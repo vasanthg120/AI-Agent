@@ -37,6 +37,15 @@ export class AutoPaySettings {
 
   @Prop({ default: 0 })
   consecutiveFailures: number;
+
+  // Short-lived atomic claim (AutoPayService.attemptRecharge) preventing two
+  // concurrent reserve() calls for the same org from both triggering a
+  // recharge — set via an atomic findOneAndUpdate the same way
+  // WalletService.tryReserve claims a reservation, cleared once the attempt
+  // finishes either way. A claim older than the staleness window is treated
+  // as abandoned (e.g. a crash mid-charge) rather than a permanent wedge.
+  @Prop()
+  rechargeLockedAt?: Date;
 }
 
 // One wallet per organization — a separate collection from Organization
@@ -67,6 +76,18 @@ export class Wallet {
 
   @Prop({ type: AutoPaySettings, default: () => ({}) })
   autoPay: AutoPaySettings;
+
+  // Set only by billing-migration.service.ts (Phase 0 org-scoping
+  // migration) when this wallet was merged into another, real
+  // organization-scoped wallet. Once set, this document is archived — its
+  // organizationId is rewritten to `migrated:<originalId>` (never deleted,
+  // so the merge is always auditable) and it is no longer read by any live
+  // code path.
+  @Prop()
+  migratedAt?: Date;
+
+  @Prop()
+  migratedIntoOrganizationId?: string;
 }
 
 export const WalletSchema = SchemaFactory.createForClass(Wallet);

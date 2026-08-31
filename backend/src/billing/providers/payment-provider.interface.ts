@@ -34,6 +34,13 @@ export interface ConfirmPaymentResult {
   reason?: string;
 }
 
+export interface RefundResult {
+  success: boolean;
+  gatewayRefundId?: string;
+  simulated: boolean;
+  reason?: string;
+}
+
 /** Every method the billing domain needs from a payment gateway — the ONE
  * seam every concrete gateway (Razorpay/Stripe/Cashfree — see
  * razorpay-payment.provider.ts, stripe-payment.provider.ts,
@@ -92,6 +99,16 @@ export interface PaymentProviderAdapter {
   // via an atomic status-guarded update, so this can safely race a webhook
   // that eventually does arrive without double-crediting.
   confirmPayment(gatewayOrderId: string, gatewayPaymentId: string, signature: string): Promise<ConfirmPaymentResult>;
+
+  // Phase 6 — both ids are passed for the same reason confirmPayment takes
+  // both: Razorpay/Stripe refund by PAYMENT id, but Cashfree's refund API is
+  // scoped to the ORDER id instead (there's no payment-level refund
+  // endpoint in its Orders API), so each adapter uses whichever one it
+  // actually needs and ignores the other. `amount` is a currency-unit
+  // (not minor-unit) value, same convention as createCheckoutOrder/
+  // chargeSavedMethod — always <= the original captured amount, enforced by
+  // the caller (RefundService), never trusted from this adapter alone.
+  refundPayment(gatewayOrderId: string, gatewayPaymentId: string, amount: number, reason?: string): Promise<RefundResult>;
 
   // `headers` carries whatever else a given gateway's signature scheme
   // needs beyond the raw body + primary signature header — e.g. Cashfree's

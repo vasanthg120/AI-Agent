@@ -1,14 +1,19 @@
 import { createHmac, randomUUID, timingSafeEqual } from 'crypto';
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { InjectModel } from '@nestjs/mongoose';
+import { Model } from 'mongoose';
 import Razorpay from 'razorpay';
 import { EncryptionService } from '../../common/encryption/encryption.service';
+import { BillingGatewayConfig, BillingGatewayConfigDocument } from '../schemas/billing-gateway-config.schema';
+import { BillingSettings, BillingSettingsDocument } from '../schemas/billing-settings.schema';
 import {
   ChargeResult,
   ConfirmPaymentResult,
   CreateCheckoutOrderResult,
   GenericWebhookEvent,
   PaymentProviderAdapter,
+  RefundResult,
   SaveMethodResult,
 } from './payment-provider.interface';
 
@@ -25,21 +30,32 @@ import {
  * once keys are added.
  */
 @Injectable()
-export class RazorpayPaymentProvider implements PaymentProviderAdapter {
+export class RazorpayPaymentProvider implements PaymentProviderAdapter, OnModuleInit {
   readonly providerKey = 'razorpay' as const;
   private readonly logger = new Logger(RazorpayPaymentProvider.name);
-  private readonly configured: boolean;
-  private readonly client?: Razorpay;
-  private readonly keyId: string;
-  private readonly keySecret: string;
-  private readonly webhookSecret: string;
+  private configured: boolean;
+  private client?: Razorpay;
+  private keyId: string;
+  private keySecret: string;
+  private webhookSecret: string;
+  private mode: 'live' | 'test';
 
   constructor(
     private config: ConfigService,
     private encryption: EncryptionService,
+    @InjectModel(BillingGatewayConfig.name) private gatewayConfigModel: Model<BillingGatewayConfigDocument>,
+    @InjectModel(BillingSettings.name) private settingsModel: Model<BillingSettingsDocument>,
   ) {
-    const mode = this.config.get<'live' | 'test'>('billing.paymentMode') ?? 'test';
-    const keys = this.config.get<{ keyId: string; keySecret: string; webhookSecret: string }>(`billing.razorpay.${mode}`);
+    this.mode = this.config.get<'live' | 'test'>('billing.paymentMode') ?? 'test';
+    this.applyEnvKeysForMode();
+  }
+
+  /** Resolves keyId/keySecret/webhookSecret from env vars for `this.mode` —
+   * shared by the constructor and onModuleInit's admin-mode-override branch
+   * below, so switching modes re-does exactly the same lookup the
+   * constructor would have done had that mode been active from boot. */
+  private applyEnvKeysForMode(): void {
+    const keys = this.config.get<{ keyId: string; keySecret: string; webhookSecret: string }>(`billing.razorpay.${this.mode}`);
     const keyId = keys?.keyId ?? '';
     this.keyId = keyId;
     this.keySecret = keys?.keySecret ?? '';
@@ -48,11 +64,59 @@ export class RazorpayPaymentProvider implements PaymentProviderAdapter {
 
     if (!this.configured) {
       this.logger.warn(
-        `Razorpay ${mode}-mode keys not set (RAZORPAY_KEY_ID${mode === 'test' ? '_TEST' : ''}/RAZORPAY_KEY_SECRET${mode === 'test' ? '_TEST' : ''}) — ` +
+        `Razorpay ${this.mode}-mode keys not set (RAZORPAY_KEY_ID${this.mode === 'test' ? '_TEST' : ''}/RAZORPAY_KEY_SECRET${this.mode === 'test' ? '_TEST' : ''}) — ` +
           'running in simulated payment mode. Purchases and AutoPay recharges will succeed instantly without contacting Razorpay.',
       );
     } else {
       this.client = new Razorpay({ key_id: keyId, key_secret: this.keySecret });
+    }
+  }
+
+  /** Phase 8 (optional) — additive DB overrides, checked once at boot AFTER
+   * the constructor's env-var setup above (which is left completely
+   * unchanged when neither override is set). See BillingGatewayConfig's own
+   * schema comment for why this is restart-to-take-effect rather than
+   * hot-reloading a live SDK client, and why a missing/malformed DB row is
+   * silently ignored rather than thrown — either way, whatever's already
+   * set up stands.
+   *
+   * BillingSettings.defaultPaymentMode (Admin-haive's Payment Settings
+   * page) is checked FIRST — if it names a different mode than the env var
+   * chose, `this.mode` is switched and env keys are re-resolved for the new
+   * mode before the credential-override lookup below runs, so a mode
+   * switch and a credential override compose correctly together. */
+  async onModuleInit(): Promise<void> {
+    const settings = await this.settingsModel.findOne({ singletonKey: 'default' }).exec();
+    if (settings?.defaultPaymentMode && settings.defaultPaymentMode !== this.mode) {
+      this.mode = settings.defaultPaymentMode;
+      this.applyEnvKeysForMode();
+      this.logger.log(`Razorpay mode switched to "${this.mode}" from admin-managed BillingSettings.defaultPaymentMode.`);
+    }
+
+    const dbConfig = await this.gatewayConfigModel.findOne({ provider: 'razorpay', mode: this.mode, isActive: true }).exec();
+    if (!dbConfig) return;
+
+    const creds = dbConfig.credentialsEncrypted;
+    const keyId = creds.keyId ? this.safeDecrypt(creds.keyId) : '';
+    const keySecret = creds.keySecret ? this.safeDecrypt(creds.keySecret) : '';
+    if (!keyId || !keySecret) {
+      this.logger.warn('Razorpay BillingGatewayConfig row found but is missing/malformed keyId or keySecret — ignoring; env-var config (if any) stands.');
+      return;
+    }
+
+    this.keyId = keyId;
+    this.keySecret = keySecret;
+    this.webhookSecret = creds.webhookSecret ? this.safeDecrypt(creds.webhookSecret) : this.webhookSecret;
+    this.configured = true;
+    this.client = new Razorpay({ key_id: keyId, key_secret: keySecret });
+    this.logger.log('Razorpay configured from admin-managed BillingGatewayConfig, overriding env vars.');
+  }
+
+  private safeDecrypt(value: string): string {
+    try {
+      return this.encryption.decrypt(value);
+    } catch {
+      return '';
     }
   }
 
@@ -91,7 +155,19 @@ export class RazorpayPaymentProvider implements PaymentProviderAdapter {
     const order = await this.client.orders.create({
       amount: amountMinorUnits,
       currency,
-      receipt: `${organizationId}_${creditPackageKey}_${Date.now()}`,
+      // Razorpay hard-rejects receipt strings over 56 characters. Every
+      // existing caller (credit package purchase) happened to stay under
+      // that with its short, curated CreditPackage.key values — but
+      // BillingSubscriptionsService.checkout's `plan_${key}_${cycle}` label
+      // (plus a 24-char Mongo id and 13-digit timestamp) can exceed it for
+      // a longer admin-chosen plan key, verified live: Razorpay returned
+      // `"receipt: the length must be no more than 56."` and checkout
+      // failed outright. This field is never parsed back (order lookup
+      // always goes through the gateway's own returned order.id, see
+      // billing-webhook.controller.ts), so a safe truncation has zero
+      // functional effect — it only ever shows up as a label in Razorpay's
+      // own dashboard.
+      receipt: `${organizationId}_${creditPackageKey}_${Date.now()}`.slice(0, 56),
       notes: { organizationId, creditPackageKey },
     });
     return {
@@ -112,6 +188,18 @@ export class RazorpayPaymentProvider implements PaymentProviderAdapter {
         order_id: order.id,
         name: 'Haive',
         description: `${creditPackageKey} credit package`,
+        // Without this, Checkout.js never shows the "save this card"
+        // consent and Razorpay never tokenizes the payment regardless of
+        // method chosen — saveMethodFromCheckout's payment.token_id lookup
+        // below then always comes back empty, so a card saved for Auto
+        // Recharge silently never happens no matter how the customer pays.
+        // Stripe's createCheckoutOrder already sets the equivalent flag
+        // (setup_future_usage: 'off_session'); this brings Razorpay's
+        // checkout up to the same behavior. Only card payments can actually
+        // be tokenized this way (Razorpay has no reusable token for
+        // Netbanking/UPI/wallet) — that's a real gateway constraint, not
+        // something this flag changes.
+        save: 1,
         // Haive's brand palette (frontend/src/styles/variables.css —
         // --brand-accent-primary/--brand-bg-primary, "do not rename") — kept
         // in sync manually since Checkout.js can't read the app's CSS
@@ -233,6 +321,22 @@ export class RazorpayPaymentProvider implements PaymentProviderAdapter {
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Could not fetch payment status';
       return { success: false, reason: message };
+    }
+  }
+
+  async refundPayment(_gatewayOrderId: string, gatewayPaymentId: string, amount: number, reason?: string): Promise<RefundResult> {
+    if (!this.configured || !this.client) {
+      return { success: true, gatewayRefundId: `sim_refund_${randomUUID()}`, simulated: true };
+    }
+    try {
+      const refund = await this.client.payments.refund(gatewayPaymentId, {
+        amount: Math.round(amount * 100),
+        notes: reason ? { reason } : undefined,
+      });
+      return { success: true, gatewayRefundId: refund.id, simulated: false };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Razorpay refund failed';
+      return { success: false, simulated: false, reason: message };
     }
   }
 

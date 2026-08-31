@@ -34,6 +34,20 @@ let AuditService = AuditService_1 = class AuditService {
     list(organizationId, limit = 200) {
         return this.auditModel.find({ organizationId }).sort({ createdAt: -1 }).limit(limit).exec();
     }
+    async listAll(filters) {
+        const page = filters.page ?? 1;
+        const limit = filters.limit ?? 100;
+        const query = {};
+        if (filters.userId)
+            query.userId = filters.userId;
+        if (filters.route)
+            query.route = { $regex: filters.route.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), $options: 'i' };
+        const [items, total] = await Promise.all([
+            this.auditModel.find(query).sort({ createdAt: -1 }).skip((page - 1) * limit).limit(limit).exec(),
+            this.auditModel.countDocuments(query).exec(),
+        ]);
+        return { items, total, page, limit };
+    }
 };
 exports.AuditService = AuditService;
 exports.AuditService = AuditService = AuditService_1 = __decorate([

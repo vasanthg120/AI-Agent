@@ -2,6 +2,8 @@ import { BadRequestException, Inject, Injectable, NotFoundException } from '@nes
 import { ConfigService } from '@nestjs/config';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
+import { BillingInvoiceService } from './billing-invoice.service';
+import { CouponsService } from './coupons.service';
 import { PAYMENT_PROVIDER, PaymentProviderAdapter } from './providers/payment-provider.interface';
 import { WalletService, WalletSummary } from './wallet.service';
 import { CreditPackage, CreditPackageDocument } from './schemas/credit-package.schema';
@@ -44,7 +46,15 @@ const TRANSACTION_DESCRIPTIONS: Record<WalletTransactionType, string> = {
   PROMOTION: 'Promotional credits',
   REFUND: 'Refund',
   MANUAL_ADJUSTMENT: 'Manual adjustment',
+  SUBSCRIPTION_GRANT: 'Subscription credits',
 };
+
+export interface AutoRechargePolicy {
+  minCredits?: number;
+  maxCredits?: number;
+  defaultOn: boolean;
+  currency: string;
+}
 
 export interface InitiatePurchaseResult {
   paymentRecordId: string;
@@ -70,12 +80,35 @@ export class BillingService {
     @InjectModel(WalletTransaction.name) private transactionModel: Model<WalletTransactionDocument>,
     @Inject(PAYMENT_PROVIDER) private paymentProvider: PaymentProviderAdapter,
     private wallet: WalletService,
+    private coupons: CouponsService,
+    private invoices: BillingInvoiceService,
     private config: ConfigService,
   ) {}
 
-  async getWalletSummary(organizationId: string): Promise<WalletSummary> {
+  /** Extends WalletService.getSummary's plain balance/reserved/autoPay
+   * shape with a customer-safe subset of the admin-configured Auto Recharge
+   * policy — only the four fields the Billing page's Auto Recharge tab
+   * needs to display, never the full BillingSettings document (which also
+   * carries company/invoice fields that stay admin-only). Deliberately only
+   * merged in here (the customer-facing GET /billing/wallet wrapper), not
+   * on WalletService.getSummary itself — that method is also called from
+   * reserve()/settle()'s hot chat-turn path, which has no use for this and
+   * shouldn't pay for an extra BillingSettings read on every turn. The
+   * customer can SEE these values but never sets them from this route —
+   * only AutoPayService.attemptRecharge and the admin settings route ever
+   * write them. */
+  async getWalletSummary(organizationId: string): Promise<WalletSummary & { autoRechargePolicy: AutoRechargePolicy }> {
     const defaultThreshold = this.config.get<number>('billing.lowBalanceThresholdCredits') ?? 200;
-    return this.wallet.getSummary(organizationId, defaultThreshold);
+    const [summary, settings] = await Promise.all([this.wallet.getSummary(organizationId, defaultThreshold), this.invoices.getOrCreateSettings()]);
+    return {
+      ...summary,
+      autoRechargePolicy: {
+        minCredits: settings.autoRechargeMinCredits,
+        maxCredits: settings.autoRechargeMaxCredits,
+        defaultOn: settings.autoRechargeDefaultOn,
+        currency: this.config.get<string>('billing.currency') ?? 'INR',
+      },
+    };
   }
 
   listPackages() {
@@ -175,11 +208,34 @@ export class BillingService {
    * happens exclusively from the verified webhook
    * (billing-webhook.controller.ts) — the client-side checkout callback is
    * never trusted on its own. */
-  async initiatePurchase(organizationId: string, userId: string, packageKey: string): Promise<InitiatePurchaseResult> {
+  async initiatePurchase(organizationId: string, userId: string, packageKey: string, couponCode?: string): Promise<InitiatePurchaseResult> {
     const pkg = await this.packageModel.findOne({ key: packageKey, active: true });
     if (!pkg) throw new BadRequestException(`Unknown or inactive credit package "${packageKey}".`);
 
-    const order = await this.paymentProvider.createCheckoutOrder(organizationId, pkg.price, pkg.currency, pkg.key);
+    let amount = pkg.price;
+    let creditsGranted = pkg.credits + pkg.bonusCredits;
+    let couponId: string | undefined;
+    let couponDiscountAmount = 0;
+    let couponBonusCredits = 0;
+
+    // Phase 3 — server-computed only; the discount/bonus is locked into the
+    // PaymentRecord below and never re-trusted from anything the client
+    // sends. See CouponsService.validate for the actual eligibility checks.
+    if (couponCode) {
+      const applied = await this.coupons.validate(couponCode, {
+        organizationId,
+        context: 'credit_purchase',
+        amount,
+        currencyCode: pkg.currency,
+      });
+      couponId = applied.coupon._id.toString();
+      couponDiscountAmount = applied.discountAmount;
+      couponBonusCredits = applied.bonusCredits;
+      amount = amount - couponDiscountAmount;
+      creditsGranted = creditsGranted + couponBonusCredits;
+    }
+
+    const order = await this.paymentProvider.createCheckoutOrder(organizationId, amount, pkg.currency, pkg.key);
 
     const record = await this.paymentRecordModel.create({
       organizationId,
@@ -187,10 +243,13 @@ export class BillingService {
       type: 'purchase',
       provider: this.paymentProvider.providerKey,
       creditPackageId: pkg.key,
+      couponId,
+      couponDiscountAmount: couponId ? couponDiscountAmount : undefined,
+      couponBonusCredits: couponId ? couponBonusCredits : undefined,
       gatewayOrderId: order.orderId,
-      amount: pkg.price,
+      amount,
       currency: pkg.currency,
-      creditsGranted: pkg.credits + pkg.bonusCredits,
+      creditsGranted,
       status: order.simulated ? 'captured' : 'created',
       simulated: order.simulated,
     });
@@ -205,11 +264,13 @@ export class BillingService {
       };
     }
 
-    await this.wallet.applyLedgerEntry(organizationId, 'PURCHASE', pkg.credits + pkg.bonusCredits, {
+    await this.wallet.applyLedgerEntry(organizationId, 'PURCHASE', creditsGranted, {
       paymentRecordId: record._id.toString(),
       metadata: { packageKey: pkg.key, provider: this.paymentProvider.providerKey, simulated: true, gatewayOrderId: order.orderId },
       createdBy: userId,
     });
+    await this.coupons.recordRedemption(record, userId, 'credit_purchase');
+    await this.invoices.generateForPaymentRecord(record);
 
     return {
       paymentRecordId: record._id.toString(),
@@ -272,16 +333,25 @@ export class BillingService {
       metadata: { packageKey: updated.creditPackageId, provider: this.paymentProvider.providerKey, gatewayPaymentId, simulated: false },
       createdBy: userId,
     });
+    await this.coupons.recordRedemption(updated, userId, 'credit_purchase');
+    await this.invoices.generateForPaymentRecord(updated);
 
     return { confirmed: true, wallet: await this.getWalletSummary(organizationId) };
   }
 
+  /** `makeDefault` forces this method to become the org's default even when
+   * it isn't the first one saved — used by the subscription-checkout flow,
+   * where the card that paid for the plan should always become the Auto
+   * Recharge default (see SubscriptionCheckoutModal.tsx). Credit-package
+   * purchases don't pass it, preserving the original "first card saved
+   * wins" behavior exactly. */
   async savePaymentMethod(
     organizationId: string,
     gatewayCustomerId: string,
     gatewayPaymentId: string,
     signature: string,
     gatewayOrderId: string,
+    makeDefault = false,
   ) {
     let saved;
     try {
@@ -304,7 +374,33 @@ export class BillingService {
         `${message} A payment method can only be saved from a real, completed checkout — purchase Haive Credits and choose to save your card at checkout to make it available for Auto Recharge.`,
       );
     }
+
+    // Dedupe: the same physical card re-saved at a later checkout (e.g. an
+    // org subscribing to a second plan, or re-using a card the gateway
+    // issued a fresh per-transaction token for) shouldn't pile up as a
+    // second row — reuse the existing one instead of inserting a duplicate.
+    const existing = await this.paymentMethodModel.findOne({
+      organizationId,
+      provider: this.paymentProvider.providerKey,
+      gatewayCustomerId: saved.gatewayCustomerId,
+      cardLast4: saved.cardLast4,
+      cardNetwork: saved.cardNetwork,
+    });
+
     const isFirst = (await this.paymentMethodModel.countDocuments({ organizationId })) === 0;
+    const shouldBeDefault = makeDefault || isFirst;
+
+    if (shouldBeDefault) {
+      await this.paymentMethodModel.updateMany({ organizationId, isDefault: true }, { isDefault: false });
+    }
+
+    if (existing) {
+      existing.gatewayTokenIdEncrypted = saved.gatewayTokenIdEncrypted;
+      if (shouldBeDefault) existing.isDefault = true;
+      await existing.save();
+      return existing;
+    }
+
     return this.paymentMethodModel.create({
       organizationId,
       provider: this.paymentProvider.providerKey,
@@ -312,8 +408,21 @@ export class BillingService {
       gatewayTokenIdEncrypted: saved.gatewayTokenIdEncrypted,
       cardLast4: saved.cardLast4,
       cardNetwork: saved.cardNetwork,
-      isDefault: isFirst,
+      isDefault: shouldBeDefault,
     });
+  }
+
+  /** Lets the customer switch which saved card Auto Recharge (and any
+   * future manual purchase's pre-selected method) uses, without re-entering
+   * card details — see BillingController's Change-Payment-Method flow. */
+  async setDefaultPaymentMethod(organizationId: string, paymentMethodId: string) {
+    const method = await this.paymentMethodModel.findOne({ _id: paymentMethodId, organizationId });
+    if (!method) throw new NotFoundException('Payment method not found.');
+
+    await this.paymentMethodModel.updateMany({ organizationId, isDefault: true }, { isDefault: false });
+    method.isDefault = true;
+    await method.save();
+    return method;
   }
 
   async deletePaymentMethod(organizationId: string, paymentMethodId: string) {

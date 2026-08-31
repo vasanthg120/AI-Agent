@@ -12,6 +12,12 @@ export const WALLET_TRANSACTION_TYPES = [
   'PROMOTION',
   'REFUND',
   'MANUAL_ADJUSTMENT',
+  // Credits granted by a BillingSubscription activating or renewing (see
+  // billing-subscriptions.service.ts/subscription-renewal.service.ts) —
+  // the "layer on top of the existing wallet" hook: a subscription's only
+  // effect on Wallet/WalletTransaction is one of these rows per cycle,
+  // otherwise indistinguishable from any other credit grant.
+  'SUBSCRIPTION_GRANT',
 ] as const;
 export type WalletTransactionType = (typeof WALLET_TRANSACTION_TYPES)[number];
 

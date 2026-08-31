@@ -70,6 +70,8 @@ exports.default = () => ({
         currency: (process.env.BILLING_CURRENCY ?? 'INR').toUpperCase(),
         usdToCurrencyRate: parseFloat(process.env.USD_TO_CURRENCY_RATE ?? ((process.env.BILLING_CURRENCY ?? 'INR').toUpperCase() === 'USD' ? '1' : '83')),
         autoPayMaxConsecutiveFailures: parseInt(process.env.AUTOPAY_MAX_CONSECUTIVE_FAILURES ?? '3', 10),
+        orgScopingEnabled: (process.env.BILLING_ORG_SCOPED_WALLETS ?? 'false').toLowerCase() === 'true',
+        subscriptionRenewalGraceAttempts: parseInt(process.env.SUBSCRIPTION_RENEWAL_GRACE_ATTEMPTS ?? '3', 10),
         paymentMode: (process.env.PAYMENT_MODE ?? 'test').toLowerCase() === 'live' ? 'live' : 'test',
         activePaymentProvider: (process.env.ACTIVE_PAYMENT_PROVIDER ?? 'razorpay').toLowerCase(),
         razorpay: {

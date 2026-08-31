@@ -1,14 +1,19 @@
 import { randomUUID } from 'crypto';
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { InjectModel } from '@nestjs/mongoose';
+import { Model } from 'mongoose';
 import Stripe from 'stripe';
 import { EncryptionService } from '../../common/encryption/encryption.service';
+import { BillingGatewayConfig, BillingGatewayConfigDocument } from '../schemas/billing-gateway-config.schema';
+import { BillingSettings, BillingSettingsDocument } from '../schemas/billing-settings.schema';
 import {
   ChargeResult,
   ConfirmPaymentResult,
   CreateCheckoutOrderResult,
   GenericWebhookEvent,
   PaymentProviderAdapter,
+  RefundResult,
   SaveMethodResult,
 } from './payment-provider.interface';
 
@@ -29,30 +34,77 @@ import {
  * make ACTIVE_PAYMENT_PROVIDER=stripe worth using in the UI.
  */
 @Injectable()
-export class StripePaymentProvider implements PaymentProviderAdapter {
+export class StripePaymentProvider implements PaymentProviderAdapter, OnModuleInit {
   readonly providerKey = 'stripe' as const;
   private readonly logger = new Logger(StripePaymentProvider.name);
-  private readonly configured: boolean;
-  private readonly client?: Stripe;
-  private readonly webhookSecret: string;
+  private configured: boolean;
+  private client?: Stripe;
+  private webhookSecret: string;
+  private mode: 'live' | 'test';
 
   constructor(
     private config: ConfigService,
     private encryption: EncryptionService,
+    @InjectModel(BillingGatewayConfig.name) private gatewayConfigModel: Model<BillingGatewayConfigDocument>,
+    @InjectModel(BillingSettings.name) private settingsModel: Model<BillingSettingsDocument>,
   ) {
-    const mode = this.config.get<'live' | 'test'>('billing.paymentMode') ?? 'test';
-    const keys = this.config.get<{ secretKey: string; publishableKey: string; webhookSecret: string }>(`billing.stripe.${mode}`);
+    this.mode = this.config.get<'live' | 'test'>('billing.paymentMode') ?? 'test';
+    this.applyEnvKeysForMode();
+  }
+
+  /** Shared by the constructor and onModuleInit's admin-mode-override branch
+   * below — see RazorpayPaymentProvider.applyEnvKeysForMode's identical
+   * rationale. */
+  private applyEnvKeysForMode(): void {
+    const keys = this.config.get<{ secretKey: string; publishableKey: string; webhookSecret: string }>(`billing.stripe.${this.mode}`);
     const secretKey = keys?.secretKey ?? '';
     this.webhookSecret = keys?.webhookSecret ?? '';
     this.configured = Boolean(secretKey);
 
     if (!this.configured) {
       this.logger.warn(
-        `Stripe ${mode}-mode key not set (STRIPE_SECRET_KEY${mode === 'test' ? '_TEST' : ''}) — ` +
+        `Stripe ${this.mode}-mode key not set (STRIPE_SECRET_KEY${this.mode === 'test' ? '_TEST' : ''}) — ` +
           'running in simulated payment mode. Purchases and AutoPay recharges will succeed instantly without contacting Stripe.',
       );
     } else {
       this.client = new Stripe(secretKey);
+    }
+  }
+
+  /** Phase 8 (optional) — see RazorpayPaymentProvider.onModuleInit for the
+   * full rationale (additive, restart-to-take-effect, silently ignored if
+   * the DB row is absent or malformed; BillingSettings.defaultPaymentMode
+   * checked first, switching `this.mode` and re-resolving env keys before
+   * the credential-override lookup below). */
+  async onModuleInit(): Promise<void> {
+    const settings = await this.settingsModel.findOne({ singletonKey: 'default' }).exec();
+    if (settings?.defaultPaymentMode && settings.defaultPaymentMode !== this.mode) {
+      this.mode = settings.defaultPaymentMode;
+      this.applyEnvKeysForMode();
+      this.logger.log(`Stripe mode switched to "${this.mode}" from admin-managed BillingSettings.defaultPaymentMode.`);
+    }
+
+    const dbConfig = await this.gatewayConfigModel.findOne({ provider: 'stripe', mode: this.mode, isActive: true }).exec();
+    if (!dbConfig) return;
+
+    const creds = dbConfig.credentialsEncrypted;
+    const secretKey = creds.secretKey ? this.safeDecrypt(creds.secretKey) : '';
+    if (!secretKey) {
+      this.logger.warn('Stripe BillingGatewayConfig row found but is missing/malformed secretKey — ignoring; env-var config (if any) stands.');
+      return;
+    }
+
+    this.webhookSecret = creds.webhookSecret ? this.safeDecrypt(creds.webhookSecret) : this.webhookSecret;
+    this.configured = true;
+    this.client = new Stripe(secretKey);
+    this.logger.log('Stripe configured from admin-managed BillingGatewayConfig, overriding env vars.');
+  }
+
+  private safeDecrypt(value: string): string {
+    try {
+      return this.encryption.decrypt(value);
+    } catch {
+      return '';
     }
   }
 
@@ -176,6 +228,27 @@ export class StripePaymentProvider implements PaymentProviderAdapter {
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Could not fetch PaymentIntent status';
       return { success: false, reason: message };
+    }
+  }
+
+  async refundPayment(_gatewayOrderId: string, gatewayPaymentId: string, amount: number, reason?: string): Promise<RefundResult> {
+    if (!this.configured || !this.client) {
+      return { success: true, gatewayRefundId: `sim_refund_${randomUUID()}`, simulated: true };
+    }
+    try {
+      // gatewayPaymentId here is the PaymentIntent id (Stripe has no
+      // separate order concept — see createCheckoutOrder). Stripe's `reason`
+      // field only accepts a fixed enum (duplicate/fraudulent/requested_by_customer),
+      // not freeform text, so our admin-entered reason goes in metadata instead.
+      const refund = await this.client.refunds.create({
+        payment_intent: gatewayPaymentId,
+        amount: Math.round(amount * 100),
+        metadata: reason ? { reason } : undefined,
+      });
+      return { success: refund.status !== 'failed' && refund.status !== 'canceled', gatewayRefundId: refund.id, simulated: false };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Stripe refund failed';
+      return { success: false, simulated: false, reason: message };
     }
   }
 

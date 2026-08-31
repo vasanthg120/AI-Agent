@@ -8,6 +8,8 @@ import { BlockRole } from './BlockRole';
 import { Spinner } from '@/components/ui';
 import { ROUTES } from '@/constants/routes';
 
+const AdminRoutes = lazy(() => import('@/features/admin-haive/AdminRoutes').then((m) => ({ default: m.AdminRoutes })));
+
 const LoginPage = lazy(() => import('@/features/auth/LoginPage').then((m) => ({ default: m.LoginPage })));
 const RegisterPage = lazy(() => import('@/features/auth/RegisterPage').then((m) => ({ default: m.RegisterPage })));
 const ForgotPasswordPage = lazy(() =>
@@ -49,6 +51,8 @@ const NotificationsPage = lazy(() =>
 );
 const ProfilePage = lazy(() => import('@/features/profile/ProfilePage').then((m) => ({ default: m.ProfilePage })));
 const BillingPage = lazy(() => import('@/features/billing/BillingPage').then((m) => ({ default: m.BillingPage })));
+const PricingPage = lazy(() => import('@/features/billing/PricingPage').then((m) => ({ default: m.PricingPage })));
+const AddCreditsPage = lazy(() => import('@/features/billing/AddCreditsPage').then((m) => ({ default: m.AddCreditsPage })));
 const PlatformAdminBillingPage = lazy(() =>
   import('@/features/platform-admin/PlatformAdminBillingPage').then((m) => ({ default: m.PlatformAdminBillingPage })),
 );
@@ -165,6 +169,8 @@ export function AppRoutes() {
                   the discoverable entry point now. */}
               <Route path={ROUTES.integrations} element={<IntegrationsPage />} />
               <Route path={ROUTES.billing} element={<BillingPage />} />
+              <Route path={ROUTES.pricing} element={<PricingPage />} />
+              <Route path={ROUTES.addCredits} element={<AddCreditsPage />} />
               <Route path={ROUTES.settings} element={<SettingsLayout />}>
                 <Route index element={<Navigate to={ROUTES.settingsGeneral} replace />} />
                 <Route path="general" element={<GeneralSettings />} />
@@ -188,6 +194,11 @@ export function AppRoutes() {
         {/* Unguarded: reached mid-flow with no session yet — the page
             itself establishes one from the token in the URL. */}
         <Route path={ROUTES.oauthCallback} element={<OAuthCallbackPage />} />
+
+        {/* A completely separate area — its own layout, its own sign-in,
+            entirely outside AppLayout/ProtectedRoute above. Must be declared
+            before the catch-all so it doesn't fall through to NotFoundPage. */}
+        <Route path="/Admin-haive/*" element={<AdminRoutes />} />
 
         <Route path="*" element={<NotFoundPage />} />
       </Routes>

@@ -68,6 +68,8 @@ declare const _default: () => {
         currency: string;
         usdToCurrencyRate: number;
         autoPayMaxConsecutiveFailures: number;
+        orgScopingEnabled: boolean;
+        subscriptionRenewalGraceAttempts: number;
         paymentMode: string;
         activePaymentProvider: string;
         razorpay: {

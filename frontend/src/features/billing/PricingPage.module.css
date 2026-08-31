@@ -1,0 +1,188 @@
+/* Every color/spacing value here falls back to the app's static design
+   tokens (see styles/variables.css) — useBillingTheme only ever ADDS
+   --billing-* custom properties as an inline style on .page, it never
+   removes or overrides the global :root tokens these rules also reference,
+   so an unconfigured (or partially configured) theme still renders a
+   complete, correctly-styled page. */
+
+.page {
+  padding: var(--space-6);
+  max-width: 1080px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+}
+
+.loadingState {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 320px;
+}
+
+.hero {
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-6) 0;
+}
+
+.heroHeadline {
+  font-size: var(--text-3xl);
+  font-weight: 800;
+  color: var(--billing-heading-color, var(--color-text-primary));
+  margin: 0;
+}
+
+.heroSubtext {
+  font-size: var(--text-lg);
+  color: var(--color-text-muted);
+  margin: 0;
+  max-width: 560px;
+  align-self: center;
+}
+
+.subscribedBanner {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-surface);
+  border: 1px solid var(--color-border);
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+}
+
+.cycleToggle {
+  display: flex;
+  justify-content: center;
+}
+
+.planGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: var(--space-5);
+  align-items: stretch;
+}
+
+.planCard {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  border-top: 3px solid var(--plan-accent, var(--billing-accent-color, var(--color-accent)));
+}
+
+.planBadge {
+  align-self: flex-start;
+}
+
+.planName {
+  font-size: var(--text-xl);
+  font-weight: 800;
+  color: var(--color-text-primary);
+}
+
+.planDescription {
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+  min-height: 2.6em;
+}
+
+.planPrice {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-1);
+}
+
+.planPriceAmount {
+  font-size: 2rem;
+  font-weight: 800;
+  color: var(--billing-accent-color, var(--color-text-primary));
+}
+
+.planPriceCycle {
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+}
+
+.featureList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  flex: 1;
+}
+
+.featureList li {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+}
+
+.featureList li svg {
+  color: var(--color-success);
+  flex-shrink: 0;
+}
+
+.planCta {
+  margin-top: auto;
+  width: 100%;
+}
+
+.emptyState {
+  text-align: center;
+  color: var(--color-text-muted);
+  padding: var(--space-8);
+}
+
+.faqList {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.faqEntry {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.faqQuestion {
+  font-weight: 600;
+  color: var(--color-text-primary);
+  font-size: var(--text-md);
+}
+
+.faqAnswer {
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+}
+
+.muted {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+}
+
+/* ---------- responsive ---------- */
+@media (max-width: 640px) {
+  .page {
+    padding: var(--space-4);
+    gap: var(--space-6);
+  }
+
+  .heroHeadline {
+    font-size: var(--text-2xl);
+  }
+
+  .planGrid {
+    grid-template-columns: 1fr;
+  }
+}

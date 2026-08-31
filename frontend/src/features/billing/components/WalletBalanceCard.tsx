@@ -1,5 +1,5 @@
-import { FiAlertTriangle, FiPlus, FiZap } from 'react-icons/fi';
-import { Button, Card } from '@/components/ui';
+import { FiAlertTriangle, FiCreditCard, FiPlus, FiZap } from 'react-icons/fi';
+import { Badge, Button, Card } from '@/components/ui';
 import type { WalletSummary } from '@/services/billingService';
 import styles from '../BillingPage.module.css';
 
@@ -7,12 +7,13 @@ export interface WalletBalanceCardProps {
   wallet: WalletSummary;
   onAddCredits: () => void;
   onEnableAutoPay: () => void;
+  onViewPlans: () => void;
 }
 
 // The main balance hero — "Available Credits" in large type, plus the
 // low-balance/zero-balance banners the billing spec calls for. Never
 // mentions a provider anywhere; "Haive Credits" is the only unit shown.
-export function WalletBalanceCard({ wallet, onAddCredits, onEnableAutoPay }: WalletBalanceCardProps) {
+export function WalletBalanceCard({ wallet, onAddCredits, onEnableAutoPay, onViewPlans }: WalletBalanceCardProps) {
   const isZero = wallet.availableCredits <= 0;
 
   return (
@@ -44,7 +45,19 @@ export function WalletBalanceCard({ wallet, onAddCredits, onEnableAutoPay }: Wal
         )}
       </div>
       <div className={styles.heroActions}>
-        {!wallet.autoPay.enabled && (
+        <Button variant="secondary" leftIcon={<FiCreditCard />} onClick={onViewPlans}>
+          View Plans
+        </Button>
+        {wallet.autoPay.enabled ? (
+          <Button variant="secondary" leftIcon={<FiZap />} onClick={onEnableAutoPay}>
+            Auto Recharge{' '}
+            <span style={{ marginLeft: 6, display: 'inline-flex' }}>
+              <Badge variant="success" dot>
+                ON
+              </Badge>
+            </span>
+          </Button>
+        ) : (
           <Button variant="secondary" leftIcon={<FiZap />} onClick={onEnableAutoPay}>
             Enable Auto Recharge
           </Button>

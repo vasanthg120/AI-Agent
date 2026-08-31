@@ -121,6 +121,20 @@ export default () => ({
       process.env.USD_TO_CURRENCY_RATE ?? ((process.env.BILLING_CURRENCY ?? 'INR').toUpperCase() === 'USD' ? '1' : '83'),
     ),
     autoPayMaxConsecutiveFailures: parseInt(process.env.AUTOPAY_MAX_CONSECUTIVE_FAILURES ?? '3', 10),
+    // Phase 0 of the org-scoped billing extension (see
+    // billing-migration.service.ts and billing.controller.ts's tenantKey()):
+    // every BillingController route passes user.sub as the wallet's tenant
+    // key today (see that controller's own header comment) — flipping this
+    // to true switches it to the real user.organizationId instead. Stays
+    // false until a dry-run + real migration
+    // (POST /billing/admin/migrate-organization-wallets) has been run in
+    // this environment; default off means zero behavior change.
+    orgScopingEnabled: (process.env.BILLING_ORG_SCOPED_WALLETS ?? 'false').toLowerCase() === 'true',
+    // Phase 2 (subscriptions, see subscription-renewal.service.ts): how many
+    // consecutive renewal charge failures a BillingSubscription tolerates
+    // (staying 'past_due', retried every cron tick) before it's marked
+    // 'expired' and stops being retried at all.
+    subscriptionRenewalGraceAttempts: parseInt(process.env.SUBSCRIPTION_RENEWAL_GRACE_ATTEMPTS ?? '3', 10),
     // One global toggle picks which key set every configured gateway reads
     // — same behavior for every request, changed by redeploying with a
     // different env var, not a runtime switch. 'live' processes real money;

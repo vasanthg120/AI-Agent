@@ -16,6 +16,9 @@ import { UsersService } from './users.service';
       { name: AgentRole.name, schema: AgentRoleSchema },
     ]),
   ],
+  // Cross-org platform_admin management moved to auth/admin-accounts.controller.ts
+  // — admin accounts are a separate credential now (see AdminAccount schema),
+  // not a role tag on a User. UsersController stays strictly org-scoped.
   controllers: [UsersController],
   providers: [UsersService],
   exports: [UsersService],

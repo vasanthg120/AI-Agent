@@ -75,13 +75,21 @@ export class PricingService {
     return this.config.get<string>('billing.currency') ?? 'INR';
   }
 
-  currencyToUsd(amount: number): number {
-    const rate = this.config.get<number>('billing.usdToCurrencyRate') ?? 83;
+  /** rateOverride lets a caller price against a specific Currency catalog
+   * row's usdToCurrencyRate (see schemas/currency.schema.ts) instead of the
+   * platform-wide config.billing.usdToCurrencyRate — e.g. a future
+   * multi-currency checkout quoting a price in whichever currency the
+   * customer picked. No current call site passes this (ReservationService/
+   * BillingAdminService/BillingService all still get the platform default),
+   * so this is purely additive — behavior for every existing caller is
+   * unchanged. */
+  currencyToUsd(amount: number, rateOverride?: number): number {
+    const rate = rateOverride ?? this.config.get<number>('billing.usdToCurrencyRate') ?? 83;
     return new Decimal(amount).dividedBy(rate).toNumber();
   }
 
-  usdToCurrency(amountUsd: number): number {
-    const rate = this.config.get<number>('billing.usdToCurrencyRate') ?? 83;
+  usdToCurrency(amountUsd: number, rateOverride?: number): number {
+    const rate = rateOverride ?? this.config.get<number>('billing.usdToCurrencyRate') ?? 83;
     return new Decimal(amountUsd).times(rate).toDecimalPlaces(2, Decimal.ROUND_HALF_UP).toNumber();
   }
 }

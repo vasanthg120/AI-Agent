@@ -2,6 +2,7 @@ import { HttpModule } from '@nestjs/axios';
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { JwtModule } from '@nestjs/jwt';
+import { MongooseModule } from '@nestjs/mongoose';
 import { PassportModule } from '@nestjs/passport';
 import { AuditModule } from '../audit/audit.module';
 import { OrganizationsModule } from '../organizations/organizations.module';
@@ -13,12 +14,18 @@ import { OAuthService } from './oauth.service';
 import { TwoFactorController } from './two-factor.controller';
 import { TwoFactorService } from './two-factor.service';
 import { JwtStrategy } from './strategies/jwt.strategy';
+import { AdminJwtStrategy } from './strategies/admin-jwt.strategy';
+import { AdminAccount, AdminAccountSchema } from './schemas/admin-account.schema';
+import { AdminAuthController } from './admin-auth.controller';
+import { AdminAccountsController } from './admin-accounts.controller';
+import { AdminAuthService } from './admin-auth.service';
 
 @Module({
   imports: [
     UsersModule,
     OrganizationsModule,
     AuditModule,
+    MongooseModule.forFeature([{ name: AdminAccount.name, schema: AdminAccountSchema }]),
     PassportModule.register({ defaultStrategy: 'jwt' }),
     HttpModule.register({ timeout: 15_000 }),
     JwtModule.registerAsync({
@@ -30,8 +37,8 @@ import { JwtStrategy } from './strategies/jwt.strategy';
       }),
     }),
   ],
-  controllers: [AuthController, OAuthController, TwoFactorController],
-  providers: [AuthService, JwtStrategy, OAuthService, TwoFactorService],
+  controllers: [AuthController, OAuthController, TwoFactorController, AdminAuthController, AdminAccountsController],
+  providers: [AuthService, JwtStrategy, OAuthService, TwoFactorService, AdminJwtStrategy, AdminAuthService],
   exports: [JwtModule, PassportModule],
 })
 export class AuthModule {}

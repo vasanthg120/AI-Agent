@@ -3,6 +3,9 @@ import { InjectModel } from '@nestjs/mongoose';
 import { RawBodyRequest } from '@nestjs/common';
 import { Request } from 'express';
 import { Model } from 'mongoose';
+import { BillingInvoiceService } from './billing-invoice.service';
+import { BillingSubscriptionsService } from './billing-subscriptions.service';
+import { CouponsService } from './coupons.service';
 import { CashfreePaymentProvider } from './providers/cashfree-payment.provider';
 import { PaymentProviderAdapter, PaymentProviderKey } from './providers/payment-provider.interface';
 import { RazorpayPaymentProvider } from './providers/razorpay-payment.provider';
@@ -33,6 +36,9 @@ export class BillingWebhookController {
     stripe: StripePaymentProvider,
     cashfree: CashfreePaymentProvider,
     private wallet: WalletService,
+    private subscriptions: BillingSubscriptionsService,
+    private coupons: CouponsService,
+    private invoices: BillingInvoiceService,
   ) {
     this.adapters = { razorpay, stripe, cashfree };
   }
@@ -95,11 +101,36 @@ export class BillingWebhookController {
       record.rawWebhookPayload = event.raw;
       await record.save();
 
-      await this.wallet.applyLedgerEntry(record.organizationId, record.type === 'autopay' ? 'AUTO_RECHARGE' : 'PURCHASE', record.creditsGranted, {
-        paymentRecordId: record._id.toString(),
-        metadata: { packageKey: record.creditPackageId, provider, gatewayPaymentId: event.gatewayPaymentId, simulated: false },
-        createdBy: 'system',
-      });
+      if (record.type === 'subscription_checkout') {
+        // Grants credits AND creates the BillingSubscription itself — see
+        // BillingSubscriptionsService.activateFromCheckoutPayment. Safe to
+        // race BillingController's /subscription/confirm for the same
+        // payment: both paths only reach here after independently winning
+        // the atomic status!=='captured' guard above (record.save() just
+        // persisted the flip this handler itself performed), so whichever
+        // of the two actually got here first is the only one that will
+        // observe subscriptionId unset and create the subscription;
+        // activateFromCheckoutPayment is idempotent either way.
+        await this.subscriptions.activateFromCheckoutPayment(record, 'system');
+      } else if (record.type !== 'subscription_renewal') {
+        // 'purchase' | 'autopay' — a flat credit grant onto the wallet.
+        // 'subscription_renewal' is deliberately excluded: those records are
+        // created AND flipped to 'captured' synchronously inside
+        // subscription-renewal.service.ts's own chargeSavedMethod call
+        // (same direct-charge shape AutoPayService already uses, not a
+        // checkout order), so by the time any webhook for that same charge
+        // could arrive, record.status is already 'captured' and the
+        // `status !== 'captured'` guard above has already short-circuited
+        // this whole block — this branch exists only so a future change to
+        // how renewals are charged can't silently double-grant credits here.
+        await this.wallet.applyLedgerEntry(record.organizationId, record.type === 'autopay' ? 'AUTO_RECHARGE' : 'PURCHASE', record.creditsGranted, {
+          paymentRecordId: record._id.toString(),
+          metadata: { packageKey: record.creditPackageId, provider, gatewayPaymentId: event.gatewayPaymentId, simulated: false },
+          createdBy: 'system',
+        });
+        await this.coupons.recordRedemption(record, 'system', 'credit_purchase');
+        await this.invoices.generateForPaymentRecord(record);
+      }
     } else if (event.event === 'payment.failed' && record.status !== 'failed') {
       record.status = 'failed';
       record.rawWebhookPayload = event.raw;

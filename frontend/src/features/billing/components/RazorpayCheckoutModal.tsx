@@ -2,9 +2,11 @@ import { useState } from 'react';
 import toast from 'react-hot-toast';
 import { Badge, Button, Modal } from '@/components/ui';
 import { billingService } from '@/services/billingService';
-import type { CreditPackage } from '@/services/billingService';
+import type { CreditPackage, PaymentMethod } from '@/services/billingService';
 import { extractErrorMessage } from '@/utils/errors';
+import { formatCurrency } from '@/utils/currency';
 import { CreditPackageGrid } from './CreditPackageGrid';
+import { PaymentMethodPicker } from './PaymentMethodPicker';
 import { HAIVE_LOGO_DATA_URI } from '../haiveLogoDataUri';
 import styles from '../BillingPage.module.css';
 
@@ -37,6 +39,13 @@ export interface RazorpayCheckoutModalProps {
   open: boolean;
   onClose: () => void;
   packages: CreditPackage[];
+  // When set, the modal skips the package-picker grid and opens straight to
+  // the order-review/payment screen for this package — used by
+  // AddCreditsPage, where picking a package already happened on the page
+  // itself (the grid there, not this modal's).
+  initialPackage?: CreditPackage;
+  paymentMethods?: PaymentMethod[];
+  onPaymentMethodsChanged?: () => void;
   onPurchased: () => void;
 }
 
@@ -47,9 +56,22 @@ export interface RazorpayCheckoutModalProps {
 // the result; once real keys are configured, the same call returns
 // simulated:false and this opens the real Razorpay Checkout widget instead
 // — crediting then happens only from the verified webhook.
-export function RazorpayCheckoutModal({ open, onClose, packages, onPurchased }: RazorpayCheckoutModalProps) {
+//
+// Adds a one-screen order-review step (package, total, payment method)
+// between picking a package and actually charging — the charge itself still
+// goes through the exact same purchasePackage/confirmPurchase + gateway
+// widget flow as before; this only changes when that flow is triggered
+// (after "Pay", not immediately on clicking a package card).
+export function RazorpayCheckoutModal({ open, onClose, packages, initialPackage, paymentMethods = [], onPaymentMethodsChanged, onPurchased }: RazorpayCheckoutModalProps) {
+  const [selectedPackage, setSelectedPackage] = useState<CreditPackage | null>(initialPackage ?? null);
   const [purchasingKey, setPurchasingKey] = useState<string | null>(null);
   const [result, setResult] = useState<{ creditsGranted: number; simulated: boolean } | null>(null);
+
+  const handleClose = () => {
+    setSelectedPackage(null);
+    setResult(null);
+    onClose();
+  };
 
   const handlePurchase = async (packageKey: string) => {
     setPurchasingKey(packageKey);
@@ -117,7 +139,7 @@ export function RazorpayCheckoutModal({ open, onClose, packages, onPurchased }: 
               `Payment succeeded but confirming it failed (${extractErrorMessage(error)}) — it will still sync automatically shortly.`,
             );
             onPurchased();
-            onClose();
+            handleClose();
           }
         },
       });
@@ -129,8 +151,15 @@ export function RazorpayCheckoutModal({ open, onClose, packages, onPurchased }: 
     }
   };
 
+  const totalCredits = selectedPackage ? selectedPackage.credits + selectedPackage.bonusCredits : 0;
+
   return (
-    <Modal open={open} onClose={onClose} title="Add Haive Credits" description="Choose a package to add to your wallet.">
+    <Modal
+      open={open}
+      onClose={handleClose}
+      title={selectedPackage && !result ? 'Checkout' : 'Add Haive Credits'}
+      description={selectedPackage && !result ? undefined : 'Choose a package to add to your wallet.'}
+    >
       {result ? (
         <div style={{ textAlign: 'center', padding: 'var(--space-4) 0' }}>
           <div className={styles.heroValue}>+{result.creditsGranted.toLocaleString()}</div>
@@ -141,11 +170,38 @@ export function RazorpayCheckoutModal({ open, onClose, packages, onPurchased }: 
             </div>
           )}
           <div style={{ marginTop: 'var(--space-4)' }}>
-            <Button onClick={onClose}>Done</Button>
+            <Button onClick={handleClose}>Done</Button>
           </div>
         </div>
+      ) : selectedPackage ? (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
+          <div>
+            <div className={styles.currentPlanName}>{selectedPackage.name}</div>
+            <div className={styles.muted}>{totalCredits.toLocaleString()} Haive Credits</div>
+          </div>
+
+          <div>
+            <div className={styles.checkoutSummaryRow}>
+              <span>Credits</span>
+              <span>{formatCurrency(selectedPackage.price, selectedPackage.currency)}</span>
+            </div>
+            <div className={styles.checkoutSummaryTotal}>
+              <span>Total</span>
+              <span>{formatCurrency(selectedPackage.price, selectedPackage.currency)}</span>
+            </div>
+          </div>
+
+          <div>
+            <span className={styles.fieldLabel}>Payment Method</span>
+            <PaymentMethodPicker paymentMethods={paymentMethods} onChanged={() => onPaymentMethodsChanged?.()} />
+          </div>
+
+          <Button fullWidth loading={purchasingKey === selectedPackage.key} onClick={() => handlePurchase(selectedPackage.key)}>
+            Pay {formatCurrency(selectedPackage.price, selectedPackage.currency)}
+          </Button>
+        </div>
       ) : (
-        <CreditPackageGrid packages={packages} purchasingKey={purchasingKey} onPurchase={handlePurchase} />
+        <CreditPackageGrid packages={packages} purchasingKey={purchasingKey} onPurchase={(key) => setSelectedPackage(packages.find((p) => p.key === key) ?? null)} />
       )}
     </Modal>
   );

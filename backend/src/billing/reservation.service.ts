@@ -65,7 +65,17 @@ export class ReservationService {
     let ok = await this.wallet.tryReserve(walletId, ceiling);
 
     if (!ok && walletDoc.autoPay?.enabled) {
-      const recharged = await this.autoPay.attemptRecharge(organizationId, 'insufficient_balance');
+      // "Required" = the actual shortfall against the reservation ceiling,
+      // not a customer-chosen flat amount and never the full price of
+      // whatever plan the org originally bought — AutoPayService floors
+      // this at the admin-configured minimum and caps it at the maximum.
+      // Provider cost for this turn isn't known yet at this point (that's
+      // only ever computed later, at settle()) — the ceiling shortfall is
+      // the correct forward-looking equivalent for "how much do we need to
+      // proceed" in this reserve-before-cost-is-known architecture.
+      const available = walletDoc.balanceCredits - walletDoc.reservedCredits;
+      const shortfall = Math.max(ceiling - available, 0);
+      const recharged = await this.autoPay.attemptRecharge(organizationId, 'insufficient_balance', shortfall);
       if (recharged) {
         ok = await this.wallet.tryReserve(walletId, ceiling);
       }

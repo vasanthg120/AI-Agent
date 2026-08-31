@@ -85,3 +85,42 @@ describe('PricingService — 1 Haive Credit = ₹1 INR, decimal precision', () =
     expect(pricing.usdToCredits(10)).toBe(5);
   });
 });
+
+// Phase 1 (Currency catalog, see schemas/currency.schema.ts) — the optional
+// rateOverride param on usdToCurrency/currencyToUsd. Every existing call
+// site omits it and keeps reading config.billing.usdToCurrencyRate exactly
+// as before (covered by the two describe blocks above, unmodified); this
+// only covers the new override behavior in isolation.
+describe('PricingService — currencyToUsd/usdToCurrency rateOverride (Phase 1, Currency catalog)', () => {
+  it('usdToCurrency uses the override rate instead of the configured platform rate', () => {
+    const pricing = makePricing({ 'billing.usdToCurrencyRate': 83 }); // platform default (INR)
+    // $1 at an overridden rate of 90 (e.g. a Currency row's own rate) -> 90, not 83.
+    expect(pricing.usdToCurrency(1, 90)).toBe(90);
+  });
+
+  it('currencyToUsd uses the override rate instead of the configured platform rate', () => {
+    const pricing = makePricing({ 'billing.usdToCurrencyRate': 83 });
+    expect(pricing.currencyToUsd(90, 90)).toBeCloseTo(1, 10);
+  });
+
+  it('omitting rateOverride falls back to config.billing.usdToCurrencyRate unchanged', () => {
+    const pricing = makePricing({ 'billing.usdToCurrencyRate': 83 });
+    expect(pricing.usdToCurrency(1)).toBe(83);
+    expect(pricing.currencyToUsd(83)).toBeCloseTo(1, 10);
+  });
+
+  it('usdToCurrency still rounds HALF_UP to 2 decimal places with an override rate', () => {
+    const pricing = makePricing();
+    // $1 at a 91.005 rate -> 91.005, rounded HALF_UP to 91.01 (2dp, paise-level precision).
+    expect(pricing.usdToCurrency(1, 91.005)).toBe(91.01);
+  });
+
+  it('currencyToUsd/usdToCurrency with an override are true inverses, same as the default-rate pair', () => {
+    const pricing = makePricing();
+    const usd = 12.3456;
+    const overrideRate = 90;
+    const inCurrency = pricing.usdToCurrency(usd, overrideRate);
+    const roundTrippedUsd = pricing.currencyToUsd(inCurrency, overrideRate);
+    expect(roundTrippedUsd).toBeCloseTo(usd, 2);
+  });
+});

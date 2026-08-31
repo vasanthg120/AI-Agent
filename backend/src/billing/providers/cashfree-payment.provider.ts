@@ -1,14 +1,19 @@
 import { randomUUID } from 'crypto';
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { InjectModel } from '@nestjs/mongoose';
 import { Cashfree, CFEnvironment } from 'cashfree-pg';
+import { Model } from 'mongoose';
 import { EncryptionService } from '../../common/encryption/encryption.service';
+import { BillingGatewayConfig, BillingGatewayConfigDocument } from '../schemas/billing-gateway-config.schema';
+import { BillingSettings, BillingSettingsDocument } from '../schemas/billing-settings.schema';
 import {
   ChargeResult,
   ConfirmPaymentResult,
   CreateCheckoutOrderResult,
   GenericWebhookEvent,
   PaymentProviderAdapter,
+  RefundResult,
   SaveMethodResult,
 } from './payment-provider.interface';
 
@@ -26,19 +31,29 @@ const API_VERSION = '2023-08-01';
  * following config.billing.paymentMode like every other gateway here.
  */
 @Injectable()
-export class CashfreePaymentProvider implements PaymentProviderAdapter {
+export class CashfreePaymentProvider implements PaymentProviderAdapter, OnModuleInit {
   readonly providerKey = 'cashfree' as const;
   private readonly logger = new Logger(CashfreePaymentProvider.name);
-  private readonly configured: boolean;
-  private readonly client?: Cashfree;
-  private readonly webhookSecret: string;
+  private configured: boolean;
+  private client?: Cashfree;
+  private webhookSecret: string;
+  private mode: 'live' | 'test';
 
   constructor(
     private config: ConfigService,
     private encryption: EncryptionService,
+    @InjectModel(BillingGatewayConfig.name) private gatewayConfigModel: Model<BillingGatewayConfigDocument>,
+    @InjectModel(BillingSettings.name) private settingsModel: Model<BillingSettingsDocument>,
   ) {
-    const mode = this.config.get<'live' | 'test'>('billing.paymentMode') ?? 'test';
-    const keys = this.config.get<{ clientId: string; clientSecret: string; webhookSecret: string }>(`billing.cashfree.${mode}`);
+    this.mode = this.config.get<'live' | 'test'>('billing.paymentMode') ?? 'test';
+    this.applyEnvKeysForMode();
+  }
+
+  /** Shared by the constructor and onModuleInit's admin-mode-override branch
+   * below — see RazorpayPaymentProvider.applyEnvKeysForMode's identical
+   * rationale. */
+  private applyEnvKeysForMode(): void {
+    const keys = this.config.get<{ clientId: string; clientSecret: string; webhookSecret: string }>(`billing.cashfree.${this.mode}`);
     const clientId = keys?.clientId ?? '';
     const clientSecret = keys?.clientSecret ?? '';
     this.webhookSecret = keys?.webhookSecret ?? '';
@@ -46,15 +61,57 @@ export class CashfreePaymentProvider implements PaymentProviderAdapter {
 
     if (!this.configured) {
       this.logger.warn(
-        `Cashfree ${mode}-mode keys not set (CASHFREE_CLIENT_ID${mode === 'test' ? '_TEST' : ''}/CASHFREE_CLIENT_SECRET${mode === 'test' ? '_TEST' : ''}) — ` +
+        `Cashfree ${this.mode}-mode keys not set (CASHFREE_CLIENT_ID${this.mode === 'test' ? '_TEST' : ''}/CASHFREE_CLIENT_SECRET${this.mode === 'test' ? '_TEST' : ''}) — ` +
           'running in simulated payment mode. Purchases and AutoPay recharges will succeed instantly without contacting Cashfree.',
       );
     } else {
-      const envOverride = this.config.get<string>('billing.cashfree.env');
-      const environment =
-        envOverride === 'PRODUCTION' || (!envOverride && mode === 'live') ? CFEnvironment.PRODUCTION : CFEnvironment.SANDBOX;
-      this.client = new Cashfree(environment, clientId, clientSecret);
+      this.client = new Cashfree(this.resolveEnvironment(), clientId, clientSecret);
       this.client.XApiVersion = API_VERSION;
+    }
+  }
+
+  /** Phase 8 (optional) — see RazorpayPaymentProvider.onModuleInit for the
+   * full rationale (additive, restart-to-take-effect, silently ignored if
+   * the DB row is absent or malformed; BillingSettings.defaultPaymentMode
+   * checked first, switching `this.mode` — and with it resolveEnvironment()'s
+   * SANDBOX/PRODUCTION choice, since that reads this.mode fresh each call —
+   * and re-resolving env keys before the credential-override lookup below). */
+  async onModuleInit(): Promise<void> {
+    const settings = await this.settingsModel.findOne({ singletonKey: 'default' }).exec();
+    if (settings?.defaultPaymentMode && settings.defaultPaymentMode !== this.mode) {
+      this.mode = settings.defaultPaymentMode;
+      this.applyEnvKeysForMode();
+      this.logger.log(`Cashfree mode switched to "${this.mode}" from admin-managed BillingSettings.defaultPaymentMode.`);
+    }
+
+    const dbConfig = await this.gatewayConfigModel.findOne({ provider: 'cashfree', mode: this.mode, isActive: true }).exec();
+    if (!dbConfig) return;
+
+    const creds = dbConfig.credentialsEncrypted;
+    const clientId = creds.clientId ? this.safeDecrypt(creds.clientId) : '';
+    const clientSecret = creds.clientSecret ? this.safeDecrypt(creds.clientSecret) : '';
+    if (!clientId || !clientSecret) {
+      this.logger.warn('Cashfree BillingGatewayConfig row found but is missing/malformed clientId or clientSecret — ignoring; env-var config (if any) stands.');
+      return;
+    }
+
+    this.webhookSecret = creds.webhookSecret ? this.safeDecrypt(creds.webhookSecret) : this.webhookSecret;
+    this.configured = true;
+    this.client = new Cashfree(this.resolveEnvironment(), clientId, clientSecret);
+    this.client.XApiVersion = API_VERSION;
+    this.logger.log('Cashfree configured from admin-managed BillingGatewayConfig, overriding env vars.');
+  }
+
+  private resolveEnvironment(): CFEnvironment {
+    const envOverride = this.config.get<string>('billing.cashfree.env');
+    return envOverride === 'PRODUCTION' || (!envOverride && this.mode === 'live') ? CFEnvironment.PRODUCTION : CFEnvironment.SANDBOX;
+  }
+
+  private safeDecrypt(value: string): string {
+    try {
+      return this.encryption.decrypt(value);
+    } catch {
+      return '';
     }
   }
 
@@ -193,6 +250,30 @@ export class CashfreePaymentProvider implements PaymentProviderAdapter {
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Could not fetch order status';
       return { success: false, reason: message };
+    }
+  }
+
+  async refundPayment(gatewayOrderId: string, _gatewayPaymentId: string, amount: number, reason?: string): Promise<RefundResult> {
+    if (!this.configured || !this.client) {
+      return { success: true, gatewayRefundId: `sim_refund_${randomUUID()}`, simulated: true };
+    }
+    try {
+      // Cashfree's refund API is scoped to the ORDER id, not the payment id
+      // (there's no payment-level refund endpoint in its Orders API) — see
+      // the interface's own comment for why both ids are passed to every
+      // adapter. refund_id must be unique per attempt, same reasoning as
+      // createCheckoutOrder's own generated order_id.
+      const refundId = `refund_${gatewayOrderId}_${Date.now()}`.slice(0, 40);
+      const response = await this.client.PGOrderCreateRefund(gatewayOrderId, {
+        refund_amount: amount,
+        refund_id: refundId,
+        refund_note: reason,
+      } as never);
+      const cfRefundId = (response.data as unknown as { refund_id?: string }).refund_id ?? refundId;
+      return { success: true, gatewayRefundId: String(cfRefundId), simulated: false };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Cashfree refund failed';
+      return { success: false, simulated: false, reason: message };
     }
   }
 
