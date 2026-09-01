@@ -40,12 +40,17 @@ export async function subscribeToPush(): Promise<void> {
     throw new Error('Push notifications are not configured on this server.');
   }
   let subscription = await registration.pushManager.getSubscription();
-  if (!subscription) {
-    subscription = await registration.pushManager.subscribe({
-      userVisibleOnly: true,
-      applicationServerKey: urlBase64ToUint8Array(data.publicKey),
-    });
-  }
+
+if (!subscription) {
+  const keyBytes = urlBase64ToUint8Array(data.publicKey);
+  const applicationServerKey = new ArrayBuffer(keyBytes.byteLength);
+  new Uint8Array(applicationServerKey).set(keyBytes);
+
+  subscription = await registration.pushManager.subscribe({
+    userVisibleOnly: true,
+    applicationServerKey,
+  });
+}
   await axiosClient.post('/notifications/push/subscribe', subscription.toJSON());
 }
 

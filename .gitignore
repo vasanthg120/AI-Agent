@@ -19,10 +19,14 @@ venv/
 # Env / secrets
 .env
 .env.local
+!.env.example
 .env.*
 *.local
 backend/.env
 python-agent/.env
+node_modules
+.venv
+__pycache__
 
 # Editor / OS
 .vscode/

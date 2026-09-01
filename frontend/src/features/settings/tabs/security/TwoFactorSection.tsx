@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import toast from 'react-hot-toast';
-import { Badge, Button, CopyableText, Input, Modal, Skeleton, Switch } from '@/components/ui';
+import { Button, CopyableText, Input, Modal, Skeleton, Switch } from '@/components/ui';
 import { twoFactorService, type TwoFactorSetup, type TwoFactorStatus } from '@/services/twoFactorService';
 import { extractErrorMessage } from '@/utils/errors';
 import { SettingsSection } from '../../components/SettingsSection';
