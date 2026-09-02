@@ -70,6 +70,17 @@ export interface PaymentProviderAdapter {
     creditPackageKey: string,
   ): Promise<CreateCheckoutOrderResult>;
 
+  // A small, dedicated "authorization" transaction whose sole purpose is to
+  // register a chargeable recurring token — NOT a real purchase (the caller
+  // refunds it immediately once saveMethodFromCheckout below succeeds; see
+  // billing.service.ts's confirmPaymentMethodAuthorization). Distinct from
+  // createCheckoutOrder because Razorpay's real "charge without the
+  // customer present" flow needs its own order shape (customer_id, a fixed
+  // small amount, method restricted to card, a token{} policy block) that a
+  // normal purchase/subscription checkout order doesn't carry — confirmed
+  // against Razorpay's own docs, see razorpay-payment.provider.ts.
+  createAuthorizationOrder(organizationId: string, gatewayCustomerId: string, currency: string): Promise<CreateCheckoutOrderResult>;
+
   saveMethodFromCheckout(
     organizationId: string,
     gatewayCustomerId: string,

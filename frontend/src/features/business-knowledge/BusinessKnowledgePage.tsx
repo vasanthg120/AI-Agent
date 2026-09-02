@@ -7,12 +7,18 @@ import { hasRole } from '@/utils/roles';
 import { businessProfileService } from '@/services/businessProfileService';
 import { BusinessProfileForm } from './components/BusinessProfileForm';
 import { BusinessKnowledgeDocumentsSection } from './components/BusinessKnowledgeDocumentsSection';
+import { BusinessKnowledgeOverviewSection } from './components/BusinessKnowledgeOverviewSection';
+import { BusinessKnowledgeAdvisorSection } from './components/BusinessKnowledgeAdvisorSection';
+import { BusinessKnowledgeRecommendationsSection } from './components/BusinessKnowledgeRecommendationsSection';
 import { RelationshipsSection } from './components/RelationshipsSection';
 import styles from './business-knowledge.module.css';
 
 const TAB_ITEMS = [
+  { id: 'overview', label: 'Overview' },
   { id: 'profile', label: 'Business Profile' },
   { id: 'documents', label: 'Documents' },
+  { id: 'advisor', label: 'AI Advisor' },
+  { id: 'recommendations', label: 'Recommendations' },
   { id: 'relationships', label: 'Relationships' },
 ];
 const TAB_IDS = TAB_ITEMS.map((t) => t.id);
@@ -24,7 +30,7 @@ export function BusinessKnowledgePage() {
   const [searchParams, setSearchParams] = useSearchParams();
 
   const initialTab = searchParams.get('tab');
-  const [activeTab, setActiveTab] = useState(initialTab && TAB_IDS.includes(initialTab) ? initialTab : 'profile');
+  const [activeTab, setActiveTab] = useState(initialTab && TAB_IDS.includes(initialTab) ? initialTab : 'overview');
 
   const changeTab = (tab: string) => {
     setActiveTab(tab);
@@ -55,6 +61,8 @@ export function BusinessKnowledgePage() {
         <Tabs items={TAB_ITEMS} activeId={activeTab} onChange={changeTab} />
       </div>
 
+      {activeTab === 'overview' && <BusinessKnowledgeOverviewSection />}
+
       {activeTab === 'profile' && (
         <BusinessProfileForm
           profile={profile}
@@ -65,6 +73,10 @@ export function BusinessKnowledgePage() {
       )}
 
       {activeTab === 'documents' && <BusinessKnowledgeDocumentsSection canEdit={canEdit} />}
+
+      {activeTab === 'advisor' && <BusinessKnowledgeAdvisorSection />}
+
+      {activeTab === 'recommendations' && <BusinessKnowledgeRecommendationsSection />}
 
       {activeTab === 'relationships' && <RelationshipsSection />}
     </div>

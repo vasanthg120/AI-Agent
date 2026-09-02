@@ -161,6 +161,16 @@ export class CashfreePaymentProvider implements PaymentProviderAdapter, OnModule
     };
   }
 
+  /** Thin wrapper at a nominal amount — Cashfree isn't the active/tested
+   * gateway in this environment (Razorpay is; see razorpay-payment.provider.ts
+   * for the fully-verified authorization-order shape). saveMethodFromCheckout
+   * above already documents that Cashfree's instrument tokenization here is
+   * a best-effort fallback, not a fully wired-up flow; this method inherits
+   * that same limitation rather than attempting to solve it unverified. */
+  async createAuthorizationOrder(organizationId: string, _gatewayCustomerId: string, currency: string): Promise<CreateCheckoutOrderResult> {
+    return this.createCheckoutOrder(organizationId, 1, currency, 'auto_recharge_card_authorization');
+  }
+
   async saveMethodFromCheckout(
     organizationId: string,
     gatewayCustomerId: string,

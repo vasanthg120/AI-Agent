@@ -188,5 +188,11 @@ import { WebhookEvent, WebhookEventSchema } from './schemas/webhook-event.schema
       inject: [ConfigService, RazorpayPaymentProvider, StripePaymentProvider, CashfreePaymentProvider, getModelToken(BillingSettings.name)],
     },
   ],
+  // ReservationService is the reserve/settle/release primitive chat's
+  // billing gate is built on — exported so other AI-backed modules (see
+  // business-knowledge-chat.service.ts) can adopt the exact same metering
+  // contract instead of reinventing it. Nothing else in this module is
+  // exported; every other provider/schema stays private to billing.
+  exports: [ReservationService],
 })
 export class BillingModule {}

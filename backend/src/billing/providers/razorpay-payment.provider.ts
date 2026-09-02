@@ -188,18 +188,6 @@ export class RazorpayPaymentProvider implements PaymentProviderAdapter, OnModule
         order_id: order.id,
         name: 'Haive',
         description: `${creditPackageKey} credit package`,
-        // Without this, Checkout.js never shows the "save this card"
-        // consent and Razorpay never tokenizes the payment regardless of
-        // method chosen — saveMethodFromCheckout's payment.token_id lookup
-        // below then always comes back empty, so a card saved for Auto
-        // Recharge silently never happens no matter how the customer pays.
-        // Stripe's createCheckoutOrder already sets the equivalent flag
-        // (setup_future_usage: 'off_session'); this brings Razorpay's
-        // checkout up to the same behavior. Only card payments can actually
-        // be tokenized this way (Razorpay has no reusable token for
-        // Netbanking/UPI/wallet) — that's a real gateway constraint, not
-        // something this flag changes.
-        save: 1,
         // Haive's brand palette (frontend/src/styles/variables.css —
         // --brand-accent-primary/--brand-bg-primary, "do not rename") — kept
         // in sync manually since Checkout.js can't read the app's CSS
@@ -207,6 +195,71 @@ export class RazorpayPaymentProvider implements PaymentProviderAdapter, OnModule
         // frontend instead (see RazorpayCheckoutModal.tsx), since it needs
         // an absolute URL resolved against wherever the app is actually
         // being served from, which this backend service has no notion of.
+        theme: {
+          color: '#ed7e2c',
+          backdrop_color: '#070707',
+        },
+        modal: {
+          backdropclose: false,
+          escape: true,
+          handleback: true,
+          confirm_close: true,
+          animation: true,
+        },
+      },
+    };
+  }
+
+  /** A dedicated, minimum-amount "authorization" order — the only way to
+   * actually get a chargeable recurring token out of Razorpay for a silent,
+   * merchant-initiated later charge (confirmed against
+   * https://razorpay.com/docs/api/payments/recurring-payments/cards/create-authorization-transaction/,
+   * not assumed). This is NOT a real purchase: billing.service.ts's
+   * confirmPaymentMethodAuthorization refunds it immediately once the token
+   * is captured. `amount` is fixed at Razorpay's documented minimum (100
+   * minor units — e.g. ₹1/$1) rather than taking a caller-supplied amount,
+   * since this order's amount is never meant to represent anything real. */
+  async createAuthorizationOrder(organizationId: string, gatewayCustomerId: string, currency: string): Promise<CreateCheckoutOrderResult> {
+    const amountMinorUnits = 100;
+
+    if (!this.configured || !this.client) {
+      const orderId = `sim_order_${randomUUID()}`;
+      return {
+        orderId,
+        simulated: true,
+        checkoutParams: { orderId, amount: amountMinorUnits, currency, customer_id: gatewayCustomerId, recurring: true, simulated: true },
+      };
+    }
+
+    const order = await this.client.orders.create({
+      amount: amountMinorUnits,
+      currency,
+      customer_id: gatewayCustomerId,
+      method: 'card',
+      // as_presented = charge-at-will (a variable amount, on demand) rather
+      // than a fixed schedule — matches AutoPayService.attemptRecharge's
+      // own variable, on-demand recharge amounts.
+      token: {
+        max_amount: 1500000,
+        expire_at: Math.floor(Date.now() / 1000) + 5 * 365 * 24 * 60 * 60,
+        frequency: 'as_presented',
+      },
+      payment_capture: true,
+      receipt: `authorize_${organizationId}_${Date.now()}`.slice(0, 56),
+      notes: { organizationId, purpose: 'auto_recharge_card_authorization' },
+    });
+    return {
+      orderId: order.id,
+      simulated: false,
+      checkoutParams: {
+        key: this.keyId,
+        amount: amountMinorUnits,
+        currency,
+        order_id: order.id,
+        customer_id: gatewayCustomerId,
+        recurring: true,
+        name: 'Haive',
+        description: 'Card verification for Auto Recharge',
         theme: {
           color: '#ed7e2c',
           backdrop_color: '#070707',
