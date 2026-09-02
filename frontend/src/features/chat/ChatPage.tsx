@@ -3,7 +3,7 @@ import type { ReactElement } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import toast from 'react-hot-toast';
-import { FiFileText, FiMail, FiBarChart2, FiCode } from 'react-icons/fi';
+import { FiFileText, FiMail, FiBarChart2, FiUsers } from 'react-icons/fi';
 import { useChatStore } from '@/stores/chatStore';
 import { useUiStore } from '@/stores/uiStore';
 import { useAuthStore } from '@/stores/authStore';
@@ -25,7 +25,7 @@ const SUGGESTION_ICONS: Record<string, ReactElement> = {
   'file-text': <FiFileText />,
   mail: <FiMail />,
   'bar-chart': <FiBarChart2 />,
-  code: <FiCode />,
+  users: <FiUsers />,
 };
 
 export function ChatPage() {
