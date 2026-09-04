@@ -10,6 +10,7 @@ import { BillingInvoicePdfService } from './billing-invoice-pdf.service';
 import { BillingInvoiceService } from './billing-invoice.service';
 import { BillingService } from './billing.service';
 import { CouponsService } from './coupons.service';
+import { PricingService } from './pricing.service';
 import {
   ChargeResult,
   ConfirmPaymentResult,
@@ -136,6 +137,7 @@ describe('Invoices (real Mongo)', () => {
         BillingAdminTemplatesService,
         BillingAdminSettingsService,
         WalletService,
+        PricingService,
         { provide: PAYMENT_PROVIDER, useValue: new FakePaymentProvider() },
         { provide: ConfigService, useValue: { get: (key: string) => configValues[key] } },
       ],

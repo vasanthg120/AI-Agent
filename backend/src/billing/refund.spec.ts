@@ -5,6 +5,7 @@ import { Connection, Model } from 'mongoose';
 import { BillingInvoiceService } from './billing-invoice.service';
 import { BillingService } from './billing.service';
 import { CouponsService } from './coupons.service';
+import { PricingService } from './pricing.service';
 import {
   ChargeResult,
   ConfirmPaymentResult,
@@ -128,6 +129,7 @@ describe('Refunds (real Mongo)', () => {
         BillingInvoiceService,
         RefundService,
         WalletService,
+        PricingService,
         { provide: PAYMENT_PROVIDER, useValue: fakeProvider },
         // RefundService injects the three concrete provider classes
         // directly (same pattern as billing-webhook.controller.ts), not

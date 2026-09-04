@@ -6,6 +6,7 @@ import { BillingInvoiceService } from './billing-invoice.service';
 import { BillingService } from './billing.service';
 import { BillingSubscriptionsService } from './billing-subscriptions.service';
 import { CouponsService } from './coupons.service';
+import { PricingService } from './pricing.service';
 import {
   ChargeResult,
   ConfirmPaymentResult,
@@ -22,6 +23,7 @@ import { BillingPlan, BillingPlanDocument, BillingPlanSchema } from './schemas/b
 import { BillingPlanPrice, BillingPlanPriceDocument, BillingPlanPriceSchema } from './schemas/billing-plan-price.schema';
 import { BillingSettings, BillingSettingsSchema } from './schemas/billing-settings.schema';
 import { BillingSubscriptionEvent, BillingSubscriptionEventDocument, BillingSubscriptionEventSchema } from './schemas/billing-subscription-event.schema';
+import { BillingFeature, BillingFeatureSchema } from './schemas/billing-feature.schema';
 import { BillingSubscription, BillingSubscriptionDocument, BillingSubscriptionSchema } from './schemas/billing-subscription.schema';
 import { CouponRedemption, CouponRedemptionDocument, CouponRedemptionSchema } from './schemas/coupon-redemption.schema';
 import { Coupon, CouponDocument, CouponSchema } from './schemas/coupon.schema';
@@ -113,6 +115,10 @@ describe('Coupons (real Mongo)', () => {
           { name: BillingPlanPrice.name, schema: BillingPlanPriceSchema },
           { name: BillingSubscription.name, schema: BillingSubscriptionSchema },
           { name: BillingSubscriptionEvent.name, schema: BillingSubscriptionEventSchema },
+          // Also a BillingSubscriptionsService dependency (feature-name
+          // resolution in listPublicPlans) — same "required to compile"
+          // reasoning as BillingInvoice below.
+          { name: BillingFeature.name, schema: BillingFeatureSchema },
           { name: PaymentRecord.name, schema: PaymentRecordSchema },
           { name: PaymentMethod.name, schema: PaymentMethodSchema },
           { name: Wallet.name, schema: WalletSchema },
@@ -133,6 +139,7 @@ describe('Coupons (real Mongo)', () => {
         BillingSubscriptionsService,
         BillingInvoiceService,
         WalletService,
+        PricingService,
         { provide: PAYMENT_PROVIDER, useValue: new FakePaymentProvider() },
         { provide: ConfigService, useValue: { get: (key: string) => configValues[key] } },
       ],

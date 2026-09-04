@@ -6,17 +6,44 @@ import { billingService } from '@/services/billingService';
 import type { AutoPaySettings, AutoRechargePolicy, PaymentMethod } from '@/services/billingService';
 import { extractErrorMessage } from '@/utils/errors';
 import { formatCurrency } from '@/utils/currency';
+import { HAIVE_LOGO_DATA_URI } from '../haiveLogoDataUri';
 import styles from '../BillingPage.module.css';
+
+interface RazorpayCheckoutSuccessResponse {
+  razorpay_payment_id: string;
+  razorpay_order_id: string;
+  razorpay_signature: string;
+}
+
+declare global {
+  interface Window {
+    Razorpay?: new (options: Record<string, unknown>) => { open: () => void };
+  }
+}
+
+const CHECKOUT_SCRIPT_SRC = 'https://checkout.razorpay.com/v1/checkout.js';
+
+function loadRazorpayScript(): Promise<boolean> {
+  if (window.Razorpay) return Promise.resolve(true);
+  return new Promise((resolve) => {
+    const script = document.createElement('script');
+    script.src = CHECKOUT_SCRIPT_SRC;
+    script.onload = () => resolve(true);
+    script.onerror = () => resolve(false);
+    document.body.appendChild(script);
+  });
+}
 
 export interface AutoPaySettingsCardProps {
   autoPay: AutoPaySettings;
   autoRechargePolicy: AutoRechargePolicy;
   paymentMethods: PaymentMethod[];
   onChanged: () => void;
-  // Opens the credit-purchase checkout (owned by BillingPage, alongside
-  // this card) — a card can only ever be saved from a real, completed
-  // checkout (Razorpay signs it), so "add a payment method" here means
-  // "go buy credits and choose to save the card", not a standalone action.
+  // Kept for API compatibility with BillingPage.tsx's existing wiring
+  // (navigates to Add Credits) — no longer called from within this
+  // component now that "Add a new card" runs its own dedicated
+  // authorization-charge flow (see handleAddCard) instead of requiring a
+  // real purchase just to save a card.
   onRequirePurchase: () => void;
 }
 
@@ -34,6 +61,7 @@ export function AutoPaySettingsCard({ autoPay, autoRechargePolicy, paymentMethod
   const [confirmingOff, setConfirmingOff] = useState(false);
   const [changeMethodOpen, setChangeMethodOpen] = useState(false);
   const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [addingCard, setAddingCard] = useState(false);
   const [monthlyCap, setMonthlyCap] = useState(autoPay.monthlyCapCredits ? String(autoPay.monthlyCapCredits) : '');
 
   const defaultMethod = paymentMethods.find((m) => m.isDefault) ?? paymentMethods[0];
@@ -44,8 +72,8 @@ export function AutoPaySettingsCard({ autoPay, autoRechargePolicy, paymentMethod
       return;
     }
     if (!defaultMethod) {
-      toast.error('Make a Haive Credits purchase and choose to save your card at checkout, then enable Auto Recharge.');
-      onRequirePurchase();
+      toast.error('Add a card first to enable Auto Recharge.');
+      await handleAddCard();
       return;
     }
     setSaving(true);
@@ -88,6 +116,60 @@ export function AutoPaySettingsCard({ autoPay, autoRechargePolicy, paymentMethod
       toast.error(extractErrorMessage(error));
     } finally {
       setSaving(false);
+    }
+  };
+
+  // "Add a new card" — runs the dedicated small authorization-charge flow
+  // (never a real purchase; auto-refunded server-side once the token is
+  // captured) rather than routing to a real credit/plan purchase, which
+  // never actually saves a chargeable card (Razorpay only tokenizes a card
+  // during a checkout specifically set up for it). Once the card is saved
+  // it becomes the org's default, so Auto Recharge is turned on right away
+  // — no separate manual step needed after adding a card for exactly this
+  // purpose.
+  const handleAddCard = async () => {
+    setAddingCard(true);
+    try {
+      const order = await billingService.createPaymentMethodAuthorization();
+      if (order.simulated) {
+        const saved = await billingService.confirmPaymentMethodAuthorization({ gatewayCustomerId: order.gatewayCustomerId });
+        await billingService.updateAutoPay({ enabled: true, paymentMethodId: saved._id });
+        toast.success('Card saved — Auto Recharge enabled');
+        setChangeMethodOpen(false);
+        onChanged();
+        return;
+      }
+
+      const loaded = await loadRazorpayScript();
+      if (!loaded || !window.Razorpay) {
+        toast.error("Couldn't load the payment checkout. Please try again.");
+        return;
+      }
+      const razorpay = new window.Razorpay({
+        ...order.checkoutParams,
+        image: HAIVE_LOGO_DATA_URI,
+        handler: async (response: RazorpayCheckoutSuccessResponse) => {
+          try {
+            const saved = await billingService.confirmPaymentMethodAuthorization({
+              gatewayCustomerId: order.gatewayCustomerId,
+              gatewayPaymentId: response.razorpay_payment_id,
+              signature: response.razorpay_signature,
+              gatewayOrderId: response.razorpay_order_id,
+            });
+            await billingService.updateAutoPay({ enabled: true, paymentMethodId: saved._id });
+            toast.success('Card saved — Auto Recharge enabled');
+            setChangeMethodOpen(false);
+            onChanged();
+          } catch (error) {
+            toast.error(extractErrorMessage(error));
+          }
+        },
+      });
+      razorpay.open();
+    } catch (error) {
+      toast.error(extractErrorMessage(error));
+    } finally {
+      setAddingCard(false);
     }
   };
 
@@ -137,10 +219,7 @@ export function AutoPaySettingsCard({ autoPay, autoRechargePolicy, paymentMethod
             <Badge variant="accent">Default</Badge>
           </div>
         ) : (
-          <p className={styles.muted}>
-            No payment method on file yet. Make a Haive Credits purchase and choose to save your card at checkout —
-            it will then be available for Auto Recharge.
-          </p>
+          <p className={styles.muted}>No payment method on file yet. Add a card to make it available for Auto Recharge.</p>
         )}
         <Button size="sm" variant="outline" onClick={() => setChangeMethodOpen(true)} style={{ marginTop: 'var(--space-2)' }}>
           Change Payment Method
@@ -208,17 +287,12 @@ export function AutoPaySettingsCard({ autoPay, autoRechargePolicy, paymentMethod
               )}
             </div>
           ))}
-          <Button
-            size="sm"
-            variant="outline"
-            leftIcon={<FiPlus />}
-            onClick={() => {
-              setChangeMethodOpen(false);
-              onRequirePurchase();
-            }}
-          >
+          <Button size="sm" variant="outline" leftIcon={<FiPlus />} loading={addingCard} onClick={handleAddCard}>
             Add a new card
           </Button>
+          <p style={{ margin: 0, fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
+            Only cards can be used for Auto Recharge — Netbanking, UPI, and wallet payments can&apos;t be automatically charged.
+          </p>
         </div>
       </Modal>
     </div>

@@ -156,7 +156,6 @@ export function TeamPerformanceSummaryCards({ data, dateFrom, dateTo, storeId }:
         value={money(data.revenue.achieved)}
         note={revenueTrendPct !== null ? `${revenueTrendPct >= 0 ? '+' : ''}${revenueTrendPct.toFixed(1)}% vs. previous period` : undefined}
         noteTone={revenueTrendPct !== null ? (revenueTrendPct >= 0 ? 'positive' : 'negative') : 'neutral'}
-        info={<p>Same revenue-achieved figure as the Overview tab's Revenue against target card. The trend percentage compares the last two points of the monthly revenue trend.</p>}
         onClick={() => setOpenPopup('revenue')}
       />
       <StatCard
@@ -165,7 +164,6 @@ export function TeamPerformanceSummaryCards({ data, dateFrom, dateTo, storeId }:
         value={data.deals.wonCount}
         note={`${wonDelta >= 0 ? '+' : ''}${wonDelta} vs. previous period`}
         noteTone={wonDelta >= 0 ? 'positive' : 'negative'}
-        info={<p>Deals marked Won whose expected closing date falls in this period, compared against the same count for the equivalent prior period.</p>}
         onClick={() => setOpenPopup('won')}
       />
       <StatCard
@@ -174,13 +172,6 @@ export function TeamPerformanceSummaryCards({ data, dateFrom, dateTo, storeId }:
         value={completionPct !== null ? `${completionPct.toFixed(1)}%` : '—'}
         note={onTrack !== null ? (onTrack ? 'On track for this period' : 'Behind pace for this period') : undefined}
         noteTone={onTrack === false ? 'negative' : 'positive'}
-        info={
-          <p>
-            Completed work ÷ assigned work across every team member's deals, emails, and quotes combined (the same data
-            "Workload by member" below shows per-person). On track/behind pace compares this against how much of the period
-            has elapsed.
-          </p>
-        }
         onClick={() => setOpenPopup('completion')}
       />
       <StatCard
@@ -193,7 +184,6 @@ export function TeamPerformanceSummaryCards({ data, dateFrom, dateTo, storeId }:
             : 'Nothing overdue'
         }
         noteTone={totals.overdue > 0 ? 'negative' : 'positive'}
-        info={<p>Count of overdue deals, emails, and quotes summed across the whole team, from the same per-member breakdown as "Workload by member" below.</p>}
         onClick={() => setOpenPopup('overdue')}
       />
 

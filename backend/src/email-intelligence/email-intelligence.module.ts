@@ -3,6 +3,7 @@ import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { AuthModule } from '../auth/auth.module';
 import { CrmModule } from '../crm/crm.module';
+import { EmailSlaModule } from '../email-sla/email-sla.module';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { OutlookConnection, OutlookConnectionSchema } from '../outlook/schemas/outlook-connection.schema';
 import { UsersModule } from '../users/users.module';
@@ -47,6 +48,10 @@ import { EmailIntelligenceService } from './email-intelligence.service';
     // reverse — same shape as TimelineModule's documented pattern elsewhere.
     CrmModule,
     NotificationsModule,
+    // Email SLA + AI Follow-up action layer (isolated extension) — this
+    // module calls EmailSlaService at two best-effort call-sites in
+    // email-intelligence.service.ts; EmailSlaModule never imports back.
+    EmailSlaModule,
   ],
   controllers: [EmailIntelligenceController, CustomerTimelineController],
   providers: [EmailIntelligenceService, EmailIntelligenceSyncService],

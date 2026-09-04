@@ -1,0 +1,384 @@
+.page {
+  padding: var(--space-6);
+  overflow-y: auto;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+}
+
+.headerRow {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+}
+
+.pageTitle {
+  font-size: var(--text-xl);
+  font-weight: 700;
+  color: var(--color-text-primary);
+}
+
+.pageSubtitle {
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+}
+
+.headerActions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+
+.filterBar {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  margin-bottom: var(--space-2);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-surface);
+  border: 1px solid var(--color-border);
+}
+
+.filterRow {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+
+.valueField {
+  flex: 0 0 auto;
+}
+
+.emptyState {
+  padding: var(--space-6);
+  text-align: center;
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+}
+
+.tableWrap {
+  overflow-x: auto;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border);
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--text-sm);
+}
+
+.table th {
+  text-align: left;
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--text-xs);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--color-text-muted);
+  background: var(--color-bg-surface);
+  border-bottom: 1px solid var(--color-border);
+  white-space: nowrap;
+}
+
+.table td {
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--color-border);
+  vertical-align: middle;
+}
+
+.table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.clickableRow {
+  cursor: pointer;
+}
+
+.clickableRow:hover {
+  background: var(--color-bg-surface-hover, var(--color-bg-surface));
+}
+
+.listItemMain {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 160px;
+}
+
+.listItemTitle {
+  color: var(--color-text-primary);
+  font-weight: 600;
+}
+
+.listItemMeta {
+  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+}
+
+.paginationRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-top: var(--space-3);
+  flex-wrap: wrap;
+}
+
+.paginationControls {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.select {
+  height: 44px;
+  min-width: 160px;
+  padding: 0 var(--space-4);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border-strong);
+  background: var(--color-bg-input);
+  color: var(--color-text-primary);
+  font-size: var(--text-md);
+}
+
+/* ---- Form (create/edit) ---- */
+
+.formSection {
+  padding: var(--space-4);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-surface);
+  border: 1px solid var(--color-border);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.sectionTitle {
+  font-size: var(--text-md);
+  font-weight: 700;
+  color: var(--color-text-primary);
+}
+
+.fieldGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: var(--space-3);
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.fieldLabel {
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--color-text-secondary);
+}
+
+.itemsTableWrap {
+  overflow-x: auto;
+}
+
+.itemsTable {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--text-sm);
+  min-width: 720px;
+}
+
+.itemsTable th {
+  text-align: left;
+  padding: var(--space-2);
+  font-size: var(--text-xs);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--color-text-muted);
+}
+
+.itemsTable td {
+  padding: var(--space-2);
+  vertical-align: middle;
+}
+
+.itemsTable input {
+  width: 100%;
+  padding: var(--space-2);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--color-border-strong);
+  background: var(--color-bg-input);
+  color: var(--color-text-primary);
+  font-size: var(--text-sm);
+}
+
+.itemLineTotal {
+  font-weight: 600;
+  color: var(--color-text-primary);
+  white-space: nowrap;
+}
+
+/* Stacked-card line-item layout, shown below 768px instead of
+   .itemsTable/.itemsTableWrap — that table needs ~930px to show all
+   columns without clipping, which no column-width tuning fixes at phone
+   widths. Used by both QuoteFormPage.tsx (editable) and QuoteDetailPage.tsx
+   (read-only, a subset of these classes). */
+.itemCardList {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.itemCard {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border);
+  background: var(--color-bg-surface);
+}
+
+.itemCardHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.itemCardProductSelect {
+  flex: 1;
+  min-width: 0;
+}
+
+.itemCardField {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  flex: 1;
+  min-width: 0;
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+}
+
+.itemCardField input {
+  width: 100%;
+  padding: var(--space-2);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--color-border-strong);
+  background: var(--color-bg-input);
+  color: var(--color-text-primary);
+  font-size: var(--text-sm);
+}
+
+.itemCardRow {
+  display: flex;
+  gap: var(--space-3);
+}
+
+.itemCardReadField {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+}
+
+.itemCardReadField span:last-child {
+  font-size: var(--text-sm);
+  color: var(--color-text-primary);
+}
+
+.itemCardTotal {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-top: var(--space-2);
+  border-top: 1px solid var(--color-border);
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+}
+
+.summaryGrid {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  align-self: flex-end;
+  min-width: 260px;
+  margin-left: auto;
+}
+
+.summaryRow {
+  display: flex;
+  justify-content: space-between;
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+}
+
+.summaryRow.total {
+  font-size: var(--text-md);
+  font-weight: 700;
+  color: var(--color-text-primary);
+  padding-top: var(--space-2);
+  border-top: 1px solid var(--color-border);
+}
+
+.footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.errorText {
+  color: var(--color-danger);
+  font-size: var(--text-sm);
+}
+
+/* ---- Detail ---- */
+
+.detailGrid {
+  display: grid;
+  grid-template-columns: 1.4fr 1fr;
+  gap: var(--space-4);
+  align-items: start;
+}
+
+@media (max-width: 900px) {
+  .detailGrid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.infoRow {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-3);
+  font-size: var(--text-sm);
+  padding: var(--space-2) 0;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.infoRow:last-child {
+  border-bottom: none;
+}
+
+.infoLabel {
+  color: var(--color-text-muted);
+}
+
+.infoValue {
+  color: var(--color-text-primary);
+  font-weight: 600;
+  text-align: right;
+}

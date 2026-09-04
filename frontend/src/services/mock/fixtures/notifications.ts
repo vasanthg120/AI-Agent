@@ -1,4 +1,4 @@
-export type NotificationKind = 'system' | 'integration' | 'warning' | 'error';
+export type NotificationKind = 'system' | 'integration' | 'warning' | 'error' | 'sla_breach';
 
 // Mirrors backend/src/notifications/schemas/notification.schema.ts's
 // NOTIFICATION_ENTITY_TYPES exactly.

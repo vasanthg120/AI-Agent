@@ -111,6 +111,29 @@ export class BillingController {
     return this.billingService.setDefaultPaymentMethod(this.tenantKey(user), id);
   }
 
+  // "Add a card for Auto Recharge" — a dedicated small authorization charge
+  // (never a real purchase, auto-refunded on confirm) that's the only way
+  // to actually get a gateway-chargeable recurring token for a card, as
+  // opposed to a real purchase/subscription checkout, which never requests
+  // that tokenization. See billing.service.ts's createPaymentMethodAuthorization
+  // for why this can't just piggyback on savePaymentMethod's existing
+  // best-effort attempt at checkout time.
+  @Post('payment-methods/authorize')
+  createPaymentMethodAuthorization(@CurrentUser() user: JwtPayload) {
+    return this.billingService.createPaymentMethodAuthorization(this.tenantKey(user), user.email);
+  }
+
+  @Post('payment-methods/authorize/confirm')
+  confirmPaymentMethodAuthorization(@CurrentUser() user: JwtPayload, @Body() dto: SavePaymentMethodDto) {
+    return this.billingService.confirmPaymentMethodAuthorization(
+      this.tenantKey(user),
+      dto.gatewayCustomerId,
+      dto.gatewayPaymentId ?? '',
+      dto.signature ?? '',
+      dto.gatewayOrderId ?? '',
+    );
+  }
+
   @Delete('payment-methods/:id')
   deletePaymentMethod(@CurrentUser() user: JwtPayload, @Param('id') id: string) {
     return this.billingService.deletePaymentMethod(this.tenantKey(user), id);

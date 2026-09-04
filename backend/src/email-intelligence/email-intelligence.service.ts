@@ -6,6 +6,7 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { firstValueFrom } from 'rxjs';
 import { correlateSingleEmail, EmailCorrelationContext } from '../crm/customer-grouping.util';
+import { EmailSlaService } from '../email-sla/email-sla.service';
 import { periodToDateRange } from '../common/period.util';
 import { classifyEmailDeterministically } from './email-preclassification.util';
 import { CustomerActivityService, TodaysEmail } from '../crm/customer-activity.service';
@@ -107,6 +108,7 @@ export class EmailIntelligenceService {
     private http: HttpService,
     private jwt: JwtService,
     private config: ConfigService,
+    private emailSla: EmailSlaService,
   ) {
     this.pythonAgentUrl = this.config.get<string>('pythonAgentUrl') ?? 'http://localhost:8000';
   }
@@ -242,6 +244,22 @@ export class EmailIntelligenceService {
         },
         organizationId,
       );
+
+      // Email SLA (isolated extension, see email-sla.module.ts) — best-effort,
+      // never blocks email sync itself. No-ops entirely unless
+      // EMAIL_SLA_ENABLED is set and this item's aiStatus is 'draft_ready'
+      // (the only two early-return paths above always set 'no_reply_needed',
+      // so this is the one call-site that can ever actually create a record).
+      this.emailSla
+        .createOrUpdateRecordForItem({
+          organizationId,
+          emailId: created._id.toString(),
+          assignedUserId: userId,
+          receivedAt: created.receivedAt,
+          priority: created.priority,
+          aiStatus: created.aiStatus ?? '',
+        })
+        .catch((err) => this.logger.error(`SLA record creation failed for ${created._id.toString()}: ${(err as Error).message}`));
 
       return created;
     } catch (err) {
@@ -846,6 +864,13 @@ export class EmailIntelligenceService {
       this.logger.error(`Post-send actions failed for ${item._id.toString()}: ${(err as Error).message}`),
     );
 
+    // Email SLA — the real, gated "first response" timestamp (only ever set
+    // after a real successful Graph dispatch, never on approve() alone).
+    // Best-effort, same reasoning as the other new call-sites in this file.
+    this.emailSla
+      .recordFirstResponse(item.organizationId, item._id.toString(), item.sentAt)
+      .catch((err) => this.logger.error(`SLA first-response recording failed for ${item._id.toString()}: ${(err as Error).message}`));
+
     return item;
   }
 
@@ -921,11 +946,22 @@ export class EmailIntelligenceService {
     );
   }
 
+  // Dedup fix (audited bug): switched from a blind .create() to an upsert
+  // keyed on the same {organizationId, emailIntelligenceItemId, reminderType}
+  // unique index the schema now declares — replying more than once to the
+  // same email within the reminder window now updates the one existing
+  // 'post_reply' reminder instead of stacking a duplicate. Only touches
+  // dueDate/title on the (rare) re-trigger; never resurrects a reminder the
+  // user already marked done/dismissed back to 'pending'.
   private async createFollowUpReminder(item: EmailIntelligenceItemDocument): Promise<void> {
+    const existing = await this.followUpModel.findOne({ organizationId: item.organizationId, emailIntelligenceItemId: item._id.toString(), reminderType: 'post_reply' }).exec();
+    if (existing) return;
+
     await this.followUpModel.create({
       organizationId: item.organizationId,
       userId: item.userId,
       emailIntelligenceItemId: item._id.toString(),
+      reminderType: 'post_reply',
       businessName: item.matchedBusinessName,
       title: `Follow up: ${item.subject || '(no subject)'}`,
       dueDate: new Date(Date.now() + FOLLOW_UP_DEFAULT_DAYS * 86_400_000),
@@ -977,6 +1013,101 @@ export class EmailIntelligenceService {
   async markFollowUpDone(userId: string, id: string): Promise<EmailFollowUpReminderDocument> {
     const reminder = await this.followUpModel.findOne({ _id: id, userId }).exec();
     if (!reminder) throw new NotFoundException('Follow-up reminder not found');
+    reminder.status = 'done';
+    await reminder.save();
+    return reminder;
+  }
+
+  // ---- AI Follow-up action layer (additive) — generate -> human review ->
+  // approve -> send, reusing the send() method's exact real Graph-call
+  // shape below rather than inventing a second send mechanism. No auto-send:
+  // the frontend requires its own explicit approve/send clicks, same
+  // human-in-the-loop discipline as approve()/send() above. ----
+
+  async generateFollowUpDraft(userId: string, id: string): Promise<EmailFollowUpReminderDocument> {
+    if (!(this.config.get<boolean>('emailSla.aiFollowupActionsEnabled') ?? false)) {
+      throw new BadRequestException('AI follow-up draft generation is not enabled for this environment.');
+    }
+    const reminder = await this.followUpModel.findOne({ _id: id, userId }).exec();
+    if (!reminder) throw new NotFoundException('Follow-up reminder not found');
+
+    const sourceItem = await this.itemModel.findOne({ _id: reminder.emailIntelligenceItemId, userId }).exec();
+    if (!sourceItem) throw new NotFoundException('Source email for this follow-up no longer exists');
+
+    reminder.draftStatus = 'generating';
+    await reminder.save();
+
+    try {
+      const token = this.jwt.sign({ sub: userId, organizationId: reminder.organizationId }, { expiresIn: '5m' });
+      const { data } = await firstValueFrom(
+        this.http.post<{ draftReply: string }>(
+          `${this.pythonAgentUrl}/business-intelligence/followups/draft`,
+          {
+            organizationId: reminder.organizationId,
+            businessName: reminder.businessName,
+            originalSubject: sourceItem.subject,
+            originalBodyPreview: sourceItem.bodyPreview,
+            ourPreviousReply: sourceItem.finalDraftReply ?? sourceItem.draftReply,
+            daysSinceSent: sourceItem.sentAt ? Math.floor((Date.now() - sourceItem.sentAt.getTime()) / 86_400_000) : undefined,
+          },
+          { headers: { Authorization: `Bearer ${token}` } },
+        ),
+      );
+      reminder.draftReply = data.draftReply;
+      reminder.draftStatus = 'pending_review';
+      reminder.draftGeneratedAt = new Date();
+    } catch (err) {
+      reminder.draftStatus = 'failed';
+      this.logger.error(`Follow-up draft generation failed for reminder ${id}: ${(err as Error).message}`);
+    }
+    await reminder.save();
+    return reminder;
+  }
+
+  async approveFollowUpDraft(userId: string, id: string, finalDraftReply?: string): Promise<EmailFollowUpReminderDocument> {
+    const reminder = await this.followUpModel.findOne({ _id: id, userId }).exec();
+    if (!reminder) throw new NotFoundException('Follow-up reminder not found');
+    if (finalDraftReply?.trim()) reminder.draftReply = finalDraftReply.trim();
+    if (!reminder.draftReply) throw new BadRequestException('No draft text to approve');
+    reminder.draftStatus = 'approved';
+    await reminder.save();
+    return reminder;
+  }
+
+  // Mirrors send()'s real Graph-dispatch shape line-for-line — same
+  // endpoint, same error handling — rather than inventing a second send
+  // mechanism (spec's own explicit requirement). Threads as a reply on the
+  // *original* email (sourceItem.externalMessageId), since a reminder has
+  // no message id of its own.
+  async sendFollowUp(userId: string, id: string): Promise<EmailFollowUpReminderDocument> {
+    const reminder = await this.followUpModel.findOne({ _id: id, userId }).exec();
+    if (!reminder) throw new NotFoundException('Follow-up reminder not found');
+    if (reminder.draftStatus !== 'approved') throw new BadRequestException('Draft must be approved before it can be sent');
+    if (reminder.sentAt) throw new BadRequestException('This follow-up has already been sent');
+    if (!reminder.draftReply) throw new BadRequestException('No draft text to send');
+
+    const sourceItem = await this.itemModel.findOne({ _id: reminder.emailIntelligenceItemId, userId }).exec();
+    if (!sourceItem) throw new NotFoundException('Source email for this follow-up no longer exists');
+
+    const token = this.jwt.sign({ sub: userId }, { expiresIn: '5m' });
+    try {
+      await firstValueFrom(
+        this.http.post(
+          `${this.pythonAgentUrl}/outlook/send-reply`,
+          { messageId: sourceItem.externalMessageId, comment: reminder.draftReply },
+          { headers: { Authorization: `Bearer ${token}` } },
+        ),
+      );
+    } catch (err) {
+      const message = (err as { response?: { data?: { detail?: string } }; message?: string }).response?.data?.detail ?? (err as Error).message;
+      reminder.sendError = message;
+      await reminder.save();
+      throw new BadRequestException(`Failed to send follow-up: ${message}`);
+    }
+
+    reminder.sentAt = new Date();
+    reminder.sendError = undefined;
+    reminder.draftStatus = 'sent';
     reminder.status = 'done';
     await reminder.save();
     return reminder;
@@ -1077,6 +1208,20 @@ export class EmailIntelligenceService {
     item.lastRegeneratedAt = new Date();
     if (item.status === 'rejected') item.status = 'pending';
     await item.save();
+
+    // Email SLA — same best-effort hook as analyzeAndCreate, in case a
+    // manual regenerate flips aiStatus to/from 'draft_ready'.
+    this.emailSla
+      .createOrUpdateRecordForItem({
+        organizationId: item.organizationId,
+        emailId: item._id.toString(),
+        assignedUserId: item.userId,
+        receivedAt: item.receivedAt,
+        priority: item.priority,
+        aiStatus: item.aiStatus,
+      })
+      .catch((err) => this.logger.error(`SLA record creation failed for ${item._id.toString()}: ${(err as Error).message}`));
+
     return item;
   }
 

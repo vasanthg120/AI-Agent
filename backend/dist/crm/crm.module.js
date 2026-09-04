@@ -23,6 +23,7 @@ const deal_schema_1 = require("./schemas/deal.schema");
 const deal_owner_mapping_schema_1 = require("./schemas/deal-owner-mapping.schema");
 const email_intelligence_item_schema_1 = require("../email-intelligence/schemas/email-intelligence-item.schema");
 const note_schema_1 = require("./schemas/note.schema");
+const product_schema_1 = require("./schemas/product.schema");
 const quote_schema_1 = require("./schemas/quote.schema");
 const quote_counter_schema_1 = require("./schemas/quote-counter.schema");
 const quote_payment_schema_1 = require("./schemas/quote-payment.schema");
@@ -35,6 +36,8 @@ const crm_service_1 = require("./crm.service");
 const customer_activity_controller_1 = require("./customer-activity.controller");
 const customer_activity_service_1 = require("./customer-activity.service");
 const quotes_controller_1 = require("./quotes.controller");
+const products_controller_1 = require("./products.controller");
+const products_service_1 = require("./products.service");
 const deal_performance_dashboard_service_1 = require("./deal-performance-dashboard.service");
 const deals_controller_1 = require("./deals.controller");
 const deals_export_service_1 = require("./deals-export.service");
@@ -58,6 +61,7 @@ exports.CrmModule = CrmModule = __decorate([
                 { name: quote_schema_1.Quote.name, schema: quote_schema_1.QuoteSchema },
                 { name: quote_payment_schema_1.QuotePayment.name, schema: quote_payment_schema_1.QuotePaymentSchema },
                 { name: note_schema_1.Note.name, schema: note_schema_1.NoteSchema },
+                { name: product_schema_1.Product.name, schema: product_schema_1.ProductSchema },
                 { name: tag_schema_1.Tag.name, schema: tag_schema_1.TagSchema },
                 { name: sales_target_schema_1.SalesTarget.name, schema: sales_target_schema_1.SalesTargetSchema },
                 { name: quote_counter_schema_1.QuoteCounter.name, schema: quote_counter_schema_1.QuoteCounterSchema },
@@ -79,6 +83,7 @@ exports.CrmModule = CrmModule = __decorate([
             deals_controller_1.DealsController,
             customer_activity_controller_1.CustomerActivityController,
             quotes_controller_1.QuotesController,
+            products_controller_1.ProductsController,
         ],
         providers: [
             crm_service_1.CrmService,
@@ -91,6 +96,7 @@ exports.CrmModule = CrmModule = __decorate([
             customer_activity_service_1.CustomerActivityService,
             quotes_service_1.QuotesService,
             quote_payments_service_1.QuotePaymentsService,
+            products_service_1.ProductsService,
         ],
         exports: [
             customer_activity_service_1.CustomerActivityService,

@@ -2,15 +2,21 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 import { InjectModel } from '@nestjs/mongoose';
 import { FilterQuery, Model } from 'mongoose';
 import { Deal, DealDocument } from './schemas/deal.schema';
+import { Product, ProductDocument } from './schemas/product.schema';
 import { Quote, QuoteDocument } from './schemas/quote.schema';
 import { QuoteCounter, QuoteCounterDocument } from './schemas/quote-counter.schema';
+import { CreateQuoteDto } from './dto/create-quote.dto';
 import { UpdateQuoteDto } from './dto/update-quote.dto';
+import { calculateQuoteTotals, validateQuoteItems } from './quote-pricing.util';
 
 // Fields the external CRM sync owns exclusively (see crm_mongo_sync.py) —
 // rejected outright (400) on any quote with externalId set, never a silent
 // no-op, so a human edit can never be quietly clobbered by the next sync
-// poll. Native (non-synced) quotes can still edit all three freely.
-const SYNC_OWNED_FIELDS = ['quoteAmount', 'clientApprovalStatus', 'quoteStatus'] as const;
+// poll. Native (non-synced) quotes can still edit all four freely. 'items'
+// was added alongside native quote creation — a synced quote never carries
+// line items (the external CRM doesn't send them), so this is additive
+// protection with zero behavior change for any quote that already had none.
+const SYNC_OWNED_FIELDS = ['quoteAmount', 'clientApprovalStatus', 'quoteStatus', 'items'] as const;
 
 export interface BiQuoteFilters {
   employeeId?: string[];
@@ -51,7 +57,59 @@ export class QuotesService {
     @InjectModel(Quote.name) private quoteModel: Model<QuoteDocument>,
     @InjectModel(QuoteCounter.name) private counterModel: Model<QuoteCounterDocument>,
     @InjectModel(Deal.name) private dealModel: Model<DealDocument>,
+    @InjectModel(Product.name) private productModel: Model<ProductDocument>,
   ) {}
+
+  // The first real "build a priced quote" entry point this app has had —
+  // every other Quote writer (createDraftQuote, the external sync) either
+  // never prices a quote or is owned entirely by the sync. dealId and every
+  // line item's productId are validated against THIS org only — a
+  // cross-org reference is a 400, never a silent cross-tenant read (same
+  // principle as getOne's own scope check below). Totals are always
+  // computed here, never trusted from the DTO (see quote-pricing.util.ts).
+  async createQuote(organizationId: string, dto: CreateQuoteDto, createdBy: string, storeConstraint?: string): Promise<QuoteDocument> {
+    if (dto.dealId) {
+      const dealMatch: FilterQuery<Deal> = { _id: dto.dealId, organizationId, ...(storeConstraint ? { storeId: storeConstraint } : {}) };
+      const deal = await this.dealModel.findOne(dealMatch).exec();
+      if (!deal) throw new BadRequestException('Deal not found in this organization.');
+    }
+
+    const quoteCurrency = dto.currency ?? 'INR';
+    const productIds = dto.items.map((i) => i.productId).filter((id): id is string => !!id);
+    if (productIds.length > 0) {
+      const products = await this.productModel.find({ _id: { $in: productIds }, organizationId }).exec();
+      const foundIds = new Set(products.map((p) => p._id.toString()));
+      const missing = productIds.filter((id) => !foundIds.has(id));
+      if (missing.length > 0) throw new BadRequestException(`Product(s) not found in this organization: ${missing.join(', ')}`);
+      const inactive = products.filter((p) => !p.isActive).map((p) => p.name);
+      if (inactive.length > 0) throw new BadRequestException(`Cannot quote inactive product(s): ${inactive.join(', ')}`);
+      this.assertProductCurrencyMatches(products, quoteCurrency);
+    }
+
+    validateQuoteItems(dto.items);
+    const totals = calculateQuoteTotals(dto.items);
+    const quoteNumber = await this.nextQuoteNumber(organizationId);
+
+    return this.quoteModel.create({
+      organizationId,
+      dealId: dto.dealId,
+      quoteName: dto.quoteName,
+      quoteStatus: 'draft',
+      clientApprovalStatus: 'pending',
+      quoteAmount: totals.quoteAmount,
+      currency: quoteCurrency,
+      expirationDate: dto.expirationDate,
+      dueDate: dto.dueDate,
+      clientDetails: dto.clientDetails,
+      requestNotes: dto.requestNotes,
+      quoteNumber,
+      ownerUserId: createdBy,
+      items: totals.items,
+      subtotal: totals.subtotal,
+      discountAmount: totals.discountAmount,
+      taxAmount: totals.taxAmount,
+    });
+  }
 
   // Phase 19 — Unified Analytics Dashboard's quote drill-down. Quote has no
   // storeId/ownerId of its own — store/personal scoping joins through the
@@ -136,6 +194,20 @@ export class QuotesService {
       .findOneAndUpdate({ organizationId }, { $inc: { seq: 1 } }, { upsert: true, new: true })
       .exec();
     return `Q-${String(counter.seq).padStart(4, '0')}`;
+  }
+
+  // A quote must never contain a product priced in a different currency
+  // than the quote itself (never silently converted or mixed — reject
+  // outright). Shared by createQuote and updateQuote, run against the same
+  // already-fetched `products` array those callers use for the
+  // missing/inactive checks, so this adds no extra query.
+  private assertProductCurrencyMatches(products: ProductDocument[], quoteCurrency: string): void {
+    const mismatched = products.filter((p) => p.currency !== quoteCurrency).map((p) => `${p.name} (${p.currency})`);
+    if (mismatched.length > 0) {
+      throw new BadRequestException(
+        `Product currency must match the quote currency (${quoteCurrency}). Mismatched: ${mismatched.join(', ')}`,
+      );
+    }
   }
 
   // Business Intelligence's Employee Productivity (section 3) — grouped by
@@ -227,7 +299,43 @@ export class QuotesService {
       }
     }
 
-    Object.assign(quote, dto);
+    if (dto.dealId) {
+      const dealMatch: FilterQuery<Deal> = { _id: dto.dealId, organizationId, ...(storeConstraint ? { storeId: storeConstraint } : {}) };
+      const deal = await this.dealModel.findOne(dealMatch).exec();
+      if (!deal) throw new BadRequestException('Deal not found in this organization.');
+    }
+
+    const { items, ...rest } = dto;
+    Object.assign(quote, rest);
+
+    // Recalculated here, never trusted from the client — same validation +
+    // productId/org check createQuote runs, so an edited line item can
+    // never quietly bypass the rules a newly-created one is held to.
+    if (items) {
+      const productIds = items.map((i) => i.productId).filter((pid): pid is string => !!pid);
+      if (productIds.length > 0) {
+        const products = await this.productModel.find({ _id: { $in: productIds }, organizationId }).exec();
+        const foundIds = new Set(products.map((p) => p._id.toString()));
+        const missing = productIds.filter((pid) => !foundIds.has(pid));
+        if (missing.length > 0) throw new BadRequestException(`Product(s) not found in this organization: ${missing.join(', ')}`);
+        const inactive = products.filter((p) => !p.isActive).map((p) => p.name);
+        if (inactive.length > 0) throw new BadRequestException(`Cannot quote inactive product(s): ${inactive.join(', ')}`);
+        // quote.currency already reflects dto.currency at this point (see
+        // Object.assign(quote, rest) above), so a request that changes both
+        // the quote's currency and its items in one PATCH is checked against
+        // the NEW currency, not the stale one.
+        this.assertProductCurrencyMatches(products, quote.currency);
+      }
+
+      validateQuoteItems(items);
+      const totals = calculateQuoteTotals(items);
+      quote.items = totals.items;
+      quote.subtotal = totals.subtotal;
+      quote.discountAmount = totals.discountAmount;
+      quote.taxAmount = totals.taxAmount;
+      quote.quoteAmount = totals.quoteAmount;
+    }
+
     await quote.save();
     return quote;
   }

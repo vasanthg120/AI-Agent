@@ -17,6 +17,7 @@ import { Deal, DealSchema } from './schemas/deal.schema';
 import { DealOwnerMapping, DealOwnerMappingSchema } from './schemas/deal-owner-mapping.schema';
 import { EmailIntelligenceItem, EmailIntelligenceItemSchema } from '../email-intelligence/schemas/email-intelligence-item.schema';
 import { Note, NoteSchema } from './schemas/note.schema';
+import { Product, ProductSchema } from './schemas/product.schema';
 import { Quote, QuoteSchema } from './schemas/quote.schema';
 import { QuoteCounter, QuoteCounterSchema } from './schemas/quote-counter.schema';
 import { QuotePayment, QuotePaymentSchema } from './schemas/quote-payment.schema';
@@ -29,6 +30,8 @@ import { CrmService } from './crm.service';
 import { CustomerActivityController } from './customer-activity.controller';
 import { CustomerActivityService } from './customer-activity.service';
 import { QuotesController } from './quotes.controller';
+import { ProductsController } from './products.controller';
+import { ProductsService } from './products.service';
 import { DealPerformanceDashboardService } from './deal-performance-dashboard.service';
 import { DealsController } from './deals.controller';
 import { DealsExportService } from './deals-export.service';
@@ -51,6 +54,7 @@ import { SalesTargetController } from './sales-target.controller';
       // added in a later build phase alongside its write endpoints on QuotesController).
       { name: QuotePayment.name, schema: QuotePaymentSchema },
       { name: Note.name, schema: NoteSchema },
+      { name: Product.name, schema: ProductSchema },
       { name: Tag.name, schema: TagSchema },
       { name: SalesTarget.name, schema: SalesTargetSchema },
       { name: QuoteCounter.name, schema: QuoteCounterSchema },
@@ -87,6 +91,7 @@ import { SalesTargetController } from './sales-target.controller';
     DealsController,
     CustomerActivityController,
     QuotesController,
+    ProductsController,
   ],
   providers: [
     CrmService,
@@ -104,6 +109,7 @@ import { SalesTargetController } from './sales-target.controller';
     CustomerActivityService,
     QuotesService,
     QuotePaymentsService,
+    ProductsService,
   ],
   // Consumed by EmailIntelligenceModule: CustomerActivityService.gatherCorrelationContext
   // (Phase 14b) and QuotesService.createDraftQuote (Phase 14e, post-send actions).

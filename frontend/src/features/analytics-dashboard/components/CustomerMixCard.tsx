@@ -1,5 +1,5 @@
 import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from 'recharts';
-import { Card, InfoPopover } from '@/components/ui';
+import { Card } from '@/components/ui';
 import styles from './CustomerMixCard.module.css';
 
 export interface CustomerMixCardProps {
@@ -30,15 +30,6 @@ export function CustomerMixCard({ newCount, existingCount, lostCount, totalConsi
           <div className={styles.label}>Relationship Health</div>
           <div className={styles.title}>
             Customer mix
-            <InfoPopover title="Customer mix">
-              <p>Every business with deal/quote activity in this period, classified into one bucket:</p>
-              <ul>
-                <li><strong>New</strong> — its earliest deal or quote was created in this period.</li>
-                <li><strong>Existing</strong> — active before this period and still has an open deal, or its most recent activity wasn't a deal turning lost.</li>
-                <li><strong>Lost</strong> — its most recent activity in this period was a deal transitioning to lost status, with no open deal remaining.</li>
-              </ul>
-              <p>Click a slice or legend to see the businesses behind that number.</p>
-            </InfoPopover>
           </div>
         </div>
         <span className={styles.periodTotal}>{totalConsidered.toLocaleString()} customers</span>

@@ -15,7 +15,9 @@ import styles from './AdminLayout.module.css';
 // useAdminAuthStore — a fully separate credential from the customer app's
 // session, not just a separate UI area over the same login.
 export function AdminLayout() {
-  const isMobile = useMediaQuery('(max-width: 960px)');
+  // Matches AppLayout.tsx's own mobile-shell breakpoint (900px) — this was
+  // independently built at 960px with no functional reason to differ.
+  const isMobile = useMediaQuery('(max-width: 900px)');
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
   const admin = useAdminAuthStore((state) => state.admin);

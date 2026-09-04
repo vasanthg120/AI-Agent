@@ -1,10 +1,27 @@
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
-from app.agent.anthropic_client import analyze_followup_priorities, compare_vendor_customer_pricing
+from app.agent.anthropic_client import analyze_followup_priorities, compare_vendor_customer_pricing, generate_followup_draft
 from app.security import get_current_user
 
 router = APIRouter()
+
+
+class FollowupDraftResponse(BaseModel):
+    draftReply: str
+
+
+# Body is the deterministic follow-up context NestJS's generateFollowUpDraft
+# assembled (businessName, originalSubject/bodyPreview, our previous reply,
+# daysSinceSent) — same raw-dict convention as /followups/analyze above.
+# Separate from that route: this one generates an actual draft email body
+# for one specific follow-up, on demand, never bundled into the cached
+# daily summary.
+@router.post("/business-intelligence/followups/draft", response_model=FollowupDraftResponse)
+def draft_followup(payload: dict, user: dict = Depends(get_current_user)):
+    return FollowupDraftResponse(
+        **generate_followup_draft(payload, organization_id=user.get("organizationId"), user_id=user.get("sub", ""))
+    )
 
 
 class TodaysPriority(BaseModel):
