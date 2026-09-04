@@ -110,5 +110,10 @@ declare const _default: () => {
             env: string;
         };
     };
+    emailSla: {
+        enabled: boolean;
+        escalationEnabled: boolean;
+        aiFollowupActionsEnabled: boolean;
+    };
 };
 export default _default;

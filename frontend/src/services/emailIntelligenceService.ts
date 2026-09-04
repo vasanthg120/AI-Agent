@@ -115,6 +115,12 @@ export interface EmailFollowUpReminder {
   title: string;
   dueDate: string;
   status: 'pending' | 'done' | 'dismissed';
+  reminderType: string;
+  draftReply?: string;
+  draftStatus: 'none' | 'generating' | 'pending_review' | 'approved' | 'sent' | 'failed';
+  draftGeneratedAt?: string;
+  sentAt?: string;
+  sendError?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -272,6 +278,24 @@ export const emailIntelligenceService = {
 
   async markFollowUpDone(id: string): Promise<EmailFollowUpReminder> {
     const { data } = await axiosClient.post<EmailFollowUpReminder>(`/email-intelligence/follow-ups/${id}/done`);
+    return data;
+  },
+
+  // AI Follow-up action layer — gated behind AI_FOLLOWUP_ACTIONS_ENABLED
+  // server-side; never auto-sends, always requires an explicit approve
+  // click before sendFollowUp is callable (see email-sla plan).
+  async generateFollowUpDraft(id: string): Promise<EmailFollowUpReminder> {
+    const { data } = await axiosClient.post<EmailFollowUpReminder>(`/email-intelligence/follow-ups/${id}/draft`);
+    return data;
+  },
+
+  async approveFollowUpDraft(id: string, finalDraftReply?: string): Promise<EmailFollowUpReminder> {
+    const { data } = await axiosClient.post<EmailFollowUpReminder>(`/email-intelligence/follow-ups/${id}/approve`, { finalDraftReply });
+    return data;
+  },
+
+  async sendFollowUp(id: string): Promise<EmailFollowUpReminder> {
+    const { data } = await axiosClient.post<EmailFollowUpReminder>(`/email-intelligence/follow-ups/${id}/send`);
     return data;
   },
 };

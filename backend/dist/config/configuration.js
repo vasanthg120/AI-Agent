@@ -112,5 +112,10 @@ exports.default = () => ({
             env: process.env.CASHFREE_ENV ?? '',
         },
     },
+    emailSla: {
+        enabled: (process.env.EMAIL_SLA_ENABLED ?? 'false').toLowerCase() === 'true',
+        escalationEnabled: (process.env.EMAIL_SLA_ESCALATION_ENABLED ?? 'false').toLowerCase() === 'true',
+        aiFollowupActionsEnabled: (process.env.AI_FOLLOWUP_ACTIONS_ENABLED ?? 'false').toLowerCase() === 'true',
+    },
 });
 //# sourceMappingURL=configuration.js.map

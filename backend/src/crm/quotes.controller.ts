@@ -4,6 +4,7 @@ import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
 import { JwtPayload } from '../auth/jwt-payload.interface';
+import { CreateQuoteDto } from './dto/create-quote.dto';
 import { ListQuotesQueryDto } from './dto/list-quotes-query.dto';
 import { UpdateQuoteDto } from './dto/update-quote.dto';
 import { RecordQuotePaymentDto } from './dto/record-quote-payment.dto';
@@ -36,6 +37,17 @@ export class QuotesController {
     const storeConstraint = canOverride ? query.storeId : user.roles.includes('manager') ? user.storeId : undefined;
     const ownerConstraint = !canOverride && user.roles.includes('consultant') ? user.sub : undefined;
     return this.quotesService.listFiltered(user.organizationId, query, storeConstraint, ownerConstraint);
+  }
+
+  // The first native "build a priced quote" entry point this app has had —
+  // same write tier (owner/admin/manager, consultant excluded) as every
+  // other mutation route below.
+  @Post()
+  @Roles('owner', 'admin', 'manager')
+  create(@CurrentUser() user: JwtPayload, @Body() dto: CreateQuoteDto) {
+    const canOverride = user.roles.includes('admin') || user.roles.includes('owner');
+    const storeConstraint = canOverride ? undefined : user.storeId;
+    return this.quotesService.createQuote(user.organizationId, dto, user.sub, storeConstraint);
   }
 
   // Section 7 (Business Intelligence: Customer Quote & Payment Tracking) —

@@ -285,6 +285,26 @@ export const billingService = {
     await axiosClient.delete(`/billing/payment-methods/${id}`);
   },
 
+  // "Add a card for Auto Recharge" — a dedicated small authorization charge
+  // (never a real purchase, auto-refunded once confirmed) that actually
+  // produces a gateway-chargeable recurring token, unlike a real purchase/
+  // subscription checkout. See AutoPaySettingsCard.tsx's "Add a new card"
+  // flow for how these two calls bracket the gateway checkout widget.
+  async createPaymentMethodAuthorization(): Promise<{ orderId: string; checkoutParams: Record<string, unknown>; simulated: boolean; gatewayCustomerId: string }> {
+    const { data } = await axiosClient.post('/billing/payment-methods/authorize');
+    return data;
+  },
+
+  async confirmPaymentMethodAuthorization(payload: {
+    gatewayCustomerId: string;
+    gatewayPaymentId?: string;
+    signature?: string;
+    gatewayOrderId?: string;
+  }): Promise<PaymentMethod> {
+    const { data } = await axiosClient.post<PaymentMethod>('/billing/payment-methods/authorize/confirm', payload);
+    return data;
+  },
+
   async purchasePackage(packageKey: string): Promise<InitiatePurchaseResult> {
     const { data } = await axiosClient.post<InitiatePurchaseResult>('/billing/credits/purchase', { packageKey });
     return data;

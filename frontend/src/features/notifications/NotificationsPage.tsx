@@ -2,7 +2,7 @@ import { useState } from 'react';
 import type { ReactElement } from 'react';
 import { useNavigate } from 'react-router-dom';
 import clsx from 'clsx';
-import { FiInfo, FiAlertTriangle, FiXCircle, FiLink2 } from 'react-icons/fi';
+import { FiInfo, FiAlertTriangle, FiXCircle, FiLink2, FiClock } from 'react-icons/fi';
 import { Card, Button, Badge, Modal } from '@/components/ui';
 import { useNotificationsStore } from '@/stores/notificationsStore';
 import { formatRelativeTime, formatFullDate } from '@/utils/date';
@@ -16,6 +16,7 @@ const KIND_META: Record<NotificationKind, { icon: ReactElement; color: string; b
   integration: { icon: <FiLink2 />, color: 'var(--color-accent)', bg: 'var(--color-accent-muted)', label: 'Integration' },
   warning: { icon: <FiAlertTriangle />, color: 'var(--color-warning)', bg: 'rgba(251, 191, 36, 0.14)', label: 'Warning' },
   error: { icon: <FiXCircle />, color: 'var(--color-danger)', bg: 'rgba(248, 113, 113, 0.14)', label: 'Error' },
+  sla_breach: { icon: <FiClock />, color: 'var(--color-danger)', bg: 'rgba(248, 113, 113, 0.14)', label: 'SLA Breach' },
 };
 
 const KIND_BADGE_VARIANT: Record<NotificationKind, 'info' | 'accent' | 'warning' | 'danger'> = {
@@ -23,6 +24,7 @@ const KIND_BADGE_VARIANT: Record<NotificationKind, 'info' | 'accent' | 'warning'
   integration: 'accent',
   warning: 'warning',
   error: 'danger',
+  sla_breach: 'danger',
 };
 
 const FILTERS: { id: 'all' | NotificationKind; label: string }[] = [
@@ -31,6 +33,7 @@ const FILTERS: { id: 'all' | NotificationKind; label: string }[] = [
   { id: 'integration', label: 'Integrations' },
   { id: 'warning', label: 'Warnings' },
   { id: 'error', label: 'Errors' },
+  { id: 'sla_breach', label: 'SLA Breaches' },
 ];
 
 // "workflow:crm_follow_up_check" -> "crm follow up check" — python-agent's

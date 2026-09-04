@@ -29,6 +29,7 @@ import { DealFunnelCard } from './components/DealFunnelCard';
 import { DealStatusDistributionCard } from './components/DealStatusDistributionCard';
 import { TeamPerformanceSummaryCards } from './components/TeamPerformanceSummaryCards';
 import { EmailResponseSlaTable } from './components/EmailResponseSlaTable';
+import { SlaDashboardSection } from './components/SlaDashboardSection';
 import styles from './analytics-dashboard.module.css';
 
 // Local-calendar-date formatter — deliberately NOT `.toISOString().slice(0,10)`,
@@ -441,6 +442,8 @@ export function AnalyticsDashboardPage() {
               <ProductivitySection dateFrom={dateFrom} dateTo={dateTo} storeId={canOverrideStore ? storeId : undefined} />
 
               <EmailResponseSlaTable dateFrom={dateFrom} dateTo={dateTo} storeId={canOverrideStore ? storeId : undefined} />
+
+              <SlaDashboardSection />
             </div>
           )}
 

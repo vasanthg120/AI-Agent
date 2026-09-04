@@ -1597,6 +1597,46 @@ manager could hand to their team as-is. aiSummary is a 2-4 sentence executive na
 picture together. Always call analyze_followup_priorities exactly once."""
 
 
+FOLLOWUP_DRAFT_TOOL = {
+    "name": "generate_followup_draft",
+    "description": "Draft a short, genuine follow-up email to a customer who hasn't replied to a previous message.",
+    "strict": True,
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "draftReply": {"type": "string", "description": "The follow-up email body, written from our company's perspective."},
+        },
+        "required": ["draftReply"],
+        "additionalProperties": False,
+    },
+}
+
+FOLLOWUP_DRAFT_SYSTEM_PROMPT = """You write short, genuine follow-up emails on behalf of a business, checking back \
+in with a customer who hasn't replied to a previous message. Always write from OUR company's perspective, as if \
+we are the ones following up — never impersonate the customer.
+
+Keep it brief (2-4 sentences), friendly, and low-pressure — a gentle nudge, not a pushy sales pitch. Reference the \
+original subject/context naturally so it reads as a real continuation of the conversation, not a generic template. \
+Never invent details (prices, dates, commitments) that weren't in the original conversation. Always call \
+generate_followup_draft exactly once."""
+
+
+def generate_followup_draft(payload: dict, *, organization_id: str | None = None, user_id: str = "") -> dict:
+    """AI Follow-up action layer (additive to the existing 3-day reminder
+    timer) — a genuinely new, on-demand draft-generation call, separate from
+    analyze_followup_priorities (which only produces narrative priority
+    text, never a draft). Same traced forced-tool-choice shape as every
+    other structured-output call in this module."""
+    return _run_forced_tool_extraction(
+        FOLLOWUP_DRAFT_SYSTEM_PROMPT,
+        FOLLOWUP_DRAFT_TOOL,
+        [{"type": "text", "text": f"Follow-up context:\n\n{json.dumps(_truncate_payload_for_prompt(payload), default=str)}"}],
+        name="followup_draft_generate",
+        organization_id=organization_id,
+        user_id=user_id,
+    )
+
+
 def analyze_followup_priorities(payload: dict, *, organization_id: str | None = None, user_id: str = "") -> dict:
     """Business Intelligence's AI Follow-Up Summary (section 6) — cached
     per {organizationId, date} on the NestJS side, same shape as

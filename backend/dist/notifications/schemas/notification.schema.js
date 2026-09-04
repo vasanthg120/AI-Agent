@@ -11,7 +11,7 @@ var __metadata = (this && this.__metadata) || function (k, v) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.NotificationSchema = exports.Notification = exports.NOTIFICATION_ENTITY_TYPES = exports.NOTIFICATION_KINDS = void 0;
 const mongoose_1 = require("@nestjs/mongoose");
-exports.NOTIFICATION_KINDS = ['system', 'integration', 'warning', 'error'];
+exports.NOTIFICATION_KINDS = ['system', 'integration', 'warning', 'error', 'sla_breach'];
 exports.NOTIFICATION_ENTITY_TYPES = [
     'email',
     'financeDocument',

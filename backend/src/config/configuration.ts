@@ -186,4 +186,18 @@ export default () => ({
       env: process.env.CASHFREE_ENV ?? '',
     },
   },
+  // Email SLA + AI Follow-up action layer — an isolated extension (see
+  // backend/src/email-sla/). Same feature-flag idiom as
+  // billing.orgScopingEnabled above: a plain boolean read via ConfigService,
+  // default false, so nothing here does anything until deliberately turned
+  // on in an environment that's been tested. `enabled` gates SLA-record
+  // creation/tracking entirely; `escalationEnabled` lets SLA tracking run
+  // without notifying anyone yet (a safer first rollout step); Email
+  // Intelligence's follow-up draft-generation/send actions have their own
+  // separate flag since they can be adopted independently of SLA tracking.
+  emailSla: {
+    enabled: (process.env.EMAIL_SLA_ENABLED ?? 'false').toLowerCase() === 'true',
+    escalationEnabled: (process.env.EMAIL_SLA_ESCALATION_ENABLED ?? 'false').toLowerCase() === 'true',
+    aiFollowupActionsEnabled: (process.env.AI_FOLLOWUP_ACTIONS_ENABLED ?? 'false').toLowerCase() === 'true',
+  },
 });

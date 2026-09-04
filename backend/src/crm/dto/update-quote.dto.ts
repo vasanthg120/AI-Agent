@@ -1,4 +1,7 @@
-import { IsNumber, IsOptional, IsString, Matches, Min } from 'class-validator';
+import { Type } from 'class-transformer';
+import { ArrayMinSize, IsArray, IsNumber, IsOptional, IsString, Matches, Min, ValidateNested } from 'class-validator';
+import { QuoteClientDetailsDto } from './create-quote.dto';
+import { QuoteItemDto } from './quote-item.dto';
 
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -41,4 +44,24 @@ export class UpdateQuoteDto {
   @IsOptional()
   @IsString()
   requestNotes?: string;
+
+  @IsOptional()
+  @IsString()
+  dealId?: string;
+
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => QuoteClientDetailsDto)
+  clientDetails?: QuoteClientDetailsDto;
+
+  // When present, quotes.service.ts's updateQuote re-validates and
+  // recalculates subtotal/discountAmount/taxAmount/quoteAmount from these —
+  // the client-sent items are never trusted as-is, matching createQuote's
+  // own convention (see quote-pricing.util.ts).
+  @IsOptional()
+  @IsArray()
+  @ArrayMinSize(1, { message: 'A quote needs at least one line item.' })
+  @ValidateNested({ each: true })
+  @Type(() => QuoteItemDto)
+  items?: QuoteItemDto[];
 }
