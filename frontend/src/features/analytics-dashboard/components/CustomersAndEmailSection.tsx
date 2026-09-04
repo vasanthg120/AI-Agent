@@ -162,7 +162,6 @@ export function CustomersAndEmailSection({ dateFrom, dateTo, storeId }: { dateFr
             value={customers.newCount}
             note="in this period"
             onClick={() => setActiveCategory('new')}
-            info={<p>Businesses whose earliest deal or quote was created in this period. Click to see the list.</p>}
           />
           <StatCard
             icon={FiSend}
@@ -170,7 +169,6 @@ export function CustomersAndEmailSection({ dateFrom, dateTo, storeId }: { dateFr
             value={summary.sentCount}
             note={`of ${summary.sentCount + summary.missedCount} sent`}
             onClick={() => setEmailListQuery({ kind: 'sent', title: 'Replied Emails' })}
-            info={<p>Relevant inbound emails in this period that received a reply, out of the total relevant emails received (replied + missed). Click to see the list.</p>}
           />
           <StatCard
             icon={FiAlertTriangle}
@@ -178,7 +176,6 @@ export function CustomersAndEmailSection({ dateFrom, dateTo, storeId }: { dateFr
             value={summary.missedCount}
             note="24h+ overdue"
             onClick={() => setEmailListQuery({ kind: 'missed', title: 'Missed Emails' })}
-            info={<p>Relevant emails still awaiting a reply more than 24 hours after they were received. Click to see the list and open any email.</p>}
           />
           <StatCard
             icon={FiMail}
@@ -186,7 +183,6 @@ export function CustomersAndEmailSection({ dateFrom, dateTo, storeId }: { dateFr
             value={summary.newEnquiryCount}
             note="awaiting triage"
             onClick={() => setEmailListQuery({ kind: 'all', intent: 'new_enquiry', title: 'New Enquiries' })}
-            info={<p>Emails the AI classified with intent "new enquiry" in this period — first-contact interest from a prospect, not yet actioned. Click to see the list.</p>}
           />
         </div>
       )}

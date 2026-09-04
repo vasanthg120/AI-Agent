@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { FiPieChart, FiTarget, FiUsers } from 'react-icons/fi';
-import { InfoPopover, SectionCard, Skeleton, Tabs } from '@/components/ui';
+import { SectionCard, Skeleton, Tabs } from '@/components/ui';
 import type { DateRange } from '@/components/ui';
 import { useAuthStore } from '@/stores/authStore';
 import { hasRole } from '@/utils/roles';
@@ -79,19 +79,6 @@ const TAB_ITEMS = [
   { id: 'bi-vendor', label: 'Vendor Profitability', requireRoles: ['owner', 'admin'] },
   { id: 'bi-followups', label: 'AI Follow-Ups' },
 ];
-
-// One-line-per-tab explainer shown next to the tab bar — what this page as a
-// whole covers, before drilling into any one card/table/chart's own
-// InfoPopover. Keyed by TAB_ITEMS' own ids so a missing entry is a build-time
-// TS error, not a silently blank popover.
-const TAB_DESCRIPTIONS: Record<(typeof TAB_ITEMS)[number]['id'], string> = {
-  overview: 'A single-glance summary of the month: revenue against target, deal/conversion/outstanding stats, momentum, and what needs attention next.',
-  pipeline: 'Every open, won, and lost deal in the selected period, plus the full quotes ledger — how the pipeline is moving and what quotes are outstanding.',
-  team: "How the sales team is performing: revenue and deals won, each member's workload completion, and email response SLAs.",
-  customers: 'Who your customers are this period (new, existing, lost) and how the inbox is keeping up (replied vs. missed emails, open enquiries).',
-  'bi-vendor': 'Gross margin by deal — customer revenue vs. paid vendor cost, for orgs that link vendor invoices to deals. Owner/admin only.',
-  'bi-followups': "Today's AI-prioritized follow-ups: overdue and due-today customer actions, high-priority accounts, and ready-to-send draft replies.",
-};
 
 type DrillDownTarget =
   | {
@@ -220,9 +207,6 @@ export function AnalyticsDashboardPage() {
 
       <div className={styles.tabBar}>
         <Tabs items={visibleTabs} activeId={activeTab} onChange={setActiveTab} />
-        <InfoPopover title={visibleTabs.find((t) => t.id === activeTab)?.label ?? ''} align="right" label="What is this?">
-          <p>{TAB_DESCRIPTIONS[activeTab]}</p>
-        </InfoPopover>
       </div>
 
       {isLoading || !data ? (
@@ -310,12 +294,6 @@ export function AnalyticsDashboardPage() {
                   title="Deals: Won / Lost / Pipeline"
                   icon={FiPieChart}
                   glass
-                  info={
-                    <p>
-                      Every deal in the selected period split by status. Click a slice or legend to see the underlying list.
-                      Counts are scoped by expected closing date, matching the figure you'd click into.
-                    </p>
-                  }
                 >
                   <DealSplitDonut
                     totalLabel="deals in this range"
@@ -344,13 +322,6 @@ export function AnalyticsDashboardPage() {
                   title="Quotes: Accepted / Not Accepted"
                   icon={FiPieChart}
                   glass
-                  info={
-                    <p>
-                      Every quote in the selected period, split by <strong>Accepted</strong> (client approval status is
-                      Approved) vs. <strong>Not Accepted</strong> (anything else — Pending, Rejected, etc.). Click a slice or
-                      legend to see the underlying list.
-                    </p>
-                  }
                 >
                   <DealSplitDonut
                     totalLabel="quotes in this range"
@@ -381,12 +352,6 @@ export function AnalyticsDashboardPage() {
                 title="Employee Leaderboard"
                 icon={FiUsers}
                 glass
-                info={
-                  <p>
-                    Every sales team member in scope, ranked by revenue from deals they own marked Won in this period. Click a
-                    row to see that person's won deals.
-                  </p>
-                }
               >
                 {data.employeeLeaderboard.length === 0 ? (
                   <div className={styles.emptyState}>No sales team members in scope for this period.</div>

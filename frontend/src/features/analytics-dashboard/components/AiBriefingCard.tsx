@@ -1,6 +1,5 @@
 import { FiZap, FiTrendingDown, FiClock, FiActivity, FiCheckCircle, FiChevronRight } from 'react-icons/fi';
 import type { IconType } from 'react-icons';
-import { InfoPopover } from '@/components/ui';
 import { formatRelativeTime } from '@/utils/date';
 import type { AiInsightItem } from '@/services/analyticsDashboardService';
 import styles from './AiBriefingCard.module.css';
@@ -44,10 +43,6 @@ export function AiBriefingCard({ insights, dataUpdatedAt, onAction }: AiBriefing
         <span className={styles.headerTitle}>
           <FiZap size={16} />
           AI briefing
-          <InfoPopover title="AI briefing">
-            <p>Deterministic, rule-based insights computed from this period's real numbers — not a free-form LLM summary. Each insight fires from a fixed condition (e.g. an achievement gap, more deals lost than won, missed emails piling up) with a link to the relevant tab.</p>
-            <p>Shown on every tab; updates whenever the dashboard's underlying data refreshes.</p>
-          </InfoPopover>
         </span>
         {dataUpdatedAt && <span className={styles.headerMeta}>Updated {formatRelativeTime(new Date(dataUpdatedAt).toISOString())}</span>}
       </div>

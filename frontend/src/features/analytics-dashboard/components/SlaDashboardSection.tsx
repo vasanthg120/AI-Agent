@@ -30,15 +30,7 @@ export function SlaDashboardSection() {
   if (data.totalEligible === 0) return null;
 
   return (
-    <SectionCard
-      title="Email SLA Compliance"
-      info={
-        <p>
-          Tracks first-response time against each email&apos;s configured SLA (business-hours aware). Separate from the
-          &quot;Unanswered Email Aging&quot; table above, which buckets missed replies by age instead.
-        </p>
-      }
-    >
+    <SectionCard title="Email SLA Compliance">
       <div className={styles.grid}>
         <StatTile value={data.totalEligible} label="Eligible emails" />
         <StatTile value={data.compliancePct !== null ? `${data.compliancePct}%` : '—'} label="Compliance" />

@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Card, InfoPopover } from '@/components/ui';
+import { Card } from '@/components/ui';
 import { dealsService, type Deal } from '@/services/dealsService';
 import { usePipelineDecisionCounts } from './usePipelineDecisionCounts';
 import { DrillDownModal, type DrillDownRow } from './DrillDownModal';
@@ -71,15 +71,6 @@ export function DealFunnelCard({ deals, dateFrom, dateTo, storeId }: DealFunnelC
           <div className={styles.label}>Conversion View</div>
           <div className={styles.title}>
             Deal movement
-            <InfoPopover title="Deal movement">
-              <p>A 4-step funnel of real, always-populated buckets — not generic CRM stage names (this app has no stage-name data to show instead):</p>
-              <ul>
-                <li><strong>All opportunities</strong> — every deal in this period (won + lost + open)</li>
-                <li><strong>Open</strong> — still in progress</li>
-                <li><strong>Awaiting response</strong> — open with a quote out, not yet approved</li>
-                <li><strong>Won</strong> — closed successfully</li>
-              </ul>
-            </InfoPopover>
           </div>
         </div>
         <span className={styles.period}>This period</span>

@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Card, Skeleton, InfoPopover } from '@/components/ui';
+import { Card, Skeleton } from '@/components/ui';
 import { emailAnalyticsService } from '@/services/emailAnalyticsService';
 import { EmailDetailModal } from '@/features/business-intelligence/components/EmailDetailModal';
 import { DrillDownModal, type DrillDownRow } from './DrillDownModal';
@@ -77,10 +77,6 @@ export function EmailResponseSlaTable({ dateFrom, dateTo, storeId }: EmailRespon
     <Card className={styles.card}>
       <div className={styles.title}>
         Unanswered Email Aging
-        <InfoPopover title="Unanswered Email Aging">
-          <p><strong>Missed</strong> means a relevant email still awaiting a reply more than 24 hours after it was received — not a general response-time metric.</p>
-          <p>The three age buckets (24–48h, 48–72h, 72h+) break down how overdue each employee's missed emails are; there's no 0–24h bucket since a missed email is already past 24h by definition. <strong>Urgent</strong> counts missed emails the AI flagged as urgent priority.</p>
-        </InfoPopover>
       </div>
       <p className={styles.subtitle}>Sent vs missed, bucketed by time to reply.</p>
 

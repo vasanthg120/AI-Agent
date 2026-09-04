@@ -111,7 +111,6 @@ export function VendorProfitabilitySection({ dateFrom, dateTo }: { dateFrom: str
             label="Customer revenue"
             value={money(data.totals.customerRevenue)}
             note={data.totals.customerRevenue > 0 ? 'in this period' : 'no linked transactions'}
-            info={<p>Revenue from deals/quotes that have a vendor cost linked to them — not total org revenue. Only transactions with a real vendor-cost link factor into this comparison.</p>}
             onClick={() => setShowRows(true)}
           />
           <StatCard
@@ -119,7 +118,6 @@ export function VendorProfitabilitySection({ dateFrom, dateTo }: { dateFrom: str
             label="Vendor cost paid"
             value={money(data.totals.vendorCost)}
             note="in this period"
-            info={<p>Total vendor cost from paid or partially-paid finance documents linked to a deal — driven by real invoice payment status, not vendor quotes (which only supply the vendor's name).</p>}
             onClick={() => setShowRows(true)}
           />
           <StatCard
@@ -127,7 +125,6 @@ export function VendorProfitabilitySection({ dateFrom, dateTo }: { dateFrom: str
             label="Gross profit"
             value={money(data.totals.grossProfit)}
             note={hasRows ? 'in this period' : 'awaiting linked costs'}
-            info={<p>Customer revenue minus vendor cost paid, summed across every deal with a linked cost. Transactions with mismatched currencies are excluded from this total (flagged separately below).</p>}
             onClick={() => setShowRows(true)}
           />
           <StatCard
@@ -135,7 +132,6 @@ export function VendorProfitabilitySection({ dateFrom, dateTo }: { dateFrom: str
             label="Gross margin"
             value={data.totals.grossMarginPct !== null ? `${data.totals.grossMarginPct}%` : '—'}
             note={data.totals.grossMarginPct !== null ? 'of customer revenue' : 'not enough data'}
-            info={<p>Gross profit as a percentage of customer revenue. No Net Profit figure is shown anywhere on this tab — only Gross.</p>}
             onClick={() => setShowRows(true)}
           />
         </div>
@@ -147,10 +143,6 @@ export function VendorProfitabilitySection({ dateFrom, dateTo }: { dateFrom: str
             <div className={panelStyles.label}>Cost Intelligence</div>
             <div className={panelStyles.title}>
               Vendor profitability
-              <InfoPopover title="Vendor profitability">
-                <p>One row per deal that has a linked, paid vendor cost. <strong>Vendor cost</strong> comes from paid/partially-paid finance documents linked to the deal; <strong>customer revenue/paid</strong> from the deal's own quote(s).</p>
-                <p>A row shows a "Currency mismatch" badge instead of gross profit when its vendor cost and customer revenue are in different currencies — those are excluded from the totals above rather than converted.</p>
-              </InfoPopover>
             </div>
             <p className={panelStyles.subtitle}>Connect vendor quotes and payments to understand margin by deal.</p>
           </div>
