@@ -4,6 +4,7 @@ import { useQuery } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import { FiPlus, FiX } from 'react-icons/fi';
 import { Button, IconButton, Input, Skeleton } from '@/components/ui';
+import { useMediaQuery } from '@/hooks/useMediaQuery';
 import { formatCurrency } from '@/utils/currency';
 import { extractErrorMessage } from '@/utils/errors';
 import { dealsService } from '@/services/dealsService';
@@ -45,6 +46,12 @@ export function QuoteFormPage() {
   const navigate = useNavigate();
   const { id } = useParams<{ id: string }>();
   const isEditing = !!id;
+
+  // The line-item table needs ~930px to show all 7 columns without
+  // clipping (see quotes.module.css's .itemsTable min-width) — no amount
+  // of column tuning makes that usable at phone widths, so below this
+  // breakpoint it switches to one card per item instead of a table.
+  const isMobile = useMediaQuery('(max-width: 768px)');
 
   const [companyName, setCompanyName] = useState('');
   const [contactName, setContactName] = useState('');
@@ -277,63 +284,63 @@ export function QuoteFormPage() {
 
       <div className={styles.formSection}>
         <span className={styles.sectionTitle}>Line items</span>
-        <div className={styles.itemsTableWrap}>
-          <table className={styles.itemsTable}>
-            <thead>
-              <tr>
-                <th style={{ minWidth: 180 }}>Product</th>
-                <th style={{ minWidth: 200 }}>Description</th>
-                <th style={{ width: 90 }}>Qty</th>
-                <th style={{ width: 120 }}>Unit price</th>
-                <th style={{ width: 110 }}>Discount</th>
-                <th style={{ width: 100 }}>Tax %</th>
-                <th style={{ width: 130 }}>Line total</th>
-                <th />
-              </tr>
-            </thead>
-            <tbody>
-              {items.map((item) => {
-                const { lineTotal } = previewLineTotal(item);
-                return (
-                  <tr key={item.key}>
-                    <td>
-                      <select value={item.productId ?? ''} onChange={(e) => applyProduct(item.key, e.target.value)}>
-                        <option value="">Custom item</option>
-                        {productOptionsForCurrency.map((p) => (
-                          <option key={p._id} value={p._id}>
-                            {p.name}
-                          </option>
-                        ))}
-                      </select>
-                    </td>
-                    <td>
-                      <input value={item.description} onChange={(e) => updateItem(item.key, { description: e.target.value })} />
-                    </td>
-                    <td>
+        {isMobile ? (
+          <div className={styles.itemCardList}>
+            {items.map((item) => {
+              const { lineTotal } = previewLineTotal(item);
+              return (
+                <div key={item.key} className={styles.itemCard}>
+                  <div className={styles.itemCardHeader}>
+                    <select
+                      className={`${styles.select} ${styles.itemCardProductSelect}`}
+                      value={item.productId ?? ''}
+                      onChange={(e) => applyProduct(item.key, e.target.value)}
+                    >
+                      <option value="">Custom item</option>
+                      {productOptionsForCurrency.map((p) => (
+                        <option key={p._id} value={p._id}>
+                          {p.name}
+                        </option>
+                      ))}
+                    </select>
+                    <IconButton icon={<FiX />} label="Remove line" size="sm" disabled={items.length === 1} onClick={() => removeItem(item.key)} />
+                  </div>
+                  <label className={styles.itemCardField}>
+                    <span>Description</span>
+                    <input value={item.description} onChange={(e) => updateItem(item.key, { description: e.target.value })} />
+                  </label>
+                  <div className={styles.itemCardRow}>
+                    <label className={styles.itemCardField}>
+                      <span>Qty</span>
                       <input
                         type="number"
                         min={0}
                         value={item.quantity}
                         onChange={(e) => updateItem(item.key, { quantity: Number(e.target.value) })}
                       />
-                    </td>
-                    <td>
+                    </label>
+                    <label className={styles.itemCardField}>
+                      <span>Unit price</span>
                       <input
                         type="number"
                         min={0}
                         value={item.unitPrice}
                         onChange={(e) => updateItem(item.key, { unitPrice: Number(e.target.value) })}
                       />
-                    </td>
-                    <td>
+                    </label>
+                  </div>
+                  <div className={styles.itemCardRow}>
+                    <label className={styles.itemCardField}>
+                      <span>Discount</span>
                       <input
                         type="number"
                         min={0}
                         value={item.discount ?? 0}
                         onChange={(e) => updateItem(item.key, { discount: Number(e.target.value) })}
                       />
-                    </td>
-                    <td>
+                    </label>
+                    <label className={styles.itemCardField}>
+                      <span>Tax %</span>
                       <input
                         type="number"
                         min={0}
@@ -341,17 +348,93 @@ export function QuoteFormPage() {
                         value={item.taxRate ?? 0}
                         onChange={(e) => updateItem(item.key, { taxRate: Number(e.target.value) })}
                       />
-                    </td>
-                    <td className={styles.itemLineTotal}>{formatCurrency(lineTotal, currency)}</td>
-                    <td>
-                      <IconButton icon={<FiX />} label="Remove line" size="sm" disabled={items.length === 1} onClick={() => removeItem(item.key)} />
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
+                    </label>
+                  </div>
+                  <div className={styles.itemCardTotal}>
+                    <span>Line total</span>
+                    <span className={styles.itemLineTotal}>{formatCurrency(lineTotal, currency)}</span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          <div className={styles.itemsTableWrap}>
+            <table className={styles.itemsTable}>
+              <thead>
+                <tr>
+                  <th style={{ minWidth: 180 }}>Product</th>
+                  <th style={{ minWidth: 200 }}>Description</th>
+                  <th style={{ width: 90 }}>Qty</th>
+                  <th style={{ width: 120 }}>Unit price</th>
+                  <th style={{ width: 110 }}>Discount</th>
+                  <th style={{ width: 100 }}>Tax %</th>
+                  <th style={{ width: 130 }}>Line total</th>
+                  <th />
+                </tr>
+              </thead>
+              <tbody>
+                {items.map((item) => {
+                  const { lineTotal } = previewLineTotal(item);
+                  return (
+                    <tr key={item.key}>
+                      <td>
+                        <select value={item.productId ?? ''} onChange={(e) => applyProduct(item.key, e.target.value)}>
+                          <option value="">Custom item</option>
+                          {productOptionsForCurrency.map((p) => (
+                            <option key={p._id} value={p._id}>
+                              {p.name}
+                            </option>
+                          ))}
+                        </select>
+                      </td>
+                      <td>
+                        <input value={item.description} onChange={(e) => updateItem(item.key, { description: e.target.value })} />
+                      </td>
+                      <td>
+                        <input
+                          type="number"
+                          min={0}
+                          value={item.quantity}
+                          onChange={(e) => updateItem(item.key, { quantity: Number(e.target.value) })}
+                        />
+                      </td>
+                      <td>
+                        <input
+                          type="number"
+                          min={0}
+                          value={item.unitPrice}
+                          onChange={(e) => updateItem(item.key, { unitPrice: Number(e.target.value) })}
+                        />
+                      </td>
+                      <td>
+                        <input
+                          type="number"
+                          min={0}
+                          value={item.discount ?? 0}
+                          onChange={(e) => updateItem(item.key, { discount: Number(e.target.value) })}
+                        />
+                      </td>
+                      <td>
+                        <input
+                          type="number"
+                          min={0}
+                          max={100}
+                          value={item.taxRate ?? 0}
+                          onChange={(e) => updateItem(item.key, { taxRate: Number(e.target.value) })}
+                        />
+                      </td>
+                      <td className={styles.itemLineTotal}>{formatCurrency(lineTotal, currency)}</td>
+                      <td>
+                        <IconButton icon={<FiX />} label="Remove line" size="sm" disabled={items.length === 1} onClick={() => removeItem(item.key)} />
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
 
         <Button type="button" variant="outline" size="sm" leftIcon={<FiPlus />} onClick={() => setItems((prev) => [...prev, emptyItem()])}>
           Add line item

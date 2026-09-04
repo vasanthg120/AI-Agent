@@ -1,6 +1,7 @@
 import { useNavigate, useParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { Badge, Button, Skeleton } from '@/components/ui';
+import { useMediaQuery } from '@/hooks/useMediaQuery';
 import { formatCurrency } from '@/utils/currency';
 import { extractErrorMessage } from '@/utils/errors';
 import { useAuthStore } from '@/stores/authStore';
@@ -25,6 +26,8 @@ export function QuoteDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const user = useAuthStore((s) => s.user);
+  // Same breakpoint/reasoning as QuoteFormPage.tsx's line-item table.
+  const isMobile = useMediaQuery('(max-width: 768px)');
 
   const { data: quote, isLoading, error } = useQuery({
     queryKey: ['quote-detail', id],
@@ -73,6 +76,40 @@ export function QuoteDetailPage() {
           {quote.items.length === 0 ? (
             <div className={styles.emptyState}>
               No priced line items on this quote{quote.externalId ? ' (synced from the external CRM).' : '.'}
+            </div>
+          ) : isMobile ? (
+            <div className={styles.itemCardList}>
+              {quote.items.map((item, i) => (
+                <div key={i} className={styles.itemCard}>
+                  <div className={styles.itemCardHeader}>
+                    <span className={styles.listItemTitle}>{item.description}</span>
+                  </div>
+                  <div className={styles.itemCardRow}>
+                    <div className={styles.itemCardReadField}>
+                      <span>Qty</span>
+                      <span>{item.quantity}</span>
+                    </div>
+                    <div className={styles.itemCardReadField}>
+                      <span>Unit price</span>
+                      <span>{formatCurrency(item.unitPrice, quote.currency)}</span>
+                    </div>
+                  </div>
+                  <div className={styles.itemCardRow}>
+                    <div className={styles.itemCardReadField}>
+                      <span>Discount</span>
+                      <span>{formatCurrency(item.discount, quote.currency)}</span>
+                    </div>
+                    <div className={styles.itemCardReadField}>
+                      <span>Tax</span>
+                      <span>{item.taxRate}%</span>
+                    </div>
+                  </div>
+                  <div className={styles.itemCardTotal}>
+                    <span>Line total</span>
+                    <span className={styles.itemLineTotal}>{formatCurrency(item.lineTotal, quote.currency)}</span>
+                  </div>
+                </div>
+              ))}
             </div>
           ) : (
             <div className={styles.itemsTableWrap}>

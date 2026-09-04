@@ -141,3 +141,23 @@
   pointer-events: all;
   box-shadow: var(--shadow-md);
 }
+
+/* Mobile RightPanel overlay (<=900px, matching AppLayout's own shell
+   breakpoint) — same backdrop+drawer idiom as AppLayout.module.css's
+   .mobileSidebarBackdrop/.sidebarMobile. Width comes from RightPanel's own
+   .panel (--right-panel-width) rendered inside; this wrapper only pins it
+   to the right edge above everything else. */
+.rightPanelBackdrop {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-sidebar);
+  background: rgba(0, 0, 0, 0.5);
+}
+
+.rightPanelMobile {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: calc(var(--z-sidebar) + 1);
+}

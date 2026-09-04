@@ -8,6 +8,11 @@
   z-index: var(--z-dropdown);
   top: calc(100% + 6px);
   min-width: 200px;
+  /* Same viewport-edge clamp as InfoPopover.module.css's .panel — without
+     it, a dropdown triggered near a narrow-viewport edge can render
+     partially off-screen since positioning is relative to the trigger, not
+     the viewport. */
+  max-width: min(320px, calc(100vw - 32px));
   padding: var(--space-2);
   background: var(--color-bg-surface-elevated);
   border: 1px solid var(--color-border-strong);

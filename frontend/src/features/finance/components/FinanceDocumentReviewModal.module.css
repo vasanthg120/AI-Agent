@@ -3,7 +3,12 @@
   flex-direction: column;
   gap: var(--space-3);
   padding: var(--space-4);
-  min-width: 480px;
+  /* min() instead of a bare min-width — still asks for 480px of breathing
+     room on desktop, but never fights the outer Modal's own phone-safe
+     shrink (Modal.module.css's width:100%/max-width cap), which a bare
+     min-width:480px was overriding and forcing horizontal overflow on any
+     phone. */
+  min-width: min(480px, 100%);
   max-width: 100%;
 }
 
@@ -11,6 +16,12 @@
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: var(--space-3);
+}
+
+@media (max-width: 640px) {
+  .row {
+    grid-template-columns: 1fr;
+  }
 }
 
 .select {
