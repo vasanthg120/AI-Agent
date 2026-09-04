@@ -11,7 +11,7 @@
 
 .filterRow {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   gap: var(--space-3);
   flex-wrap: wrap;
 }
@@ -23,54 +23,11 @@
   flex: 0 0 auto;
 }
 
-.filterToggle {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  font-size: var(--text-sm);
-  color: var(--color-text-secondary);
-  white-space: nowrap;
-}
-
 .emptyState {
   padding: var(--space-4);
   text-align: center;
   color: var(--color-text-muted);
   font-size: var(--text-sm);
-}
-
-.dealList {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-3);
-}
-
-.dealRow {
-  display: flex;
-  align-items: center;
-  gap: var(--space-3);
-  padding: var(--space-3);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-}
-
-.dealInfo {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  flex: 1;
-  min-width: 0;
-}
-
-.dealName {
-  font-size: var(--text-md);
-  font-weight: 600;
-  color: var(--color-text-primary);
-}
-
-.dealMeta {
-  font-size: var(--text-sm);
-  color: var(--color-text-muted);
 }
 
 .select {
@@ -84,20 +41,7 @@
   font-size: var(--text-md);
 }
 
-.mappingSection {
-  margin-bottom: var(--space-5);
-  padding-bottom: var(--space-5);
-  border-bottom: 1px solid var(--color-border);
-}
-
-.mappingHeading {
-  font-size: var(--text-md);
-  font-weight: 600;
-  color: var(--color-text-primary);
-  margin: 0 0 var(--space-1);
-}
-
-.mappingHint {
+.paginationText {
   font-size: var(--text-sm);
   color: var(--color-text-secondary);
   margin: 0 0 var(--space-3);
@@ -147,11 +91,6 @@
 
 .listItemTitle {
   color: var(--color-text-primary);
-}
-
-.listItemMeta {
-  color: var(--color-text-muted);
-  font-size: var(--text-xs);
 }
 
 .ownerCell {

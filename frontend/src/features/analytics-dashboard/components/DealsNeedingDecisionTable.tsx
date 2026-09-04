@@ -110,9 +110,7 @@ export function DealsNeedingDecisionTable({ dateFrom, dateTo, storeId, ownerName
       <div className={styles.header}>
         <div>
           <div className={styles.label}>Detailed View</div>
-          <div className={styles.title}>
-            Deals needing a decision
-          </div>
+          <div className={styles.title}>Deals needing a decision</div>
         </div>
         <button
           type="button"

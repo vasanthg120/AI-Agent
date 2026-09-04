@@ -86,6 +86,24 @@
   gap: var(--space-4);
 }
 
+@media (max-width: 680px) {
+  .page {
+    padding: var(--space-5) var(--space-4);
+    gap: var(--space-5);
+  }
+
+  /* minmax(300px, 1fr) can't shrink below 300px, so on a phone narrower
+     than ~330px (300px + page padding) it forces the whole page to scroll
+     horizontally — collapse to a single column instead. */
+  .twoColumn {
+    grid-template-columns: 1fr;
+  }
+
+  .tabBar {
+    flex-wrap: wrap;
+  }
+}
+
 .listItem {
   display: flex;
   align-items: center;

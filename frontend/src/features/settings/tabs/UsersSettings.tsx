@@ -3,10 +3,9 @@ import toast from 'react-hot-toast';
 import { FiTrash2 } from 'react-icons/fi';
 import { Badge, Button, IconButton, Input, Modal, Switch } from '@/components/ui';
 import { extractErrorMessage } from '@/utils/errors';
-import { chatService } from '@/services/chatService';
+import { agentRolesService, type AgentRole } from '@/services/agentRolesService';
 import { organizationsService, type Store } from '@/services/organizationsService';
 import { useAuthStore } from '@/stores/authStore';
-import type { ChatAgent } from '@/types';
 import { usersService, type AdminUser, type AssignableRole, type CreateUserResult } from '@/services/usersService';
 import { SettingsField, SettingsSection } from '../components/SettingsSection';
 import styles from './UsersSettings.module.css';
@@ -36,7 +35,7 @@ const emptyForm = {
 export function UsersSettings() {
   const currentUserId = useAuthStore((state) => state.user?.id);
   const [users, setUsers] = useState<AdminUser[]>([]);
-  const [agents, setAgents] = useState<ChatAgent[]>([]);
+  const [agentRoles, setAgentRoles] = useState<AgentRole[]>([]);
   const [stores, setStores] = useState<Store[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -65,13 +64,13 @@ export function UsersSettings() {
   const load = async () => {
     setLoading(true);
     try {
-      const [userList, agentList, storeList] = await Promise.all([
+      const [userList, roleList, storeList] = await Promise.all([
         usersService.list(),
-        chatService.getAgents(),
+        agentRolesService.list(),
         organizationsService.listStores(),
       ]);
       setUsers(userList);
-      setAgents(agentList);
+      setAgentRoles(roleList);
       setStores(storeList);
     } catch (err) {
       toast.error(extractErrorMessage(err));
@@ -79,6 +78,12 @@ export function UsersSettings() {
       setLoading(false);
     }
   };
+
+  // Agent User accounts lock to one org-created agent (see backend's
+  // resolveValidAgentIds) — built-in personas and drafts aren't assignable,
+  // so this dropdown only ever offers the agents someone actually created
+  // and activated.
+  const createdAgents = agentRoles.filter((role) => !role.builtin && role.status === 'active');
 
   useEffect(() => {
     void load();
@@ -166,7 +171,7 @@ export function UsersSettings() {
 
   // Falls back to a readable placeholder, never the raw id — an
   // agent/store that's since been deleted shouldn't surface its Mongo id.
-  const agentName = (agentId?: string) => agents.find((a) => a.id === agentId)?.name ?? 'Unknown agent';
+  const agentName = (agentId?: string) => agentRoles.find((a) => a.slug === agentId)?.name ?? 'Unknown agent';
   const storeName = (storeId?: string) => stores.find((s) => s._id === storeId)?.name ?? 'Unknown store';
 
   return (
@@ -270,12 +275,15 @@ export function UsersSettings() {
                     <option value="" disabled>
                       Select an agent…
                     </option>
-                    {agents.map((a) => (
-                      <option key={a.id} value={a.id}>
+                    {createdAgents.map((a) => (
+                      <option key={a.slug} value={a.slug}>
                         {a.name}
                       </option>
                     ))}
                   </select>
+                  {createdAgents.length === 0 && (
+                    <p className={styles.hint}>No custom agents yet — create one under Settings → AI Agents first.</p>
+                  )}
                 </SettingsField>
               )}
               {STORE_SCOPED_ROLES.has(form.role) && (
@@ -350,8 +358,8 @@ export function UsersSettings() {
                 <option value="" disabled>
                   Select an agent…
                 </option>
-                {agents.map((a) => (
-                  <option key={a.id} value={a.id}>
+                {createdAgents.map((a) => (
+                  <option key={a.slug} value={a.slug}>
                     {a.name}
                   </option>
                 ))}

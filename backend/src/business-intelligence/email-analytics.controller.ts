@@ -115,18 +115,37 @@ export class EmailAnalyticsController {
   @Roles('owner', 'admin', 'manager', 'consultant')
   async getOne(@CurrentUser() user: JwtPayload, @Param('id') id: string) {
     const item = await this.emailIntelligenceService.getOneForOrg(user.organizationId, id);
-    // Consultant self-scope, server-enforced — never trust the URL param
-    // alone at this RBAC tier (same principle as every other BI endpoint's
-    // scopeBiFilters, applied here post-fetch since getOneForOrg is a
-    // single-record lookup, not a filtered list).
+    await this.authorizeItemAccess(user, item.userId);
+    return item;
+  }
+
+  // Full body, fetched live from Graph (never stored — see
+  // EmailIntelligenceItem's bodyPreview-only comment) so "open and read"
+  // shows the actual email, not just the ~255-char preview snippet. Same
+  // RBAC as getOne above — this only ever surfaces content for an email the
+  // caller was already allowed to see the summary of.
+  @Get('emails/:id/body')
+  @Roles('owner', 'admin', 'manager', 'consultant')
+  async getBody(@CurrentUser() user: JwtPayload, @Param('id') id: string) {
+    const item = await this.emailIntelligenceService.getOneForOrg(user.organizationId, id);
+    await this.authorizeItemAccess(user, item.userId);
+    return this.emailIntelligenceService.getFullBody(item);
+  }
+
+  // Consultant self-scope, server-enforced — never trust the URL param
+  // alone at this RBAC tier (same principle as every other BI endpoint's
+  // scopeBiFilters, applied here post-fetch since getOneForOrg/getFullBody
+  // are single-record lookups, not filtered lists). Shared by getOne and
+  // getBody so the two can never drift apart on who's allowed to see what.
+  private async authorizeItemAccess(user: JwtPayload, itemOwnerUserId: string): Promise<void> {
     const canOverride = user.roles.includes('admin') || user.roles.includes('owner');
-    if (!canOverride && user.roles.includes('consultant') && item.userId !== user.sub) {
+    if (canOverride) return;
+    if (user.roles.includes('consultant') && itemOwnerUserId !== user.sub) {
       throw new NotFoundException('Email intelligence item not found');
     }
-    if (!canOverride && user.roles.includes('manager')) {
-      const owner = await this.usersService.findById(item.userId);
+    if (user.roles.includes('manager')) {
+      const owner = await this.usersService.findById(itemOwnerUserId);
       if (!owner || owner.storeId !== user.storeId) throw new NotFoundException('Email intelligence item not found');
     }
-    return item;
   }
 }

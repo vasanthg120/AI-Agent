@@ -71,9 +71,7 @@ export function RevenueMomentumCard({ dateFrom, dateTo, storeId }: RevenueMoment
   return (
     <Card className={styles.card} interactive={series.length > 1} onClick={series.length > 1 ? () => setShowDeals(true) : undefined}>
       <div className={styles.label}>Performance Signal</div>
-      <div className={styles.title}>
-        Revenue momentum
-      </div>
+      <div className={styles.title}>Revenue momentum</div>
 
       <div className={styles.valueRow}>
         <span className={styles.value}>{money(total)}</span>

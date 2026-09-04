@@ -1,23 +1,21 @@
 import { useState } from 'react';
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
-import { FiAward, FiFileText, FiPercent, FiTrendingUp } from 'react-icons/fi';
+import { FiAward, FiPercent, FiTrendingUp } from 'react-icons/fi';
 import { DateRangeControl, SectionCard, Skeleton, Tabs, type DateRange } from '@/components/ui';
 import { dayjs } from '@/utils/date';
 import { salesReportService } from '@/services/salesReportService';
 import { grossMarginReportService } from '@/services/grossMarginReportService';
 import { RoyaltyReportSection } from '@/features/royalty/components/RoyaltyReportSection';
-import { InvoicesSection } from '@/features/royalty/components/InvoicesSection';
 import { SalesReportView } from './components/SalesReportView';
 import { GrossMarginReportView } from './components/GrossMarginReportView';
 import styles from './reporting.module.css';
 
-type ReportType = 'sales' | 'grossMargin' | 'royalty' | 'invoices';
+type ReportType = 'sales' | 'grossMargin' | 'royalty';
 
 const REPORT_TYPE_TABS = [
   { id: 'sales', label: 'Sales', icon: <FiTrendingUp /> },
   { id: 'grossMargin', label: 'Gross Margin', icon: <FiPercent /> },
   { id: 'royalty', label: 'Royalty', icon: <FiAward /> },
-  { id: 'invoices', label: 'Invoices', icon: <FiFileText /> },
 ];
 
 const GROUP_OPTIONS: Record<'sales' | 'grossMargin', { value: string; label: string }[]> = {
@@ -34,7 +32,7 @@ const GROUP_OPTIONS: Record<'sales' | 'grossMargin', { value: string; label: str
   ],
 };
 
-const REPORT_ICON = { sales: FiTrendingUp, grossMargin: FiPercent, royalty: FiAward, invoices: FiFileText };
+const REPORT_ICON = { sales: FiTrendingUp, grossMargin: FiPercent, royalty: FiAward };
 
 // Single-column, top-down layout — NOT a narrow left sidebar. A 300px
 // sidebar was tried first but doesn't actually fit this page's controls:
@@ -108,8 +106,6 @@ export function ReportingPage() {
 
       {reportType === 'royalty' ? (
         <RoyaltyReportSection />
-      ) : reportType === 'invoices' ? (
-        <InvoicesSection />
       ) : (
         <>
           <div className={styles.filterBar}>

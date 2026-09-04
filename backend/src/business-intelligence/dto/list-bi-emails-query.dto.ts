@@ -3,8 +3,8 @@ import { IsIn, IsInt, IsOptional, IsString, Max, Min } from 'class-validator';
 import { BiFilterQueryDto } from './bi-filter-query.dto';
 
 export class ListBiEmailsQueryDto extends BiFilterQueryDto {
-  @IsIn(['sent', 'missed', 'all'])
-  kind: 'sent' | 'missed' | 'all';
+  @IsIn(['sent', 'missed', 'replied', 'all'])
+  kind: 'sent' | 'missed' | 'replied' | 'all';
 
   // Narrows to one RELEVANT_EMAIL_INTENTS category (e.g. drilling into the
   // "New Enquiries" stat tile) — invalid/irrelevant values are ignored by

@@ -42,8 +42,13 @@ export class EmailSyncJob {
   @Prop({ required: true, default: 0 })
   failedCount: number;
 
-  @Prop({ required: true, enum: ['user'], default: 'user' })
-  triggeredBy: 'user';
+  // 'scheduled' added alongside the half-hourly background sync
+  // (EmailIntelligenceSyncService.runScheduledSync) — both call the exact
+  // same syncMyMailbox, but the sync history / "last synced" UI needs to
+  // say which happened, since an auto-run finding nothing new means
+  // something different to a user than their own click doing the same.
+  @Prop({ required: true, enum: ['user', 'scheduled'], default: 'user' })
+  triggeredBy: 'user' | 'scheduled';
 
   @Prop({ required: true })
   startedAt: Date;

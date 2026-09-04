@@ -87,9 +87,7 @@ export function PipelineHealthCard({ deals, dateFrom, dateTo, storeId }: Pipelin
   return (
     <Card className={styles.card}>
       <div className={styles.mainCol}>
-        <div className={styles.label}>
-          Pipeline Health
-        </div>
+        <div className={styles.label}>Pipeline Health</div>
         <div className={styles.valueRow}>
           <span className={styles.value}>{paymentSummary ? money(paymentSummary.totalOutstanding) : '—'}</span>
           <span className={styles.valueLabel}>total outstanding</span>

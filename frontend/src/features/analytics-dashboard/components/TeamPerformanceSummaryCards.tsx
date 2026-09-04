@@ -1,11 +1,10 @@
 import { useMemo } from 'react';
-import type { ReactNode } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import dayjs from 'dayjs';
 import type { IconType } from 'react-icons';
 import { FiTrendingUp, FiTarget, FiActivity, FiClock } from 'react-icons/fi';
 import { useState } from 'react';
-import { Card, InfoPopover } from '@/components/ui';
+import { Card } from '@/components/ui';
 import { formatINR as money } from '@/utils/currency';
 import { dealsService } from '@/services/dealsService';
 import { employeeProductivityService } from '@/services/employeeProductivityService';
@@ -19,7 +18,6 @@ function StatCard({
   value,
   note,
   noteTone,
-  info,
   onClick,
 }: {
   icon: IconType;
@@ -27,7 +25,6 @@ function StatCard({
   value: string | number;
   note?: string;
   noteTone?: 'positive' | 'negative' | 'neutral';
-  info?: ReactNode;
   onClick?: () => void;
 }) {
   return (
@@ -35,10 +32,7 @@ function StatCard({
       <span className={styles.iconBadge}>
         <Icon size={16} />
       </span>
-      <div className={styles.label}>
-        {label}
-        {info && <InfoPopover title={label}>{info}</InfoPopover>}
-      </div>
+      <div className={styles.label}>{label}</div>
       <div className={styles.value}>{value}</div>
       {note && <div className={styles[`note-${noteTone ?? 'neutral'}`]}>{note}</div>}
     </Card>

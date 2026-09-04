@@ -117,9 +117,7 @@ export function KeyStatsGrid({ deals, businessHealthScore, revenueTrend, dateFro
   return (
     <div className={styles.grid}>
       <Card interactive={!!onDealsClick} onClick={onDealsClick} className={styles.cell}>
-        <div className={styles.label}>
-          Deals Won
-        </div>
+        <div className={styles.label}>Deals Won</div>
         <div className={styles.value}>{deals.wonCount}</div>
         <div className={styles.caption}>of {totalDeals} deals in range</div>
         <div className={styles.divider} />
@@ -129,9 +127,7 @@ export function KeyStatsGrid({ deals, businessHealthScore, revenueTrend, dateFro
       </Card>
 
       <Card className={styles.cell} interactive onClick={() => setOpenDrilldown('conversion')}>
-        <div className={styles.label}>
-          Conversion
-        </div>
+        <div className={styles.label}>Conversion</div>
         <div className={styles.value}>{conversionPct !== null ? `${conversionPct}%` : '—'}</div>
         <div className={styles.caption}>won / closed deals</div>
         <div className={styles.divider} />
@@ -139,9 +135,7 @@ export function KeyStatsGrid({ deals, businessHealthScore, revenueTrend, dateFro
       </Card>
 
       <Card className={styles.cell} interactive={revenueTrend.length > 1} onClick={revenueTrend.length > 1 ? () => setOpenDrilldown('health') : undefined}>
-        <div className={styles.label}>
-          Business Health
-        </div>
+        <div className={styles.label}>Business Health</div>
         <div className={styles.value}>{businessHealthScore ?? '—'}</div>
         <div className={styles.caption}>composite score out of 100</div>
         {revenueTrend.length > 1 && (
@@ -156,9 +150,7 @@ export function KeyStatsGrid({ deals, businessHealthScore, revenueTrend, dateFro
       </Card>
 
       <Card className={styles.cell} interactive onClick={() => setOpenDrilldown('outstanding')}>
-        <div className={styles.label}>
-          Outstanding
-        </div>
+        <div className={styles.label}>Outstanding</div>
         <div className={styles.value}>{totalOutstanding !== null ? money(totalOutstanding) : '—'}</div>
         <div className={styles.caption}>{bucketSentence ?? 'Loading…'}</div>
         <div className={styles.divider} />

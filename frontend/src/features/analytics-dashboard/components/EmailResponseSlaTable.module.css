@@ -51,11 +51,12 @@
   border-top: 1px solid var(--color-border);
 }
 
-.clickableRow {
+.clickableCell {
   cursor: pointer;
+  border-radius: var(--radius-md);
 }
 
-.clickableRow:hover {
+.clickableCell:hover {
   background: var(--color-bg-hover);
 }
 

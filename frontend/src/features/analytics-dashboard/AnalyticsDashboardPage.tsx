@@ -23,7 +23,6 @@ import { KeyStatsGrid } from './components/KeyStatsGrid';
 import { RevenueMomentumCard } from './components/RevenueMomentumCard';
 import { ActionQueueCard } from './components/ActionQueueCard';
 import { DealsNeedingDecisionTable } from './components/DealsNeedingDecisionTable';
-import { QuotesLedgerTable } from './components/QuotesLedgerTable';
 import { PipelineHealthCard } from './components/PipelineHealthCard';
 import { DealFunnelCard } from './components/DealFunnelCard';
 import { DealStatusDistributionCard } from './components/DealStatusDistributionCard';
@@ -290,11 +289,7 @@ export function AnalyticsDashboardPage() {
               </div>
 
               <div className={styles.twoColumn}>
-                <SectionCard
-                  title="Deals: Won / Lost / Pipeline"
-                  icon={FiPieChart}
-                  glass
-                >
+                <SectionCard title="Deals: Won / Lost / Pipeline" icon={FiPieChart} glass>
                   <DealSplitDonut
                     totalLabel="deals in this range"
                     segments={[
@@ -318,11 +313,7 @@ export function AnalyticsDashboardPage() {
                   />
                 </SectionCard>
 
-                <SectionCard
-                  title="Quotes: Accepted / Not Accepted"
-                  icon={FiPieChart}
-                  glass
-                >
+                <SectionCard title="Quotes: Accepted / Not Accepted" icon={FiPieChart} glass>
                   <DealSplitDonut
                     totalLabel="quotes in this range"
                     segments={[
@@ -339,8 +330,6 @@ export function AnalyticsDashboardPage() {
                   />
                 </SectionCard>
               </div>
-
-              <QuotesLedgerTable dateFrom={dateFrom} dateTo={dateTo} />
             </div>
           )}
 
@@ -348,11 +337,7 @@ export function AnalyticsDashboardPage() {
             <div className={styles.tabContent}>
               <TeamPerformanceSummaryCards data={data} dateFrom={dateFrom} dateTo={dateTo} storeId={canOverrideStore ? storeId : undefined} />
 
-              <SectionCard
-                title="Employee Leaderboard"
-                icon={FiUsers}
-                glass
-              >
+              <SectionCard title="Employee Leaderboard" icon={FiUsers} glass>
                 {data.employeeLeaderboard.length === 0 ? (
                   <div className={styles.emptyState}>No sales team members in scope for this period.</div>
                 ) : (

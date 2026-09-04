@@ -107,9 +107,7 @@ export function PriorityQueueCard({ followUpReminders }: PriorityQueueCardProps)
       <div className={styles.header}>
         <div>
           <div className={styles.label}>Suggested Actions</div>
-          <div className={styles.title}>
-            Priority queue
-          </div>
+          <div className={styles.title}>Priority queue</div>
         </div>
         <span className={styles.count}>{items.length} action{items.length === 1 ? '' : 's'}</span>
       </div>

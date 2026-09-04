@@ -17,6 +17,7 @@ export interface BiFilters {
 export interface EmailActivitySummary {
   totalRelevantCount: number;
   sentCount: number;
+  repliedCount: number;
   missedCount: number;
   newEnquiryCount: number;
   byIntent: { intent: string; label: string; receivedCount: number; sentCount: number }[];
@@ -55,7 +56,10 @@ export const emailAnalyticsService = {
     return data;
   },
 
-  async getByEmployee(kind: 'sent' | 'missed', filters: BiFilters): Promise<{ rows: EmployeeEmailAnalyticsRow[]; totalCount: number }> {
+  async getByEmployee(
+    kind: 'sent' | 'missed' | 'replied',
+    filters: BiFilters,
+  ): Promise<{ rows: EmployeeEmailAnalyticsRow[]; totalCount: number }> {
     const { data } = await axiosClient.get<{ rows: EmployeeEmailAnalyticsRow[]; totalCount: number }>(
       '/business-intelligence/email-analytics/by-employee',
       { params: toParams(filters, { kind }) },
@@ -64,7 +68,7 @@ export const emailAnalyticsService = {
   },
 
   async listEmails(
-    kind: 'sent' | 'missed' | 'all',
+    kind: 'sent' | 'missed' | 'replied' | 'all',
     filters: BiFilters,
     page: number,
     pageSize: number,
@@ -78,6 +82,16 @@ export const emailAnalyticsService = {
 
   async getOne(id: string): Promise<EmailIntelligenceItem> {
     const { data } = await axiosClient.get<EmailIntelligenceItem>(`/business-intelligence/email-analytics/emails/${id}`);
+    return data;
+  },
+
+  // Full body, fetched live from Outlook (never stored — see
+  // EmailIntelligenceItem.bodyPreview's own short-snippet-only comment) so
+  // "open and read" shows the real email rather than a ~255-char preview.
+  async getBody(id: string): Promise<{ contentType: string; content: string }> {
+    const { data } = await axiosClient.get<{ contentType: string; content: string }>(
+      `/business-intelligence/email-analytics/emails/${id}/body`,
+    );
     return data;
   },
 

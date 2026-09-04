@@ -12,9 +12,7 @@ export function InboxIntentCard({ byIntent, onIntentClick }: InboxIntentCardProp
   return (
     <Card className={styles.card}>
       <div className={styles.label}>Inbox Intelligence</div>
-      <div className={styles.title}>
-        By intent
-      </div>
+      <div className={styles.title}>By intent</div>
 
       {byIntent.length === 0 ? (
         <div className={styles.empty}>No relevant emails in this period.</div>

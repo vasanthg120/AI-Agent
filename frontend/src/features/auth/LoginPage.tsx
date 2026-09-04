@@ -3,7 +3,7 @@ import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
-import { FiMail, FiLock, FiEye, FiEyeOff, FiGithub } from 'react-icons/fi';
+import { FiMail, FiLock, FiEye, FiEyeOff } from 'react-icons/fi';
 import { FaGoogle, FaMicrosoft } from 'react-icons/fa';
 import { Input, Button } from '@/components/ui';
 import { useAuthStore } from '@/stores/authStore';
@@ -156,9 +156,6 @@ export function LoginPage() {
           aria-label="Continue with Microsoft"
         >
           <FaMicrosoft />
-        </button>
-        <button type="button" className={styles.socialButton} onClick={() => handleOAuth('github')} aria-label="Continue with GitHub">
-          <FiGithub />
         </button>
       </div>
 

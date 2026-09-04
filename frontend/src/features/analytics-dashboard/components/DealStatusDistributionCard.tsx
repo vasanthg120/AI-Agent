@@ -51,9 +51,7 @@ export function DealStatusDistributionCard({ deals, dateFrom, dateTo, storeId }:
   return (
     <Card className={styles.card}>
       <div className={styles.label}>Distribution</div>
-      <div className={styles.title}>
-        Deal status
-      </div>
+      <div className={styles.title}>Deal status</div>
 
       <div className={styles.list}>
         {rows.map((row) => (

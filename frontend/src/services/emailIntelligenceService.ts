@@ -99,6 +99,11 @@ export interface EmailIntelligenceItem {
   // status === 'approved' means "approved but not yet sent."
   sentAt?: string;
   sendError?: string;
+  // Set when a reply was detected directly in the mailbox owner's real
+  // Outlook client (same-thread outbound message, found via Sent Items
+  // cross-reference during sync) — never through this app's own send flow,
+  // which is what sentAt above means instead. See EmailIntelligenceSyncService.
+  externalReplyDetectedAt?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -157,7 +162,10 @@ export interface EmailSyncJob {
   newItemsCount: number;
   succeededCount: number;
   failedCount: number;
-  triggeredBy: 'user';
+  // 'scheduled' — the background half-hourly sync (see
+  // email-intelligence-sync.service.ts's runScheduledSync); 'user' — an
+  // explicit Sync Inbox click.
+  triggeredBy: 'user' | 'scheduled';
   startedAt: string;
   completedAt: string;
   createdAt: string;

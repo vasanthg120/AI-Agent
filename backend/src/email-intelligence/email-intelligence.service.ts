@@ -117,6 +117,39 @@ export class EmailIntelligenceService {
     return !!(await this.itemModel.exists({ userId, externalMessageId }));
   }
 
+  // External-reply detection (see EmailIntelligenceSyncService) — how far
+  // back to fetch Sent Items for this user, i.e. the oldest still-open
+  // question we need an answer for. null means nothing to check, so the
+  // caller can skip the Sent Items fetch entirely rather than pointlessly
+  // hitting Graph.
+  async getEarliestPendingReceivedAt(userId: string): Promise<Date | null> {
+    const oldest = await this.itemModel
+      .findOne({ userId, status: 'pending', conversationId: { $exists: true, $ne: '' }, externalReplyDetectedAt: { $exists: false } })
+      .sort({ receivedAt: 1 })
+      .select('receivedAt')
+      .exec();
+    return oldest?.receivedAt ?? null;
+  }
+
+  // Applies detected replies in bulk. The filter (not just the lookup that
+  // built `repliesByConversationId`) re-enforces status:'pending' +
+  // externalReplyDetectedAt unset + receivedAt before the reply — so this
+  // stays correct even if something else updated the item between the
+  // lookup and this write (e.g. the user approved/sent it through the app
+  // in the meantime, which should win, not get overwritten).
+  async markExternalReplies(userId: string, repliesByConversationId: Map<string, Date>): Promise<number> {
+    if (repliesByConversationId.size === 0) return 0;
+    const result = await this.itemModel.bulkWrite(
+      [...repliesByConversationId.entries()].map(([conversationId, sentAt]) => ({
+        updateMany: {
+          filter: { userId, conversationId, status: 'pending', externalReplyDetectedAt: { $exists: false }, receivedAt: { $lt: sentAt } },
+          update: { $set: { externalReplyDetectedAt: sentAt } },
+        },
+      })),
+    );
+    return result.modifiedCount ?? 0;
+  }
+
   // Phase 21 follow-up — a read-only dry-run of the same two deterministic
   // gates analyzeAndCreate/regenerate apply below (Phase 17 Layer 1 self-send
   // + Phase 18 Layer 0 pre-filter), used by EmailIntelligenceSyncService's
@@ -149,6 +182,7 @@ export class EmailIntelligenceService {
       userId,
       mailboxEmail,
       externalMessageId: email.id,
+      conversationId: email.conversationId || undefined,
       receivedAt: new Date(email.receivedAt),
       subject: email.subject,
       fromAddress: email.from,
@@ -426,6 +460,7 @@ export class EmailIntelligenceService {
   ): Promise<{
     totalRelevantCount: number;
     sentCount: number;
+    repliedCount: number;
     missedCount: number;
     newEnquiryCount: number;
     byIntent: { intent: string; label: string; receivedCount: number; sentCount: number }[];
@@ -439,8 +474,12 @@ export class EmailIntelligenceService {
     // original email was received, so a category's sentCount can include
     // items received before this range but replied to within it — the
     // honest, real meaning of "analyze the sent box for this window".
-    const [sentCount, missedCount, receivedRows, sentRows] = await Promise.all([
+    // repliedCount is the sibling of sentCount for emails answered directly
+    // in the real Outlook client rather than through this app — see
+    // buildActivityKindMatch's 'replied' branch.
+    const [sentCount, repliedCount, missedCount, receivedRows, sentRows] = await Promise.all([
       this.itemModel.countDocuments(this.buildActivityKindMatch(organizationId, 'sent', start, end, userFilter)).exec(),
+      this.itemModel.countDocuments(this.buildActivityKindMatch(organizationId, 'replied', start, end, userFilter)).exec(),
       this.itemModel.countDocuments(this.buildActivityKindMatch(organizationId, 'missed', start, end, userFilter)).exec(),
       this.itemModel
         .aggregate<{ _id: string; count: number }>([
@@ -484,7 +523,7 @@ export class EmailIntelligenceService {
     const totalRelevantCount = byIntent.reduce((sum, r) => sum + r.receivedCount, 0);
     const newEnquiryCount = receivedByIntent.get('new_enquiry') ?? 0;
 
-    return { totalRelevantCount, sentCount, missedCount, newEnquiryCount, byIntent };
+    return { totalRelevantCount, sentCount, repliedCount, missedCount, newEnquiryCount, byIntent };
   }
 
   // Back-compat convenience for callers that still think in calendar months
@@ -533,13 +572,14 @@ export class EmailIntelligenceService {
     return userIds ? { userId: { $in: userIds } } : {};
   }
 
-  // sentCount/missedCount/byIntent's exact definitions, factored out so
-  // getActivityStats (counts) and listActivity (drill-down records) can
-  // never disagree. Both 'sent' and 'missed' are restricted to RELEVANT_
+  // sentCount/missedCount/repliedCount/byIntent's exact definitions,
+  // factored out so getActivityStats (counts), getEmailAnalyticsByEmployee,
+  // getEmailProductivityStats, and listActivity (drill-down records) can
+  // never disagree. 'sent'/'missed'/'replied' are restricted to RELEVANT_
   // EMAIL_INTENTS — business mail only, matching the widget's whole point.
   private buildActivityKindMatch(
     organizationId: string,
-    kind: 'sent' | 'missed' | 'intent',
+    kind: 'sent' | 'missed' | 'replied' | 'intent',
     start: Date,
     end: Date,
     userFilter: Record<string, unknown>,
@@ -554,6 +594,17 @@ export class EmailIntelligenceService {
     if (kind === 'sent') {
       return { organizationId, ...userFilter, ...relevantFilter, sentAt: { $gte: start, $lt: end } };
     }
+    // A reply sent directly in the mailbox owner's real Outlook client —
+    // never routed through this app's own approve/send flow (that's 'sent'
+    // above; status stays 'pending' the whole time). Detected during sync by
+    // cross-referencing the item's conversationId against Sent Items — see
+    // EmailIntelligenceSyncService.detectExternalReplies. Kept as its own
+    // kind (not folded into 'sent') so "AI-assisted" vs "handled directly in
+    // Outlook" both stay visible, even though both count as genuinely
+    // handled for 'missed' purposes below.
+    if (kind === 'replied') {
+      return { organizationId, ...userFilter, ...relevantFilter, externalReplyDetectedAt: { $gte: start, $lt: end } };
+    }
     if (kind === 'missed') {
       const missedCutoff = new Date(Date.now() - 24 * 60 * 60 * 1000);
       return {
@@ -561,6 +612,12 @@ export class EmailIntelligenceService {
         ...userFilter,
         ...relevantFilter,
         status: 'pending',
+        // The real fix: an item can only ever be genuinely missed if nobody
+        // replied to it at all — including directly in Outlook. Without
+        // this exclusion, an email the salesperson already answered outside
+        // this app stayed 'pending' forever and got counted as missed the
+        // moment it crossed 24h, even though nothing was actually overdue.
+        externalReplyDetectedAt: { $exists: false },
         receivedAt: { $gte: start, $lt: end, $lte: missedCutoff },
       };
     }
@@ -580,7 +637,7 @@ export class EmailIntelligenceService {
 
   async getEmailAnalyticsByEmployee(
     organizationId: string,
-    kind: 'sent' | 'missed',
+    kind: 'sent' | 'missed' | 'replied',
     start: Date,
     end: Date,
     filters: { employeeId?: string[]; storeId?: string[] },
@@ -589,7 +646,9 @@ export class EmailIntelligenceService {
     const rosterIds = roster.map((u) => u._id.toString());
     const match = { ...this.buildActivityKindMatch(organizationId, kind, start, end, {}), userId: { $in: rosterIds } };
 
-    if (kind === 'sent') {
+    // 'replied' is the same simple "count per user" shape as 'sent' — only
+    // 'missed' needs the priority/urgency/age-bucket breakdown below.
+    if (kind === 'sent' || kind === 'replied') {
       const rows = await this.itemModel
         .aggregate<{ _id: string; count: number }>([{ $match: match }, { $group: { _id: '$userId', count: { $sum: 1 } } }])
         .exec();
@@ -700,7 +759,7 @@ export class EmailIntelligenceService {
   // (buildActivityKindMatch's own 'intent' branch with no specific intent).
   async listEmailsFiltered(
     organizationId: string,
-    kind: 'sent' | 'missed' | 'all',
+    kind: 'sent' | 'missed' | 'replied' | 'all',
     start: Date,
     end: Date,
     filters: { employeeId?: string[]; storeId?: string[]; intent?: string },
@@ -710,7 +769,7 @@ export class EmailIntelligenceService {
     const userFilter = await this.resolveEmployeeUserFilter(organizationId, filters);
     const internalKind = kind === 'all' ? 'intent' : kind;
     const match = this.buildActivityKindMatch(organizationId, internalKind, start, end, userFilter, filters.intent);
-    const sortField = kind === 'sent' ? 'sentAt' : 'receivedAt';
+    const sortField = kind === 'sent' ? 'sentAt' : kind === 'replied' ? 'externalReplyDetectedAt' : 'receivedAt';
 
     const [items, total] = await Promise.all([
       this.itemModel
@@ -725,12 +784,15 @@ export class EmailIntelligenceService {
   }
 
   // Business Intelligence's Employee Productivity (section 3) — Assigned
-  // (received in range, regardless of status), Completed (sentAt in range —
-  // same as kind:'sent'), Pending (still-open, within the 24h SLA window),
-  // Overdue (kind:'missed' — already past the 24h SLA window). Pending and
-  // Overdue are computed against the SAME missedCutoff buildActivityKindMatch
-  // uses, so they can never disagree with the Sent/Missed Email pages'
-  // own numbers for the same employee/range.
+  // (received in range, regardless of status), Completed (sentAt OR
+  // externalReplyDetectedAt in range — handled at all, whether via this
+  // app's AI-draft-send flow or answered directly in Outlook), Pending
+  // (still-open, within the 24h SLA window, and not already answered
+  // externally), Overdue (kind:'missed' — already past the 24h SLA window).
+  // Pending and Overdue are computed against the SAME missedCutoff/
+  // externalReplyDetectedAt exclusion buildActivityKindMatch uses, so they
+  // can never disagree with the Sent/Missed Email pages' own numbers for
+  // the same employee/range.
   async getEmailProductivityStats(
     organizationId: string,
     start: Date,
@@ -748,8 +810,25 @@ export class EmailIntelligenceService {
       intent: { $in: RELEVANT_EMAIL_INTENTS },
       receivedAt: { $gte: start, $lt: end },
     };
-    const pendingMatch = { ...assignedMatch, status: 'pending', receivedAt: { $gte: start, $lt: end, $gt: missedCutoff } };
-    const completedMatch = this.buildActivityKindMatch(organizationId, 'sent', start, end, rosterFilter);
+    // Same externalReplyDetectedAt exclusion as buildActivityKindMatch's
+    // 'missed' branch — an item replied to directly in Outlook is done, not
+    // still pending, even though its own status field never leaves 'pending'.
+    const pendingMatch = {
+      ...assignedMatch,
+      status: 'pending',
+      externalReplyDetectedAt: { $exists: false },
+      receivedAt: { $gte: start, $lt: end, $gt: missedCutoff },
+    };
+    // "Completed" = handled at all, whether the reply went out through this
+    // app (sentAt) or directly in the mailbox owner's real Outlook client
+    // (externalReplyDetectedAt) — a genuine either/or, never both on the
+    // same item, so no double-count risk.
+    const completedMatch = {
+      organizationId,
+      ...rosterFilter,
+      intent: { $in: RELEVANT_EMAIL_INTENTS },
+      $or: [{ sentAt: { $gte: start, $lt: end } }, { externalReplyDetectedAt: { $gte: start, $lt: end } }],
+    };
     const overdueMatch = this.buildActivityKindMatch(organizationId, 'missed', start, end, rosterFilter);
 
     const groupByUser = (match: Record<string, unknown>) =>
@@ -789,6 +868,31 @@ export class EmailIntelligenceService {
     const item = await this.itemModel.findOne({ _id: id, organizationId }).exec();
     if (!item) throw new NotFoundException('Email intelligence item not found');
     return item;
+  }
+
+  // "Open and read" the actual email — bodyPreview above is Graph's short
+  // (~255 char) snippet captured once at ingest, not the real email. Full
+  // content is never stored (bigger footprint, and it can go stale/be
+  // recalled), so this fetches it live on demand instead. Signed as the
+  // MAILBOX OWNER (item.userId), not the caller — same delegation the sync
+  // job already uses, since it's that person's Outlook token that can
+  // actually read their own mailbox. The controller's RBAC gate (which
+  // already decided the caller may see this item's summary) is what makes
+  // that safe to do on their behalf.
+  async getFullBody(item: EmailIntelligenceItemDocument): Promise<{ contentType: string; content: string }> {
+    const token = this.jwt.sign({ sub: item.userId }, { expiresIn: '5m' });
+    try {
+      const { data } = await firstValueFrom(
+        this.http.get<{ contentType: string; content: string }>(
+          `${this.pythonAgentUrl}/outlook/message/${item.externalMessageId}/body`,
+          { headers: { Authorization: `Bearer ${token}` } },
+        ),
+      );
+      return data;
+    } catch (err) {
+      const message = (err as { response?: { data?: { detail?: string } }; message?: string }).response?.data?.detail ?? (err as Error).message;
+      throw new BadRequestException(`Failed to fetch email body: ${message}`);
+    }
   }
 
   list(userId: string, status?: 'pending' | 'approved' | 'rejected', from?: string, to?: string) {

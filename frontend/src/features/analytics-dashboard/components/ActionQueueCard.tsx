@@ -101,9 +101,7 @@ export function ActionQueueCard({ dateFrom, dateTo, storeId, newEnquiryCount, on
       <div className={styles.headerRow}>
         <div>
           <div className={styles.label}>Action Queue</div>
-          <div className={styles.title}>
-            Needs attention
-          </div>
+          <div className={styles.title}>Needs attention</div>
         </div>
         {items.length > 0 && <span className={styles.countBadge}>{items.length}</span>}
       </div>

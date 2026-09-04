@@ -5,8 +5,7 @@ import toast from 'react-hot-toast';
 import clsx from 'clsx';
 import { FiTrendingUp, FiPackage, FiArrowUpRight, FiTarget, FiZap, FiHelpCircle } from 'react-icons/fi';
 import type { IconType } from 'react-icons';
-import type { ReactNode } from 'react';
-import { Badge, Card, InfoPopover, Skeleton } from '@/components/ui';
+import { Badge, Card, Skeleton } from '@/components/ui';
 import { extractErrorMessage } from '@/utils/errors';
 import { formatINR as money } from '@/utils/currency';
 import { vendorProfitabilityService, type VendorCustomerCompareResult } from '@/services/vendorProfitabilityService';
@@ -22,14 +21,12 @@ function StatCard({
   label,
   value,
   note,
-  info,
   onClick,
 }: {
   icon: IconType;
   label: string;
   value: string;
   note: string;
-  info?: ReactNode;
   onClick?: () => void;
 }) {
   return (
@@ -37,10 +34,7 @@ function StatCard({
       <span className={statStyles.iconBadge}>
         <Icon size={16} />
       </span>
-      <div className={statStyles.label}>
-        {label}
-        {info && <InfoPopover title={label}>{info}</InfoPopover>}
-      </div>
+      <div className={statStyles.label}>{label}</div>
       <div className={statStyles.value}>{value}</div>
       <div className={statStyles.note}>{note}</div>
     </Card>
@@ -141,9 +135,7 @@ export function VendorProfitabilitySection({ dateFrom, dateTo }: { dateFrom: str
         <div className={panelStyles.header}>
           <div className={panelStyles.headerText}>
             <div className={panelStyles.label}>Cost Intelligence</div>
-            <div className={panelStyles.title}>
-              Vendor profitability
-            </div>
+            <div className={panelStyles.title}>Vendor profitability</div>
             <p className={panelStyles.subtitle}>Connect vendor quotes and payments to understand margin by deal.</p>
           </div>
           {hasRows && (

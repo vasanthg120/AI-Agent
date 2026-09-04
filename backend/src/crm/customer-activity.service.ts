@@ -40,6 +40,12 @@ export interface TodaysEmail {
   preview: string;
   isRead: boolean;
   importance: string;
+  // Graph's thread id — see EmailIntelligenceSyncService's external-reply
+  // detection for why this is captured. Optional since regenerate() below
+  // reconstructs a TodaysEmail from an already-stored item that predates
+  // this field, and never needs it (only analyzeAndCreate's persistence
+  // path does).
+  conversationId?: string;
 }
 
 export interface CorrelatedEmail extends TodaysEmail {

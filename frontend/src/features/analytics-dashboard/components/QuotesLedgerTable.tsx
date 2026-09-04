@@ -94,9 +94,7 @@ export function QuotesLedgerTable({ dateFrom, dateTo }: QuotesLedgerTableProps) 
 
   return (
     <Card className={styles.card}>
-      <div className={styles.title}>
-        Quotes
-      </div>
+      <div className={styles.title}>Quotes</div>
       <p className={styles.subtitle}>Paid and outstanding reflect each quote's linked invoice status.</p>
 
       <div className={styles.toolbar}>

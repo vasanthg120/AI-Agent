@@ -23,9 +23,7 @@ export function ProductivitySection({ dateFrom, dateTo, storeId }: { dateFrom: s
   return (
     <Card className={styles.card}>
       <div className={styles.header}>
-        <div className={styles.title}>
-          Workload by member
-        </div>
+        <div className={styles.title}>Workload by member</div>
         <p className={styles.subtitle}>Emails, quotes and deals — assigned, completed, pending, overdue.</p>
       </div>
 

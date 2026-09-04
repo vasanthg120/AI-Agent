@@ -70,9 +70,7 @@ export function MonthlySalesPerformanceCard({
     <Card interactive={!!onClick} onClick={onClick} className={styles.card}>
       <div className={styles.topRow}>
         <div>
-          <div className={styles.title}>
-            Revenue against target
-          </div>
+          <div className={styles.title}>Revenue against target</div>
           <div className={styles.subtitle}>Sales targets are set per calendar month.</div>
         </div>
         {onTrack !== null && <Badge variant={onTrack ? 'success' : 'danger'}>{onTrack ? 'On track' : 'Off track'}</Badge>}

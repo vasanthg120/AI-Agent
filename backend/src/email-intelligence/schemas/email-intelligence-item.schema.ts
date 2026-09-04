@@ -45,6 +45,12 @@ export class EmailIntelligenceItem {
   @Prop({ required: true })
   externalMessageId: string;
 
+  // Graph's thread id — absent on items ingested before this field existed.
+  // Used only to cross-reference against Sent Items during sync (see
+  // externalReplyDetectedAt below); never displayed.
+  @Prop({ index: true })
+  conversationId?: string;
+
   @Prop({ required: true, index: true })
   receivedAt: Date;
 
@@ -178,6 +184,20 @@ export class EmailIntelligenceItem {
   @Prop()
   sendError?: string;
 
+  // Set when EmailIntelligenceSyncService's external-reply detection finds
+  // an outbound message in the same Outlook conversation thread, sent after
+  // receivedAt, that did NOT go through this app's own approve/send flow
+  // (status stays 'pending' — sentAt is only ever set by a real send() call
+  // above). Represents a reply sent directly in the mailbox owner's real
+  // Outlook client. Without this, an email a salesperson genuinely already
+  // answered — just not through this app — eventually gets misclassified as
+  // "missed" once it crosses the 24h cutoff, which was the original bug
+  // report this field fixes. Distinct from sentAt so "AI-assisted send" vs
+  // "handled directly in Outlook" both stay visible to reporting, while
+  // buildActivityKindMatch's 'missed' definition excludes either.
+  @Prop()
+  externalReplyDetectedAt?: Date;
+
   @Prop()
   rejectedAt?: Date;
 
@@ -211,3 +231,6 @@ export const EmailIntelligenceItemSchema = SchemaFactory.createForClass(EmailInt
 EmailIntelligenceItemSchema.index({ userId: 1, externalMessageId: 1 }, { unique: true });
 EmailIntelligenceItemSchema.index({ userId: 1, status: 1, receivedAt: -1 });
 EmailIntelligenceItemSchema.index({ organizationId: 1, createdAt: -1 });
+// External-reply detection's own lookup — every still-pending item with a
+// captured thread id, for one user, each sync run.
+EmailIntelligenceItemSchema.index({ userId: 1, status: 1, conversationId: 1 });

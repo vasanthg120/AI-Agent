@@ -51,10 +51,10 @@ export const mockSlashCommands: SlashCommand[] = [
 ];
 
 export const mockPromptSuggestions: PromptSuggestion[] = [
-  { id: 'sug_1', title: 'Summarize a document', prompt: 'Summarize the key points from the Q3 product roadmap.', icon: 'file-text' },
-  { id: 'sug_2', title: 'Draft an email', prompt: 'Draft a follow-up email to a customer who has not responded in 2 weeks.', icon: 'mail' },
-  { id: 'sug_3', title: 'Analyze data', prompt: 'Analyze last month’s support ticket trends and suggest improvements.', icon: 'bar-chart' },
-  { id: 'sug_4', title: 'Explain code', prompt: 'Explain what this authentication middleware does and flag any risks.', icon: 'code' },
+  { id: 'sug_1', title: 'Follow up on a deal', prompt: 'Draft a follow-up email to a customer who has not responded in 2 weeks.', icon: 'mail' },
+  { id: 'sug_2', title: 'Summarize my pipeline', prompt: 'Summarize my open deals — which ones need attention this week?', icon: 'bar-chart' },
+  { id: 'sug_3', title: "Today's business summary", prompt: "Summarize today's CRM and email activity — what needs my attention?", icon: 'file-text' },
+  { id: 'sug_4', title: 'Prep for a customer call', prompt: 'Pull together recent deals, quotes, and email history for my next customer call.', icon: 'users' },
 ];
 
 export const mockConversations: Conversation[] = [

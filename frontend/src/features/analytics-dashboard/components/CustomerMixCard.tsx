@@ -28,9 +28,7 @@ export function CustomerMixCard({ newCount, existingCount, lostCount, totalConsi
       <div className={styles.header}>
         <div>
           <div className={styles.label}>Relationship Health</div>
-          <div className={styles.title}>
-            Customer mix
-          </div>
+          <div className={styles.title}>Customer mix</div>
         </div>
         <span className={styles.periodTotal}>{totalConsidered.toLocaleString()} customers</span>
       </div>

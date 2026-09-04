@@ -35,9 +35,7 @@ export function PendingConversationsCard({ dateFrom, dateTo, storeId }: PendingC
             <FiInbox size={18} />
           </span>
           <div className={styles.body}>
-            <div className={styles.title}>
-              No pending conversations
-            </div>
+            <div className={styles.title}>No pending conversations</div>
             <p className={styles.subtitle}>Your email inbox is clear. New customer enquiries will appear here for triage.</p>
           </div>
           <button type="button" className={styles.openBtn} onClick={() => navigate(ROUTES.emailIntelligence)}>

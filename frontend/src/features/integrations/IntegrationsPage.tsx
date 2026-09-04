@@ -7,7 +7,6 @@ import {
   FiGrid,
   FiKey,
   FiLink,
-  FiLink2,
   FiPlus,
   FiSettings,
   FiShield,
@@ -35,6 +34,20 @@ import {
 import { extractErrorMessage } from '@/utils/errors';
 import { ResourceEndpointBuilder } from './ResourceEndpointBuilder';
 import styles from './IntegrationsPage.module.css';
+
+// Custom/generic CRM connections aren't one real brand, so this is a
+// designed glyph (a hub of connected systems) rather than a fetched logo —
+// used for the Custom Integrations section header and each row's tile.
+function CustomCrmIcon({ size = 20 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden>
+      <path d="M12 8v6M12 14l-5.2 3M12 14l5.2 3" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+      <circle cx="12" cy="5.5" r="2.5" stroke="currentColor" strokeWidth="1.8" />
+      <circle cx="5.5" cy="18.5" r="2.5" stroke="currentColor" strokeWidth="1.8" />
+      <circle cx="18.5" cy="18.5" r="2.5" stroke="currentColor" strokeWidth="1.8" />
+    </svg>
+  );
+}
 
 type CardStatus = 'connected' | 'disconnected' | 'error' | 'loading';
 
@@ -624,7 +637,9 @@ export function IntegrationsPage() {
           {/* Anthropic — real API key, stored server-side, used for chat + Outlook mail analysis */}
           <Card className={styles.card}>
             <div className={styles.cardHeader}>
-              <span className={styles.iconTile}>A</span>
+              <span className={styles.logoTile}>
+                <img src="/integrations/anthropic.svg" alt="" />
+              </span>
               <div className={styles.cardTitleRow}>
                 <div className={styles.cardName}>Anthropic</div>
                 <div className={styles.cardCategory}>AI Model</div>
@@ -651,7 +666,9 @@ export function IntegrationsPage() {
           {/* Gmail — real Google OAuth delegated flow, mirrors Outlook below */}
           <Card className={styles.card}>
             <div className={styles.cardHeader}>
-              <span className={clsx(styles.iconTile, styles.iconTileGmail)}>G</span>
+              <span className={styles.logoTile}>
+                <img src="/integrations/gmail.svg" alt="" />
+              </span>
               <div className={styles.cardTitleRow}>
                 <div className={styles.cardName}>Gmail</div>
                 <div className={styles.cardCategory}>Communication</div>
@@ -682,7 +699,9 @@ export function IntegrationsPage() {
           {/* Outlook — real Microsoft Graph delegated OAuth flow, supports multiple connected accounts */}
           <Card className={styles.card}>
             <div className={styles.cardHeader}>
-              <span className={clsx(styles.iconTile, styles.iconTileOutlook)}>O</span>
+              <span className={styles.logoTile}>
+                <img src="/integrations/outlook.svg" alt="" />
+              </span>
               <div className={styles.cardTitleRow}>
                 <div className={styles.cardName}>Microsoft Outlook</div>
                 <div className={styles.cardCategory}>Communication</div>
@@ -720,7 +739,9 @@ export function IntegrationsPage() {
               uses; see buildGorillaDashPayload/handleSaveGorillaDash above. */}
           <Card className={styles.card}>
             <div className={styles.cardHeader}>
-              <span className={clsx(styles.iconTile, styles.iconTileGorillaDash)}>🦍</span>
+              <span className={clsx(styles.logoTile, styles.logoTileGorillaDash)}>
+                <img src="/integrations/gorilla-dash.png" alt="" />
+              </span>
               <div className={styles.cardTitleRow}>
                 <div className={styles.cardName}>Gorilla Dash</div>
                 <div className={styles.cardCategory}>CRM</div>
@@ -762,7 +783,7 @@ export function IntegrationsPage() {
         <div className={styles.customHeader}>
           <div className={styles.customHeaderText}>
             <span className={styles.customHeaderIcon}>
-              <FiLink2 size={18} />
+              <CustomCrmIcon size={20} />
             </span>
             <div>
               <div className={styles.sectionTitle}>Custom Integrations</div>
@@ -793,7 +814,7 @@ export function IntegrationsPage() {
             {otherCustomIntegrations.map((integration) => (
               <div key={integration.provider} className={styles.accountRow}>
                 <div className={styles.accountRowMain}>
-                  <Avatar name={integration.provider} size="md" />
+                  <Avatar name={integration.provider} size="md" color="linear-gradient(135deg, #8b5cf6 0%, #4c1d95 100%)" />
                   <div>
                     <div className={styles.accountEmail}>{integration.provider}</div>
                     <span className={styles.accountOwner}>

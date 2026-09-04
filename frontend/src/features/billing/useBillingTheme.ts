@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { billingService } from '@/services/billingService';
-import { useUiStore } from '@/stores/uiStore';
 
 export interface BillingThemeResult {
   style: CSSProperties;
@@ -19,17 +18,16 @@ export interface BillingThemeResult {
 // var(..., fallback) or a plain static value) apply automatically — no
 // explicit "is this configured?" branching needed at the call site.
 export function useBillingTheme(): BillingThemeResult {
-  const themeMode = useUiStore((state) => state.theme);
   const [style, setStyle] = useState<CSSProperties>({});
   const [logoUrl, setLogoUrl] = useState<string | undefined>(undefined);
 
   useEffect(() => {
-    let cancelled = false;
+    let cancelled = false; 
     billingService
       .getTheme()
       .then((theme) => {
         if (cancelled) return;
-        const tokens = themeMode === 'dark' ? { ...theme.tokens, ...theme.darkTokens } : theme.tokens;
+        const tokens = theme.tokens;
         setStyle(tokens as CSSProperties);
         setLogoUrl(theme.logoUrl);
       })
@@ -41,7 +39,7 @@ export function useBillingTheme(): BillingThemeResult {
     return () => {
       cancelled = true;
     };
-  }, [themeMode]);
+  }, []);
 
   return { style, logoUrl };
 }

@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import clsx from 'clsx';
-import { FiBriefcase, FiClock, FiDownload, FiFileText, FiGrid, FiList, FiPercent, FiZap } from 'react-icons/fi';
+import { FiBriefcase, FiClock, FiDownload, FiGrid, FiList, FiPercent, FiZap } from 'react-icons/fi';
 import { Badge, Button, DateRangeControl, Dropdown, SectionCard, Skeleton, StatTile, type DateRange } from '@/components/ui';
 import { formatINR as money } from '@/utils/currency';
 import { dayjs } from '@/utils/date';
@@ -13,8 +13,8 @@ import {
 import styles from '../royalty.module.css';
 
 // Shared "Summary: Total Records / Total Sales (Ex Tax)" footer under each
-// itemized table — same two figures for Deals/Invoices/Work In Progress, so
-// this is one small component instead of three copies of the same markup.
+// itemized table — same two figures for Deals/Work In Progress, so this is
+// one small component instead of two copies of the same markup.
 function TableSummaryFooter({ summary }: { summary: RoyaltyReportLineSummary }) {
   return (
     <div className={styles.tableSummaryFooter}>
@@ -33,12 +33,6 @@ const DEAL_STATUS_VARIANT: Record<'open' | 'won' | 'lost', 'neutral' | 'success'
   open: 'neutral',
   won: 'success',
   lost: 'danger',
-};
-
-const INVOICE_STATUS_VARIANT: Record<string, 'neutral' | 'success' | 'warning'> = {
-  draft: 'neutral',
-  invoiced: 'warning',
-  paid: 'success',
 };
 
 interface ReportLine {
@@ -251,61 +245,6 @@ export function RoyaltyReportSection() {
                   </table>
                 </div>
                 <TableSummaryFooter summary={report.dealsSummary} />
-              </>
-            )}
-          </SectionCard>
-
-          <SectionCard title={`Invoices (${report.invoices.length})`} icon={FiFileText}>
-            {report.invoices.length === 0 ? (
-              <div className={styles.emptyState}>
-                No invoices in this date range yet — an invoice is created automatically once a quote is marked
-                approved.
-              </div>
-            ) : (
-              <>
-                <div className={styles.tableScroll}>
-                  <table className={styles.reportTable}>
-                    <thead>
-                      <tr>
-                        <th>Invoice #</th>
-                        <th>Customer</th>
-                        <th>Quote #</th>
-                        <th>Invoice Date</th>
-                        <th>Created Date</th>
-                        <th>Previous Value</th>
-                        <th>Updated Value</th>
-                        <th>Ex Tax Value</th>
-                        <th>Eligible Value</th>
-                        <th>Royalty</th>
-                        <th>Status</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {report.invoices.map((inv) => (
-                        <tr key={inv.invoiceId}>
-                          <td>{inv.invoiceNumber}</td>
-                          <td>{inv.customerName}</td>
-                          <td>{inv.quoteNumber ?? '—'}</td>
-                          <td>{inv.invoiceDate}</td>
-                          <td>{inv.createdDate}</td>
-                          <td>{inv.previousValue !== undefined ? money(inv.previousValue) : '—'}</td>
-                          <td>{money(inv.currentValue)}</td>
-                          <td>{money(inv.exTaxValue)}</td>
-                          <td>{money(inv.eligibleValue)}</td>
-                          <td>{money(inv.royalty)}</td>
-                          <td>
-                            {inv.voidStatus ? (
-                              <Badge variant="danger">Voided</Badge>
-                            ) : (
-                              <Badge variant={INVOICE_STATUS_VARIANT[inv.invoiceStatus] ?? 'neutral'}>{inv.invoiceStatus}</Badge>
-                            )}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-                <TableSummaryFooter summary={report.invoicesSummary} />
               </>
             )}
           </SectionCard>

@@ -69,9 +69,7 @@ export function DealFunnelCard({ deals, dateFrom, dateTo, storeId }: DealFunnelC
       <div className={styles.header}>
         <div>
           <div className={styles.label}>Conversion View</div>
-          <div className={styles.title}>
-            Deal movement
-          </div>
+          <div className={styles.title}>Deal movement</div>
         </div>
         <span className={styles.period}>This period</span>
       </div>

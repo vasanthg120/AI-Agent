@@ -1,11 +1,10 @@
 import { useMemo, useState } from 'react';
-import type { ReactNode } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import dayjs from 'dayjs';
 import toast from 'react-hot-toast';
 import { FiZap, FiClock, FiAlertTriangle, FiStar, FiMessageSquare } from 'react-icons/fi';
 import type { IconType } from 'react-icons';
-import { Card, InfoPopover, SectionCard, Skeleton } from '@/components/ui';
+import { Card, SectionCard, Skeleton } from '@/components/ui';
 import { extractErrorMessage } from '@/utils/errors';
 import { aiFollowupSummaryService } from '@/services/aiFollowupSummaryService';
 import { emailIntelligenceService } from '@/services/emailIntelligenceService';
@@ -22,14 +21,12 @@ function StatCard({
   label,
   value,
   note,
-  info,
   onClick,
 }: {
   icon: IconType;
   label: string;
   value: string | number;
   note: string;
-  info?: ReactNode;
   onClick?: () => void;
 }) {
   return (
@@ -37,10 +34,7 @@ function StatCard({
       <span className={statStyles.iconBadge}>
         <Icon size={16} />
       </span>
-      <div className={statStyles.label}>
-        {label}
-        {info && <InfoPopover title={label}>{info}</InfoPopover>}
-      </div>
+      <div className={statStyles.label}>{label}</div>
       <div className={statStyles.value}>{value}</div>
       <div className={statStyles.note}>{note}</div>
     </Card>
@@ -244,10 +238,7 @@ export function AiFollowupSummarySection() {
         </div>
       )}
 
-      <SectionCard
-        title="Real Follow-Up Reminders"
-        glass
-      >
+      <SectionCard title="Real Follow-Up Reminders" glass>
         {isLoading || !data ? (
           <Skeleton height={160} />
         ) : data.followUpReminders.length === 0 ? (

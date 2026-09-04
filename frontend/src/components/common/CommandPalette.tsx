@@ -22,8 +22,6 @@ interface Action {
   onSelect: () => void;
 }
 
-const IS_MAC = typeof navigator !== 'undefined' && /Mac|iPod|iPhone|iPad/.test(navigator.platform);
-
 // Global Cmd/Ctrl+/ toggle — this component is mounted once (AppLayout.tsx)
 // regardless of commandPaletteOpen, exactly like SidebarChatSection used to
 // listen for Cmd+K app-wide before it was removed.
