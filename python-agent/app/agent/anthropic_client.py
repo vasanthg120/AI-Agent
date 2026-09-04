@@ -1388,6 +1388,24 @@ the system is that this sender belongs to a known business: treat 'exact' as fac
 explicitly (e.g. "this may be related to...") in recommendedAction/draftReply, and treat the sender as \
 unknown whenever matchConfidence is 'none' or businessContext is null.
 
+Priority and urgency are two different axes — never copy one value into the other, and ground each in \
+a real signal from the input rather than guessing. Urgency is about TIME: how soon a reply is actually \
+needed. Set urgency to urgent only when the email itself states or clearly implies a tight deadline, an \
+explicit cue ("urgent", "ASAP", "immediately", "today", "by end of day", a stated deadline), or describes \
+a live/ongoing problem (e.g. a system down right now, an event happening today); high when there's a real \
+but softer time expectation (e.g. "this week", a pending decision, a scheduled meeting request); medium \
+for routine correspondence with no stated timeline; low for FYI-style or clearly non-time-sensitive mail. \
+Priority is about IMPORTANCE: how much this email matters to the business regardless of timing. Weigh \
+intent (a complaint or escalation, or a quotation_request/price_negotiation from a matched existing \
+customer, normally deserves medium-to-high priority even with no deadline stated; routine vendor/other \
+mail is normally low-to-medium), the correlation's matchConfidence and businessContext (an existing \
+customer with open deals or a history of won deals matters more than an unmatched sender), and sentiment \
+(frustrated/negative sentiment raises priority — an unhappy known customer is high priority even if they \
+never say "urgent"). A message can be high urgency but low priority (e.g. an unmatched vendor pushing for \
+a same-day response on something minor) or high priority but low urgency (e.g. a high-value existing \
+customer's quotation request with no stated deadline) — set each independently from its own criteria \
+above, and do not let one influence the other.
+
 Classify intent using: new_enquiry, existing_customer, quotation_request, price_negotiation, complaint, \
 technical_support, payment, purchase_order, vendor, refund, meeting_request, escalation, internal, spam, \
 other. Set shouldDraft true ONLY for new_enquiry, existing_customer, quotation_request, \

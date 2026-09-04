@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { FiInbox, FiArrowUpRight } from 'react-icons/fi';
-import { Card, InfoPopover } from '@/components/ui';
+import { Card } from '@/components/ui';
 import { emailAnalyticsService, type BiFilters } from '@/services/emailAnalyticsService';
 import { ROUTES } from '@/constants/routes';
 import styles from './PendingConversationsCard.module.css';
@@ -35,12 +35,7 @@ export function PendingConversationsCard({ dateFrom, dateTo, storeId }: PendingC
             <FiInbox size={18} />
           </span>
           <div className={styles.body}>
-            <div className={styles.title}>
-              No pending conversations
-              <InfoPopover title="Pending conversations">
-                <p>New-enquiry emails still in <strong>pending</strong> status — not yet approved, sent, or rejected by anyone on the team. Same status field the AI Email Inbox page uses for its own tabs.</p>
-              </InfoPopover>
-            </div>
+            <div className={styles.title}>No pending conversations</div>
             <p className={styles.subtitle}>Your email inbox is clear. New customer enquiries will appear here for triage.</p>
           </div>
           <button type="button" className={styles.openBtn} onClick={() => navigate(ROUTES.emailIntelligence)}>
@@ -54,9 +49,6 @@ export function PendingConversationsCard({ dateFrom, dateTo, storeId }: PendingC
             <div className={styles.headerText}>
               <div className={styles.title}>
                 {pending.length} pending conversation{pending.length === 1 ? '' : 's'}
-                <InfoPopover title="Pending conversations">
-                  <p>New-enquiry emails still in <strong>pending</strong> status — not yet approved, sent, or rejected by anyone on the team. Same status field the AI Email Inbox page uses for its own tabs.</p>
-                </InfoPopover>
               </div>
               <p className={styles.subtitle}>New customer enquiries awaiting triage.</p>
             </div>

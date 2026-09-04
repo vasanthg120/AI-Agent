@@ -4,7 +4,7 @@ import dayjs from 'dayjs';
 import clsx from 'clsx';
 import { AreaChart, Area, XAxis, ResponsiveContainer, Tooltip } from 'recharts';
 import { FiArrowUpRight, FiArrowDownRight } from 'react-icons/fi';
-import { Card, InfoPopover } from '@/components/ui';
+import { Card } from '@/components/ui';
 import { formatINR as money } from '@/utils/currency';
 import { dealsService } from '@/services/dealsService';
 import { DrillDownModal, type DrillDownRow } from './DrillDownModal';
@@ -71,13 +71,7 @@ export function RevenueMomentumCard({ dateFrom, dateTo, storeId }: RevenueMoment
   return (
     <Card className={styles.card} interactive={series.length > 1} onClick={series.length > 1 ? () => setShowDeals(true) : undefined}>
       <div className={styles.label}>Performance Signal</div>
-      <div className={styles.title}>
-        Revenue momentum
-        <InfoPopover title="Revenue momentum">
-          <p>Day-by-day won-deal value across the selected period, bucketed by each deal's expected closing date. Days with no won deals genuinely show zero.</p>
-          <p>The percentage compares the second half of the period's total against the first half — positive means revenue is accelerating, negative means it's slowing.</p>
-        </InfoPopover>
-      </div>
+      <div className={styles.title}>Revenue momentum</div>
 
       <div className={styles.valueRow}>
         <span className={styles.value}>{money(total)}</span>

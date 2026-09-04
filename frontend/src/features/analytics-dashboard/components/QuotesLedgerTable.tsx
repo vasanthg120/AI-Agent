@@ -3,7 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import dayjs from 'dayjs';
 import clsx from 'clsx';
 import { FiSearch, FiChevronDown, FiDownload, FiArrowUp, FiArrowDown } from 'react-icons/fi';
-import { Card, Input, InfoPopover } from '@/components/ui';
+import { Card, Input } from '@/components/ui';
 import { formatINR as money } from '@/utils/currency';
 import { quotesService, type Quote } from '@/services/quotesService';
 import styles from './QuotesLedgerTable.module.css';
@@ -94,13 +94,7 @@ export function QuotesLedgerTable({ dateFrom, dateTo }: QuotesLedgerTableProps) 
 
   return (
     <Card className={styles.card}>
-      <div className={styles.title}>
-        Quotes
-        <InfoPopover title="Quotes">
-          <p>A complete ledger of every quote in the selected period — not just ones tied to still-open deals (see Deals needing a decision for that narrower view).</p>
-          <p><strong>Status</strong> is Approved/Rejected only when the client approval status literally says so; everything else (including no response yet) falls into Awaiting. <strong>Outstanding</strong> = quote amount minus what's been paid.</p>
-        </InfoPopover>
-      </div>
+      <div className={styles.title}>Quotes</div>
       <p className={styles.subtitle}>Paid and outstanding reflect each quote's linked invoice status.</p>
 
       <div className={styles.toolbar}>

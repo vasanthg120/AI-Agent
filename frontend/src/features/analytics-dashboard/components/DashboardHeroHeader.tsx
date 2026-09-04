@@ -1,13 +1,12 @@
 import { useRef, useState } from 'react';
 import dayjs from 'dayjs';
 import toast from 'react-hot-toast';
-import { FiFilter, FiCalendar, FiBox, FiDownload, FiChevronDown, FiPlus, FiX } from 'react-icons/fi';
+import { FiFilter, FiCalendar, FiBox, FiDownload, FiChevronDown, FiX } from 'react-icons/fi';
 import { MONTH_NAMES, CURRENT_YEAR, CURRENT_MONTH, YEAR_OPTIONS, rangeForMonth } from '@/components/ui';
 import type { DateRange } from '@/components/ui';
 import { dealsService } from '@/services/dealsService';
 import { extractErrorMessage } from '@/utils/errors';
 import { useClickOutside } from '@/hooks/useClickOutside';
-import { NewEnquiryModal } from './NewEnquiryModal';
 import styles from './DashboardHeroHeader.module.css';
 
 function greeting(): string {
@@ -56,7 +55,6 @@ export function DashboardHeroHeader({
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [periodPickerOpen, setPeriodPickerOpen] = useState(false);
   const [storePickerOpen, setStorePickerOpen] = useState(false);
-  const [enquiryOpen, setEnquiryOpen] = useState(false);
   const [exporting, setExporting] = useState(false);
   // Purely a UI display toggle (which picker the popover shows), not itself
   // part of the applied range — defaults to whichever mode actually explains
@@ -135,10 +133,6 @@ export function DashboardHeroHeader({
             <FiFilter size={14} />
             Filters
             {activeFilterCount > 0 && <span className={styles.filterBadge}>{activeFilterCount}</span>}
-          </button>
-          <button type="button" className={styles.newEnquiryButton} onClick={() => setEnquiryOpen(true)}>
-            <FiPlus size={15} />
-            New enquiry
           </button>
         </div>
       </div>
@@ -299,8 +293,6 @@ export function DashboardHeroHeader({
           </button>
         </div>
       )}
-
-      <NewEnquiryModal open={enquiryOpen} onClose={() => setEnquiryOpen(false)} stores={stores} canOverrideStore={canOverrideStore} />
     </div>
   );
 }

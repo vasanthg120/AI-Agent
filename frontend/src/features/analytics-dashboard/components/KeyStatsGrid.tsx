@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import dayjs from 'dayjs';
 import { AreaChart, Area, ResponsiveContainer } from 'recharts';
-import { Card, InfoPopover } from '@/components/ui';
+import { Card } from '@/components/ui';
 import { formatINR as money } from '@/utils/currency';
 import { dealsService } from '@/services/dealsService';
 import { customerQuotePaymentService } from '@/services/customerQuotePaymentService';
@@ -117,13 +117,7 @@ export function KeyStatsGrid({ deals, businessHealthScore, revenueTrend, dateFro
   return (
     <div className={styles.grid}>
       <Card interactive={!!onDealsClick} onClick={onDealsClick} className={styles.cell}>
-        <div className={styles.label}>
-          Deals Won
-          <InfoPopover title="Deals Won">
-            <p>Count of deals marked <strong>Won</strong> whose expected closing date falls in the selected period.</p>
-            <p><strong>Overdue</strong>/<strong>pending</strong> below refer to this period's still-open deals: overdue ones have an expected closing date already in the past.</p>
-          </InfoPopover>
-        </div>
+        <div className={styles.label}>Deals Won</div>
         <div className={styles.value}>{deals.wonCount}</div>
         <div className={styles.caption}>of {totalDeals} deals in range</div>
         <div className={styles.divider} />
@@ -133,13 +127,7 @@ export function KeyStatsGrid({ deals, businessHealthScore, revenueTrend, dateFro
       </Card>
 
       <Card className={styles.cell} interactive onClick={() => setOpenDrilldown('conversion')}>
-        <div className={styles.label}>
-          Conversion
-          <InfoPopover title="Conversion">
-            <p>Won deals ÷ closed deals (won + lost) in this period, as a percentage.</p>
-            <p>Only deals that have actually closed count — open deals aren't included in either side of the ratio.</p>
-          </InfoPopover>
-        </div>
+        <div className={styles.label}>Conversion</div>
         <div className={styles.value}>{conversionPct !== null ? `${conversionPct}%` : '—'}</div>
         <div className={styles.caption}>won / closed deals</div>
         <div className={styles.divider} />
@@ -147,16 +135,7 @@ export function KeyStatsGrid({ deals, businessHealthScore, revenueTrend, dateFro
       </Card>
 
       <Card className={styles.cell} interactive={revenueTrend.length > 1} onClick={revenueTrend.length > 1 ? () => setOpenDrilldown('health') : undefined}>
-        <div className={styles.label}>
-          Business Health
-          <InfoPopover title="Business Health">
-            <p>
-              A weighted score out of 100: <strong>60%</strong> revenue achievement against target (capped at 100%) plus{' '}
-              <strong>40%</strong> follow-up health (100% minus the share of overdue tasks across the team).
-            </p>
-            <p>The sparkline below traces the same revenue trend shown on the Revenue against target card.</p>
-          </InfoPopover>
-        </div>
+        <div className={styles.label}>Business Health</div>
         <div className={styles.value}>{businessHealthScore ?? '—'}</div>
         <div className={styles.caption}>composite score out of 100</div>
         {revenueTrend.length > 1 && (
@@ -171,13 +150,7 @@ export function KeyStatsGrid({ deals, businessHealthScore, revenueTrend, dateFro
       </Card>
 
       <Card className={styles.cell} interactive onClick={() => setOpenDrilldown('outstanding')}>
-        <div className={styles.label}>
-          Outstanding
-          <InfoPopover title="Outstanding">
-            <p>Total unpaid amount across quotes in this period (quote amount minus what's been paid so far), from the same payment records the Pipeline &amp; Quotes tab uses.</p>
-            <p>The caption shows which aging bucket (current, 1–30, 31–60, 60+ days overdue) holds most of that total.</p>
-          </InfoPopover>
-        </div>
+        <div className={styles.label}>Outstanding</div>
         <div className={styles.value}>{totalOutstanding !== null ? money(totalOutstanding) : '—'}</div>
         <div className={styles.caption}>{bucketSentence ?? 'Loading…'}</div>
         <div className={styles.divider} />

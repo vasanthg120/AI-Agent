@@ -1,7 +1,7 @@
 import dayjs from 'dayjs';
 import clsx from 'clsx';
 import { FiArrowDown, FiArrowUp } from 'react-icons/fi';
-import { Card, Badge, InfoPopover } from '@/components/ui';
+import { Card, Badge } from '@/components/ui';
 import { formatINR as money } from '@/utils/currency';
 import styles from './MonthlySalesPerformanceCard.module.css';
 
@@ -70,20 +70,7 @@ export function MonthlySalesPerformanceCard({
     <Card interactive={!!onClick} onClick={onClick} className={styles.card}>
       <div className={styles.topRow}>
         <div>
-          <div className={styles.title}>
-            Revenue against target
-            <InfoPopover title="Revenue against target">
-              <p>
-                <strong>Achieved</strong> sums every deal marked <strong>Won</strong> whose expected closing date falls in the
-                selected period. <strong>Target</strong> is the sales target set for that calendar month.
-              </p>
-              <p>
-                <strong>Predicted month-end</strong> extrapolates the current run rate (achieved so far ÷ days elapsed) across
-                the rest of the month. <strong>On track / Off track</strong> compares achievement-so-far against how much of the
-                month has elapsed, with a 10% cushion so an early-month dip doesn't flip it immediately.
-              </p>
-            </InfoPopover>
-          </div>
+          <div className={styles.title}>Revenue against target</div>
           <div className={styles.subtitle}>Sales targets are set per calendar month.</div>
         </div>
         {onTrack !== null && <Badge variant={onTrack ? 'success' : 'danger'}>{onTrack ? 'On track' : 'Off track'}</Badge>}

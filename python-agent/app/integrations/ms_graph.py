@@ -9,7 +9,11 @@ GRAPH_BASE = "https://graph.microsoft.com/v1.0"
 
 # Read endpoints worth caching. Outlook data is per-user (unlike CRM's
 # shared data), so the cache key below is scoped to the calling token.
-_CACHEABLE_PATHS = {"/me/messages", "/me/contacts"}
+# /me/mailFolders/inbox/messages is the Inbox-scoped sibling outlook.py's
+# todays_emails/messages_since moved to (see their own comments) — kept
+# cacheable alongside /me/messages so that move didn't silently drop caching
+# for Email Intelligence's two highest-traffic Graph calls.
+_CACHEABLE_PATHS = {"/me/messages", "/me/mailFolders/inbox/messages", "/me/contacts"}
 
 
 def graph_get(path: str, access_token: str, params: dict | None = None) -> dict:

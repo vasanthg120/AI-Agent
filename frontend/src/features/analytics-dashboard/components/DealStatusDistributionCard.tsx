@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import clsx from 'clsx';
-import { Card, InfoPopover } from '@/components/ui';
+import { Card } from '@/components/ui';
 import { dealsService, type Deal } from '@/services/dealsService';
 import { usePipelineDecisionCounts } from './usePipelineDecisionCounts';
 import { DrillDownModal, type DrillDownRow } from './DrillDownModal';
@@ -51,13 +51,7 @@ export function DealStatusDistributionCard({ deals, dateFrom, dateTo, storeId }:
   return (
     <Card className={styles.card}>
       <div className={styles.label}>Distribution</div>
-      <div className={styles.title}>
-        Deal status
-        <InfoPopover title="Deal status">
-          <p><strong>Won</strong> deals closed successfully. <strong>Awaiting response</strong> are open deals with a quote out that the client hasn't approved yet.</p>
-          <p><strong>In review</strong> is the remainder — open deals with no unapproved quote out, so nothing is currently waiting on a client decision.</p>
-        </InfoPopover>
-      </div>
+      <div className={styles.title}>Deal status</div>
 
       <div className={styles.list}>
         {rows.map((row) => (

@@ -3,7 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import dayjs from 'dayjs';
 import { FiClock, FiTarget, FiInbox, FiChevronRight, FiArrowUpRight } from 'react-icons/fi';
 import type { IconType } from 'react-icons';
-import { Card, InfoPopover } from '@/components/ui';
+import { Card } from '@/components/ui';
 import { formatINR as money } from '@/utils/currency';
 import { dealsService } from '@/services/dealsService';
 import { aiFollowupSummaryService } from '@/services/aiFollowupSummaryService';
@@ -101,13 +101,7 @@ export function ActionQueueCard({ dateFrom, dateTo, storeId, newEnquiryCount, on
       <div className={styles.headerRow}>
         <div>
           <div className={styles.label}>Action Queue</div>
-          <div className={styles.title}>
-            Needs attention
-            <InfoPopover title="Needs attention">
-              <p>Up to 3 real items, each only shown when it genuinely applies: the org's most-overdue pending follow-up reminder, the highest-value open deal in this period, and the new-enquiry email count.</p>
-              <p>Nothing here is padded to hit a fixed count — an empty queue means nothing needs attention right now.</p>
-            </InfoPopover>
-          </div>
+          <div className={styles.title}>Needs attention</div>
         </div>
         {items.length > 0 && <span className={styles.countBadge}>{items.length}</span>}
       </div>

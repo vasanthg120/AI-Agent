@@ -2,7 +2,7 @@ import { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import dayjs from 'dayjs';
-import { Card, InfoPopover } from '@/components/ui';
+import { Card } from '@/components/ui';
 import { formatINR as money } from '@/utils/currency';
 import { dealsService } from '@/services/dealsService';
 import { quotesService } from '@/services/quotesService';
@@ -107,18 +107,7 @@ export function PriorityQueueCard({ followUpReminders }: PriorityQueueCardProps)
       <div className={styles.header}>
         <div>
           <div className={styles.label}>Suggested Actions</div>
-          <div className={styles.title}>
-            Priority queue
-            <InfoPopover title="Priority queue">
-              <p>Up to 3 real, independently-derived items, each shown only when genuinely true:</p>
-              <ul>
-                <li>the org's most-overdue pending follow-up reminder</li>
-                <li>the open deal (with a linked quote) closing soonest</li>
-                <li>the most recently fully-paid quote</li>
-              </ul>
-              <p>Nothing here is generated from AI prose — every field traces to a real record.</p>
-            </InfoPopover>
-          </div>
+          <div className={styles.title}>Priority queue</div>
         </div>
         <span className={styles.count}>{items.length} action{items.length === 1 ? '' : 's'}</span>
       </div>

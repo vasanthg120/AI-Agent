@@ -1,11 +1,10 @@
 import { useMemo, useState } from 'react';
-import type { ReactNode } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import dayjs from 'dayjs';
 import toast from 'react-hot-toast';
 import { FiZap, FiClock, FiAlertTriangle, FiStar, FiMessageSquare } from 'react-icons/fi';
 import type { IconType } from 'react-icons';
-import { Card, InfoPopover, SectionCard, Skeleton } from '@/components/ui';
+import { Card, SectionCard, Skeleton } from '@/components/ui';
 import { extractErrorMessage } from '@/utils/errors';
 import { aiFollowupSummaryService } from '@/services/aiFollowupSummaryService';
 import { emailIntelligenceService } from '@/services/emailIntelligenceService';
@@ -22,14 +21,12 @@ function StatCard({
   label,
   value,
   note,
-  info,
   onClick,
 }: {
   icon: IconType;
   label: string;
   value: string | number;
   note: string;
-  info?: ReactNode;
   onClick?: () => void;
 }) {
   return (
@@ -37,10 +34,7 @@ function StatCard({
       <span className={statStyles.iconBadge}>
         <Icon size={16} />
       </span>
-      <div className={statStyles.label}>
-        {label}
-        {info && <InfoPopover title={label}>{info}</InfoPopover>}
-      </div>
+      <div className={statStyles.label}>{label}</div>
       <div className={statStyles.value}>{value}</div>
       <div className={statStyles.note}>{note}</div>
     </Card>
@@ -165,7 +159,6 @@ export function AiFollowupSummarySection() {
             label="Due today"
             value={dueTodayCount}
             note="customer actions"
-            info={<p>Pending follow-up reminders whose due date is today.</p>}
             onClick={() => setOpenPopup('due')}
           />
           <StatCard
@@ -173,7 +166,6 @@ export function AiFollowupSummarySection() {
             label="Overdue"
             value={overdueCount}
             note="need a response"
-            info={<p>Pending follow-up reminders whose due date has already passed.</p>}
             onClick={() => setOpenPopup('overdue')}
           />
           <StatCard
@@ -181,12 +173,6 @@ export function AiFollowupSummarySection() {
             label="High priority"
             value={summary ? summary.highPriorityCustomers.length : '—'}
             note={summary ? 'open opportunities' : 'generate a summary to see this'}
-            info={
-              <p>
-                Customers the AI judged high-priority when the summary below was generated — this isn't a stored field, only
-                the AI's own reasoning produces it, which is why it shows "—" until you generate a summary.
-              </p>
-            }
             onClick={summary ? () => setOpenPopup('priority') : undefined}
           />
           <StatCard
@@ -194,7 +180,6 @@ export function AiFollowupSummarySection() {
             label="Suggested replies"
             value={suggestedRepliesCount}
             note="ready to review"
-            info={<p>Pending inbox emails where the AI has already prepared a draft reply — always available, independent of whether an AI summary has been generated.</p>}
             onClick={() => setOpenPopup('replies')}
           />
         </div>
@@ -253,11 +238,7 @@ export function AiFollowupSummarySection() {
         </div>
       )}
 
-      <SectionCard
-        title="Real Follow-Up Reminders"
-        glass
-        info={<p>Every pending follow-up reminder for this org/store, regardless of due date — the full list the Due today/Overdue stat tiles above are counted from.</p>}
-      >
+      <SectionCard title="Real Follow-Up Reminders" glass>
         {isLoading || !data ? (
           <Skeleton height={160} />
         ) : data.followUpReminders.length === 0 ? (

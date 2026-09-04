@@ -22,7 +22,7 @@ export function useBillingTheme(): BillingThemeResult {
   const [logoUrl, setLogoUrl] = useState<string | undefined>(undefined);
 
   useEffect(() => {
-    let cancelled = false;
+    let cancelled = false; 
     billingService
       .getTheme()
       .then((theme) => {

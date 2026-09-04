@@ -1,6 +1,6 @@
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import clsx from 'clsx';
-import { Card, Skeleton, Avatar, Badge, InfoPopover } from '@/components/ui';
+import { Card, Skeleton, Avatar, Badge } from '@/components/ui';
 import { formatINR as money } from '@/utils/currency';
 import { employeeProductivityService } from '@/services/employeeProductivityService';
 import styles from './ProductivitySection.module.css';
@@ -23,13 +23,7 @@ export function ProductivitySection({ dateFrom, dateTo, storeId }: { dateFrom: s
   return (
     <Card className={styles.card}>
       <div className={styles.header}>
-        <div className={styles.title}>
-          Workload by member
-          <InfoPopover title="Workload by member">
-            <p>Each team member's assigned vs. completed counts for deals, emails, and quotes in this period, from the same real per-employee endpoint the Team revenue summary cards above draw their totals from.</p>
-            <p><strong>Overall completion</strong> combines all three buckets into one percentage per person.</p>
-          </InfoPopover>
-        </div>
+        <div className={styles.title}>Workload by member</div>
         <p className={styles.subtitle}>Emails, quotes and deals — assigned, completed, pending, overdue.</p>
       </div>
 

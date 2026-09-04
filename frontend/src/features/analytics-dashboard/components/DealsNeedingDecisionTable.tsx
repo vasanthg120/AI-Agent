@@ -3,7 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import dayjs from 'dayjs';
 import clsx from 'clsx';
 import { FiSearch, FiChevronDown, FiChevronRight } from 'react-icons/fi';
-import { Card, Input, InfoPopover } from '@/components/ui';
+import { Card, Input } from '@/components/ui';
 import { formatINR as money } from '@/utils/currency';
 import { dealsService } from '@/services/dealsService';
 import { quotesService } from '@/services/quotesService';
@@ -110,13 +110,7 @@ export function DealsNeedingDecisionTable({ dateFrom, dateTo, storeId, ownerName
       <div className={styles.header}>
         <div>
           <div className={styles.label}>Detailed View</div>
-          <div className={styles.title}>
-            Deals needing a decision
-            <InfoPopover title="Deals needing a decision">
-              <p>Quotes tied to a still-<strong>open</strong> deal in the selected period — the client hasn't approved yet (<strong>Awaiting response</strong>) or has (<strong>Approved</strong>), but the deal itself isn't won or lost either way.</p>
-              <p>Built by joining this period's open deals with their linked quotes. Sorted by closing date, soonest first. No likelihood/probability score is shown — that field doesn't exist in the underlying data.</p>
-            </InfoPopover>
-          </div>
+          <div className={styles.title}>Deals needing a decision</div>
         </div>
         <button
           type="button"

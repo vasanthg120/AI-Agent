@@ -176,8 +176,8 @@ export function EmailIntelligencePage() {
         <div>
           <div className={styles.pageTitle}>AI Email Inbox</div>
           <div className={styles.pageSubtitle}>
-            Hit Sync to scan your connected mailbox — review, edit, and approve AI-drafted replies here. Nothing runs
-            automatically in the background.
+            Your connected mailbox syncs automatically every 30 minutes — hit Sync for an immediate check. Review,
+            edit, and approve AI-drafted replies here.
           </div>
           {providerHealth && providerHealth.length > 0 && (
             <div className={styles.providerHealthRow}>
@@ -218,9 +218,10 @@ export function EmailIntelligencePage() {
         title="Email Queue"
         icon={FiInbox}
         action={
-          data && visibleItems && data.length > visibleItems.length ? (
-            <span className={styles.listItemMeta}>{visibleItems.length} of {data.length} shown</span>
-          ) : undefined
+          <span className={styles.listItemMeta}>
+            Sorted by what needs a reply soonest
+            {data && visibleItems && data.length > visibleItems.length ? ` · ${visibleItems.length} of ${data.length} shown` : ''}
+          </span>
         }
       >
         <EmailIntelligenceList items={visibleItems} isLoading={isLoading} onSelect={setSelected} />

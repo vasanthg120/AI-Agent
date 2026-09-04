@@ -30,14 +30,15 @@ export class EmailIntelligenceController {
     return this.emailIntelligenceSyncService.previewSync(user.sub);
   }
 
-  // The only place this module ever spends an LLM call outside of an
-  // explicit approve/reject/regenerate/send action — deliberately
-  // button-triggered only (see EmailIntelligenceSyncService's own comment
-  // for why the old always-on 3-minute cron was removed). Static segment,
-  // must be declared before the ':id' GET route below.
+  // Explicit, user-triggered sync — the button click gets an immediate,
+  // synchronous result and a real preview-before-spend step (see the
+  // /sync/preview route above), unlike EmailIntelligenceSyncService's own
+  // background half-hourly sweep (runScheduledSync), which also calls
+  // syncMyMailbox but on every connected mailbox, unattended. Static
+  // segment, must be declared before the ':id' GET route below.
   @Post('sync')
   sync(@CurrentUser() user: JwtPayload) {
-    return this.emailIntelligenceSyncService.syncMyMailbox(user.sub);
+    return this.emailIntelligenceSyncService.syncMyMailbox(user.sub, 'user');
   }
 
   // Phase 21 — recent sync-job history for the caller's own mailbox. Static

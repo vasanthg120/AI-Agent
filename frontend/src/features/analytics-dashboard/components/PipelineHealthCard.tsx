@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import dayjs from 'dayjs';
-import { Card, InfoPopover } from '@/components/ui';
+import { Card } from '@/components/ui';
 import { formatINR as money } from '@/utils/currency';
 import { dealsService, type Deal } from '@/services/dealsService';
 import { customerQuotePaymentService } from '@/services/customerQuotePaymentService';
@@ -87,17 +87,7 @@ export function PipelineHealthCard({ deals, dateFrom, dateTo, storeId }: Pipelin
   return (
     <Card className={styles.card}>
       <div className={styles.mainCol}>
-        <div className={styles.label}>
-          Pipeline Health
-          <InfoPopover title="Pipeline Health">
-            <p>Total outstanding is the unpaid balance across this period's quotes (same figure as Outstanding on the Overview tab).</p>
-            <p>
-              The progress bar shows <strong>won value</strong> as a share of <strong>active value</strong> (won + still-open
-              value; lost deals are excluded since they're no longer in play). Overdue counts open deals whose expected
-              closing date has already passed.
-            </p>
-          </InfoPopover>
-        </div>
+        <div className={styles.label}>Pipeline Health</div>
         <div className={styles.valueRow}>
           <span className={styles.value}>{paymentSummary ? money(paymentSummary.totalOutstanding) : '—'}</span>
           <span className={styles.valueLabel}>total outstanding</span>

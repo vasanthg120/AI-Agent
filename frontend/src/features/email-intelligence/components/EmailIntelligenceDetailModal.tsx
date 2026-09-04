@@ -32,6 +32,15 @@ const AI_STATUS_VARIANT: Record<string, BadgeVariant> = {
   awaiting_customer_response: 'info',
   validation_failed: 'danger',
 };
+// Same priority/urgency distinction as EmailIntelligenceList.tsx's own
+// badges (kept in sync — see that file's comment for why the wording
+// deliberately differs between the two axes). This modal used to show
+// neither: priority/urgency/sentiment were only ever visible from the list
+// row, not from the actual review screen where the decision gets made.
+const PRIORITY_VARIANT: Record<string, BadgeVariant> = { urgent: 'danger', high: 'warning', medium: 'info', low: 'neutral' };
+const URGENCY_LABEL: Record<string, string> = { urgent: 'Reply today', high: 'Reply soon' };
+const URGENCY_VARIANT: Record<string, BadgeVariant> = { urgent: 'danger', high: 'warning' };
+const SENTIMENT_VARIANT: Record<string, BadgeVariant> = { negative: 'danger', frustrated: 'danger', positive: 'success', neutral: 'neutral' };
 
 export function EmailIntelligenceDetailModal({
   open,
@@ -130,6 +139,15 @@ export function EmailIntelligenceDetailModal({
   return (
     <Modal open={open} onClose={onClose} title={item.subject || '(no subject)'} maxWidth={640}>
       <div className={styles.formGrid}>
+        <div className={styles.badgeRow}>
+          <Badge variant="accent">{item.intent.replace(/_/g, ' ')}</Badge>
+          <Badge variant={PRIORITY_VARIANT[item.priority]}>{item.priority} priority</Badge>
+          {(item.urgency === 'urgent' || item.urgency === 'high') && (
+            <Badge variant={URGENCY_VARIANT[item.urgency]}>{URGENCY_LABEL[item.urgency]}</Badge>
+          )}
+          {item.sentiment !== 'neutral' && <Badge variant={SENTIMENT_VARIANT[item.sentiment] ?? 'neutral'}>{item.sentiment}</Badge>}
+        </div>
+
         <div className={styles.card}>
           <div className={styles.fieldLabel}>Original Message</div>
           <div>From: {item.fromAddress}</div>
