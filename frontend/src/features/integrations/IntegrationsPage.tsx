@@ -386,10 +386,10 @@ export function IntegrationsPage() {
     }
   };
 
-  const handleDisconnectCustomIntegration = async (provider: string) => {
+  const handleDisconnectCustomIntegration = async (provider: string, label: string) => {
     try {
       await integrationsService.disconnectCredential(provider);
-      toast.success(`${provider} disconnected`);
+      toast.success(`${label} disconnected`);
       loadCustomIntegrations();
     } catch (error) {
       toast.error(extractErrorMessage(error));
@@ -814,9 +814,13 @@ export function IntegrationsPage() {
             {otherCustomIntegrations.map((integration) => (
               <div key={integration.provider} className={styles.accountRow}>
                 <div className={styles.accountRowMain}>
-                  <Avatar name={integration.provider} size="md" color="linear-gradient(135deg, #8b5cf6 0%, #4c1d95 100%)" />
+                  <Avatar
+                    name={integration.label || integration.provider}
+                    size="md"
+                    color="linear-gradient(135deg, #8b5cf6 0%, #4c1d95 100%)"
+                  />
                   <div>
-                    <div className={styles.accountEmail}>{integration.provider}</div>
+                    <div className={styles.accountEmail}>{integration.label || integration.provider}</div>
                     <span className={styles.accountOwner}>
                       {integration.authType ? AUTH_TYPE_LABELS[integration.authType] : 'API Key'}
                       {integration.baseUrl ? ` · ${integration.baseUrl}` : ''}
@@ -839,7 +843,7 @@ export function IntegrationsPage() {
                     size="sm"
                     variant="ghost"
                     leftIcon={<FiTrash2 />}
-                    onClick={() => handleDisconnectCustomIntegration(integration.provider)}
+                    onClick={() => handleDisconnectCustomIntegration(integration.provider, integration.label || integration.provider)}
                   >
                     Disconnect
                   </Button>

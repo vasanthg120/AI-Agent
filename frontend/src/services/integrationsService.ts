@@ -46,6 +46,10 @@ export interface AuthCredentials {
 
 export interface CustomIntegration {
   provider: string;
+  // Customer-facing name — never the raw provider slug for a white-labeled
+  // provider (e.g. the underlying CRM vendor); use this for display, keep
+  // `provider` only as the internal key for API calls.
+  label: string;
   connected: boolean;
   authType?: AuthType;
   maskedKey?: string;

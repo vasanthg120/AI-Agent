@@ -4,7 +4,7 @@ from app.integrations import prospectconnect
 
 SPEC = {
     "name": "crm_product",
-    "description": "List or search products/pricing catalog in the CRM (ProspectConnect).",
+    "description": "List or search products/pricing catalog in the CRM.",
     "input_schema": {
         "type": "object",
         "properties": {

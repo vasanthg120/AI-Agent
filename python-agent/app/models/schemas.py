@@ -107,6 +107,19 @@ class BusinessDocumentExtractResponse(BaseModel):
     inconsistencyNotes: list[str] = []
 
 
+class BusinessKnowledgeChatSource(BaseModel):
+    index: int
+    sourceType: str
+    documentId: str | None = None
+    filename: str | None = None
+    snippet: str
+
+
+class BusinessKnowledgeChatResponse(BaseModel):
+    answer: str
+    sources: list[BusinessKnowledgeChatSource] = []
+
+
 class FinanceExtractResponse(BaseModel):
     vectorDocumentId: str
     vectorChunkCount: int

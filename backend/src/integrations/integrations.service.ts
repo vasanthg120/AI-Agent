@@ -1,5 +1,7 @@
 import { HttpService } from '@nestjs/axios';
-import { BadRequestException, Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { JwtService } from '@nestjs/jwt';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { firstValueFrom } from 'rxjs';
@@ -14,6 +16,12 @@ import {
   IntegrationCredentialDocument,
 } from './schemas/integration-credential.schema';
 
+// The two provider slugs a connected CRM is ever stored under (the fixed
+// 'crm' card's legacy apiKey path, or the generic Custom Integration flow
+// using the external CRM's own connector id) — see prospectconnect.py's
+// resolve_credentials for why both are checked everywhere else too.
+const CRM_PROVIDERS = new Set(['crm', 'prospectconnect']);
+
 const PROVIDER_SLUG = /^[a-z0-9][a-z0-9_-]{0,63}$/i;
 
 export interface IntegrationStatus {
@@ -25,17 +33,46 @@ export interface IntegrationStatus {
 
 export interface IntegrationSummary extends IntegrationStatus {
   provider: string;
+  // Customer-facing name — never the raw provider slug for a
+  // white-labeled provider like 'prospectconnect' (see provider-rules.ts).
+  label: string;
   connectedAt?: Date;
 }
 
 @Injectable()
 export class IntegrationsService {
+  private readonly logger = new Logger(IntegrationsService.name);
+  private readonly pythonAgentUrl: string;
+
   constructor(
     @InjectModel(IntegrationCredential.name)
     private credentialModel: Model<IntegrationCredentialDocument>,
     private encryption: EncryptionService,
     private http: HttpService,
-  ) {}
+    private jwt: JwtService,
+    private config: ConfigService,
+  ) {
+    this.pythonAgentUrl = this.config.get<string>('pythonAgentUrl') ?? 'http://localhost:8000';
+  }
+
+  /** Fires an immediate, org-scoped CRM sync right after a customer connects
+   * (or reconnects) their CRM — without this, real data only shows up on
+   * the dashboard after the next crm_mongo_sync_interval_minutes poll (up to
+   * 10 minutes of an apparently-connected-but-empty dashboard, which is
+   * exactly the "doesn't fetch automatically" complaint). Best-effort and
+   * never blocks/fails the connect response — mirrors business-profile.
+   * service.ts's post-save Qdrant sync call. Scoped to 'crm'/'prospectconnect'
+   * only; every other provider (Anthropic, Stripe, a customer's own custom
+   * REST API, ...) has nothing to sync. */
+  private triggerCrmSyncIfApplicable(organizationId: string, provider: string): void {
+    if (!CRM_PROVIDERS.has(provider)) return;
+    const token = this.jwt.sign({ sub: 'system', organizationId }, { expiresIn: '5m' });
+    firstValueFrom(
+      this.http.post(`${this.pythonAgentUrl}/sync/crm/run-for-org`, {}, { headers: { Authorization: `Bearer ${token}` } }),
+    ).catch((err) => {
+      this.logger.error(`Immediate CRM sync failed for org ${organizationId}: ${(err as Error).message}`);
+    });
+  }
 
   /** Legacy shape, request/response byte-for-byte unchanged: apiKey (+
    * optional baseUrl), used by the 'anthropic' and 'crm' connect UI today.
@@ -54,6 +91,7 @@ export class IntegrationsService {
       { organizationId, provider, apiKey: this.encryption.encrypt(apiKey), baseUrl, authType: undefined, credentialsEncrypted: undefined },
       { upsert: true },
     );
+    this.triggerCrmSyncIfApplicable(organizationId, provider);
     return { connected: true, maskedKey: this.mask(apiKey), baseUrl };
   }
 
@@ -87,6 +125,7 @@ export class IntegrationsService {
       },
       { upsert: true },
     );
+    this.triggerCrmSyncIfApplicable(organizationId, provider);
     return { connected: true, authType, baseUrl: dto.baseUrl };
   }
 
@@ -122,6 +161,7 @@ export class IntegrationsService {
       .sort({ createdAt: -1 });
     return docs.map((doc) => ({
       provider: doc.provider,
+      label: getProviderRule(doc.provider).label,
       connected: true,
       authType: doc.authType,
       maskedKey: doc.authType ? undefined : this.mask(this.decryptStoredApiKey(doc.apiKey)),

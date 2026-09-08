@@ -1,4 +1,6 @@
 import { HttpService } from '@nestjs/axios';
+import { ConfigService } from '@nestjs/config';
+import { JwtService } from '@nestjs/jwt';
 import { Model, Types } from 'mongoose';
 import { EncryptionService } from '../common/encryption/encryption.service';
 import { AuthCredentials, AuthType } from './auth-methods';
@@ -14,13 +16,19 @@ export interface IntegrationStatus {
 }
 export interface IntegrationSummary extends IntegrationStatus {
     provider: string;
+    label: string;
     connectedAt?: Date;
 }
 export declare class IntegrationsService {
     private credentialModel;
     private encryption;
     private http;
-    constructor(credentialModel: Model<IntegrationCredentialDocument>, encryption: EncryptionService, http: HttpService);
+    private jwt;
+    private config;
+    private readonly logger;
+    private readonly pythonAgentUrl;
+    constructor(credentialModel: Model<IntegrationCredentialDocument>, encryption: EncryptionService, http: HttpService, jwt: JwtService, config: ConfigService);
+    private triggerCrmSyncIfApplicable;
     connect(organizationId: string, provider: string, apiKey: string, baseUrl?: string): Promise<{
         connected: true;
         maskedKey: string;

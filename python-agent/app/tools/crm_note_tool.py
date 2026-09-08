@@ -5,7 +5,7 @@ from app.integrations import prospectconnect
 SPEC = {
     "name": "crm_note",
     "description": (
-        "Fetch notes from the CRM (ProspectConnect) for a contact. Optionally narrow "
+        "Fetch notes from the CRM for a contact. Optionally narrow "
         "further to notes tied to a specific deal or account."
     ),
     "input_schema": {

@@ -3,7 +3,7 @@ from app.integrations import prospectconnect
 SPEC = {
     "name": "crm_contact",
     "description": (
-        "Create, update, list, or look up contacts in the CRM (ProspectConnect). "
+        "Create, update, list, or look up contacts in the CRM. "
         "Use 'upsert' to create a new contact (omit contact_id) or update an existing "
         "one (pass contact_id) — either email or phone is required. Use 'search_by_ids' "
         "to fetch full details for known contact IDs. Use 'list' to browse or search all "

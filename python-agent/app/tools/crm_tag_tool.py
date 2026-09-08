@@ -2,7 +2,7 @@ from app.integrations import prospectconnect
 
 SPEC = {
     "name": "crm_tag",
-    "description": "List tags defined in the CRM (ProspectConnect) for a given module (e.g. contacts, deals).",
+    "description": "List tags defined in the CRM for a given module (e.g. contacts, deals).",
     "input_schema": {
         "type": "object",
         "properties": {

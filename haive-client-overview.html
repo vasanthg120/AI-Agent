@@ -1,0 +1,225 @@
+<title>Meet Haive</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,480;9..144,560;9..144,650&family=Work+Sans:wght@400;500;600;700&display=swap');
+
+:root{
+  --paper:#f3f4f8; --surface:#ffffff; --surface-2:#eceef4; --ink:#1c2230; --ink-dim:#464f63;
+  --muted:#6b7386; --line:#dde1ec; --line-soft:#e8eaf1;
+  --gold:#b8791f; --gold-ink:#8f5c14; --gold-soft:#f7ecd9;
+  --teal:#0f6e63; --teal-soft:#e2f1ee; --teal-ink:#0b5049;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --paper:#10131c; --surface:#191e2c; --surface-2:#1f2536; --ink:#edeff6; --ink-dim:#c6ccdb;
+    --muted:#9aa1b5; --line:#2c3245; --line-soft:#232839;
+    --gold:#e0a94a; --gold-ink:#f2c983; --gold-soft:#3a2c14;
+    --teal:#3fb6a8; --teal-soft:#132e2a; --teal-ink:#6fd3c6;
+  }
+}
+:root[data-theme="dark"]{
+  --paper:#10131c; --surface:#191e2c; --surface-2:#1f2536; --ink:#edeff6; --ink-dim:#c6ccdb;
+  --muted:#9aa1b5; --line:#2c3245; --line-soft:#232839;
+  --gold:#e0a94a; --gold-ink:#f2c983; --gold-soft:#3a2c14;
+  --teal:#3fb6a8; --teal-soft:#132e2a; --teal-ink:#6fd3c6;
+}
+
+*{box-sizing:border-box}
+body{background:var(--paper);color:var(--ink-dim);font-family:'Work Sans',Arial,sans-serif;line-height:1.6;
+  -webkit-font-smoothing:antialiased;}
+h1,h2,h3{font-family:'Fraunces',Georgia,serif;color:var(--ink);text-wrap:balance;font-weight:600;letter-spacing:-.01em;}
+::selection{background:var(--gold-soft);color:var(--gold-ink)}
+
+.wrap{max-width:920px;margin:0 auto;padding:64px 28px 100px;}
+
+/* ---- hero ---- */
+.hero{margin-bottom:64px;}
+.eyebrow{font-size:12.5px;font-weight:600;letter-spacing:1.6px;text-transform:uppercase;color:var(--gold-ink);
+  margin-bottom:16px;}
+.hero h1{font-size:clamp(34px,5vw,54px);line-height:1.08;margin:0 0 20px;max-width:14ch;}
+.hero p{font-size:18px;color:var(--ink-dim);max-width:56ch;margin:0;}
+
+/* ---- day rail ---- */
+.day{margin-bottom:8px;}
+.day-head{display:flex;align-items:baseline;gap:14px;margin:56px 0 22px;padding-top:6px;border-top:1px solid var(--line);}
+.day-head .tag{font-family:'Work Sans',sans-serif;font-weight:700;font-size:11px;letter-spacing:1.4px;
+  text-transform:uppercase;color:var(--surface);background:var(--ink);padding:5px 11px;border-radius:20px;
+  white-space:nowrap;flex:none;}
+.day-head h2{font-size:24px;margin:0;}
+.day-lede{font-size:14.5px;color:var(--muted);margin:0 0 26px;max-width:60ch;}
+
+.cards{display:grid;grid-template-columns:repeat(2,1fr);gap:20px;}
+@media (max-width:640px){.cards{grid-template-columns:1fr;}}
+
+.card{background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:24px 24px 22px;
+  display:flex;flex-direction:column;gap:14px;}
+.card h3{font-size:17px;margin:0;font-weight:600;line-height:1.3;}
+.card p{margin:0;font-size:14px;color:var(--ink-dim);}
+.bubble{margin-top:auto;background:var(--teal-soft);color:var(--teal-ink);border-radius:14px 14px 14px 3px;
+  padding:11px 15px;font-size:13.5px;font-weight:500;font-style:italic;line-height:1.45;}
+.bubble::before{content:"“";font-style:normal;}
+.bubble::after{content:"”";font-style:normal;}
+
+/* ---- roles ---- */
+.roles{margin:64px 0 8px;padding-top:6px;border-top:1px solid var(--line);}
+.roles h2{font-size:24px;margin:56px 0 10px;}
+.roles > p{font-size:14.5px;color:var(--muted);max-width:60ch;margin:0 0 26px;}
+.role-row{display:grid;grid-template-columns:repeat(2,1fr);gap:20px;}
+@media (max-width:640px){.role-row{grid-template-columns:1fr;}}
+.role{border:1px solid var(--line);border-radius:16px;padding:22px 24px;background:var(--surface);}
+.role .who{font-size:11px;font-weight:700;letter-spacing:1.2px;text-transform:uppercase;color:var(--gold-ink);
+  margin-bottom:8px;}
+.role h3{font-size:17px;margin:0 0 8px;}
+.role p{margin:0;font-size:13.5px;color:var(--ink-dim);}
+
+/* ---- closing ---- */
+.closing{margin-top:72px;padding:38px 36px;background:var(--ink);border-radius:20px;color:var(--paper);}
+.closing h2{color:var(--paper);font-size:23px;margin:0 0 12px;max-width:26ch;}
+.closing p{color:#c7cbdb;margin:0;font-size:15px;max-width:58ch;}
+
+footer{max-width:920px;margin:40px auto 0;padding:0 28px;color:var(--muted);font-size:12px;}
+</style>
+
+<div class="wrap">
+
+  <div class="hero">
+    <div class="eyebrow">A look at your AI assistant</div>
+    <h1>Haive works alongside your team, all day.</h1>
+    <p>It keeps an eye on your customers and your pipeline, answers questions about your own business,
+    and can act on your behalf — drafting a message, chasing a follow-up, or getting your team ready for
+    what's next. Below is what that actually looks like across a working day.</p>
+  </div>
+
+  <!-- MORNING -->
+  <div class="day">
+    <div class="day-head"><span class="tag">Morning</span><h2>Starts the day already caught up</h2></div>
+    <p class="day-lede">Before anyone opens a spreadsheet, Haive can hand your team a short briefing — what
+    needs attention today, and what's already waiting.</p>
+    <div class="cards">
+      <div class="card">
+        <h3>A ready-made priority list</h3>
+        <p>Instead of starting the day by hunting through emails and the CRM, your team opens Haive to a
+        short list of what actually needs their attention — overdue follow-ups, upcoming deadlines, quotes
+        still waiting on a decision.</p>
+        <div class="bubble">Give me my morning briefing</div>
+      </div>
+      <div class="card">
+        <h3>Nothing forgotten overnight</h3>
+        <p>Enquiries that came in after hours, or customers who haven't heard back in a few days, are
+        surfaced automatically rather than relying on someone remembering to check.</p>
+        <div class="bubble">Who haven't we followed up with this week?</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- SALES -->
+  <div class="day">
+    <div class="day-head"><span class="tag">During the day</span><h2>Keeps the sales pipeline moving</h2></div>
+    <p class="day-lede">Haive doesn't just report numbers back to you — it looks at your deals the way an
+    experienced sales manager would, and tells you what to do about it.</p>
+    <div class="cards">
+      <div class="card">
+        <h3>Spots deals going quiet</h3>
+        <p>It can scan your open opportunities and point out the ones that have stalled, or quotes that
+        have been sitting without a response — the things that are easy to lose track of.</p>
+        <div class="bubble">Which deals haven't moved this week?</div>
+      </div>
+      <div class="card">
+        <h3>Coaches, not just reports</h3>
+        <p>Ask it a real question and it reasons through the answer, connecting the data to what it means
+        and what to try next — not just a printout of numbers.</p>
+        <div class="bubble">Why did we lose that account, and what should we do differently next time?</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- CUSTOMERS -->
+  <div class="day">
+    <div class="day-head"><span class="tag">During the day</span><h2>Gets your team ready for every customer</h2></div>
+    <p class="day-lede">Every conversation, quote, and past interaction with a customer, pulled into one
+    place — so no one walks into a call unprepared.</p>
+    <div class="cards">
+      <div class="card">
+        <h3>Full context before every call</h3>
+        <p>A quick history of what's been discussed, what's outstanding, and anything worth knowing before
+        you pick up the phone.</p>
+        <div class="bubble">Catch me up on this customer before my call</div>
+      </div>
+      <div class="card">
+        <h3>Follows up, so you don't have to remember to</h3>
+        <p>It can draft a follow-up email or WhatsApp message for a customer — and send it for you, the
+        moment you ask.</p>
+        <div class="bubble">Send a follow-up to this customer about their quote</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- COMPANY KNOWLEDGE -->
+  <div class="day">
+    <div class="day-head"><span class="tag">During the day</span><h2>Knows your business, not just a chatbot's guesses</h2></div>
+    <p class="day-lede">Haive can answer questions using your actual company documents and policies — and
+    tell you when something important is missing.</p>
+    <div class="cards">
+      <div class="card">
+        <h3>Answers, sourced from your own documents</h3>
+        <p>Ask it about a policy, a procedure, or a pricing term, and it answers from what your business
+        has actually written down — showing you exactly where the answer came from.</p>
+        <div class="bubble">What's our refund policy?</div>
+      </div>
+      <div class="card">
+        <h3>Flags what's missing before it's a problem</h3>
+        <p>It reviews your company profile and points out real gaps — like a missing returns policy or
+        undocumented terms — before a customer finds them for you.</p>
+        <div class="bubble">What's missing from our business setup?</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- END OF DAY -->
+  <div class="day">
+    <div class="day-head"><span class="tag">End of day</span><h2>Closes the loop</h2></div>
+    <p class="day-lede">A short wrap-up of what happened and what's still open, so tomorrow starts where
+    today left off — not from scratch.</p>
+    <div class="cards">
+      <div class="card">
+        <h3>An end-of-day summary</h3>
+        <p>What got done, what's still outstanding, and anything that needs to carry over to tomorrow.</p>
+        <div class="bubble">What's my end-of-day summary?</div>
+      </div>
+      <div class="card">
+        <h3>Ready the moment you need it</h3>
+        <p>Haive lives in the same chat your team already uses — there's no separate app to open or
+        dashboard to remember to check.</p>
+        <div class="bubble">Available any time, right where you're already working</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ROLES -->
+  <div class="roles">
+    <h2>One assistant, tuned to each role</h2>
+    <p>Haive doesn't behave the same way for everyone — it can be set up differently depending on who's
+    asking.</p>
+    <div class="role-row">
+      <div class="role">
+        <div class="who">Store / Team Manager</div>
+        <h3>Focused on today's operations</h3>
+        <p>Overdue follow-ups, enquiries that need a response, and what's on today's schedule — the
+        day-to-day view.</p>
+      </div>
+      <div class="role">
+        <div class="who">Sales Consultant</div>
+        <h3>Focused on pipeline and revenue</h3>
+        <p>Deal stages, quote values, and where the biggest opportunities are — the numbers that move the
+        business forward.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="closing">
+    <h2>The same assistant, everywhere your team already works.</h2>
+    <p>Haive isn't a new habit your team has to build — it's built into the chat they're already using,
+    answering the moment they ask.</p>
+  </div>
+
+</div>
+<footer>Prepared for client presentation · a plain-language walkthrough of Haive's current capabilities.</footer>

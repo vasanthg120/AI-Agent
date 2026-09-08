@@ -74,21 +74,51 @@ def resolve_credentials(organization_id: str | None = None, user_id: str = "") -
             creds = integration_store.get_credentials(provider, organization_id)
             if not creds or not creds.get("baseUrl"):
                 continue
-            headers = integration_store.build_auth_headers(creds["authType"], creds["credentials"])
-            auth_header = headers.get("Authorization")
+            # Real bug, fixed here: this used to build headers via the
+            # generic buildAuthHeaders convention and only look for a key
+            # literally named "Authorization" — which only ever exists for
+            # the bearer/basic auth types. But the Add Integration wizard
+            # defaults to (and most customers pick) the "API Key" auth type,
+            # which stores the same raw key under "X-Api-Key" instead
+            # (auth-methods.ts's buildAuthHeaders default). That mismatch
+            # made every apiKey-connected org silently fall through to tier
+            # 4 (the empty native backend) — CRM tools and the dashboard
+            # sync job both looked "connected" in the UI but never actually
+            # talked to the real CRM, so no data ever showed up. Extract the
+            # raw token value directly per auth type instead of depending on
+            # which header name it happened to land under — this module
+            # always sends it under its own hardcoded "Authorization" header
+            # (see post_json/get_json below) regardless of what the customer
+            # named it when connecting.
+            auth_type = creds["authType"]
+            credentials = creds["credentials"]
+            if auth_type in ("apiKey", "apiKeyBaseUrl"):
+                auth_header = credentials.get("apiKey")
+            elif auth_type == "bearer":
+                # Confirmed live against the real API: ProspectConnect
+                # rejects (401) a "Bearer "-prefixed token and only accepts
+                # the raw token value — same fact this module's own tier-4
+                # comment above already documents for post_json/post's
+                # header convention. An org connected via the generic
+                # "bearer" auth type still stores (and should store) a real
+                # RFC6750-style token, so strip the scheme prefix only for
+                # THIS provider's actual wire format, rather than
+                # reinterpreting what "bearer" means everywhere else this
+                # generic multi-auth system is used.
+                auth_header = (credentials.get("bearerToken") or "").removeprefix("Bearer ") or None
+            elif auth_type == "customHeaders":
+                headers = credentials.get("headers") or {}
+                auth_header = next(
+                    (value for name, value in headers.items() if name.lower() == "authorization"),
+                    None,
+                )
+            else:
+                # 'basic' has no single raw token to extract (it's a
+                # username+password pair) — ProspectConnect doesn't support
+                # basic auth, so there's nothing usable here; fall through.
+                auth_header = None
             if not auth_header:
                 continue
-            # Confirmed live against the real API: ProspectConnect rejects
-            # (401) a "Bearer "-prefixed token and only accepts the raw
-            # token value — same fact this module's own tier-4 comment above
-            # already documents for post_json/post's header convention. An
-            # org connected via the generic "bearer" auth type still stores
-            # (and should store) a real RFC6750-style token, so strip the
-            # scheme prefix only for THIS provider's actual wire format,
-            # rather than reinterpreting what "bearer" means everywhere else
-            # this generic multi-auth system is used.
-            if creds["authType"] == "bearer" and auth_header.startswith("Bearer "):
-                auth_header = auth_header[len("Bearer ") :]
             parsed = urlparse(creds["baseUrl"])
             return f"{parsed.scheme}://{parsed.netloc}", auth_header
 

@@ -1,3 +1,4 @@
+import requests
 from jsonschema import Draft7Validator
 from jsonschema.exceptions import best_match
 
@@ -105,6 +106,16 @@ def execute_tool(name: str, tool_input: dict, context: dict, allowed_tools: list
     ) as outcome:
         try:
             result = handler(tool_input, context)
+        except requests.RequestException:
+            # A network/HTTP failure calling an external provider (e.g. the
+            # CRM) embeds the real request URL in str(exc) — e.g. "404
+            # Client Error: ... for url: https://api.<vendor>.com/...".
+            # Letting that reach Claude risks it being quoted straight back
+            # to the user, defeating the whole point of white-labeling which
+            # provider backs a given integration. Every other exception type
+            # keeps the generic-detail message below (never a raw URL).
+            outcome["success"] = False
+            return f"Tool '{name}' failed: the external service request failed or timed out."
         except Exception as exc:  # tool failures become context for Claude, not crashes
             outcome["success"] = False
             return f"Tool '{name}' failed: {exc}"

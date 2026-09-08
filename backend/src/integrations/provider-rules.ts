@@ -83,6 +83,16 @@ export const PROVIDER_RULES: Record<string, ProviderRule> = {
   openai: { label: 'OpenAI', allowedAuthTypes: ['apiKey'] },
   stripe: { label: 'Stripe', allowedAuthTypes: ['apiKey'] },
   twilio: { label: 'Twilio', allowedAuthTypes: ['apiKey'] },
+  // White-labeled on purpose: this is the connector id of the external CRM
+  // provider used behind the scenes (see python-agent/app/integrations/
+  // prospectconnect.py). Customers should only ever see "CRM", never the
+  // underlying vendor's name — falling through to getProviderRule's default
+  // (label = the raw provider string) would leak it straight into the
+  // Custom Integrations list and every toast that names this integration.
+  prospectconnect: {
+    label: 'CRM',
+    allowedAuthTypes: ['apiKeyBaseUrl', 'apiKey', 'bearer', 'basic', 'customHeaders'],
+  },
 };
 
 /** Unknown providers (anything not in the table — a real "connect ANY REST

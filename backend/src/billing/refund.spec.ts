@@ -52,6 +52,9 @@ class FakePaymentProvider implements PaymentProviderAdapter {
   async createCheckoutOrder(): Promise<CreateCheckoutOrderResult> {
     return { orderId: `fake_order_${Date.now()}_${Math.random().toString(36).slice(2)}`, checkoutParams: {}, simulated: true };
   }
+  async createAuthorizationOrder(): Promise<CreateCheckoutOrderResult> {
+    return { orderId: `fake_auth_order_${Date.now()}_${Math.random().toString(36).slice(2)}`, checkoutParams: {}, simulated: true };
+  }
   async saveMethodFromCheckout(): Promise<SaveMethodResult> {
     return { paymentMethodId: 'fake_pm', gatewayCustomerId: 'fake_cust', gatewayTokenIdEncrypted: 'enc', cardLast4: '4242', cardNetwork: 'visa' };
   }

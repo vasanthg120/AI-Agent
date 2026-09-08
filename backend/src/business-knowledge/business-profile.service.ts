@@ -6,34 +6,9 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { firstValueFrom } from 'rxjs';
 import { JwtPayload } from '../auth/jwt-payload.interface';
+import { BusinessKnowledgeInsightsService } from './business-knowledge-insights.service';
 import { BusinessProfile, BusinessProfileDocument } from './schemas/business-profile.schema';
 import { UpsertBusinessProfileDto } from './dto/upsert-business-profile.dto';
-
-const TEXT_FIELDS: (keyof BusinessProfile)[] = [
-  'businessName',
-  'description',
-  'industry',
-  'website',
-  'pricingPolicies',
-  'salesProcess',
-  'customerJourney',
-  'targetAudience',
-  'vision',
-  'mission',
-  'termsAndConditions',
-  'warrantyPolicy',
-  'refundPolicy',
-  'shippingPolicy',
-  'businessRules',
-  'standardOperatingProcedures',
-  'salesGuidelines',
-  'marketingGuidelines',
-  'internalPolicies',
-];
-const LIST_FIELDS: (keyof BusinessProfile)[] = ['branches', 'products', 'services', 'brands', 'values'];
-// Every field counted for "completeness" — faqs counted separately below
-// since it's neither a plain string nor a plain string[].
-const COMPLETENESS_FIELD_COUNT = TEXT_FIELDS.length + LIST_FIELDS.length + 1;
 
 function emptyProfile(organizationId: string) {
   return {
@@ -65,16 +40,6 @@ function emptyProfile(organizationId: string) {
     internalPolicies: undefined,
     completenessPct: 0,
   };
-}
-
-// Computed on read, never stored — same instinct as
-// customer-activity.service.ts's emailCorrelationCoverage.
-function completenessPct(profile: BusinessProfile): number {
-  let filled = 0;
-  for (const field of TEXT_FIELDS) if (profile[field]) filled += 1;
-  for (const field of LIST_FIELDS) if ((profile[field] as string[] | undefined)?.length) filled += 1;
-  if (profile.faqs?.length) filled += 1;
-  return Math.round((filled / COMPLETENESS_FIELD_COUNT) * 100);
 }
 
 // Assembles the profile into one labeled text blob for RAG indexing —
@@ -124,14 +89,16 @@ export class BusinessProfileService {
     private http: HttpService,
     private jwt: JwtService,
     private config: ConfigService,
+    private insights: BusinessKnowledgeInsightsService,
   ) {
     this.pythonAgentUrl = this.config.get<string>('pythonAgentUrl') ?? 'http://localhost:8000';
   }
 
   async getOrDefault(organizationId: string) {
     const doc = await this.profileModel.findOne({ organizationId }).exec();
-    if (!doc) return emptyProfile(organizationId);
-    return { ...doc.toObject(), completenessPct: completenessPct(doc) };
+    const completenessPct = await this.insights.overallCompletenessPct(organizationId);
+    if (!doc) return { ...emptyProfile(organizationId), completenessPct };
+    return { ...doc.toObject(), completenessPct };
   }
 
   async upsert(caller: JwtPayload, dto: UpsertBusinessProfileDto) {
@@ -162,6 +129,6 @@ export class BusinessProfileService {
       this.logger.error(`Business profile Qdrant sync failed: ${(err as Error).message}`);
     }
 
-    return { ...doc.toObject(), completenessPct: completenessPct(doc) };
+    return { ...doc.toObject(), completenessPct: await this.insights.overallCompletenessPct(caller.organizationId) };
   }
 }

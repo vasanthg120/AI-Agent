@@ -147,6 +147,17 @@ export class StripePaymentProvider implements PaymentProviderAdapter, OnModuleIn
     };
   }
 
+  /** Unlike Razorpay, Stripe doesn't need a dedicated "authorization" order
+   * shape — createCheckoutOrder above already sets setup_future_usage:
+   * 'off_session' on every PaymentIntent, which already achieves silent
+   * merchant-initiated recurring capability. This is a thin wrapper at a
+   * nominal amount so it never represents a real purchase, matching
+   * Razorpay's authorization order's intent (see confirmPaymentMethodAuthorization,
+   * billing.service.ts — the caller refunds this immediately either way). */
+  async createAuthorizationOrder(organizationId: string, _gatewayCustomerId: string, currency: string): Promise<CreateCheckoutOrderResult> {
+    return this.createCheckoutOrder(organizationId, 1, currency, 'auto_recharge_card_authorization');
+  }
+
   async saveMethodFromCheckout(
     _organizationId: string,
     gatewayCustomerId: string,

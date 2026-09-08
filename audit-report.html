@@ -1,0 +1,831 @@
+<title>Haive Platform Audit</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Sans+Condensed:wght@600;700&family=IBM+Plex+Serif:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap');
+
+:root{
+  --paper:#eef1f6; --surface:#ffffff; --surface-2:#f4f6fb; --ink:#131b2e; --ink-dim:#3c4658;
+  --muted:#5b657a; --line:#d6dceb; --line-soft:#e4e8f2; --accent:#1e56d6; --accent-ink:#0f3aa8;
+  --accent-soft:#e3ebfd; --code-bg:#e7ecf7;
+  --ok:#1a8f52; --ok-soft:#e2f6ea; --warn:#a5720a; --warn-soft:#fbf1d9; --bad:#c23b2e; --bad-soft:#fbe7e4;
+  --broken:#c0521a; --broken-soft:#fdece0; --test:#0e7d84; --test-soft:#dff4f4; --dead:#767c8c; --dead-soft:#eceef3;
+  --mock:#7c4fd6; --mock-soft:#efe7fb; --unk:#5b657a; --unk-soft:#eef0f5;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --paper:#0c1220; --surface:#121a2c; --surface-2:#162035; --ink:#e8ecf8; --ink-dim:#c3cae0;
+    --muted:#8b96b3; --line:#28324a; --line-soft:#1e2740; --accent:#6f97ff; --accent-ink:#9db7ff;
+    --accent-soft:#1a2a52; --code-bg:#1a2338;
+    --ok:#49d489; --ok-soft:#123324; --warn:#e3b143; --warn-soft:#3a2e0f; --bad:#ff7a6b; --bad-soft:#3a1712;
+    --broken:#ff9a5c; --broken-soft:#3a220d; --test:#5fd0d6; --test-soft:#0f2f31; --dead:#98a0b5; --dead-soft:#1c2338;
+    --mock:#b79bf0; --mock-soft:#251a3d; --unk:#8b96b3; --unk-soft:#1a2032;
+  }
+}
+:root[data-theme="dark"]{
+  --paper:#0c1220; --surface:#121a2c; --surface-2:#16203536; --ink:#e8ecf8; --ink-dim:#c3cae0;
+  --muted:#8b96b3; --line:#28324a; --line-soft:#1e2740; --accent:#6f97ff; --accent-ink:#9db7ff;
+  --accent-soft:#1a2a52; --code-bg:#1a2338;
+  --ok:#49d489; --ok-soft:#123324; --warn:#e3b143; --warn-soft:#3a2e0f; --bad:#ff7a6b; --bad-soft:#3a1712;
+  --broken:#ff9a5c; --broken-soft:#3a220d; --test:#5fd0d6; --test-soft:#0f2f31; --dead:#98a0b5; --dead-soft:#1c2338;
+  --mock:#b79bf0; --mock-soft:#251a3d; --unk:#8b96b3; --unk-soft:#1a2032;
+}
+
+*{box-sizing:border-box}
+body{background:var(--paper);color:var(--ink);font-family:'IBM Plex Serif',Georgia,serif;line-height:1.62;
+  -webkit-font-smoothing:antialiased;}
+h1,h2,h3,h4{font-family:'IBM Plex Sans Condensed','IBM Plex Sans',Arial,sans-serif;font-weight:700;
+  color:var(--ink);text-wrap:balance;letter-spacing:.1px;}
+code,.mono,.pill,.tag,td.num,.meta,.legend{font-family:'IBM Plex Mono',ui-monospace,Consolas,monospace;}
+
+a{color:var(--accent)}
+::selection{background:var(--accent-soft);color:var(--accent-ink)}
+
+/* ---------- shell ---------- */
+.shell{display:grid;grid-template-columns:272px minmax(0,1fr);gap:0;max-width:1400px;margin:0 auto;}
+.toc{position:sticky;top:0;align-self:start;height:100vh;overflow-y:auto;padding:28px 18px 40px 28px;
+  border-right:1px solid var(--line);}
+.toc-brand{font-family:'IBM Plex Sans',sans-serif;font-weight:700;font-size:13px;letter-spacing:1.6px;
+  text-transform:uppercase;color:var(--muted);margin-bottom:4px;}
+.toc-title{font-size:19px;font-weight:700;margin-bottom:2px;line-height:1.25;}
+.toc-sub{font-size:12px;color:var(--muted);margin-bottom:22px;font-family:'IBM Plex Sans',sans-serif;}
+.toc ol{list-style:none;padding:0;margin:0;counter-reset:sec;}
+.toc li{counter-increment:sec;margin-bottom:1px;}
+.toc a{display:flex;gap:8px;text-decoration:none;color:var(--ink-dim);font-family:'IBM Plex Sans',sans-serif;
+  font-size:12.5px;padding:5px 8px;border-radius:5px;line-height:1.35;}
+.toc a:hover{background:var(--surface-2);color:var(--ink)}
+.toc a::before{content:counter(sec);color:var(--muted);font-family:'IBM Plex Mono',monospace;font-size:11px;
+  min-width:16px;}
+.toc-score{margin-top:20px;padding:12px 14px;background:var(--surface);border:1px solid var(--line);
+  border-radius:10px;font-family:'IBM Plex Sans',sans-serif;}
+.toc-score .n{font-family:'IBM Plex Mono',monospace;font-size:26px;font-weight:600;color:var(--accent-ink);}
+.toc-score .l{font-size:10.5px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;}
+
+main{padding:40px 56px 120px;min-width:0;}
+.masthead{max-width:800px;margin-bottom:10px;}
+.eyebrow{font-family:'IBM Plex Mono',monospace;font-size:11.5px;letter-spacing:2px;text-transform:uppercase;
+  color:var(--accent);margin-bottom:14px;}
+.masthead h1{font-size:44px;line-height:1.08;margin:0 0 14px;}
+.masthead p.lede{font-family:'IBM Plex Sans',sans-serif;font-size:16px;color:var(--ink-dim);max-width:640px;margin:0 0 22px;}
+.meta-row{display:flex;flex-wrap:wrap;gap:22px;font-family:'IBM Plex Mono',monospace;font-size:12px;color:var(--muted);
+  padding:16px 0 30px;border-bottom:1px solid var(--line);margin-bottom:34px;}
+.meta-row b{color:var(--ink-dim);font-weight:600;}
+
+/* ---------- scorecard strip ---------- */
+.scorecard{display:grid;grid-template-columns:repeat(auto-fit,minmax(128px,1fr));gap:1px;background:var(--line);
+  border:1px solid var(--line);border-radius:12px;overflow:hidden;margin-bottom:40px;}
+.scorecard .cell{background:var(--surface);padding:16px 16px 14px;}
+.scorecard .cell .v{font-family:'IBM Plex Mono',monospace;font-size:24px;font-weight:600;color:var(--ink);}
+.scorecard .cell .k{font-family:'IBM Plex Sans',sans-serif;font-size:11px;color:var(--muted);text-transform:uppercase;
+  letter-spacing:.6px;margin-top:2px;}
+
+/* ---------- sections ---------- */
+section{max-width:840px;margin-bottom:56px;scroll-margin-top:24px;}
+section.wide{max-width:none;}
+.sec-num{font-family:'IBM Plex Mono',monospace;color:var(--accent);font-size:13px;}
+h2{font-size:27px;margin:0 0 6px;display:flex;align-items:baseline;gap:10px;}
+h2 .sec-num{font-size:15px;}
+.sec-dek{font-family:'IBM Plex Sans',sans-serif;color:var(--muted);font-size:13.5px;margin:0 0 20px;}
+h3{font-size:18px;margin:26px 0 8px;}
+p{margin:0 0 14px;max-width:70ch;}
+ul,ol{margin:0 0 16px;padding-left:22px;}
+li{margin-bottom:6px;max-width:68ch;}
+strong{color:var(--ink);font-weight:600;}
+
+/* ---------- badges / legend ---------- */
+.legend{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:36px;}
+.badge{display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:600;padding:3px 9px 3px 7px;
+  border-radius:20px;white-space:nowrap;line-height:1.7;letter-spacing:.2px;}
+.b-ok{background:var(--ok-soft);color:var(--ok)}
+.b-partial{background:var(--warn-soft);color:var(--warn)}
+.b-missing{background:var(--bad-soft);color:var(--bad)}
+.b-broken{background:var(--broken-soft);color:var(--broken)}
+.b-untested{background:var(--test-soft);color:var(--test)}
+.b-dead{background:var(--dead-soft);color:var(--dead)}
+.b-mock{background:var(--mock-soft);color:var(--mock)}
+.b-unk{background:var(--unk-soft);color:var(--unk);border:1px dashed var(--muted)}
+
+/* ---------- tables ---------- */
+.twrap{overflow-x:auto;border:1px solid var(--line);border-radius:10px;margin:14px 0 26px;background:var(--surface);}
+table{border-collapse:collapse;width:100%;font-family:'IBM Plex Sans',sans-serif;font-size:12.8px;min-width:640px;}
+thead th{text-align:left;background:var(--surface-2);color:var(--muted);font-weight:600;font-size:10.5px;
+  text-transform:uppercase;letter-spacing:.5px;padding:9px 12px;border-bottom:1px solid var(--line);white-space:nowrap;}
+tbody td{padding:9px 12px;border-bottom:1px solid var(--line-soft);vertical-align:top;color:var(--ink-dim);}
+tbody tr:last-child td{border-bottom:none;}
+tbody tr:hover{background:var(--surface-2);}
+td code, li code, p code{background:var(--code-bg);color:var(--accent-ink);padding:1px 5px;border-radius:4px;font-size:11.5px;}
+td.file{white-space:nowrap;font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--muted);}
+
+/* ---------- callouts ---------- */
+.callout{border:1px solid var(--line);border-left:3px solid var(--accent);background:var(--surface);
+  border-radius:0 10px 10px 0;padding:14px 18px;margin:18px 0 24px;font-family:'IBM Plex Sans',sans-serif;font-size:13.5px;}
+.callout.warn{border-left-color:var(--warn);}
+.callout.bad{border-left-color:var(--bad);}
+.callout p{margin:0;max-width:none;color:var(--ink-dim)}
+.callout .lbl{font-weight:700;color:var(--ink);text-transform:uppercase;font-size:10.5px;letter-spacing:.8px;
+  margin-bottom:6px;display:block;}
+
+/* ---------- flow diagram ---------- */
+.flow{display:flex;flex-direction:column;gap:0;font-family:'IBM Plex Mono',monospace;font-size:12.5px;margin:20px 0 28px;}
+.flow .step{background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:9px 14px;
+  display:flex;justify-content:space-between;gap:14px;align-items:center;}
+.flow .step .note{color:var(--muted);font-family:'IBM Plex Sans',sans-serif;font-size:11.5px;text-align:right;}
+.flow .arrow{text-align:center;color:var(--muted);font-size:14px;padding:2px 0;}
+.flow .step.gap{border-style:dashed;border-color:var(--bad);color:var(--bad);}
+
+/* score ring */
+.ring-wrap{display:flex;gap:36px;align-items:center;flex-wrap:wrap;margin:22px 0 10px;}
+.ring{position:relative;width:168px;height:168px;flex:none;}
+.ring svg{transform:rotate(-90deg);}
+.ring .num{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;}
+.ring .num b{font-family:'IBM Plex Mono',monospace;font-size:38px;color:var(--ink);}
+.ring .num span{font-family:'IBM Plex Sans',sans-serif;font-size:10.5px;color:var(--muted);letter-spacing:.5px;}
+
+footer{max-width:840px;padding-top:26px;border-top:1px solid var(--line);color:var(--muted);
+  font-family:'IBM Plex Sans',sans-serif;font-size:12px;}
+
+@media (max-width:900px){
+  .shell{grid-template-columns:1fr;}
+  .toc{position:relative;height:auto;border-right:none;border-bottom:1px solid var(--line);}
+  main{padding:32px 20px 100px;}
+}
+</style>
+
+<div class="shell">
+  <nav class="toc">
+    <div class="toc-brand">Codebase Audit</div>
+    <div class="toc-title">Haive AI Agent</div>
+    <div class="toc-sub">Full-stack + AI agent gap analysis</div>
+    <ol>
+      <li><a href="#s1">Executive Summary</a></li>
+      <li><a href="#s2">Current Architecture</a></li>
+      <li><a href="#s3">Frontend Audit</a></li>
+      <li><a href="#s4">Backend Audit</a></li>
+      <li><a href="#s5">Python Agent Audit</a></li>
+      <li><a href="#s6">AI / LLM Audit</a></li>
+      <li><a href="#s7">Memory Audit</a></li>
+      <li><a href="#s8">Sales &amp; Revenue Audit</a></li>
+      <li><a href="#s9">Integration Audit</a></li>
+      <li><a href="#s10">Database Audit</a></li>
+      <li><a href="#s11">Security Audit</a></li>
+      <li><a href="#s12">Performance &amp; Scale</a></li>
+      <li><a href="#s13">Code Quality</a></li>
+      <li><a href="#s14">Testing Audit</a></li>
+      <li><a href="#s15">DevOps Audit</a></li>
+      <li><a href="#s16">Implemented Features</a></li>
+      <li><a href="#s17">Partially Implemented</a></li>
+      <li><a href="#s18">Broken Features</a></li>
+      <li><a href="#s19">Missing Features</a></li>
+      <li><a href="#s20">Features to Modify</a></li>
+      <li><a href="#s21">Features to Remove</a></li>
+      <li><a href="#s22">Target Architecture</a></li>
+      <li><a href="#s23">Memory Architecture</a></li>
+      <li><a href="#s24">Capability Gap Analysis</a></li>
+      <li><a href="#s25">Implementation Roadmap</a></li>
+      <li><a href="#s26">P0–P3 Backlog</a></li>
+      <li><a href="#s27">Readiness Score</a></li>
+    </ol>
+    <div class="toc-score">
+      <div class="n">46<span style="font-size:16px;color:var(--muted)">/100</span></div>
+      <div class="l">Production readiness — see §27</div>
+    </div>
+  </nav>
+
+  <main>
+    <div class="masthead">
+      <div class="eyebrow">Static code audit — not a penetration test</div>
+      <h1>What Haive actually does, versus what it claims to.</h1>
+      <p class="lede">A source-level audit of the three-layer Haive stack — React frontend, NestJS backend,
+      FastAPI/LangGraph Python agent — tracing every sales-and-revenue claim back to real code, real database
+      writes, and real LLM calls, file and line included.</p>
+    </div>
+    <div class="meta-row">
+      <span><b>Repo</b> AI-Agent (branch <code>main</code>)</span>
+      <span><b>Audited</b> 2026-09-04</span>
+      <span><b>Method</b> static read of source, configs &amp; git history — app not exercised live</span>
+      <span><b>Scope</b> frontend/, backend/, python-agent/</span>
+    </div>
+
+    <div class="scorecard">
+      <div class="cell"><div class="v">31</div><div class="k">Backend modules</div></div>
+      <div class="cell"><div class="v">70</div><div class="k">Backend controllers</div></div>
+      <div class="cell"><div class="v">73</div><div class="k">Mongoose schemas</div></div>
+      <div class="cell"><div class="v">20</div><div class="k">Agent tools registered</div></div>
+      <div class="cell"><div class="v">16</div><div class="k">Backend spec files</div></div>
+      <div class="cell"><div class="v">0</div><div class="k">Python / frontend tests</div></div>
+      <div class="cell"><div class="v">0</div><div class="k">CI workflows</div></div>
+    </div>
+
+    <div class="legend">
+      <span class="badge b-ok">✅ Implemented</span>
+      <span class="badge b-partial">🟡 Partial</span>
+      <span class="badge b-missing">🔴 Missing</span>
+      <span class="badge b-broken">⚠️ Broken</span>
+      <span class="badge b-untested">🧪 Untested</span>
+      <span class="badge b-dead">🗑️ Dead</span>
+      <span class="badge b-mock">🔌 Mock</span>
+      <span class="badge b-unk">❓ Unverifiable</span>
+    </div>
+
+    <!-- ============ 1 EXEC SUMMARY ============ -->
+    <section id="s1">
+      <h2><span class="sec-num">01</span> Executive Summary</h2>
+      <p class="sec-dek">The short version, before the evidence.</p>
+
+      <p><strong>Haive is a real, working, multi-tenant SaaS product — not a demo.</strong> It has bcrypt+JWT
+      auth with session revocation and 2FA, a genuine multi-tier CRM integration against an external product
+      called <strong>ProspectConnect</strong>, a working Microsoft Graph OAuth2 flow with encrypted token storage,
+      a metered credit-billing system wired to Stripe/Razorpay/Cashfree, an org-scoped RAG pipeline over Qdrant,
+      and a Claude-based tool-calling agent loop that can read and write real CRM, calendar, email and WhatsApp
+      data. This is materially more built than a typical "AI chat wrapper."</p>
+
+      <p><strong>The README is stale by roughly a month of active development</strong> (<code>README.md</code>
+      last touched 2026-07-19; <code>app/agent/orchestrator.py</code> 2026-08-17) and describes a system that no
+      longer exists: it claims an <strong>OpenAI + Gemini</strong> router, but the code runs on
+      <strong>Anthropic Claude + Groq</strong> (<code>app/agent/anthropic_client.py</code>,
+      <code>app/agent/groq_client.py</code> — no OpenAI or Gemini client file exists anywhere in the repo). It
+      claims the CRM and Outlook modules are "stubbed" placeholders; both are real integrations today. It claims
+      Redis is unused; a per-tool rate limiter and a cache module both read/write it. Anyone onboarding from the
+      README alone would misjudge the system in almost every direction — some features are far more real than
+      documented, one (web search) is <em>less</em> real than documented.</p>
+
+      <p><strong>The product has quietly grown past "AI sales agent" into a full retail/franchise operations
+      suite</strong> — billing, royalty (franchise revenue-share), vendor management, finance documents,
+      gamification, timeline, command-center, and business-intelligence modules sit alongside the CRM/chat core.
+      This is a legitimate strategic direction, but it also means engineering effort is spread across ~31
+      backend modules while the two areas that most directly gate revenue — <strong>lead/deal intelligence</strong>
+      and <strong>test coverage on anything except billing</strong> — are comparatively thin.</p>
+
+      <p><strong>There is no first-class "Lead" concept.</strong> The product speaks ProspectConnect's own
+      vocabulary — contacts, deals, accounts, quotes — and approximates lead-funnel tracking through
+      email-intent classification (<code>email-preclassification.util.ts</code>) feeding an
+      "enquiry-conversion" analytics view. There is no lead score, no qualification stage, no assignment
+      workflow, and no agent tool that can create or update a deal (only <em>list/search</em> tools exist for
+      CRM data — see §8).</p>
+
+      <p><strong>Autonomous business action is real but unconfirmed.</strong> The agent can send real email
+      (SMTP) and real WhatsApp messages (Meta Cloud API) once credentials are configured, and the tool registry
+      (<code>app/tools/registry.py</code>) enforces schema validation, per-user rate limiting and
+      persona-scoped tool allow-lists on every call — but there is no human-in-the-loop confirmation step before
+      a side-effecting tool fires. A model that decides to email a customer, emails them.</p>
+
+      <p><strong>Testing and CI are the sharpest gap.</strong> 16 of 16 backend spec files sit inside
+      <code>auth/</code> and <code>billing/</code>; the CRM, chat, memory, RAG, business-intelligence, royalty,
+      finance, gamification and integrations modules — the majority of the product surface — have zero
+      automated tests. The Python agent and the frontend have none at all. There is no <code>.github/workflows</code>
+      directory, so none of this is even checked on push.</p>
+    </section>
+
+    <!-- ============ 2 ARCHITECTURE ============ -->
+    <section id="s2">
+      <h2><span class="sec-num">02</span> Current System Architecture</h2>
+      <p class="sec-dek">What's actually wired together, corrected against the stale README.</p>
+
+      <div class="flow">
+        <div class="step"><span>React 19 + Vite frontend <code>:5173</code></span><span class="note">Socket.IO + REST via axios</span></div>
+        <div class="arrow">↓</div>
+        <div class="step"><span>NestJS backend <code>:3000</code></span><span class="note">JWT mint/verify · 31 modules · owns Mongo writes for conversations, CRM, billing</span></div>
+        <div class="arrow">↓ JWT forwarded, re-verified</div>
+        <div class="step"><span>FastAPI + custom LangGraph-style orchestrator <code>:8000</code></span><span class="note">Anthropic Claude primary, Groq for trivial turns — <em>not</em> OpenAI/Gemini as README states</span></div>
+        <div class="arrow">↓</div>
+        <div class="step"><span>MongoDB · Qdrant · Redis</span><span class="note">memory + RAG + rate-limit/cache (Redis <em>is</em> consumed, contra README)</span></div>
+      </div>
+
+      <p>Every chat turn also makes a synchronous side-trip to a credit-billing gate: the agent calls
+      <code>POST /billing/credits/reserve</code> on the NestJS backend <em>before</em> the LLM is invoked
+      (<code>app/routes/chat.py</code>, <code>app/billing/client.py</code>), and settles or releases the
+      reservation after. This is a real hard-stop (HTTP 402 on insufficient balance) with a deliberate fail-open
+      exception if the billing call itself errors — see §11.</p>
+
+      <h3>Corrections to the documented architecture</h3>
+      <div class="twrap"><table>
+        <thead><tr><th>README claims</th><th>Code actually shows</th><th>Evidence</th></tr></thead>
+        <tbody>
+          <tr><td>OpenAI + Gemini smart router</td><td>Anthropic Claude + Groq; no OpenAI/Gemini client exists</td><td class="file">app/agent/anthropic_client.py, groq_client.py, router.py</td></tr>
+          <tr><td>9 tools registered</td><td>20 tools registered</td><td class="file">app/tools/registry.py</td></tr>
+          <tr><td>CRM module "stubbed"</td><td>Real 4-tier integration against ProspectConnect + native fallback</td><td class="file">app/integrations/prospectconnect.py</td></tr>
+          <tr><td>Outlook "stubbed", swap in OAuth2 later</td><td>Real MS Graph OAuth2, token refresh, AES-encrypted storage; one read path still returns placeholder data</td><td class="file">app/memory/outlook_store.py, backend/src/outlook/outlook.service.ts:87-99</td></tr>
+          <tr><td>Redis "wired in for future work, nothing consumes it yet"</td><td>Consumed today by the per-tool rate limiter and a cache module</td><td class="file">app/memory/rate_limiter.py, app/cache/</td></tr>
+          <tr><td>No billing mentioned</td><td>Full credit-metering + Stripe/Razorpay/Cashfree gateway system</td><td class="file">backend/src/billing/* (24 files)</td></tr>
+        </tbody>
+      </table></div>
+
+      <div class="callout warn"><span class="lbl">Anomaly</span><p><code>frontend/AI-Agent/</code> is a
+      separate git submodule (its own <code>.git</code>, its own nested <code>backend/</code>) currently showing
+      modified/untracked content in <code>git status</code>. It was not in scope for this audit and its purpose
+      relative to the top-level <code>frontend/</code> and <code>backend/</code> is not documented anywhere —
+      worth a five-minute conversation with whoever added it before it's mistaken for dead weight or, worse,
+      silently diverges further.</p></div>
+    </section>
+
+    <!-- ============ 3 FRONTEND ============ -->
+    <section id="s3" class="wide">
+      <h2><span class="sec-num">03</span> Frontend Audit</h2>
+      <p class="sec-dek">React 19 + Vite + TypeScript · Zustand + TanStack Query · Socket.IO client.</p>
+
+      <p>28 feature folders under <code>src/features/</code>, routed through a single lazy-loaded
+      <code>routes/index.tsx</code> behind <code>ProtectedRoute</code> (auth-gated) and <code>RequireRole</code>
+      /<code>BlockRole</code> (role-gated, e.g. <code>agent_user</code> is blocked from several admin surfaces).
+      This is a real, sizeable application, not a chat-widget shell.</p>
+
+      <div class="twrap"><table>
+        <thead><tr><th>Feature</th><th>UI</th><th>API</th><th>Backend</th><th>AI</th><th>DB</th><th>Functional</th></tr></thead>
+        <tbody>
+          <tr><td>Auth (login/register/2FA/OAuth)</td><td>✅</td><td>✅</td><td>✅</td><td>—</td><td>✅</td><td><span class="badge b-ok">✅ Yes</span></td></tr>
+          <tr><td>Chat (Socket.IO)</td><td>✅</td><td>✅</td><td>✅</td><td>✅</td><td>✅</td><td><span class="badge b-ok">✅ Yes</span></td></tr>
+          <tr><td>Chat slash-commands / prompt chips</td><td>✅</td><td>—</td><td>—</td><td>—</td><td>—</td><td><span class="badge b-mock">🔌 Hardcoded fixture list</span></td></tr>
+          <tr><td>Business dashboard router</td><td>✅</td><td>✅</td><td>✅</td><td>—</td><td>✅</td><td><span class="badge b-ok">✅ Yes</span></td></tr>
+          <tr><td>Business Intelligence (enquiry-conversion, followup-summary, etc.)</td><td>✅</td><td>✅</td><td>✅</td><td>🟡 (summary only)</td><td>✅</td><td><span class="badge b-partial">🟡 Mostly</span></td></tr>
+          <tr><td>Email Intelligence / customer timeline</td><td>✅</td><td>✅</td><td>✅</td><td>—</td><td>✅</td><td><span class="badge b-ok">✅ Yes</span></td></tr>
+          <tr><td>Command Center</td><td>✅</td><td>✅</td><td>✅</td><td>❓</td><td>✅</td><td><span class="badge b-unk">❓ Not traced deeply</span></td></tr>
+          <tr><td>Timeline</td><td>✅</td><td>✅</td><td>✅</td><td>—</td><td>✅</td><td><span class="badge b-ok">✅ Yes</span></td></tr>
+          <tr><td>Finance (dashboard/documents/presets)</td><td>✅</td><td>✅</td><td>✅</td><td>🟡 (RAG over uploaded docs)</td><td>✅</td><td><span class="badge b-partial">🟡 Mostly</span></td></tr>
+          <tr><td>Royalty (invoices/report/rules)</td><td>✅</td><td>✅</td><td>✅</td><td>—</td><td>✅</td><td><span class="badge b-ok">✅ Yes</span></td></tr>
+          <tr><td>Gamification (points/streaks)</td><td>✅</td><td>✅</td><td>✅</td><td>—</td><td>✅</td><td><span class="badge b-ok">✅ Yes</span></td></tr>
+          <tr><td>Billing / Pricing / Add Credits</td><td>✅</td><td>✅</td><td>✅</td><td>—</td><td>✅</td><td><span class="badge b-ok">✅ Yes (best-tested area)</span></td></tr>
+          <tr><td>Integrations page</td><td>✅</td><td>✅</td><td>✅</td><td>✅ (agent reads these creds)</td><td>✅</td><td><span class="badge b-ok">✅ Yes</span></td></tr>
+          <tr><td>Notifications</td><td>✅</td><td>✅</td><td>✅</td><td>—</td><td>✅</td><td><span class="badge b-partial">🟡 Type list is a fixture, data is real</span></td></tr>
+          <tr><td>Agent Roles settings</td><td>✅</td><td>✅</td><td>✅</td><td>✅ (drives persona.allowed_tools)</td><td>✅</td><td><span class="badge b-ok">✅ Yes</span></td></tr>
+          <tr><td>Sales Targets settings</td><td>✅</td><td>✅</td><td>✅</td><td>—</td><td>✅</td><td><span class="badge b-ok">✅ Yes, RBAC-gated</span></td></tr>
+          <tr><td>Platform Admin (billing)</td><td>✅</td><td>✅</td><td>✅</td><td>—</td><td>✅</td><td><span class="badge b-ok">✅ Yes</span></td></tr>
+        </tbody>
+      </table></div>
+
+      <h3>Fake/hardcoded data actually found</h3>
+      <p>The mock layer (<code>src/services/mock/fixtures/</code>) is small and honestly scoped — three files:
+      <code>chat.ts</code> (slash-command list, prompt-suggestion chips), <code>notifications.ts</code>
+      (notification <em>kind</em> enum/labels, not notification data), <code>integrations.ts</code>. None of the
+      three feed a page's primary business data — they back cosmetic UI affordances. This is a minor, low-risk
+      finding, not the "entire dashboard is fake" pattern the audit brief warned to watch for.</p>
+
+      <h3>What wasn't verified</h3>
+      <p>Accessibility (no axe/lighthouse run performed), responsive breakpoints, and exact loading/empty-state
+      coverage per page were not exhaustively reviewed — flagged <span class="badge b-unk">❓</span> rather than
+      guessed at. No frontend test file exists anywhere under <code>frontend/src</code>.</p>
+    </section>
+
+    <!-- ============ 4 BACKEND ============ -->
+    <section id="s4" class="wide">
+      <h2><span class="sec-num">04</span> Backend Audit</h2>
+      <p class="sec-dek">NestJS 10 · Mongoose · 31 modules, 70 controllers, 73 schemas.</p>
+
+      <p>Auth uses two entirely separate Passport strategies — <code>JwtStrategy</code> for customer users and
+      <code>AdminJwtStrategy</code> for a distinct <code>AdminAccount</code> collection — sharing only the JWT
+      secret, never the user model. Both re-fetch the account on <em>every</em> request rather than trusting the
+      token's snapshot claims, so deactivation and role changes take effect on the next call instead of waiting
+      out the token TTL (<code>strategies/jwt.strategy.ts:29-52</code>). Session revocation is real: each login
+      issues a <code>jti</code> appended to the user's <code>sessions[]</code>; a token whose <code>jti</code> no
+      longer appears there is rejected — genuine logout-everywhere / revoke-a-device support, not just
+      TTL-based expiry.</p>
+
+      <p>Given the scale (70 controllers), the table below is representative rather than exhaustive — it covers
+      the modules most load-bearing for the sales/revenue mandate. Endpoint counts per module are in the
+      right-most column for the rest.</p>
+
+      <div class="twrap"><table>
+        <thead><tr><th>Method</th><th>Endpoint</th><th>Purpose</th><th>Auth</th><th>DB</th><th>External</th><th>Agent</th><th>Status</th></tr></thead>
+        <tbody>
+          <tr><td>POST</td><td><code>/auth/register</code></td><td>Create org + owner user</td><td>Public, throttled</td><td>✅</td><td>—</td><td>—</td><td><span class="badge b-ok">✅</span></td></tr>
+          <tr><td>POST</td><td><code>/auth/login</code></td><td>Password → JWT (or 2FA challenge)</td><td>Public, throttled</td><td>✅</td><td>—</td><td>—</td><td><span class="badge b-ok">✅</span></td></tr>
+          <tr><td>POST</td><td><code>/crm/deal/getDealsByBusinessId</code></td><td>List/search deals (native CRM bridge — mirrors ProspectConnect's own contract)</td><td>JWT</td><td>—</td><td>proxies to ProspectConnect or self</td><td>✅ read by <code>crm_deal_tool.py</code></td><td><span class="badge b-ok">✅</span></td></tr>
+          <tr><td>POST</td><td><code>/crm/contact/upsert</code></td><td>Create/update a contact</td><td>JWT</td><td>—</td><td>✅</td><td>✅ via <code>integration_execute_tool</code></td><td><span class="badge b-ok">✅</span></td></tr>
+          <tr><td>GET</td><td><code>/sales-targets/achievement</code></td><td>Target vs. actual, scoped</td><td>JWT + <code>admin</code> role</td><td>✅</td><td>—</td><td>—</td><td><span class="badge b-ok">✅ (was missing RolesGuard — since fixed)</span></td></tr>
+          <tr><td>POST</td><td><code>/business-intelligence/ai-followup-summary/generate</code></td><td>LLM-generated org-wide follow-up narrative, daily cache</td><td>JWT + owner/admin/manager</td><td>✅</td><td>—</td><td>✅ real LLM call</td><td><span class="badge b-ok">✅</span></td></tr>
+          <tr><td>GET</td><td><code>/business-intelligence/enquiry-conversion</code></td><td>Closest thing to lead-funnel analytics</td><td>JWT, role-scoped</td><td>✅</td><td>—</td><td>—</td><td><span class="badge b-ok">✅</span></td></tr>
+          <tr><td>POST</td><td><code>/billing/credits/reserve|settle|release</code></td><td>Pre/post-flight metering for every chat turn</td><td>Service JWT (agent→backend)</td><td>✅</td><td>Stripe/Razorpay/Cashfree</td><td>called by python-agent</td><td><span class="badge b-ok">✅ Best-tested path in repo</span></td></tr>
+          <tr><td>POST</td><td><code>/documents/upload</code></td><td>Multipart → forwarded to agent ingest</td><td>JWT</td><td>—</td><td>—</td><td>✅</td><td><span class="badge b-ok">✅</span></td></tr>
+          <tr><td>*</td><td><code>outlook/*</code></td><td>OAuth connect, account switch, (placeholder) inbox read</td><td>JWT</td><td>✅</td><td>MS Graph</td><td>✅ token consumed by agent</td><td><span class="badge b-partial">🟡 OAuth real, one read path placeholder</span></td></tr>
+          <tr><td>—</td><td><code>gamification/*</code>, <code>timeline/*</code>, <code>royalty/*</code>, <code>vendors/*</code>, <code>finance/*</code>, <code>command-center/*</code></td><td>Operational-suite modules, ~35 endpoints combined</td><td>JWT/RBAC</td><td>✅</td><td>varies</td><td>mostly none</td><td><span class="badge b-untested">🧪 Functional per code, zero test coverage</span></td></tr>
+        </tbody>
+      </table></div>
+
+      <h3>Security-conscious details worth keeping</h3>
+      <ul>
+        <li>Global <code>ValidationPipe({whitelist, forbidNonWhitelisted, transform})</code> in <code>main.ts</code> — unknown/extra body fields are rejected outright.</li>
+        <li>Razorpay webhook HMAC is verified against the literal raw request bytes (<code>rawBody:true</code> in <code>main.ts</code>), not a re-serialized JSON body — the correct way to do it.</li>
+        <li>CORS is an explicit configured origin with <code>credentials:true</code>, not a wildcard.</li>
+        <li>A documented, already-fixed privilege-escalation bug: <code>sales-target.controller.ts</code>'s <code>achievement</code> route previously had no role guard, letting any authenticated user query org-wide or a named coworker's revenue figures via query params — the comment trail shows this was caught and closed, a good sign for how seriously the team treats access control.</li>
+      </ul>
+
+      <h3>What's incomplete</h3>
+      <p><code>backend/src/outlook/outlook.service.ts:87-99</code> — <code>placeholderEmails()</code> is
+      returned whenever the mailbox isn't "configured", <em>and also</em> as the unconditional fallback path
+      even when it is. The OAuth handshake, token storage/refresh and agent-side consumption are all real; this
+      one surfaced read is not.</p>
+    </section>
+
+    <!-- ============ 5 PYTHON AGENT ============ -->
+    <section id="s5" class="wide">
+      <h2><span class="sec-num">05</span> Python AI Agent Audit</h2>
+      <p class="sec-dek">FastAPI · a hand-rolled planner/tool-loop (README calls it "LangGraph"; <code>langgraph</code> is a dependency but the live chat loop in <code>app/agent/orchestrator.py</code> + <code>graph.py</code> is custom control flow, not a <code>StateGraph</code>).</p>
+
+      <h3>Actual execution flow (chat turn)</h3>
+      <div class="flow">
+        <div class="step"><span>Frontend → Socket.IO → NestJS <code>ChatGateway</code></span><span class="note">persists user turn to Mongo</span></div>
+        <div class="arrow">↓</div>
+        <div class="step"><span>NestJS → <code>POST /chat</code> (JWT forwarded)</span></div>
+        <div class="arrow">↓</div>
+        <div class="step"><span><code>security.get_current_user</code> re-verifies JWT</span><span class="note">agent never trusts the backend blindly</span></div>
+        <div class="arrow">↓</div>
+        <div class="step"><span><code>billing_client.reserve()</code></span><span class="note">HTTP 402 hard-stop before any LLM call — <code>app/routes/chat.py:38-42</code></span></div>
+        <div class="arrow">↓</div>
+        <div class="step"><span><code>resolve_persona()</code> → system prompt + <code>allowed_tools</code> + model tier</span></div>
+        <div class="arrow">↓</div>
+        <div class="step"><span><code>get_recent_messages()</code> from Mongo (agent reads, backend owns writes)</span></div>
+        <div class="arrow">↓</div>
+        <div class="step"><span><code>trivial_router</code> → Groq, else Claude (<code>anthropic_client.py</code>)</span><span class="note">bounded to 5 tool rounds per orchestrator.py</span></div>
+        <div class="arrow">↓</div>
+        <div class="step"><span><code>execute_tool()</code> — schema-validated, rate-limited, persona-scoped</span><span class="note">app/tools/registry.py — the single real execution boundary</span></div>
+        <div class="arrow">↓</div>
+        <div class="step"><span>Result fed back to Claude → final reply</span></div>
+        <div class="arrow">↓</div>
+        <div class="step"><span><code>billing_client.settle()</code> → <code>redact_secrets()</code> → backend → socket → UI</span></div>
+      </div>
+
+      <p>Streaming (<code>/chat/stream</code>) and cancellation (<code>/chat/stream/cancel</code>,
+      <code>app/agent/cancellation.py</code>) are both real, plus a scheduler-driven autonomous track:
+      <code>app/agent/autonomous.py</code> runs the identical Planner/tool stack from a bare goal string with no
+      live user turn, and <code>app/workflows/</code> registers concrete jobs on top of it
+      (<code>morning_brief</code>, <code>eod_report</code>, a per-user <code>todo_agent</code>/<code>eod_agent</code>
+      that gathers real CRM/Outlook/Calendar/Document data). This is meaningfully more automation
+      infrastructure than the README implies, though it's currently scheduler-triggered only — nothing yet
+      proactively fires it off an event like "deal went cold" (see §19).</p>
+
+      <h3>Tool inventory (20 registered)</h3>
+      <div class="twrap"><table>
+        <thead><tr><th>Tool</th><th>Real / stub</th><th>Notes</th></tr></thead>
+        <tbody>
+          <tr><td><code>crm_tool</code>, <code>crm_deal_tool</code>, <code>crm_note_tool</code>, <code>crm_tag_tool</code>, <code>crm_account_tool</code>, <code>crm_product_tool</code>, <code>crm_quote_tool</code></td><td><span class="badge b-ok">✅ Real</span></td><td>Read/search only — no create/update-deal tool exists</td></tr>
+          <tr><td><code>outlook_tool</code>, <code>calendar_tool</code></td><td><span class="badge b-ok">✅ Real</span></td><td>Live MS Graph once org connects</td></tr>
+          <tr><td><code>gmail_tool</code></td><td><span class="badge b-ok">✅ Real</span></td><td>Not documented in README at all</td></tr>
+          <tr><td><code>email_tool</code> (send_email)</td><td><span class="badge b-ok">✅ Real SMTP</span></td><td>Falls back to a labeled stub string only if SMTP unconfigured</td></tr>
+          <tr><td><code>whatsapp_tool</code></td><td><span class="badge b-ok">✅ Real Meta Cloud API</span></td><td>Same graceful stub-when-unconfigured pattern</td></tr>
+          <tr><td><code>database_tool</code></td><td><span class="badge b-ok">✅ Real</span></td><td>Reads live <code>notes</code> + user <code>preferences</code></td></tr>
+          <tr><td><code>document_tool</code>, <code>business_search_tool</code></td><td><span class="badge b-ok">✅ Real</span></td><td>RAG retrieval, tenant-scoped (§7/§9)</td></tr>
+          <tr><td><code>memory_tool</code></td><td><span class="badge b-ok">✅ Real</span></td><td>Long-term memory save/list/delete</td></tr>
+          <tr><td><code>integration_capabilities_tool</code>, <code>integration_execute_tool</code></td><td><span class="badge b-ok">✅ Real</span></td><td>Generic connector execution against org-configured integrations</td></tr>
+          <tr><td><code>employee_tool</code></td><td><span class="badge b-mock">🔌 Mock</span></td><td>Two hardcoded names in a Python list — no HRIS</td></tr>
+          <tr><td><code>search_tool</code> (web_search)</td><td><span class="badge b-broken">⚠️ Non-functional even when configured</span></td><td>With <code>SEARCH_API_KEY</code> set, still returns the literal string <em>"configured but not yet implemented"</em> — worse than the README's "plug in a provider" framing suggests; the plug point doesn't exist yet</td></tr>
+        </tbody>
+      </table></div>
+
+      <h3>Multi-model routing, correctly implemented</h3>
+      <p><code>trivial_router.py</code> sends short/simple turns to Groq; anything already mid-tool-loop, long,
+      or tool-shaped goes to Claude via <code>anthropic_client.py</code>. <code>personas.py</code> layers a
+      second dimension on top — each configured agent persona carries its own system prompt,
+      <strong>allowed-tool allow-list</strong>, and model tier, and that allow-list is enforced twice: once by
+      only exposing those tool specs to the model (<code>registry.get_tool_definitions</code>), and again as a
+      hard check inside <code>execute_tool()</code> — so a persona restriction can't be bypassed even from the
+      MCP server path (<code>app/mcp_server.py</code>), which exposes the same tool registry to external MCP
+      clients.</p>
+    </section>
+
+    <!-- ============ 6 AI/LLM ============ -->
+    <section id="s6">
+      <h2><span class="sec-num">06</span> AI / LLM Audit</h2>
+      <p class="sec-dek">Distinguishing "a good prompt" from "an agent that acts."</p>
+      <p>The system genuinely crosses the line from text generation into tool-driven action: CRM reads, SMTP
+      sends, WhatsApp sends, and memory writes are all real side effects a model can trigger mid-conversation,
+      gated only by schema validation, a 30-calls/minute-per-tool rate limit, and persona scoping — not by any
+      confirmation step (see §11). <code>crew_reports.py</code> runs a second, separate execution path
+      (CrewAI, pinned to 0.130.0 specifically because newer CrewAI drags in a Starlette version this FastAPI
+      app can't tolerate) purely for the scheduled morning/EOD report — the live chat loop never touches CrewAI.
+      Reasoning is bounded, not open-ended: the tool-round cap is 5 per turn
+      (<code>app/agent/orchestrator.py</code>), a sane guardrail against runaway loops and runaway spend.</p>
+      <p>Prompt management lives in <code>app/prompts/registry.py</code> and <code>definitions.py</code> as
+      versioned, named prompt definitions rather than inline strings scattered through the codebase — a real
+      practice, not just convention.</p>
+    </section>
+
+    <!-- ============ 7 MEMORY ============ -->
+    <section id="s7">
+      <h2><span class="sec-num">07</span> Memory Audit</h2>
+      <p class="sec-dek">What the agent actually remembers, layer by layer.</p>
+
+      <div class="twrap"><table>
+        <thead><tr><th>Layer</th><th>Status</th><th>Where</th></tr></thead>
+        <tbody>
+          <tr><td>Conversation history</td><td><span class="badge b-ok">✅</span></td><td>Mongo, written by NestJS, read-only for the agent (<code>conversation_store.py</code>)</td></tr>
+          <tr><td>Long-term user facts/preferences</td><td><span class="badge b-ok">✅</span></td><td><code>user_memory.py</code> — dual-written to Mongo <em>and</em> embedded into Qdrant, so long-term and semantic memory can't drift apart</td></tr>
+          <tr><td>Short-term / working memory</td><td><span class="badge b-ok">✅</span></td><td><code>working_memory.py</code></td></tr>
+          <tr><td>Org-level "business memory" as a distinct structured store</td><td><span class="badge b-missing">🔴 Missing as its own abstraction</span></td><td>Approximated by scheduled RAG sync of CRM deals/quotes into Qdrant (<code>rag/business_sync.py</code>) — semantic, not queryable as structured facts</td></tr>
+          <tr><td>Activity memory (which leads/deals/emails the agent has already touched)</td><td><span class="badge b-missing">🔴 Missing</span></td><td>No "agent execution history" collection found — <code>traced_tool_call</code> (§11) logs for observability, not for the agent's own future recall</td></tr>
+          <tr><td>Cross-session user identity/role/org</td><td><span class="badge b-ok">✅</span></td><td>Carried on every JWT, re-verified per request</td></tr>
+        </tbody>
+      </table></div>
+
+      <p>The dual-write pattern in <code>user_memory.py</code> — one Mongo insert, one Qdrant upsert, same
+      write path — is a genuinely good design choice worth preserving rather than "refactoring away": it's
+      exactly what avoids the classic bug where structured memory and semantic memory silently disagree.</p>
+    </section>
+
+    <!-- ============ 8 SALES & REVENUE ============ -->
+    <section id="s8" class="wide">
+      <h2><span class="sec-num">08</span> Sales &amp; Revenue Capability Audit</h2>
+      <p class="sec-dek">The audit's core question, from a RevOps seat.</p>
+
+      <div class="twrap"><table>
+        <thead><tr><th>Capability</th><th>Status</th><th>Reality</th></tr></thead>
+        <tbody>
+          <tr><td>Lead creation</td><td><span class="badge b-missing">🔴 Missing</span></td><td>No lead entity anywhere; only contacts/deals via ProspectConnect</td></tr>
+          <tr><td>Lead scoring / qualification</td><td><span class="badge b-missing">🔴 Missing</span></td><td>No scoring model, no BANT/MEDDIC-style qualification field found</td></tr>
+          <tr><td>Lead assignment</td><td><span class="badge b-partial">🟡 Adjacent</span></td><td><code>DealAssignmentSettings</code> exists for deals, not leads specifically</td></tr>
+          <tr><td>Customer profiles / history</td><td><span class="badge b-ok">✅</span></td><td>Real, via CRM contacts + <code>customer-activity.controller.ts</code> + email timeline</td></tr>
+          <tr><td>Pipeline / deal tracking</td><td><span class="badge b-ok">✅</span></td><td>Real, sourced live from ProspectConnect (<code>crm_deal_tool.py</code>)</td></tr>
+          <tr><td>Forecasting / probability</td><td><span class="badge b-unk">❓</span></td><td>Not found in any BI module inspected — likely absent, not confirmed absent</td></tr>
+          <tr><td>Conversion analysis</td><td><span class="badge b-ok">✅</span></td><td><code>enquiry-conversion.controller.ts</code> — the closest thing to lead-funnel analytics</td></tr>
+          <tr><td>Sales performance / targets</td><td><span class="badge b-ok">✅</span></td><td><code>sales-target.controller.ts</code>, RBAC-scoped, real</td></tr>
+          <tr><td>Find high-value leads / recommend who to contact</td><td><span class="badge b-missing">🔴 Missing</span></td><td>No ranking/recommendation tool or endpoint found</td></tr>
+          <tr><td>Draft outreach</td><td><span class="badge b-partial">🟡 Implicit</span></td><td>The LLM can draft text in chat; no dedicated "draft outreach" tool/template flow</td></tr>
+          <tr><td>Send email / WhatsApp</td><td><span class="badge b-ok">✅</span></td><td>Real, see §5 — but only if the model decides to, and only via generic send tools, not a CRM-aware sequencer</td></tr>
+          <tr><td>Update CRM records (create/edit)</td><td><span class="badge b-partial">🟡 Partial</span></td><td>Contact <em>upsert</em> exists; deals/notes/tags are list/search-only from the agent's side</td></tr>
+          <tr><td>Detect inactive leads / stale deals</td><td><span class="badge b-missing">🔴 Missing</span></td><td>No "days since last activity" alerting found</td></tr>
+          <tr><td>Recommend next actions</td><td><span class="badge b-partial">🟡</span></td><td>The daily <code>todo_agent</code>/<code>eod_agent</code> workflow generates a prioritized list from real CRM/Outlook/Calendar data — the closest real analog</td></tr>
+          <tr><td>Predict revenue</td><td><span class="badge b-missing">🔴 Missing</span></td><td>No forecasting model found</td></tr>
+          <tr><td>Generate sales reports</td><td><span class="badge b-ok">✅</span></td><td>Morning brief / EOD report workflows, real LLM output over real data</td></tr>
+          <tr><td>Answer revenue questions with real data</td><td><span class="badge b-ok">✅</span></td><td>RAG over synced CRM deals/quotes (<code>rag/business_sync.py</code>) plus live tool calls</td></tr>
+        </tbody>
+      </table></div>
+    </section>
+
+    <!-- ============ 9 INTEGRATIONS ============ -->
+    <section id="s9" class="wide">
+      <h2><span class="sec-num">09</span> Integration Audit</h2>
+      <div class="twrap"><table>
+        <thead><tr><th>Integration</th><th>Configured</th><th>Backend</th><th>Python Agent</th><th>Frontend</th><th>Auth</th><th>Functional</th></tr></thead>
+        <tbody>
+          <tr><td>ProspectConnect CRM</td><td>✅</td><td>✅</td><td>✅</td><td>✅</td><td>API key / bearer, 4-tier resolution + native fallback</td><td><span class="badge b-ok">✅</span></td></tr>
+          <tr><td>Microsoft Outlook / Graph</td><td>✅</td><td>✅</td><td>✅</td><td>✅</td><td>Multi-tenant OAuth2, encrypted refresh token</td><td><span class="badge b-partial">🟡 OAuth real, one read stubbed</span></td></tr>
+          <tr><td>Gmail</td><td>✅</td><td>✅</td><td>✅</td><td>❓ not traced</td><td>OAuth</td><td><span class="badge b-ok">✅ per code</span></td></tr>
+          <tr><td>Email (SMTP send)</td><td>env-dependent</td><td>—</td><td>✅</td><td>—</td><td>SMTP creds</td><td><span class="badge b-ok">✅ when configured</span></td></tr>
+          <tr><td>WhatsApp (Meta Cloud API)</td><td>env-dependent</td><td>—</td><td>✅</td><td>—</td><td>access token</td><td><span class="badge b-ok">✅ when configured</span></td></tr>
+          <tr><td>Web search</td><td>env-dependent</td><td>—</td><td>⚠️</td><td>—</td><td>—</td><td><span class="badge b-broken">⚠️ Non-functional regardless</span></td></tr>
+          <tr><td>Employee directory / HRIS</td><td>—</td><td>—</td><td>🔌</td><td>—</td><td>—</td><td><span class="badge b-mock">🔌 Hardcoded 2 rows</span></td></tr>
+          <tr><td>Stripe / Razorpay / Cashfree</td><td>✅</td><td>✅</td><td>—</td><td>✅</td><td>API keys, HMAC webhook verify</td><td><span class="badge b-ok">✅</span></td></tr>
+          <tr><td>MCP server</td><td>✅</td><td>—</td><td>✅ (<code>mcp_server.py</code>, mounted at <code>/mcp</code>)</td><td>—</td><td>same JWT boundary</td><td><span class="badge b-ok">✅ exposes tool registry externally</span></td></tr>
+        </tbody>
+      </table></div>
+    </section>
+
+    <!-- ============ 10 DATABASE ============ -->
+    <section id="s10">
+      <h2><span class="sec-num">10</span> Database &amp; Data Architecture Audit</h2>
+      <p><strong>73 Mongoose schemas</strong> across the backend — organizations, users (with embedded
+      <code>sessions[]</code> for revocation), CRM cache, billing/subscriptions/invoices/coupons, royalty,
+      finance, gamification stats, timeline events, notifications, agent roles. Qdrant holds four semantically
+      distinct point namespaces via <code>source_type</code> payload filtering — <code>document</code>
+      (user-private uploads), <code>finance_document</code> and <code>business_knowledge_document</code>/
+      <code>business_profile</code> (org-wide), and <code>memory</code> (per-user long-term facts) — a clean,
+      consistent tenant-isolation pattern rather than one shared unscoped bucket (<code>app/rag/retriever.py</code>).
+      Redis backs the tool-call rate limiter and a cache layer for cacheable ProspectConnect reads
+      (<code>app/cache/</code>, <code>prospectconnect.py</code>'s <code>_CACHEABLE_PATHS</code>).</p>
+      <p><strong>Missing for a production sales agent:</strong> no dedicated lead entity/collection (§8); no
+      "agent execution history" collection distinct from tracing spans (§7); index coverage on the 73 schemas
+      was not individually audited — flagged <span class="badge b-unk">❓</span> rather than assumed adequate.</p>
+    </section>
+
+    <!-- ============ 11 SECURITY ============ -->
+    <section id="s11" class="wide">
+      <h2><span class="sec-num">11</span> Security Audit</h2>
+      <div class="twrap"><table>
+        <thead><tr><th>Severity</th><th>Finding</th><th>Evidence</th></tr></thead>
+        <tbody>
+          <tr><td><span class="badge b-broken">HIGH</span></td><td>No human-in-the-loop confirmation before side-effecting tool calls (send_email, send_whatsapp, contact upsert). A model that decides to act, acts — bounded only by schema validation, a 30/min-per-tool rate limit, and persona scoping.</td><td class="file">app/tools/registry.py:76-108</td></tr>
+          <tr><td><span class="badge b-partial">MEDIUM</span></td><td><code>docker-compose.yml</code> exposes Mongo, Qdrant and Redis directly on host ports with no auth/TLS — fine for local dev, a real risk if this compose file is ever run as-is against a public host, and the README frames Docker as "the fastest path" with no separate prod compose called out.</td><td class="file">docker-compose.yml</td></tr>
+          <tr><td><span class="badge b-partial">MEDIUM</span></td><td>Billing <code>reserve()</code> fails <em>open</em> (unmetered) if the backend billing call itself errors — a deliberate, documented tradeoff to protect chat availability, but it means an attacker who can disrupt the backend↔agent link gets free LLM usage. Worth an explicit business sign-off, not a silent default.</td><td class="file">app/billing/client.py:44-56</td></tr>
+          <tr><td><span class="badge b-partial">MEDIUM</span></td><td>No CI pipeline means no automated dependency/secret scanning gate on every push.</td><td class="file">no <code>.github/workflows</code> found</td></tr>
+          <tr><td><span class="badge b-ok">Good</span></td><td>Session revocation via <code>jti</code> + re-fetched account state on every request; deactivation/role changes take effect immediately, not at token TTL.</td><td class="file">strategies/jwt.strategy.ts</td></tr>
+          <tr><td><span class="badge b-ok">Good</span></td><td>Agent independently re-verifies the JWT rather than trusting the backend's forward — defense in depth; "never openly callable."</td><td class="file">app/security.py</td></tr>
+          <tr><td><span class="badge b-ok">Good</span></td><td>Webhook HMAC checked against raw bytes, not re-serialized JSON.</td><td class="file">main.ts (rawBody:true), billing-webhook.controller.ts</td></tr>
+          <tr><td><span class="badge b-ok">Good</span></td><td>OAuth refresh/access tokens encrypted at rest (<code>app/encryption.py</code>, per-org Azure client secrets included).</td><td class="file">app/memory/outlook_store.py</td></tr>
+          <tr><td><span class="badge b-ok">Good</span></td><td>An RBAC bug (missing guard on org-wide sales achievement data) was found and fixed, with the reasoning left in the commit — a healthy sign for how access-control review happens on this codebase.</td><td class="file">sales-target.controller.ts</td></tr>
+        </tbody>
+      </table></div>
+      <p>Prompt injection was not independently tested (no live run performed), but the structural risk is real:
+      RAG-retrieved CRM/document content flows back into the same context the model uses to decide tool calls,
+      with no visible output-sanitization step between retrieval and tool-selection.</p>
+    </section>
+
+    <!-- ============ 12 PERFORMANCE ============ -->
+    <section id="s12">
+      <h2><span class="sec-num">12</span> Performance &amp; Scalability Audit</h2>
+      <ul>
+        <li><strong>Single in-process scheduler.</strong> <code>main.py</code>'s <code>BackgroundScheduler</code> (RAG sync, CRM/quote Mongo sync) is explicitly documented as safe only for a single python-agent replica — horizontal scaling the agent needs this moved to a real job queue (Redis is already present) before it's safe.</li>
+        <li><strong>Synchronous billing round-trip on every turn.</strong> <code>reserve()</code> is a blocking HTTP call to the backend before the LLM call even starts, adding real latency to every message; acceptable at current scale, worth watching under load.</li>
+        <li><strong>Tool round cap (5) and per-tool rate limit (30/min/user)</strong> bound both cost and latency blowup — good defaults, not yet load-tested per this audit.</li>
+        <li><strong>Conversation history growth</strong> — no summarization/compaction step was found feeding <code>_build_messages()</code>; long conversations will grow the context sent to the LLM unbounded (a real cost and latency risk as usage grows).</li>
+      </ul>
+    </section>
+
+    <!-- ============ 13 CODE QUALITY ============ -->
+    <section id="s13">
+      <h2><span class="sec-num">13</span> Code Quality Audit</h2>
+      <p>Code quality is notably above average for a project this size — comments consistently explain
+      <em>why</em> (a documented ProspectConnect quirk in <code>crm_deal_tool.py</code>, the CrewAI/Starlette
+      pin conflict in <code>requirements.txt</code>, the Windows console encoding workaround in
+      <code>main.py</code>), and several comments record a bug that was found and fixed rather than just the
+      current state. The main structural risks are scale-driven, not craft-driven: 31 backend modules and 20
+      agent tools is a lot of surface for a small team to keep coherent, and the near-total absence of tests
+      outside billing (§14) means that discipline currently rests entirely on code review, not on a safety net.</p>
+    </section>
+
+    <!-- ============ 14 TESTING ============ -->
+    <section id="s14">
+      <h2><span class="sec-num">14</span> Testing Audit</h2>
+      <div class="ring-wrap">
+        <div class="ring">
+          <svg width="168" height="168" viewBox="0 0 168 168">
+            <circle cx="84" cy="84" r="72" fill="none" stroke="var(--line)" stroke-width="16"/>
+            <circle cx="84" cy="84" r="72" fill="none" stroke="var(--bad)" stroke-width="16"
+              stroke-dasharray="452.4" stroke-dashoffset="401" stroke-linecap="round"/>
+          </svg>
+          <div class="num"><b>2/31</b><span>backend modules tested</span></div>
+        </div>
+        <div style="max-width:420px">
+          <p style="margin:0">16 spec files total: 1 in <code>auth/</code> (<code>admin-auth.spec.ts</code>),
+          15 in <code>billing/</code>. Every other backend module — CRM, chat, dashboard, gamification,
+          timeline, business-intelligence, royalty, finance, vendors, integrations, documents, notifications,
+          organizations, users — has <strong>zero</strong> automated tests. The Python agent has no
+          <code>test_*.py</code> anywhere. The frontend has no <code>.test.</code>/<code>.spec.</code> file
+          anywhere.</p>
+        </div>
+      </div>
+      <p><strong>Minimum bar before production:</strong> auth (already covered) plus (1) the chat→agent→tool
+      round trip with a mocked LLM, (2) the billing reserve/settle/release state machine under concurrent
+      requests, (3) CRM credential-resolution tiering (the exact bug class the code comments show already bit
+      production once), (4) RBAC on every role-gated endpoint, and (5) tenant-isolation on RAG retrieval
+      (a leak here is a cross-customer data breach, not just a bug).</p>
+    </section>
+
+    <!-- ============ 15 DEVOPS ============ -->
+    <section id="s15">
+      <h2><span class="sec-num">15</span> DevOps &amp; Deployment Audit</h2>
+      <ul>
+        <li>Dockerfiles exist for all three services plus the nested submodule copy; <code>frontend/nginx.conf</code> serves the built SPA.</li>
+        <li><code>docker-compose.yml</code> is a single, dev-shaped file — no separate hardened production compose/K8s manifests were found.</li>
+        <li><strong>No CI/CD</strong> — no <code>.github/workflows</code> directory exists anywhere in the repo. Nothing runs tests, lint, or a build check automatically on push or PR.</li>
+        <li>Only the Mongo service has a healthcheck in compose; backend/agent/frontend containers have <code>restart: unless-stopped</code> but no liveness/readiness probes wired to it.</li>
+        <li>No backup, monitoring/alerting (Prometheus/Grafana/Sentry), or rollback strategy was found in-repo — this may live outside the repository, so it's marked <span class="badge b-unk">❓</span> rather than asserted absent.</li>
+      </ul>
+    </section>
+
+    <!-- ============ 16-21 FEATURE STATUS LISTS ============ -->
+    <section id="s16">
+      <h2><span class="sec-num">16</span> Implemented Features</h2>
+      <p>JWT auth + 2FA + session revocation · multi-tenant org model · ProspectConnect CRM (contacts, deals,
+      accounts, notes, tags, products, quotes) · MS Graph OAuth2 with encrypted refresh · Gmail integration ·
+      real SMTP + WhatsApp send · credit-based billing with Stripe/Razorpay/Cashfree · Claude+Groq routed chat
+      with streaming and cancellation · persona-scoped tool access · tenant-isolated RAG over Qdrant · long-term
+      + semantic dual-write memory · scheduled morning-brief/EOD-report/todo-agent workflows · sales targets +
+      achievement tracking with RBAC · gamification · royalty/franchise revenue-share module · AI-generated
+      follow-up summaries · enquiry-conversion analytics · MCP server exposing the tool registry.</p>
+    </section>
+
+    <section id="s17">
+      <h2><span class="sec-num">17</span> Partially Implemented Features</h2>
+      <p>Outlook module (OAuth real, one inbox-read path placeholder) · CRM agent write access (contact upsert
+      real, deals/notes/tags read-only from the agent) · finance module (dashboard real, RAG-over-documents
+      depth not fully traced) · command-center (wired end-to-end, AI depth unconfirmed) · notifications
+      (real data, fixture-defined kind list).</p>
+    </section>
+
+    <section id="s18">
+      <h2><span class="sec-num">18</span> Broken Features</h2>
+      <p><code>web_search</code> tool — registered, schema-valid, reachable by the model, and still returns
+      "configured but not yet implemented" even with a search API key set (<code>app/tools/search_tool.py</code>).
+      This is the one place the actual code is <em>less</em> functional than the README's own description
+      implies.</p>
+    </section>
+
+    <section id="s19">
+      <h2><span class="sec-num">19</span> Missing Features</h2>
+      <p>First-class Lead entity and lead scoring/qualification · deal create/update tools for the agent (only
+      list/search exist) · stale-deal / inactive-lead detection and alerting · revenue forecasting · outbound
+      sequencing (multi-touch outreach cadences) · event-driven (vs. purely scheduled) autonomous triggers ·
+      structured org-level "business facts" memory distinct from RAG · agent execution history for the agent's
+      own recall · CI/CD pipeline · test coverage outside billing/auth.</p>
+    </section>
+
+    <section id="s20">
+      <h2><span class="sec-num">20</span> Features to Modify</h2>
+      <p>Add a confirmation/dry-run gate for side-effecting tools (email/WhatsApp send, CRM writes) before they
+      fire unattended · replace <code>outlook.service.ts</code>'s unconditional placeholder-email fallback with
+      a real Graph read now that the OAuth plumbing already exists · give the billing fail-open path an explicit
+      cap/alert rather than silent unmetered pass-through · move the in-process scheduler to a queue-backed job
+      runner ahead of any horizontal scale-out.</p>
+    </section>
+
+    <section id="s21">
+      <h2><span class="sec-num">21</span> Features to Remove</h2>
+      <p>Nothing rises to "delete this" — the mock fixtures found (§3) are small, honest, and low-risk enough to
+      leave as-is. The clearest cleanup candidate is documentation, not code: the README needs a rewrite (§1),
+      and the purpose of the <code>frontend/AI-Agent</code> submodule needs to be either documented or removed
+      before it accumulates more silent drift.</p>
+    </section>
+
+    <!-- ============ 22 TARGET ARCH ============ -->
+    <section id="s22">
+      <h2><span class="sec-num">22</span> Recommended Target Architecture</h2>
+      <p>The existing shape is already close to right — frontend → backend gateway → agent orchestration → LLM
+      → tool router → external systems → activity → memory. The gap is not in the layers, it's in two places:
+      (1) a <strong>confirmation checkpoint</strong ) between tool selection and tool execution for anything
+      that writes to an external system, and (2) an explicit <strong>Activity/Memory write-back</strong> step
+      after every tool execution, so the next turn (or the next day's autonomous run) can see what the agent
+      already did rather than re-discovering it from scratch each time.</p>
+    </section>
+
+    <!-- ============ 23 MEMORY ARCH ============ -->
+    <section id="s23">
+      <h2><span class="sec-num">23</span> Future Memory Architecture</h2>
+      <p>Keep the existing dual-write pattern (Mongo as system of record, Qdrant as the semantic mirror) and
+      extend it with two new layers rather than replacing anything: an <strong>Episodic Activity</strong>
+      collection (one document per tool execution: what was called, on whose behalf, what changed, keyed by
+      organization + lead/deal id) written directly from <code>execute_tool()</code>'s existing success path,
+      and a <strong>Semantic Business Memory</strong> collection for durable org facts ("our standard payment
+      terms are Net 30") distinct from the current CRM-sync RAG index, which is transactional data, not
+      knowledge. Both should carry <code>organization_id</code> as a mandatory field from day one, following the
+      isolation pattern already used correctly by <code>rag/retriever.py</code>'s per-<code>source_type</code>
+      filters.</p>
+    </section>
+
+    <!-- ============ 24 GAP ANALYSIS ============ -->
+    <section id="s24">
+      <h2><span class="sec-num">24</span> Product Capability Gap Analysis</h2>
+      <p>The platform's engineering maturity (auth, billing, multi-tenancy, real integrations) is well ahead of
+      its stated product vision (an autonomous sales/RevOps agent). The gap is concentrated almost entirely in
+      the <strong>lead layer</strong>: everything downstream of "a lead exists" — scoring, prioritization,
+      stale-deal detection, proactive outreach, forecasting — is either approximated through email-intent
+      classification or simply absent, while everything upstream (auth, billing, tenancy, integrations,
+      analytics plumbing) is unusually solid for this stage. This is a favorable gap to have: the hard
+      infrastructure is done, and what's missing is domain logic that can be built on top of it.</p>
+    </section>
+
+    <!-- ============ 25 ROADMAP ============ -->
+    <section id="s25" class="wide">
+      <h2><span class="sec-num">25</span> Prioritized Implementation Roadmap</h2>
+      <div class="twrap"><table>
+        <thead><tr><th>Phase</th><th>Story</th><th>Component</th><th>Priority</th><th>Acceptance Criteria</th></tr></thead>
+        <tbody>
+          <tr><td>1 · Stabilize</td><td>Fix Outlook placeholder-email fallback</td><td>Backend</td><td>P0</td><td>Real Graph read returned whenever a connection is active</td></tr>
+          <tr><td>1 · Stabilize</td><td>Implement or remove <code>web_search</code></td><td>Python agent</td><td>P1</td><td>Tool either calls a real provider or is unregistered</td></tr>
+          <tr><td>1 · Stabilize</td><td>Rewrite README against current code</td><td>Docs</td><td>P0</td><td>Provider, tool count, integration status all match source</td></tr>
+          <tr><td>2 · Core Agent</td><td>Confirmation gate for side-effecting tools</td><td>Python agent</td><td>P0</td><td>Email/WhatsApp/CRM-write tool calls require an explicit accept step before firing</td></tr>
+          <tr><td>2 · Core Agent</td><td>Add deal create/update tools</td><td>Python agent + Backend</td><td>P1</td><td>Agent can move a deal stage, not just read it</td></tr>
+          <tr><td>3 · Memory</td><td>Episodic Activity collection</td><td>Python agent</td><td>P1</td><td>Every tool execution writes one activity record, org-scoped</td></tr>
+          <tr><td>4 · Sales Intelligence</td><td>Lead entity + qualification stage</td><td>Backend + Frontend</td><td>P0</td><td>A lead can be created, scored, and promoted to a deal</td></tr>
+          <tr><td>4 · Sales Intelligence</td><td>Stale-deal detection</td><td>Python agent</td><td>P1</td><td>Daily job flags deals with no activity in N days</td></tr>
+          <tr><td>5 · Automation</td><td>Event-driven autonomous triggers</td><td>Python agent</td><td>P2</td><td>A CRM webhook (e.g. deal stage change) can fire <code>autonomous.py</code>, not just the scheduler</td></tr>
+          <tr><td>6 · Production</td><td>CI pipeline (lint + test + build)</td><td>DevOps</td><td>P0</td><td>PRs blocked on failing checks</td></tr>
+          <tr><td>6 · Production</td><td>Test coverage for CRM, chat, RAG tenant isolation</td><td>All</td><td>P0</td><td>Coverage exists for every module in §14's list</td></tr>
+        </tbody>
+      </table></div>
+    </section>
+
+    <!-- ============ 26 BACKLOG ============ -->
+    <section id="s26">
+      <h2><span class="sec-num">26</span> P0 / P1 / P2 / P3 Backlog</h2>
+      <p><strong>P0 — Critical:</strong> confirmation gate on side-effecting tools · Outlook placeholder fix ·
+      CI pipeline · tests for CRM/chat/RAG tenant isolation · README rewrite · lead entity.</p>
+      <p><strong>P1 — High:</strong> deal create/update tools · stale-deal detection · web_search
+      fix-or-remove · episodic activity memory · queue-backed scheduler for horizontal scale.</p>
+      <p><strong>P2 — Medium:</strong> event-driven autonomous triggers · outbound sequencing · revenue
+      forecasting · semantic business-facts memory layer.</p>
+      <p><strong>P3 — Future:</strong> lead scoring model · multi-touch cadence builder · cross-org benchmarking
+      in business intelligence.</p>
+    </section>
+
+    <!-- ============ 27 SCORE ============ -->
+    <section id="s27">
+      <h2><span class="sec-num">27</span> Final Production Readiness Score</h2>
+      <div class="ring-wrap">
+        <div class="ring">
+          <svg width="168" height="168" viewBox="0 0 168 168">
+            <circle cx="84" cy="84" r="72" fill="none" stroke="var(--line)" stroke-width="16"/>
+            <circle cx="84" cy="84" r="72" fill="none" stroke="var(--accent)" stroke-width="16"
+              stroke-dasharray="452.4" stroke-dashoffset="244" stroke-linecap="round"/>
+          </svg>
+          <div class="num"><b>46</b><span>/ 100</span></div>
+        </div>
+        <div style="max-width:440px">
+          <p style="margin:0 0 8px">Engineering foundation: <strong>~70/100</strong> — real auth, real
+          multi-tenancy, real billing, real integrations, thoughtful security fixes already in the commit
+          history.</p>
+          <p style="margin:0 0 8px">Sales/revenue product completeness against the stated vision:
+          <strong>~30/100</strong> — no lead entity, no scoring, no stale-deal detection, no forecasting.</p>
+          <p style="margin:0">Operational safety net: <strong>~15/100</strong> — no CI, tests confined to
+          billing/auth, no confirmation gate on autonomous external actions.</p>
+        </div>
+      </div>
+      <p>The number that matters most for a go/no-go decision is the operational-safety-net score, not the
+      feature score: this system can already take real, hard-to-undo actions (send an email, message a
+      customer on WhatsApp, write to the CRM) with no human checkpoint and no automated test protecting the
+      paths that decide whether it should. That is the single highest-leverage fix before any new sales
+      capability is layered on top.</p>
+    </section>
+
+    <footer>
+      Audit performed via static source review of the repository at commit <code>7048c840f</code> (branch
+      <code>main</code>) — no live requests were made against any external system (ProspectConnect, Microsoft
+      Graph, Stripe, etc.) during this review. Findings marked <span class="badge b-unk">❓</span> reflect code
+      that was not traced deeply enough for a firm verdict, not confirmed absence.
+    </footer>
+  </main>
+</div>

@@ -2,7 +2,7 @@ from app.integrations import prospectconnect
 
 SPEC = {
     "name": "crm_deal",
-    "description": "List or search deals in the CRM (ProspectConnect), with optional pipeline scoping.",
+    "description": "List or search deals in the CRM, with optional pipeline scoping.",
     "input_schema": {
         "type": "object",
         "properties": {

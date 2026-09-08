@@ -11,10 +11,13 @@ var __metadata = (this && this.__metadata) || function (k, v) {
 var __param = (this && this.__param) || function (paramIndex, decorator) {
     return function (target, key) { decorator(target, key, paramIndex); }
 };
+var IntegrationsService_1;
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.IntegrationsService = void 0;
 const axios_1 = require("@nestjs/axios");
 const common_1 = require("@nestjs/common");
+const config_1 = require("@nestjs/config");
+const jwt_1 = require("@nestjs/jwt");
 const mongoose_1 = require("@nestjs/mongoose");
 const mongoose_2 = require("mongoose");
 const rxjs_1 = require("rxjs");
@@ -23,16 +26,30 @@ const encryption_service_1 = require("../common/encryption/encryption.service");
 const auth_methods_1 = require("./auth-methods");
 const provider_rules_1 = require("./provider-rules");
 const integration_credential_schema_1 = require("./schemas/integration-credential.schema");
+const CRM_PROVIDERS = new Set(['crm', 'prospectconnect']);
 const PROVIDER_SLUG = /^[a-z0-9][a-z0-9_-]{0,63}$/i;
-let IntegrationsService = class IntegrationsService {
-    constructor(credentialModel, encryption, http) {
+let IntegrationsService = IntegrationsService_1 = class IntegrationsService {
+    constructor(credentialModel, encryption, http, jwt, config) {
         this.credentialModel = credentialModel;
         this.encryption = encryption;
         this.http = http;
+        this.jwt = jwt;
+        this.config = config;
+        this.logger = new common_1.Logger(IntegrationsService_1.name);
+        this.pythonAgentUrl = this.config.get('pythonAgentUrl') ?? 'http://localhost:8000';
+    }
+    triggerCrmSyncIfApplicable(organizationId, provider) {
+        if (!CRM_PROVIDERS.has(provider))
+            return;
+        const token = this.jwt.sign({ sub: 'system', organizationId }, { expiresIn: '5m' });
+        (0, rxjs_1.firstValueFrom)(this.http.post(`${this.pythonAgentUrl}/sync/crm/run-for-org`, {}, { headers: { Authorization: `Bearer ${token}` } })).catch((err) => {
+            this.logger.error(`Immediate CRM sync failed for org ${organizationId}: ${err.message}`);
+        });
     }
     async connect(organizationId, provider, apiKey, baseUrl) {
         this.assertAllowed(provider);
         await this.credentialModel.findOneAndUpdate({ organizationId, provider }, { organizationId, provider, apiKey: this.encryption.encrypt(apiKey), baseUrl, authType: undefined, credentialsEncrypted: undefined }, { upsert: true });
+        this.triggerCrmSyncIfApplicable(organizationId, provider);
         return { connected: true, maskedKey: this.mask(apiKey), baseUrl };
     }
     async connectWithAuth(organizationId, provider, dto) {
@@ -52,6 +69,7 @@ let IntegrationsService = class IntegrationsService {
             healthCheckPath: dto.healthCheckPath,
             apiKey: undefined,
         }, { upsert: true });
+        this.triggerCrmSyncIfApplicable(organizationId, provider);
         return { connected: true, authType, baseUrl: dto.baseUrl };
     }
     connectFromDto(organizationId, provider, dto) {
@@ -75,6 +93,7 @@ let IntegrationsService = class IntegrationsService {
             .sort({ createdAt: -1 });
         return docs.map((doc) => ({
             provider: doc.provider,
+            label: (0, provider_rules_1.getProviderRule)(doc.provider).label,
             connected: true,
             authType: doc.authType,
             maskedKey: doc.authType ? undefined : this.mask(this.decryptStoredApiKey(doc.apiKey)),
@@ -201,11 +220,13 @@ let IntegrationsService = class IntegrationsService {
     }
 };
 exports.IntegrationsService = IntegrationsService;
-exports.IntegrationsService = IntegrationsService = __decorate([
+exports.IntegrationsService = IntegrationsService = IntegrationsService_1 = __decorate([
     (0, common_1.Injectable)(),
     __param(0, (0, mongoose_1.InjectModel)(integration_credential_schema_1.IntegrationCredential.name)),
     __metadata("design:paramtypes", [mongoose_2.Model,
         encryption_service_1.EncryptionService,
-        axios_1.HttpService])
+        axios_1.HttpService,
+        jwt_1.JwtService,
+        config_1.ConfigService])
 ], IntegrationsService);
 //# sourceMappingURL=integrations.service.js.map

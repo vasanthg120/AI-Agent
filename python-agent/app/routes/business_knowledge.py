@@ -6,10 +6,17 @@ from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from pydantic import BaseModel
 from pypdf import PdfReader
 
-from app.agent.anthropic_client import extract_business_document, extract_business_document_from_text
-from app.models.schemas import BusinessDocumentExtractResponse, BusinessProfileSyncResponse, SourceRef
+from app.agent.anthropic_client import answer_business_question, extract_business_document, extract_business_document_from_text
+from app.models.schemas import (
+    BusinessDocumentExtractResponse,
+    BusinessKnowledgeChatResponse,
+    BusinessKnowledgeChatSource,
+    BusinessProfileSyncResponse,
+    SourceRef,
+)
 from app.rag.embeddings import embed
 from app.rag.loader import load_text
+from app.rag.retriever import retrieve_business_knowledge
 from app.rag.splitter import split_text
 from app.rag.vector_store import delete_by_document_id, upsert_chunks
 from app.security import get_current_user
@@ -34,6 +41,16 @@ _MAX_PDF_PAGES = 100
 class BusinessProfileSyncRequest(BaseModel):
     organizationId: str
     text: str
+
+
+class BusinessKnowledgeChatRequest(BaseModel):
+    organizationId: str
+    question: str
+    # Threaded through to traced_llm_call so NestJS's settle() (see
+    # backend/src/billing/reservation.service.ts) can find and price this
+    # call's agent_executions row — same requestId contract chat.py already
+    # uses, just initiated from NestJS instead of Python for this route.
+    requestId: str = ""
 
 
 @router.post("/business-knowledge/profile/sync", response_model=BusinessProfileSyncResponse)
@@ -62,6 +79,44 @@ def sync_business_profile(payload: BusinessProfileSyncRequest, user: dict = Depe
         )
 
     return BusinessProfileSyncResponse(documentId=document_id, chunkCount=len(chunks))
+
+
+@router.post("/business-knowledge/chat", response_model=BusinessKnowledgeChatResponse)
+def chat_business_knowledge(payload: BusinessKnowledgeChatRequest, user: dict = Depends(get_current_user)):
+    """Dedicated, business-knowledge-only grounded Q&A — distinct from the
+    general chat agent's search_business_context tool, which mixes in CRM/
+    Outlook/documents/memories. Retrieval is org-scoped by
+    retrieve_business_knowledge (app.rag.retriever) exactly like every other
+    business-knowledge read path; this route only adds the numbered-citation
+    formatting and the single grounded LLM call.
+    """
+    if not payload.organizationId:
+        raise HTTPException(400, "organizationId is required")
+
+    hits = retrieve_business_knowledge(payload.question, payload.organizationId)
+
+    context_blocks: list[str] = []
+    sources: list[BusinessKnowledgeChatSource] = []
+    for i, hit in enumerate(hits, start=1):
+        context_blocks.append(f"[{i}] ({hit.get('source_type', 'business_knowledge')}) {hit.get('text', '')}")
+        sources.append(
+            BusinessKnowledgeChatSource(
+                index=i,
+                sourceType=hit.get("source_type", "business_knowledge"),
+                documentId=hit.get("document_id"),
+                filename=hit.get("filename"),
+                snippet=(hit.get("text") or "")[:280],
+            )
+        )
+
+    answer = answer_business_question(
+        payload.question,
+        context_blocks,
+        organization_id=payload.organizationId,
+        user_id=user.get("sub", ""),
+        request_id=payload.requestId,
+    )
+    return BusinessKnowledgeChatResponse(answer=answer, sources=sources)
 
 
 @router.post("/business-knowledge/documents/extract", response_model=BusinessDocumentExtractResponse)

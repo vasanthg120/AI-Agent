@@ -4,7 +4,7 @@ from app.integrations import prospectconnect
 
 SPEC = {
     "name": "crm_quote",
-    "description": "List or search quotes in the CRM (ProspectConnect), optionally scoped to a specific deal.",
+    "description": "List or search quotes in the CRM, optionally scoped to a specific deal.",
     "input_schema": {
         "type": "object",
         "properties": {

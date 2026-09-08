@@ -2,7 +2,7 @@ from app.integrations import prospectconnect
 
 SPEC = {
     "name": "crm_account",
-    "description": "List or search accounts (companies/organizations) in the CRM (ProspectConnect).",
+    "description": "List or search accounts (companies/organizations) in the CRM.",
     "input_schema": {
         "type": "object",
         "properties": {
