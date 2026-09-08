@@ -6,6 +6,7 @@ import {
   PAYMENT_METHODS,
   PAYMENT_STATUSES,
   financeDocumentsService,
+  type CustomerQuoteMatch,
   type FinanceDocument,
   type UpdateFinanceDocumentPayload,
 } from '@/services/financeDocumentsService';
@@ -31,8 +32,28 @@ export function FinanceDocumentReviewModal({ open, document, onClose, onSaved, o
   const [saving, setSaving] = useState(false);
   const [viewingFile, setViewingFile] = useState(false);
 
+  // Vendor Quote <-> Customer Quote linking (Finance AI "Customer Quote No"
+  // field) — a separate mini flow from the rest of this form's plain
+  // field-edit/save, since it has its own search -> preview -> confirm steps
+  // and calls its own dedicated endpoints rather than the generic PATCH.
+  const [linkedQuoteNo, setLinkedQuoteNo] = useState<string | undefined>(undefined);
+  const [quoteSearchOpen, setQuoteSearchOpen] = useState(false);
+  const [quoteNumberInput, setQuoteNumberInput] = useState('');
+  const [searchingQuote, setSearchingQuote] = useState(false);
+  const [quoteSearchError, setQuoteSearchError] = useState<string | null>(null);
+  const [quoteMatches, setQuoteMatches] = useState<CustomerQuoteMatch[] | null>(null);
+  const [selectedMatch, setSelectedMatch] = useState<CustomerQuoteMatch | null>(null);
+  const [linkingQuote, setLinkingQuote] = useState(false);
+
   useEffect(() => {
     if (!open || !document) return;
+    setLinkedQuoteNo(document.customerQuoteNo);
+    setQuoteSearchOpen(false);
+    setQuoteNumberInput('');
+    setSearchingQuote(false);
+    setQuoteSearchError(null);
+    setQuoteMatches(null);
+    setSelectedMatch(null);
     setForm({
       vendorName: document.vendorName,
       vendorId: document.vendorId,
@@ -103,6 +124,46 @@ export function FinanceDocumentReviewModal({ open, document, onClose, onSaved, o
     }
   };
 
+  const handleSearchQuote = async () => {
+    const trimmed = quoteNumberInput.trim();
+    if (!trimmed) return;
+    setSearchingQuote(true);
+    setQuoteSearchError(null);
+    setQuoteMatches(null);
+    setSelectedMatch(null);
+    try {
+      const results = await financeDocumentsService.searchCustomerQuote(trimmed);
+      setQuoteMatches(results);
+      // Exactly one match — show its preview immediately rather than making
+      // the user click it from a one-item list. Two or more must always be
+      // picked explicitly (never auto-chosen).
+      if (results.length === 1) setSelectedMatch(results[0]);
+    } catch (err) {
+      setQuoteSearchError(extractErrorMessage(err));
+    } finally {
+      setSearchingQuote(false);
+    }
+  };
+
+  const handleConfirmLink = async () => {
+    if (!selectedMatch) return;
+    setLinkingQuote(true);
+    try {
+      const result = await financeDocumentsService.linkCustomerQuote(document._id, selectedMatch.quoteId);
+      toast.success(`Linked to customer quote ${result.linkedQuote.quoteNumber ?? selectedMatch.quoteId}`);
+      setLinkedQuoteNo(result.linkedQuote.quoteNumber);
+      setQuoteSearchOpen(false);
+      setQuoteMatches(null);
+      setSelectedMatch(null);
+      setQuoteNumberInput('');
+      onSaved(result.document);
+    } catch (err) {
+      toast.error(extractErrorMessage(err));
+    } finally {
+      setLinkingQuote(false);
+    }
+  };
+
   return (
     <Modal open={open} onClose={onClose} title={document.originalFilename} maxWidth={720}>
       <div className={styles.form}>
@@ -145,6 +206,91 @@ export function FinanceDocumentReviewModal({ open, document, onClose, onSaved, o
           <Input label="Due Date" type="date" value={form.dueDate ?? ''} onChange={(e) => set('dueDate', e.target.value || undefined)} />
         </div>
         <Input label="Payment Date" type="date" value={form.paymentDate ?? ''} onChange={(e) => set('paymentDate', e.target.value || undefined)} />
+
+        <span className={financeStyles.reviewSectionTitle}>Customer Quote Link</span>
+        {linkedQuoteNo && !quoteSearchOpen ? (
+          <div className={styles.row}>
+            <Badge variant="success">Linked to Customer Quote {linkedQuoteNo}</Badge>
+            <Button type="button" variant="ghost" size="sm" onClick={() => setQuoteSearchOpen(true)}>
+              Change link
+            </Button>
+          </div>
+        ) : (
+          <div className={styles.quoteLinkBox}>
+            {linkedQuoteNo && (
+              <div className={financeStyles.flagList}>
+                <Badge variant="warning">Already linked</Badge>
+                <span>Currently linked to Customer Quote {linkedQuoteNo} — searching again will replace this link.</span>
+              </div>
+            )}
+            <div className={styles.row}>
+              <Input
+                label="Customer Quote No"
+                placeholder="e.g. IN001"
+                value={quoteNumberInput}
+                onChange={(e) => {
+                  setQuoteNumberInput(e.target.value);
+                  setQuoteMatches(null);
+                  setSelectedMatch(null);
+                  setQuoteSearchError(null);
+                }}
+              />
+              <Button
+                type="button"
+                variant="ghost"
+                loading={searchingQuote}
+                disabled={!quoteNumberInput.trim()}
+                onClick={() => void handleSearchQuote()}
+              >
+                Search
+              </Button>
+            </div>
+
+            {quoteSearchError && <div className={financeStyles.emptyState}>{quoteSearchError}</div>}
+
+            {quoteMatches && quoteMatches.length === 0 && (
+              <div className={financeStyles.emptyState}>No customer quote found with number "{quoteNumberInput.trim()}".</div>
+            )}
+
+            {quoteMatches && quoteMatches.length > 1 && !selectedMatch && (
+              <div className={styles.quoteMatchList}>
+                <span>Multiple matches — select the correct one:</span>
+                {quoteMatches.map((m) => (
+                  <button key={m.quoteId} type="button" className={styles.quoteMatchItem} onClick={() => setSelectedMatch(m)}>
+                    <strong>{m.quoteNumber}</strong> — {m.customerName ?? 'Unknown customer'} — {m.currency} {m.quoteAmount.toLocaleString()}
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {selectedMatch && (
+              <div className={styles.quoteMatchPreview}>
+                <div>
+                  Customer Quote No: <strong>{selectedMatch.quoteNumber}</strong>
+                </div>
+                <div>Customer: {selectedMatch.customerName ?? '—'}</div>
+                <div>
+                  Customer Quote Amount: {selectedMatch.currency} {selectedMatch.quoteAmount.toLocaleString()}
+                </div>
+                <div>Approval Status: {selectedMatch.clientApprovalStatus}</div>
+                <div className={styles.row}>
+                  <Button type="button" loading={linkingQuote} onClick={() => void handleConfirmLink()}>
+                    Confirm & Link
+                  </Button>
+                  <Button type="button" variant="ghost" onClick={() => setSelectedMatch(null)}>
+                    Cancel
+                  </Button>
+                </div>
+              </div>
+            )}
+
+            {linkedQuoteNo && (
+              <Button type="button" variant="ghost" size="sm" onClick={() => setQuoteSearchOpen(false)}>
+                Cancel — keep existing link
+              </Button>
+            )}
+          </div>
+        )}
 
         <span className={financeStyles.reviewSectionTitle}>Amounts & Tax</span>
         <div className={styles.row}>

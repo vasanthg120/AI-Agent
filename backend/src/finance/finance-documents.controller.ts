@@ -1,5 +1,6 @@
 import { FileInterceptor } from '@nestjs/platform-express';
 import {
+  BadRequestException,
   Body,
   Controller,
   Delete,
@@ -23,6 +24,7 @@ import { JwtPayload } from '../auth/jwt-payload.interface';
 import { UPLOAD_FILE_INTERCEPTOR_OPTIONS } from '../common/upload-limits';
 import { FinanceExportQueryDto } from './dto/finance-export-query.dto';
 import { FinanceListQueryDto } from './dto/finance-list-query.dto';
+import { LinkCustomerQuoteDto } from './dto/link-customer-quote.dto';
 import { UpdateFinanceDocumentDto } from './dto/update-finance-document.dto';
 import { FinanceDocumentsService } from './finance-documents.service';
 import { FinanceExportService } from './finance-export.service';
@@ -93,6 +95,14 @@ export class FinanceDocumentsController {
     doc.end();
   }
 
+  // Static segment, must be registered before ':id' — same rule as
+  // 'query'/'export' above.
+  @Get('quote-lookup')
+  searchCustomerQuote(@CurrentUser() user: JwtPayload, @Query('quoteNumber') quoteNumber?: string) {
+    if (!quoteNumber?.trim()) throw new BadRequestException('quoteNumber is required');
+    return this.financeDocumentsService.searchCustomerQuotes(user.organizationId, quoteNumber);
+  }
+
   @Get(':id')
   getOne(@CurrentUser() user: JwtPayload, @Param('id') id: string) {
     return this.financeDocumentsService.findOne(id, user.organizationId);
@@ -116,6 +126,11 @@ export class FinanceDocumentsController {
   @Post(':id/retry-extraction')
   retryExtraction(@CurrentUser() user: JwtPayload, @Param('id') id: string) {
     return this.financeDocumentsService.retryExtraction(id, user.organizationId, user.sub);
+  }
+
+  @Post(':id/link-quote')
+  linkCustomerQuote(@CurrentUser() user: JwtPayload, @Param('id') id: string, @Body() dto: LinkCustomerQuoteDto) {
+    return this.financeDocumentsService.linkCustomerQuote(id, user.organizationId, dto.quoteId);
   }
 
   @Delete(':id')

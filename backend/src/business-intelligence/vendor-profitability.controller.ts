@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Query, UseGuards } from '@nestjs/common';
+import { Controller, Get, Param, Post, Query, UseGuards } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import { Transform } from 'class-transformer';
 import { IsArray, IsOptional, IsString } from 'class-validator';
@@ -33,6 +33,15 @@ export class VendorProfitabilityController {
   overview(@CurrentUser() user: JwtPayload, @Query() query: VendorProfitabilityQueryDto) {
     const { start, end } = resolveBiDateRange(query);
     return this.vendorProfitabilityService.getOverview(user.organizationId, start, end, { vendorId: query.vendorId });
+  }
+
+  // Section 10 — click a row to see the complete deal (vendor documents,
+  // customer quotes, PDF references, AI summary) with no date restriction of
+  // its own, since the deal was already selected from the filtered overview.
+  @Get('deals/:dealId')
+  @Roles('owner', 'admin')
+  dealDetail(@CurrentUser() user: JwtPayload, @Param('dealId') dealId: string) {
+    return this.vendorProfitabilityService.getDealDetail(user.organizationId, dealId);
   }
 
   // Re-derives the transaction rows server-side from the same filters

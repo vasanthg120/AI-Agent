@@ -133,6 +133,7 @@ export class FinanceSummaryService {
         documentId: d._id.toString(),
         vendorName: d.vendorName ?? 'Unknown vendor',
         invoiceNumber: d.invoiceNumber,
+        customerQuoteNo: d.customerQuoteNo,
         amount: d.paymentAmount,
         dueDate: d.dueDate,
         paymentStatus: d.paymentStatus,
