@@ -3,6 +3,7 @@ import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { AuthModule } from '../auth/auth.module';
 import { GridFsService } from '../common/gridfs/gridfs.service';
+import { CrmModule } from '../crm/crm.module';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { TimelineModule } from '../timeline/timeline.module';
 import { UsersModule } from '../users/users.module';
@@ -35,6 +36,12 @@ import { FinanceSummaryService } from './finance-summary.service';
     // no live consumer of VendorsService here yet, wired ahead for the
     // future "Link to Vendor" control on the document review modal.
     VendorsModule,
+    // Vendor Quote <-> Customer Quote linking (FinanceDocument.quoteId/
+    // dealId) needs QuotesService to look up/validate a customer quote by
+    // number — one-directional import, CrmModule never imports FinanceModule
+    // back (same safe-from-circularity precedent as this file's own
+    // VendorsModule/TimelineModule imports above).
+    CrmModule,
     // Phase 12's on-demand Finance AI summary writes a Timeline event on
     // every LLM-generated summary — same one-directional import as
     // crm.module.ts's identical addition, safe from circularity.

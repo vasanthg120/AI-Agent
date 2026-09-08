@@ -264,6 +264,23 @@ export class QuotesService {
   // with no dealId can never be attributed to a specific store/consultant,
   // so it's correctly excluded once either constraint is set (404, not a
   // silent pass) — same precedent as listFiltered's own comment.
+  // Vendor Profitability's Vendor Quote <-> Customer Quote linking (Finance
+  // AI "Customer Quote No" field) — the one search this app never needed
+  // before, since every prior Quote consumer already had a dealId/quoteId in
+  // hand. Case-insensitive exact match (a human retyping "IN001" from a PDF
+  // may not match stored case), org-scoped, capped at 10 — this feeds a
+  // confirmation UI a person reviews, never an auto-pick.
+  async findByQuoteNumber(organizationId: string, quoteNumber: string): Promise<QuoteDocument[]> {
+    const trimmed = quoteNumber.trim();
+    if (!trimmed) return [];
+    const escaped = trimmed.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    return this.quoteModel
+      .find({ organizationId, quoteNumber: { $regex: `^${escaped}$`, $options: 'i' } })
+      .sort({ createdAt: -1 })
+      .limit(10)
+      .exec();
+  }
+
   async getOne(organizationId: string, id: string, storeConstraint?: string, ownerConstraint?: string): Promise<QuoteDocument> {
     const quote = await this.quoteModel.findOne({ _id: id, organizationId }).exec();
     if (!quote) throw new NotFoundException('Quote not found');
