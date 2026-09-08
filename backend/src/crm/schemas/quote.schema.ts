@@ -25,6 +25,41 @@ export class QuoteClientDetails {
 }
 const QuoteClientDetailsSchema = SchemaFactory.createForClass(QuoteClientDetails);
 
+// Embedded line item — added for native (in-app) quote creation. Mirrors
+// billing/schemas/billing-invoice.schema.ts's BillingInvoiceItem pattern
+// (embedded, not a separate collection, since a quote's items are always
+// read/rendered together with the quote itself). lineSubtotal/lineTotal are
+// always server-computed by quote-pricing.util.ts — never trusted as
+// client input. Left empty ([]) for synced and pre-existing quotes, which
+// keep using the flat quoteAmount exactly as before.
+@Schema({ _id: false })
+export class QuoteLineItem {
+  @Prop()
+  productId?: string;
+
+  @Prop({ required: true })
+  description: string;
+
+  @Prop({ required: true })
+  quantity: number;
+
+  @Prop({ required: true })
+  unitPrice: number;
+
+  @Prop({ default: 0 })
+  discount: number;
+
+  @Prop({ default: 0 })
+  taxRate: number;
+
+  @Prop({ required: true })
+  lineSubtotal: number;
+
+  @Prop({ required: true })
+  lineTotal: number;
+}
+const QuoteLineItemSchema = SchemaFactory.createForClass(QuoteLineItem);
+
 // quoteStatus (internal lifecycle) and clientApprovalStatus (client-facing
 // approval state) are separate, independent axes — matches crm_quote_tool's
 // existing vocabulary.
@@ -132,6 +167,26 @@ export class Quote {
   // "never trust a stored value for something date/amount-derived" convention.
   @Prop({ default: 0 })
   paidAmount: number;
+
+  // --- Native quote line items (additive) ---
+
+  // Empty for every quote created before this field existed, and for
+  // synced quotes (the external CRM never sends line items) — those keep
+  // relying on the flat quoteAmount exactly as before. quoteAmount itself
+  // continues to be the one "total" field for every quote, native or
+  // synced — items just give a native quote's quoteAmount a real,
+  // server-computed derivation instead of a hand-typed number.
+  @Prop({ type: [QuoteLineItemSchema], default: [] })
+  items: QuoteLineItem[];
+
+  @Prop({ default: 0 })
+  subtotal: number;
+
+  @Prop({ default: 0 })
+  discountAmount: number;
+
+  @Prop({ default: 0 })
+  taxAmount: number;
 
   // Managed automatically by { timestamps: true } above — see deal.schema.ts's
   // identical comment.

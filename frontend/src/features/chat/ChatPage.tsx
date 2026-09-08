@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react';
 import type { ReactElement } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { motion } from 'framer-motion';
+import { AnimatePresence, motion } from 'framer-motion';
 import toast from 'react-hot-toast';
 import { FiFileText, FiMail, FiBarChart2, FiUsers } from 'react-icons/fi';
+import { useMediaQuery } from '@/hooks/useMediaQuery';
 import { useChatStore } from '@/stores/chatStore';
 import { useUiStore } from '@/stores/uiStore';
 import { useAuthStore } from '@/stores/authStore';
@@ -70,7 +71,25 @@ export function ChatPage() {
   const sendMessage = useChatStore((state) => state.sendMessage);
 
   const rightPanelOpen = useUiStore((state) => state.rightPanelOpen);
+  const setRightPanelOpen = useUiStore((state) => state.setRightPanelOpen);
   const user = useAuthStore((state) => state.user);
+
+  // RightPanel is docked (flex sibling, always --right-panel-width wide)
+  // above this breakpoint — same threshold AppLayout.tsx uses for its own
+  // shell-level mobile switch. Below it, docking a fixed 320px panel next
+  // to the conversation column would leave almost no room for the chat
+  // itself, so it becomes an overlay drawer instead — the same
+  // backdrop+slide-in pattern AppLayout.tsx already uses for its sidebar.
+  const isMobile = useMediaQuery('(max-width: 900px)');
+
+  useEffect(() => {
+    if (!isMobile || !rightPanelOpen) return;
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setRightPanelOpen(false);
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [isMobile, rightPanelOpen, setRightPanelOpen]);
 
   const [agents, setAgents] = useState<ChatAgent[]>([]);
   useEffect(() => {
@@ -139,7 +158,30 @@ export function ChatPage() {
         </div>
       </div>
 
-      {rightPanelOpen && activeConversationId && <RightPanel conversationId={activeConversationId} />}
+      {!isMobile && rightPanelOpen && activeConversationId && <RightPanel conversationId={activeConversationId} />}
+
+      <AnimatePresence>
+        {isMobile && rightPanelOpen && activeConversationId && (
+          <>
+            <motion.div
+              className={styles.rightPanelBackdrop}
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setRightPanelOpen(false)}
+            />
+            <motion.div
+              className={styles.rightPanelMobile}
+              initial={{ x: 320 }}
+              animate={{ x: 0 }}
+              exit={{ x: 320 }}
+              transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
+            >
+              <RightPanel conversationId={activeConversationId} />
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

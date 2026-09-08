@@ -141,6 +141,24 @@ export class EmailIntelligenceController {
     return this.emailIntelligenceService.markFollowUpDone(user.sub, id);
   }
 
+  // AI Follow-up action layer (additive) — generate -> review -> approve ->
+  // send, gated behind AI_FOLLOWUP_ACTIONS_ENABLED (see
+  // email-intelligence.service.ts's generateFollowUpDraft).
+  @Post('follow-ups/:id/draft')
+  generateFollowUpDraft(@CurrentUser() user: JwtPayload, @Param('id') id: string) {
+    return this.emailIntelligenceService.generateFollowUpDraft(user.sub, id);
+  }
+
+  @Post('follow-ups/:id/approve')
+  approveFollowUpDraft(@CurrentUser() user: JwtPayload, @Param('id') id: string, @Body() body: { finalDraftReply?: string }) {
+    return this.emailIntelligenceService.approveFollowUpDraft(user.sub, id, body?.finalDraftReply);
+  }
+
+  @Post('follow-ups/:id/send')
+  sendFollowUp(@CurrentUser() user: JwtPayload, @Param('id') id: string) {
+    return this.emailIntelligenceService.sendFollowUp(user.sub, id);
+  }
+
   @Get(':id')
   getOne(@CurrentUser() user: JwtPayload, @Param('id') id: string) {
     return this.emailIntelligenceService.getOne(user.sub, id);

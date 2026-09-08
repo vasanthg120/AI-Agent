@@ -1,6 +1,6 @@
 import { Document, Types } from 'mongoose';
 export type NotificationDocument = Notification & Document<Types.ObjectId>;
-export declare const NOTIFICATION_KINDS: readonly ["system", "integration", "warning", "error"];
+export declare const NOTIFICATION_KINDS: readonly ["system", "integration", "warning", "error", "sla_breach"];
 export type NotificationKind = (typeof NOTIFICATION_KINDS)[number];
 export declare const NOTIFICATION_ENTITY_TYPES: readonly ["email", "financeDocument", "deal", "task", "outlookAccount", "dailyReport"];
 export type NotificationEntityType = (typeof NOTIFICATION_ENTITY_TYPES)[number];

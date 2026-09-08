@@ -22,6 +22,16 @@ export class EmailFollowUpReminder {
   @Prop({ required: true })
   emailIntelligenceItemId: string;
 
+  // Additive — the (organizationId, emailIntelligenceItemId, reminderType)
+  // unique index below is the dedup fix for the audited bug (createFollowUpReminder
+  // previously had no existence check, so replying more than once in the
+  // reminder window created duplicate overlapping reminders). Defaults to
+  // 'post_reply' so every reminder created by the existing 3-day-after-send
+  // trigger keeps working unchanged; a future silence-detection trigger can
+  // use a different type without colliding with it.
+  @Prop({ default: 'post_reply', index: true })
+  reminderType: string;
+
   @Prop()
   businessName?: string;
 
@@ -34,9 +44,28 @@ export class EmailFollowUpReminder {
   @Prop({ enum: ['pending', 'done', 'dismissed'], default: 'pending', index: true })
   status: 'pending' | 'done' | 'dismissed';
 
+  // ---- AI Follow-up action layer (additive) ----
+  @Prop()
+  draftReply?: string;
+
+  @Prop({ enum: ['none', 'generating', 'pending_review', 'approved', 'sent', 'failed'], default: 'none' })
+  draftStatus: 'none' | 'generating' | 'pending_review' | 'approved' | 'sent' | 'failed';
+
+  @Prop()
+  draftGeneratedAt?: Date;
+
+  @Prop()
+  sentAt?: Date;
+
+  @Prop()
+  sendError?: string;
+
   createdAt: Date;
   updatedAt: Date;
 }
 
 export const EmailFollowUpReminderSchema = SchemaFactory.createForClass(EmailFollowUpReminder);
 EmailFollowUpReminderSchema.index({ userId: 1, status: 1, dueDate: 1 });
+// Duplicate-reminder prevention — the fix for the audited bug (see
+// reminderType's own comment above).
+EmailFollowUpReminderSchema.index({ organizationId: 1, emailIntelligenceItemId: 1, reminderType: 1 }, { unique: true });

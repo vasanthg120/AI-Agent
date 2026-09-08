@@ -1,10 +1,11 @@
-import { BadRequestException, Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { BillingInvoiceService } from './billing-invoice.service';
 import { CouponsService } from './coupons.service';
 import { PAYMENT_PROVIDER, PaymentProviderAdapter } from './providers/payment-provider.interface';
+import { PricingService } from './pricing.service';
 import { WalletService, WalletSummary } from './wallet.service';
 import { CreditPackage, CreditPackageDocument } from './schemas/credit-package.schema';
 import { PaymentMethod, PaymentMethodDocument } from './schemas/payment-method.schema';
@@ -73,6 +74,8 @@ export interface InitiatePurchaseResult {
  */
 @Injectable()
 export class BillingService {
+  private readonly logger = new Logger(BillingService.name);
+
   constructor(
     @InjectModel(CreditPackage.name) private packageModel: Model<CreditPackageDocument>,
     @InjectModel(PaymentMethod.name) private paymentMethodModel: Model<PaymentMethodDocument>,
@@ -83,6 +86,7 @@ export class BillingService {
     private coupons: CouponsService,
     private invoices: BillingInvoiceService,
     private config: ConfigService,
+    private pricing: PricingService,
   ) {}
 
   /** Extends WalletService.getSummary's plain balance/reserved/autoPay
@@ -410,6 +414,59 @@ export class BillingService {
       cardNetwork: saved.cardNetwork,
       isDefault: shouldBeDefault,
     });
+  }
+
+  // Nominal amount for the dedicated "add a card for Auto Recharge"
+  // authorization transaction below — never a real purchase, refunded
+  // immediately once the token is captured. Fixed at Razorpay's documented
+  // minimum for this kind of transaction (100 minor units — e.g. ₹1/$1),
+  // shared between order-creation and the matching refund so they always
+  // agree. See PaymentProviderAdapter.createAuthorizationOrder's own
+  // comment for why this can't just piggyback on a real purchase checkout.
+  private static readonly AUTHORIZATION_AMOUNT = 1;
+
+  /** Step 1 of the "add a card for Auto Recharge" flow — creates the small
+   * dedicated authorization order the frontend opens the gateway checkout
+   * widget against. Reuses any gatewayCustomerId this org already has on a
+   * saved PaymentMethod (so repeat card-adds don't create duplicate gateway
+   * customers); creates a new one via createCustomer only the first time. */
+  async createPaymentMethodAuthorization(organizationId: string, actorEmail: string) {
+    const existing = await this.paymentMethodModel.findOne({ organizationId, provider: this.paymentProvider.providerKey }).exec();
+    const gatewayCustomerId = existing
+      ? existing.gatewayCustomerId
+      : (await this.paymentProvider.createCustomer(organizationId, actorEmail, actorEmail)).customerId;
+
+    const currency = this.pricing.billingCurrency;
+    const order = await this.paymentProvider.createAuthorizationOrder(organizationId, gatewayCustomerId, currency);
+    return { orderId: order.orderId, checkoutParams: order.checkoutParams, simulated: order.simulated, gatewayCustomerId };
+  }
+
+  /** Step 2 — called right after the gateway checkout widget succeeds.
+   * Reuses savePaymentMethod's exact signature-verification + persist logic
+   * (makeDefault: true always — this is an explicit "add my card" action),
+   * then best-effort refunds the nominal authorization charge. A failed
+   * refund is logged, never fails the request — the card is already saved,
+   * which is the actual goal; a stray unrefunded nominal amount is a minor,
+   * recoverable admin-visible issue. */
+  async confirmPaymentMethodAuthorization(
+    organizationId: string,
+    gatewayCustomerId: string,
+    gatewayPaymentId: string,
+    signature: string,
+    gatewayOrderId: string,
+  ) {
+    const method = await this.savePaymentMethod(organizationId, gatewayCustomerId, gatewayPaymentId, signature, gatewayOrderId, true);
+
+    try {
+      const refund = await this.paymentProvider.refundPayment(gatewayOrderId, gatewayPaymentId, BillingService.AUTHORIZATION_AMOUNT, 'Card verification for Auto Recharge');
+      if (!refund.success) {
+        this.logger.warn(`Authorization-charge refund failed for org ${organizationId}, payment ${gatewayPaymentId}: ${refund.reason ?? 'unknown reason'}`);
+      }
+    } catch (err) {
+      this.logger.warn(`Authorization-charge refund threw for org ${organizationId}, payment ${gatewayPaymentId}: ${(err as Error).message}`);
+    }
+
+    return method;
   }
 
   /** Lets the customer switch which saved card Auto Recharge (and any

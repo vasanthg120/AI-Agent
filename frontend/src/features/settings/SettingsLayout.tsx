@@ -1,5 +1,5 @@
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
-import { FiSettings, FiBell, FiShield, FiUsers, FiUserPlus, FiTarget, FiUserCheck, FiPercent, FiLink2 } from 'react-icons/fi';
+import { FiSettings, FiBell, FiShield, FiUsers, FiUserPlus, FiTarget, FiUserCheck, FiPercent, FiLink2, FiClock } from 'react-icons/fi';
 import { Tabs } from '@/components/ui';
 import { ROUTES } from '@/constants/routes';
 import { useAuthStore } from '@/stores/authStore';
@@ -39,6 +39,16 @@ const TAB_ITEMS = [
     // Widened to ['owner','admin'] — matches RoyaltyRulesController's actual
     // backend gate, unlike every other tab above (['admin']-only), since
     // this is sensitive org-wide financial configuration.
+    requireRoles: ['owner', 'admin'],
+  },
+  {
+    id: 'email-sla',
+    label: 'Email SLA',
+    icon: <FiClock />,
+    path: ROUTES.settingsEmailSla,
+    // Matches EmailSlaController's mutation gate (owner/admin) — the
+    // read-only policy list route allows manager too, but this tab is
+    // primarily for configuring policy, so it stays owner/admin only.
     requireRoles: ['owner', 'admin'],
   },
 ];

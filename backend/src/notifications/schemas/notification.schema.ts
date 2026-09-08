@@ -5,7 +5,9 @@ export type NotificationDocument = Notification & Document<Types.ObjectId>;
 
 // Matches the frontend's NotificationKind exactly (frontend/src/services/mock/fixtures/notifications.ts) —
 // the frontend's mock fixtures were the only definition of this shape before this schema existed.
-export const NOTIFICATION_KINDS = ['system', 'integration', 'warning', 'error'] as const;
+// 'sla_breach' is additive (Email SLA escalation, see email-sla-escalation.service.ts) — every
+// existing kind/consumer is unaffected.
+export const NOTIFICATION_KINDS = ['system', 'integration', 'warning', 'error', 'sla_breach'] as const;
 export type NotificationKind = (typeof NOTIFICATION_KINDS)[number];
 
 // What kind of record entityId below points at — the frontend's click
