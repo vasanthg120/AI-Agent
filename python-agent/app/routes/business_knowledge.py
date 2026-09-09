@@ -26,7 +26,7 @@ router = APIRouter()
 # Deterministic per-org point id — a business profile is a singleton per
 # organization, so re-syncing after every save should update the same
 # Qdrant document rather than accumulating stale copies (same uuid5-over-a-
-# fixed-namespace idea as app.rag.vector_store.memory_point_id).
+# fixed-namespace idea as app.rag.business_sync's _point_id).
 _PROFILE_NAMESPACE = uuid.NAMESPACE_URL
 
 _IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".gif", ".webp"}

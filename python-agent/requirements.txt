@@ -27,6 +27,17 @@ sentence-transformers==3.3.1
 jsonschema>=4.20.0
 rank_bm25==0.2.2
 
+# Long-term User Memory (app/memory/mem0_client.py) — automatic extraction/
+# dedup/update/retrieval, configured to reuse this app's own Anthropic LLM,
+# sentence-transformers embedder, and Qdrant deployment (a separate
+# collection) rather than Mem0's OpenAI-first defaults. Verified compatible
+# with the pinned qdrant-client==1.12.1 above (requires >=1.12.0) and doesn't
+# touch starlette/fastapi at all, unlike crewai/mcp below — the one adjacent
+# effect is pip resolving protobuf down to <7.0.0 (mem0ai's own constraint)
+# if something else in this tree ever pulls in a newer one; `pip check`
+# confirmed no broken requirements at the time this was pinned.
+mem0ai==2.0.20
+
 # MCP server (app/mcp_server.py), exposing the tool registry to external MCP
 # clients. Same starlette-conflict class as crewai above: the mcp package's
 # own sse-starlette dependency wants to pull starlette to 1.3.1 by default
