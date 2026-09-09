@@ -188,6 +188,15 @@ export class FinanceDocument {
   // vendor originally quoted for the same cost.
   @Prop()
   vendorQuoteId?: string;
+
+  // Denormalized display copy of the linked Quote's own quoteNumber (e.g.
+  // "IN001"), set once by FinanceDocumentsService.linkCustomerQuote at the
+  // same time as quoteId/dealId above. quoteId remains the source of truth
+  // for the actual relationship (re-validated against this org on every
+  // link) — this field only exists so a Finance document card/list can show
+  // "Customer Quote No: IN001" without a live join back to crm_quotes.
+  @Prop()
+  customerQuoteNo?: string;
 }
 
 export const FinanceDocumentSchema = SchemaFactory.createForClass(FinanceDocument);

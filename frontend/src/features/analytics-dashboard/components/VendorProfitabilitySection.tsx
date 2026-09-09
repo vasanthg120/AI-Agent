@@ -8,13 +8,22 @@ import type { IconType } from 'react-icons';
 import { Badge, Card, Skeleton } from '@/components/ui';
 import { extractErrorMessage } from '@/utils/errors';
 import { formatINR as money } from '@/utils/currency';
-import { vendorProfitabilityService, type VendorCustomerCompareResult } from '@/services/vendorProfitabilityService';
+import { vendorProfitabilityService, type VendorCustomerCompareResult, type VendorProfitabilityPaymentStatus } from '@/services/vendorProfitabilityService';
 import { ROUTES } from '@/constants/routes';
 import biStyles from '@/features/business-intelligence/business-intelligence.module.css';
 import { DrillDownModal, type DrillDownRow } from './DrillDownModal';
+import { VendorProfitabilityDetailModal } from './VendorProfitabilityDetailModal';
 import styles from '../analytics-dashboard.module.css';
 import statStyles from './VendorProfitabilityStats.module.css';
 import panelStyles from './VendorProfitabilityPanel.module.css';
+
+function paymentStatusLabel(status: VendorProfitabilityPaymentStatus): string {
+  return status === 'paid' ? 'Paid' : status === 'partially_paid' ? 'Partially paid' : 'Pending';
+}
+
+function paymentStatusVariant(status: VendorProfitabilityPaymentStatus): 'success' | 'warning' | 'neutral' {
+  return status === 'paid' ? 'success' : status === 'partially_paid' ? 'warning' : 'neutral';
+}
 
 function StatCard({
   icon: Icon,
@@ -46,18 +55,19 @@ function StatCard({
 // AnalyticsDashboardPage's own tab-visibility filter) — margin data is more
 // sensitive than pipeline data. No Net Profit column — Gross Profit only.
 //
-// "Vendor cost" here is driven by a paid/partially-paid FinanceDocument
-// linked to a deal (see vendor-profitability.service.ts) — VendorQuote
-// records only ever supply the vendor's display name, they don't drive the
-// cost total. There is no frontend surface anywhere yet for manually
-// linking a finance document to a deal (that linkage is set up during
-// document processing) — so "Go to vendor quotes"/"Learn how" below point
-// at the real Finance AI page (where those paid vendor documents actually
-// live), not an invented quote-creation flow that wouldn't move these
-// numbers.
+// "Vendor cost" is the AGREED/quoted amount — every non-cancelled
+// FinanceDocument linked to a deal (see vendor-profitability.service.ts),
+// regardless of whether it's been paid yet. Profitability is deliberately
+// independent of vendor payment status (a real, known cost the moment the
+// vendor invoice exists, not only once it's been paid) — actualVendorCostPaid
+// is the separate, payment-status-aware figure for "how much have I actually
+// paid". A FinanceDocument is linked to a deal via Finance AI's own
+// "Customer Quote No" field (FinanceDocumentReviewModal.tsx) — "Go to
+// vendor quotes"/"Learn how" below point there.
 export function VendorProfitabilitySection({ dateFrom, dateTo }: { dateFrom: string; dateTo: string }) {
   const navigate = useNavigate();
   const [aiResult, setAiResult] = useState<VendorCustomerCompareResult | null>(null);
+  const [detailDealId, setDetailDealId] = useState<string | null>(null);
   const filters = { dateFrom, dateTo };
 
   const { data, isLoading } = useQuery({
@@ -109,9 +119,9 @@ export function VendorProfitabilitySection({ dateFrom, dateTo }: { dateFrom: str
           />
           <StatCard
             icon={FiPackage}
-            label="Vendor cost paid"
+            label="Vendor cost"
             value={money(data.totals.vendorCost)}
-            note="in this period"
+            note={`${money(data.totals.actualVendorCostPaid ?? 0)} actually paid`}
             onClick={() => setShowRows(true)}
           />
           <StatCard
@@ -126,6 +136,13 @@ export function VendorProfitabilitySection({ dateFrom, dateTo }: { dateFrom: str
             label="Gross margin"
             value={data.totals.grossMarginPct !== null ? `${data.totals.grossMarginPct}%` : '—'}
             note={data.totals.grossMarginPct !== null ? 'of customer revenue' : 'not enough data'}
+            onClick={() => setShowRows(true)}
+          />
+          <StatCard
+            icon={FiTarget}
+            label="Markup"
+            value={data.totals.markupPct != null ? `${data.totals.markupPct}%` : '—'}
+            note={data.totals.markupPct != null ? 'of vendor cost' : 'not enough data'}
             onClick={() => setShowRows(true)}
           />
         </div>
@@ -171,6 +188,8 @@ export function VendorProfitabilitySection({ dateFrom, dateTo }: { dateFrom: str
             <table className={panelStyles.table}>
               <thead>
                 <tr>
+                  <th>Vendor Quote</th>
+                  <th>Customer Quote</th>
                   <th>Deal</th>
                   <th>Vendor(s)</th>
                   <th>Vendor Cost</th>
@@ -178,11 +197,14 @@ export function VendorProfitabilitySection({ dateFrom, dateTo }: { dateFrom: str
                   <th>Customer Paid</th>
                   <th>Gross Profit</th>
                   <th>Margin</th>
+                  <th>Vendor Payment</th>
                 </tr>
               </thead>
               <tbody>
                 {data.rows.map((r) => (
-                  <tr key={r.dealId}>
+                  <tr key={r.dealId} style={{ cursor: 'pointer' }} onClick={() => setDetailDealId(r.dealId)}>
+                    <td>{(r.vendorQuoteNumbers ?? []).join(', ') || '—'}</td>
+                    <td>{r.customerQuoteNo ?? '—'}</td>
                     <td className={panelStyles.dealCell}>{r.dealName ?? r.dealId}</td>
                     <td>{r.vendorNames.join(', ') || '—'}</td>
                     <td>
@@ -194,6 +216,13 @@ export function VendorProfitabilitySection({ dateFrom, dateTo }: { dateFrom: str
                     <td>{money(r.customerPaid)}</td>
                     <td>{r.currencyMismatch ? <Badge variant="warning">Currency mismatch</Badge> : money(r.grossProfit ?? 0)}</td>
                     <td>{r.grossMarginPct !== null ? `${r.grossMarginPct}%` : '—'}</td>
+                    <td>
+                      {r.vendorPaymentStatus ? (
+                        <Badge variant={paymentStatusVariant(r.vendorPaymentStatus)}>{paymentStatusLabel(r.vendorPaymentStatus)}</Badge>
+                      ) : (
+                        '—'
+                      )}
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -257,6 +286,7 @@ export function VendorProfitabilitySection({ dateFrom, dateTo }: { dateFrom: str
       )}
 
       <DrillDownModal open={showRows} onClose={() => setShowRows(false)} title="Vendor Profitability by Deal" isLoading={isLoading} rows={dealRows} />
+      <VendorProfitabilityDetailModal dealId={detailDealId} onClose={() => setDetailDealId(null)} />
     </div>
   );
 }

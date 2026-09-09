@@ -58,8 +58,24 @@ export interface FinanceDocument {
   inconsistencyNotes: string[];
   possibleDuplicate: boolean;
   duplicateOfDocumentId?: string;
+  dealId?: string;
+  quoteId?: string;
+  customerQuoteNo?: string;
   createdAt: string;
   updatedAt: string;
+}
+
+// Preview shape for the Vendor Quote <-> Customer Quote linking flow — a
+// human confirms one of these before anything is saved (see
+// FinanceDocumentReviewModal.tsx's CustomerQuoteLink section).
+export interface CustomerQuoteMatch {
+  quoteId: string;
+  quoteNumber?: string;
+  dealId?: string;
+  customerName?: string;
+  quoteAmount: number;
+  currency: string;
+  clientApprovalStatus: string;
 }
 
 // Shared filter shape — reused by the list/export calls and the dashboard
@@ -149,6 +165,19 @@ export const financeDocumentsService = {
 
   async retryExtraction(id: string): Promise<FinanceDocument> {
     const { data } = await axiosClient.post<FinanceDocument>(`/finance/documents/${id}/retry-extraction`);
+    return data;
+  },
+
+  // Step 1 of linking — search the org's own CRM quotes by quote number.
+  // Empty array is a normal "not found" result, not an error.
+  async searchCustomerQuote(quoteNumber: string): Promise<CustomerQuoteMatch[]> {
+    const { data } = await axiosClient.get<CustomerQuoteMatch[]>('/finance/documents/quote-lookup', { params: { quoteNumber } });
+    return data;
+  },
+
+  // Step 2 — persist the link the user confirmed from a searchCustomerQuote result.
+  async linkCustomerQuote(id: string, quoteId: string): Promise<{ document: FinanceDocument; linkedQuote: CustomerQuoteMatch }> {
+    const { data } = await axiosClient.post<{ document: FinanceDocument; linkedQuote: CustomerQuoteMatch }>(`/finance/documents/${id}/link-quote`, { quoteId });
     return data;
   },
 

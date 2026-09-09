@@ -8,12 +8,27 @@ import FormData from 'form-data';
 import { firstValueFrom } from 'rxjs';
 import { NotificationsService } from '../notifications/notifications.service';
 import { UsersService } from '../users/users.service';
+import { QuotesService } from '../crm/quotes.service';
+import { QuoteDocument } from '../crm/schemas/quote.schema';
 import { FinanceDocument, FinanceDocumentDocument } from './schemas/finance-document.schema';
 import { FinanceGridFsService } from './finance-gridfs.service';
 import { FinanceFilterQueryDto } from './dto/finance-filter-query.dto';
 import { FinanceListQueryDto } from './dto/finance-list-query.dto';
 import { UpdateFinanceDocumentDto } from './dto/update-finance-document.dto';
 import { buildFinanceMatchStage } from './finance-filter.util';
+
+// Preview shape shown before/after linking — the same fields whether the
+// caller is browsing search results or just confirmed a link, so the
+// frontend can render both states with one component.
+export interface CustomerQuoteMatch {
+  quoteId: string;
+  quoteNumber?: string;
+  dealId?: string;
+  customerName?: string;
+  quoteAmount: number;
+  currency: string;
+  clientApprovalStatus: string;
+}
 
 const DOCUMENT_FORMAT_BY_EXT: Record<string, FinanceDocument['documentFormat']> = {
   pdf: 'pdf',
@@ -51,6 +66,7 @@ export class FinanceDocumentsService {
     private config: ConfigService,
     private usersService: UsersService,
     private notificationsService: NotificationsService,
+    private quotesService: QuotesService,
   ) {
     this.pythonAgentUrl = this.config.get<string>('pythonAgentUrl') ?? 'http://localhost:8000';
   }
@@ -201,5 +217,55 @@ export class FinanceDocumentsService {
   async getFileStream(id: string, organizationId: string): Promise<{ stream: NodeJS.ReadableStream; doc: FinanceDocumentDocument }> {
     const doc = await this.findOne(id, organizationId);
     return { stream: this.gridFs.openDownloadStream(doc.gridFsFileId), doc };
+  }
+
+  private toQuoteMatch(quote: QuoteDocument): CustomerQuoteMatch {
+    return {
+      quoteId: quote._id.toString(),
+      quoteNumber: quote.quoteNumber,
+      dealId: quote.dealId,
+      customerName: quote.clientDetails?.companyName ?? quote.quoteName,
+      quoteAmount: quote.quoteAmount,
+      currency: quote.currency,
+      clientApprovalStatus: quote.clientApprovalStatus,
+    };
+  }
+
+  // Step 1 of the Vendor Quote <-> Customer Quote linking flow — searches
+  // the org's own CRM quotes (QuotesService.findByQuoteNumber, org-scoped)
+  // for a human to confirm before anything is saved. Zero matches is a
+  // normal, valid result (not an error) — the caller shows "not found";
+  // more than one match means the caller must show a picker, never
+  // auto-select.
+  async searchCustomerQuotes(organizationId: string, quoteNumber: string): Promise<CustomerQuoteMatch[]> {
+    const quotes = await this.quotesService.findByQuoteNumber(organizationId, quoteNumber);
+    return quotes.map((q) => this.toQuoteMatch(q));
+  }
+
+  // Step 2 — persists the link the user confirmed. quoteId is re-resolved
+  // through QuotesService.getOne, which matches { _id, organizationId } —
+  // the real organization-isolation guarantee: even a tampered/wrong-org
+  // quoteId can never be linked, regardless of what the client sends.
+  // Re-linking (a different quoteId than what's already stored) is allowed
+  // — the frontend is responsible for warning the user first when a document
+  // is already linked (see FinanceDocument.quoteId/customerQuoteNo on the
+  // existing document it already has in hand) — this method itself has no
+  // documented business reason to refuse a correction.
+  //
+  // dealId is populated from the quote's own dealId when it has one — this
+  // is the one field vendor-profitability.service.ts's getOverview() actually
+  // groups by, so a customer quote with no linked deal will link
+  // successfully (quoteId/customerQuoteNo are still saved) but won't feed
+  // Vendor Profitability, which is an existing, pre-dating limitation of
+  // that dealId-keyed join, not something this method introduces.
+  async linkCustomerQuote(id: string, organizationId: string, quoteId: string): Promise<{ document: FinanceDocumentDocument; linkedQuote: CustomerQuoteMatch }> {
+    await this.findOne(id, organizationId);
+    const quote = await this.quotesService.getOne(organizationId, quoteId);
+
+    const setFields: Record<string, unknown> = { quoteId: quote._id.toString(), customerQuoteNo: quote.quoteNumber };
+    if (quote.dealId) setFields.dealId = quote.dealId;
+
+    const updated = await this.documentModel.findByIdAndUpdate(id, { $set: setFields }, { new: true }).exec();
+    return { document: updated!, linkedQuote: this.toQuoteMatch(quote) };
   }
 }
