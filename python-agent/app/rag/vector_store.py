@@ -34,13 +34,12 @@ def ensure_collection() -> None:
     # and delete's points_selector filters, is outright rejected by Qdrant —
     # without a payload index on the filtered fields. document_id is filtered
     # on by reassign_owner/delete_by_document_id (role activation/deletion).
-    # record_id is filtered on by delete_by_record_id (app.memory.user_memory).
     # organization_id backs Finance's real per-tenant scoping (app.rag.retriever's
     # _finance_document_filter) — harmless for older points that lack it; a
     # keyword index simply never matches them on that field, which is
     # correct, since they were never org-scoped to begin with.
     indexed = set(client.get_collection(settings.qdrant_collection).payload_schema)
-    for field in ("user_id", "source_type", "document_id", "record_id", "organization_id"):
+    for field in ("user_id", "source_type", "document_id", "organization_id"):
         if field not in indexed:
             client.create_payload_index(
                 collection_name=settings.qdrant_collection,
@@ -89,33 +88,6 @@ def upsert_chunks(
         for i, (chunk, vector) in enumerate(zip(chunks, vectors))
     ]
     upsert_points(points)
-
-
-_MEMORY_POINT_NAMESPACE = uuid.NAMESPACE_URL
-
-
-def memory_point_id(memory_id: str) -> str:
-    """Deterministic point id for a long-term memory (app.memory.user_memory)
-    — same uuid5-over-a-fixed-namespace pattern as app.rag.business_sync's
-    _point_id, so re-saving the same Mongo _id always maps to the same point."""
-    return str(uuid.uuid5(_MEMORY_POINT_NAMESPACE, f"memory:{memory_id}"))
-
-
-def delete_by_record_id(source_type: str, record_id: str) -> None:
-    """Purges the point for one record within a source_type — used to delete
-    a single long-term memory (app.memory.user_memory.delete_memory).
-    Unlike delete_by_document_id, this filters on record_id/source_type since
-    memory points have no document_id payload field."""
-    ensure_collection()
-    get_client().delete(
-        collection_name=settings.qdrant_collection,
-        points_selector=qmodels.Filter(
-            must=[
-                qmodels.FieldCondition(key="source_type", match=qmodels.MatchValue(value=source_type)),
-                qmodels.FieldCondition(key="record_id", match=qmodels.MatchValue(value=record_id)),
-            ]
-        ),
-    )
 
 
 def reassign_owner(document_id: str, new_user_id: str) -> None:

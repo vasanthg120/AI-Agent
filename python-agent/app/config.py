@@ -37,6 +37,11 @@ class Settings:
     qdrant_url: str = os.environ.get("QDRANT_URL", "http://localhost:6333")
     qdrant_api_key: str = os.environ.get("QDRANT_API_KEY", "")
     qdrant_collection: str = os.environ.get("QDRANT_COLLECTION", "documents")
+    # Separate from qdrant_collection above — Mem0 (app.memory.mem0_client) manages its
+    # own point schema/ids internally, incompatible with the hand-rolled source_type
+    # discriminator scheme app.rag.hybrid_search/retriever depend on for the shared
+    # collection, so it gets its own collection on the same Qdrant deployment instead.
+    qdrant_mem0_collection: str = os.environ.get("QDRANT_MEM0_COLLECTION", "haive_user_memory")
     redis_url: str = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
 
     embedding_model: str = os.environ.get(
