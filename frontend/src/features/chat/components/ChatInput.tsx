@@ -9,6 +9,7 @@ import { useChatStore } from '@/stores/chatStore';
 import { chatService } from '@/services/chatService';
 import { mockSlashCommands } from '@/services/mock/fixtures/chat';
 import type { ChatAgent } from '@/types';
+import { VoiceInputModal } from './VoiceInputModal';
 import styles from './ChatInput.module.css';
 
 type Popup = { type: 'slash'; query: string } | { type: 'mention'; query: string } | null;
@@ -24,7 +25,7 @@ export function ChatInput({ prefillText, onPrefillConsumed }: ChatInputProps) {
   const [dragOver, setDragOver] = useState(false);
   const [popup, setPopup] = useState<Popup>(null);
   const [activeIndex, setActiveIndex] = useState(0);
-  const [recording, setRecording] = useState(false);
+  const [voiceModalOpen, setVoiceModalOpen] = useState(false);
   const [agents, setAgents] = useState<ChatAgent[]>([]);
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
 
@@ -242,18 +243,8 @@ export function ChatInput({ prefillText, onPrefillConsumed }: ChatInputProps) {
           <Tooltip content="Attach images">
             <IconButton icon={<FiImage />} label="Attach images" size="sm" onClick={() => imageInputRef.current?.click()} />
           </Tooltip>
-          <Tooltip content={recording ? 'Stop recording' : 'Voice input'}>
-            <IconButton
-              icon={<FiMic />}
-              label="Voice input"
-              size="sm"
-              active={recording}
-              className={recording ? styles.recording : undefined}
-              onClick={() => {
-                setRecording((prev) => !prev);
-                toast('Voice input is a Phase 2 feature — recording UI only.');
-              }}
-            />
+          <Tooltip content="Voice input">
+            <IconButton icon={<FiMic />} label="Voice input" size="sm" onClick={() => setVoiceModalOpen(true)} />
           </Tooltip>
           <input ref={fileInputRef} type="file" multiple className={styles.hiddenInput} onChange={(e) => e.target.files && addFiles(e.target.files)} />
           <input
@@ -279,6 +270,7 @@ export function ChatInput({ prefillText, onPrefillConsumed }: ChatInputProps) {
           )}
         </div>
       </div>
+      <VoiceInputModal open={voiceModalOpen} onClose={() => setVoiceModalOpen(false)} />
     </div>
   );
 }

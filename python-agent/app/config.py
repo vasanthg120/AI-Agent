@@ -74,6 +74,15 @@ class Settings:
 
     search_api_key: str = os.environ.get("SEARCH_API_KEY", "")
 
+    # Voice (Sarvam AI STT/TTS) — see app/integrations/sarvam_client.py.
+    # Never sent to the frontend; NestJS's voice module only ever forwards
+    # raw audio bytes/JSON through to this service, it never sees this key.
+    sarvam_api_key: str = os.environ.get("SARVAM_API_KEY", "")
+    # Defaults match Sarvam's own current REST API defaults (verified against
+    # docs.sarvam.ai as of this writing) — saaras:v3 for STT, bulbul:v3 for TTS.
+    sarvam_stt_model: str = os.environ.get("SARVAM_STT_MODEL", "saaras:v3")
+    sarvam_tts_model: str = os.environ.get("SARVAM_TTS_MODEL", "bulbul:v3")
+
     # --- Response-completeness / truncation controls ---
     # Was a hardcoded 1024 in anthropic_client.call() — the main planner/
     # chat-reply function, used for every ordinary turn. 1024 tokens

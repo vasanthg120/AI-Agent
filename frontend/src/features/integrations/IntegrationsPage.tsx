@@ -5,7 +5,6 @@ import clsx from 'clsx';
 import {
   FiCheckCircle,
   FiGrid,
-  FiKey,
   FiLink,
   FiPlus,
   FiSettings,
@@ -56,16 +55,6 @@ interface CardState {
   detail?: string;
 }
 
-// Only 'anthropic' uses this simple api-key-only flow now — CRM connections
-// go through the "Custom Integrations" section below (Add Integration /
-// Import Connector Config), which supports every auth style ProspectConnect
-// or any other CRM's REST API actually needs, not just a bare API key.
-const ANTHROPIC_KEY_MODAL_COPY = {
-  title: 'Connect Anthropic',
-  description: "Paste your Anthropic API key. It's stored server-side and used by the chat agent — never exposed to the browser.",
-  placeholder: 'sk-ant-api03-...',
-};
-
 // OAuth-based platforms (Salesforce, Slack, HubSpot, ...) aren't offered
 // here deliberately — this wizard is only for auth styles that need no
 // dedicated consent flow/app registration (see backend/src/integrations/
@@ -97,7 +86,6 @@ const GORILLA_DASH_API_SECRET_HEADER = 'GorillaDash-Api-Secret';
 
 export function IntegrationsPage() {
   const [searchParams, setSearchParams] = useSearchParams();
-  const [anthropic, setAnthropic] = useState<CardState>({ status: 'loading' });
   const [outlookAccounts, setOutlookAccounts] = useState<OutlookAccount[]>([]);
   const [outlookOrgAccounts, setOutlookOrgAccounts] = useState<OutlookOrgAccount[]>([]);
   const [outlookStatus, setOutlookStatus] = useState<CardStatus>('loading');
@@ -109,9 +97,6 @@ export function IntegrationsPage() {
   const [gmailStatus, setGmailStatus] = useState<CardStatus>('loading');
   const [gmailError, setGmailError] = useState<string | undefined>();
   const [gmailModalOpen, setGmailModalOpen] = useState(false);
-  const [anthropicModalOpen, setAnthropicModalOpen] = useState(false);
-  const [apiKeyInput, setApiKeyInput] = useState('');
-  const [connecting, setConnecting] = useState(false);
 
   // Generic "connect any CRM/SaaS" flow — see integrationsService.ts's
   // ConnectCustomIntegrationPayload / auth-methods.ts on the backend.
@@ -215,11 +200,6 @@ export function IntegrationsPage() {
   };
 
   useEffect(() => {
-    integrationsService
-      .getCredentialStatus('anthropic')
-      .then((s) => setAnthropic({ status: s.connected ? 'connected' : 'disconnected', detail: s.maskedKey }))
-      .catch((error) => setAnthropic({ status: 'error', detail: extractErrorMessage(error) }));
-
     loadOutlookAccounts();
     loadOutlookOrgAccounts();
     loadTenantAuthStatus();
@@ -289,36 +269,6 @@ export function IntegrationsPage() {
     return () => clearTimeout(timeout);
   }, [customProvider, customModalOpen]);
 
-  const openAnthropicModal = () => {
-    setApiKeyInput('');
-    setAnthropicModalOpen(true);
-  };
-
-  const handleSaveAnthropicKey = async () => {
-    if (apiKeyInput.trim().length < 10) {
-      toast.error('That doesn’t look like a valid Anthropic API key.');
-      return;
-    }
-
-    setConnecting(true);
-    try {
-      const result = await integrationsService.connectWithApiKey('anthropic', apiKeyInput.trim());
-      setAnthropic({ status: 'connected', detail: result.maskedKey });
-      toast.success('Anthropic connected — Claude will now be used for chat and Outlook mail analysis.');
-      setAnthropicModalOpen(false);
-      setApiKeyInput('');
-    } catch (error) {
-      toast.error(extractErrorMessage(error));
-    } finally {
-      setConnecting(false);
-    }
-  };
-
-  const handleDisconnectAnthropic = async () => {
-    await integrationsService.disconnectCredential('anthropic');
-    setAnthropic({ status: 'disconnected' });
-    toast.success('Anthropic disconnected');
-  };
 
   // "Header: value" per line, matching how most people paste headers from
   // API docs — parsed into the Record<string,string> the backend expects.
@@ -634,35 +584,6 @@ export function IntegrationsPage() {
       <div>
         <div className={styles.sectionEyebrow}>Core Connections</div>
         <div className={styles.grid}>
-          {/* Anthropic — real API key, stored server-side, used for chat + Outlook mail analysis */}
-          <Card className={styles.card}>
-            <div className={styles.cardHeader}>
-              <span className={styles.logoTile}>
-                <img src="/integrations/anthropic.svg" alt="" />
-              </span>
-              <div className={styles.cardTitleRow}>
-                <div className={styles.cardName}>Anthropic</div>
-                <div className={styles.cardCategory}>AI Model</div>
-              </div>
-              {badgeFor(anthropic)}
-            </div>
-            <p className={styles.cardDescription}>Claude models for chat, reasoning, and Outlook mail analysis.</p>
-            {(anthropic.status === 'connected' || anthropic.status === 'error') && anthropic.detail && (
-              <div className={styles.keyPreview}>{anthropic.detail}</div>
-            )}
-            <div className={styles.cardFooter}>
-              {anthropic.status === 'connected' ? (
-                <Button size="sm" variant="secondary" onClick={handleDisconnectAnthropic}>
-                  Disconnect
-                </Button>
-              ) : (
-                <Button size="sm" leftIcon={<FiKey />} onClick={openAnthropicModal}>
-                  Connect
-                </Button>
-              )}
-            </div>
-          </Card>
-
           {/* Gmail — real Google OAuth delegated flow, mirrors Outlook below */}
           <Card className={styles.card}>
             <div className={styles.cardHeader}>
@@ -1069,31 +990,6 @@ export function IntegrationsPage() {
         </Modal>
       )}
 
-      {anthropicModalOpen && (
-        <Modal
-          open
-          onClose={() => setAnthropicModalOpen(false)}
-          title={ANTHROPIC_KEY_MODAL_COPY.title}
-          description={ANTHROPIC_KEY_MODAL_COPY.description}
-        >
-          <Input
-            label="API key"
-            type="password"
-            placeholder={ANTHROPIC_KEY_MODAL_COPY.placeholder}
-            value={apiKeyInput}
-            onChange={(e) => setApiKeyInput(e.target.value)}
-            autoFocus
-          />
-          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 'var(--space-2)', marginTop: 'var(--space-5)' }}>
-            <Button variant="ghost" onClick={() => setAnthropicModalOpen(false)}>
-              Cancel
-            </Button>
-            <Button loading={connecting} onClick={handleSaveAnthropicKey}>
-              Save Key
-            </Button>
-          </div>
-        </Modal>
-      )}
 
       {gorillaDashModalOpen && (
         <Modal

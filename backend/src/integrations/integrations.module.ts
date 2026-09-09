@@ -2,6 +2,7 @@ import { HttpModule } from '@nestjs/axios';
 import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { AuthModule } from '../auth/auth.module';
+import { AdminIntegrationsController } from './admin-integrations.controller';
 import { DynamicExecutorService } from './dynamic-executor.service';
 import { IntegrationResourcesService } from './integration-resources.service';
 import { IntegrationsController } from './integrations.controller';
@@ -27,7 +28,7 @@ import { IntegrationResource, IntegrationResourceSchema } from './schemas/integr
     HttpModule.register({ timeout: 15_000 }),
     AuthModule,
   ],
-  controllers: [IntegrationsController, ResourcesController],
+  controllers: [IntegrationsController, ResourcesController, AdminIntegrationsController],
   providers: [IntegrationsService, IntegrationResourcesService, DynamicExecutorService],
 })
 export class IntegrationsModule {}
