@@ -1,9 +1,16 @@
 import { ConfigService } from '@nestjs/config';
+import { Model } from 'mongoose';
 import { PricingService } from './pricing.service';
+import { BillingSettingsDocument } from './schemas/billing-settings.schema';
 
-// Pure unit tests — no Mongo, no NestJS DI container. PricingService only
-// ever depends on ConfigService.get(), so a plain object satisfies it.
-function makePricing(overrides: Record<string, unknown> = {}): PricingService {
+// Pure unit tests — no Mongo, no NestJS DI container. PricingService depends
+// on ConfigService.get() (unchanged) plus, since the admin-configurable
+// global margin override, a Mongoose model for BillingSettings — a plain
+// fake satisfies both, no real database needed. `settingsOverride` lets a
+// test simulate an admin having set BillingSettings.targetGrossMarginPct;
+// omitting it (the default) means "no admin override" — findOne resolves to
+// null, matching a fresh/never-configured deployment.
+function makePricing(overrides: Record<string, unknown> = {}, settingsOverride: { targetGrossMarginPct?: number } | null = null): PricingService {
   const values: Record<string, unknown> = {
     'billing.creditValueInCurrency': 1,
     'billing.targetGrossMargin': 0.5,
@@ -12,38 +19,69 @@ function makePricing(overrides: Record<string, unknown> = {}): PricingService {
     ...overrides,
   };
   const config = { get: (key: string) => values[key] } as unknown as ConfigService;
-  return new PricingService(config);
+  const settingsModel = {
+    findOne: () => ({ exec: () => Promise.resolve(settingsOverride) }),
+  } as unknown as Model<BillingSettingsDocument>;
+  return new PricingService(config, settingsModel);
 }
 
 describe('PricingService — 50% gross margin (not markup)', () => {
   // Spec §49 MARGIN test cases, verbatim: provider cost -> customer charge,
   // at a 1:1 USD:currency rate so the margin math is visible directly.
-  it('$1 provider cost -> $2 customer charge (50% margin)', () => {
+  it('$1 provider cost -> $2 customer charge (50% margin)', async () => {
     const pricing = makePricing({ 'billing.usdToCurrencyRate': 1 });
-    expect(pricing.costToCustomerUsd(1).toNumber()).toBeCloseTo(2, 10);
+    expect((await pricing.costToCustomerUsd(1)).toNumber()).toBeCloseTo(2, 10);
   });
 
-  it('$2.50 provider cost -> $5 customer charge (50% margin)', () => {
+  it('$2.50 provider cost -> $5 customer charge (50% margin)', async () => {
     const pricing = makePricing({ 'billing.usdToCurrencyRate': 1 });
-    expect(pricing.costToCustomerUsd(2.5).toNumber()).toBeCloseTo(5, 10);
+    expect((await pricing.costToCustomerUsd(2.5)).toNumber()).toBeCloseTo(5, 10);
   });
 
-  it('$7.50 provider cost -> $15 customer charge (50% margin)', () => {
+  it('$7.50 provider cost -> $15 customer charge (50% margin)', async () => {
     const pricing = makePricing({ 'billing.usdToCurrencyRate': 1 });
-    expect(pricing.costToCustomerUsd(7.5).toNumber()).toBeCloseTo(15, 10);
+    expect((await pricing.costToCustomerUsd(7.5)).toNumber()).toBeCloseTo(15, 10);
   });
 
-  it('is division by (1 - margin), not a 1.5x markup', () => {
+  it('is division by (1 - margin), not a 1.5x markup', async () => {
     const pricing = makePricing({ 'billing.usdToCurrencyRate': 1 });
-    const customer = pricing.costToCustomerUsd(10).toNumber();
+    const customer = (await pricing.costToCustomerUsd(10)).toNumber();
     expect(customer).toBeCloseTo(20, 10); // NOT 15 (a naive +50% markup)
     const grossMargin = (customer - 10) / customer;
     expect(grossMargin).toBeCloseTo(0.5, 10);
   });
 
-  it('rejects a margin >= 1 (would imply infinite or negative price)', () => {
+  it('rejects a margin >= 1 (would imply infinite or negative price)', async () => {
     const pricing = makePricing();
-    expect(() => pricing.costToCustomerUsd(10, 1)).toThrow();
+    await expect(pricing.costToCustomerUsd(10, 1)).rejects.toThrow();
+  });
+
+  it('70% provider cost -> $1 / (1 - 0.7) = $3.333... customer charge', async () => {
+    const pricing = makePricing({ 'billing.usdToCurrencyRate': 1 });
+    expect((await pricing.costToCustomerUsd(1, 0.7)).toNumber()).toBeCloseTo(3.3333333333, 9);
+  });
+});
+
+describe('PricingService — dynamic admin-configured global margin (BillingSettings.targetGrossMarginPct)', () => {
+  it('with no admin override, falls back to config.billing.targetGrossMargin unchanged', async () => {
+    const pricing = makePricing({ 'billing.usdToCurrencyRate': 1, 'billing.targetGrossMargin': 0.5 }, null);
+    expect((await pricing.costToCustomerUsd(1)).toNumber()).toBeCloseTo(2, 10); // $1 / (1-0.5)
+  });
+
+  it('an admin-set targetGrossMarginPct of 70 overrides the env default (50%) for future usage', async () => {
+    const pricing = makePricing({ 'billing.usdToCurrencyRate': 1, 'billing.targetGrossMargin': 0.5 }, { targetGrossMarginPct: 70 });
+    expect((await pricing.costToCustomerUsd(1)).toNumber()).toBeCloseTo(3.3333333333, 9); // $1 / (1-0.7)
+  });
+
+  it('an explicit per-call marginOverride still wins over the admin-configured global value', async () => {
+    const pricing = makePricing({ 'billing.usdToCurrencyRate': 1 }, { targetGrossMarginPct: 70 });
+    // Explicit 0.5 fraction passed in — must NOT use the 70% admin override.
+    expect((await pricing.costToCustomerUsd(1, 0.5)).toNumber()).toBeCloseTo(2, 10);
+  });
+
+  it('getTargetGrossMargin returns the resolved fraction directly', async () => {
+    const pricing = makePricing({}, { targetGrossMarginPct: 60 });
+    expect((await pricing.getTargetGrossMargin()).toNumber()).toBeCloseTo(0.6, 10);
   });
 });
 
@@ -62,13 +100,13 @@ describe('PricingService — 1 Haive Credit = ₹1 INR, decimal precision', () =
     expect(pricing.usdToCredits(0.85)).toBe(0.85);
   });
 
-  it('providerCostToCustomerCredits composes margin + credit conversion, undiscretized', () => {
+  it('providerCostToCustomerCredits composes margin + credit conversion, undiscretized', async () => {
     // Spec §41: provider cost ₹2.50 (i.e. $2.50 at a 1:1 rate) -> 50%
     // margin -> ₹5.00 customer charge -> 5 credits used.
     const pricing = makePricing({ 'billing.usdToCurrencyRate': 1 });
-    expect(pricing.providerCostToCustomerCredits(2.5)).toBeCloseTo(5, 10);
+    expect(await pricing.providerCostToCustomerCredits(2.5)).toBeCloseTo(5, 10);
     // Spec §42: ₹7.50 -> ₹15.00 -> 15 credits.
-    expect(pricing.providerCostToCustomerCredits(7.5)).toBeCloseTo(15, 10);
+    expect(await pricing.providerCostToCustomerCredits(7.5)).toBeCloseTo(15, 10);
   });
 
   it('creditsToUsd is the true inverse of usdToCredits at the default peg', () => {

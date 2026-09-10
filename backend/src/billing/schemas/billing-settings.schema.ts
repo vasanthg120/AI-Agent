@@ -90,6 +90,17 @@ export class BillingSettings {
   // (this field unset) is "on".
   @Prop({ default: true })
   autoRechargeDefaultOn: boolean;
+
+  // Global target gross margin, as a 0-100 percentage (50 = 50%) — the
+  // admin-configurable override PricingService.getTargetGrossMargin() reads
+  // FIRST, before falling back to config.billing.targetGrossMargin (the
+  // TARGET_GROSS_MARGIN env var, unchanged as the deploy-time default for a
+  // fresh install with no admin override yet). Unset means "use the env
+  // default" — never a silent 0%/100% margin. Never used directly by
+  // anything else; PricingService.costToCustomerUsd is the only place the
+  // formula customerCharge = providerCost / (1 - margin) exists.
+  @Prop({ min: 0, max: 99.99 })
+  targetGrossMarginPct?: number;
 }
 
 export const BillingSettingsSchema = SchemaFactory.createForClass(BillingSettings);

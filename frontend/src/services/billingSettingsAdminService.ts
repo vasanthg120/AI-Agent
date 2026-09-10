@@ -19,6 +19,7 @@ export interface BillingSettings {
   autoRechargeMinCredits?: number;
   autoRechargeMaxCredits?: number;
   autoRechargeDefaultOn?: boolean;
+  targetGrossMarginPct?: number;
 }
 
 // GET/PUT of the single BillingSettings singleton — see

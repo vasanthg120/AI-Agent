@@ -27,6 +27,8 @@ import { BillingAdminPackagesService } from './billing-admin-packages.service';
 import { BillingAdminPageConfigController } from './billing-admin-page-config.controller';
 import { BillingAdminPlansController } from './billing-admin-plans.controller';
 import { BillingAdminPlansService } from './billing-admin-plans.service';
+import { BillingAdminProviderPricingController } from './billing-admin-provider-pricing.controller';
+import { BillingAdminProviderPricingService } from './billing-admin-provider-pricing.service';
 import { BillingAdminRefundsController } from './billing-admin-refunds.controller';
 import { BillingAdminService } from './billing-admin.service';
 import { BillingAdminSettingsController } from './billing-admin-settings.controller';
@@ -141,6 +143,7 @@ import { WebhookEvent, WebhookEventSchema } from './schemas/webhook-event.schema
     BillingAdminInvoicesController,
     BillingAdminTemplatesController,
     BillingAdminSettingsController,
+    BillingAdminProviderPricingController,
     BillingAdminThemeController,
     BillingAdminPageConfigController,
     BillingAdminRefundsController,
@@ -174,6 +177,7 @@ import { WebhookEvent, WebhookEventSchema } from './schemas/webhook-event.schema
     BillingAdminInvoicesService,
     BillingAdminTemplatesService,
     BillingAdminSettingsService,
+    BillingAdminProviderPricingService,
     BillingThemeService,
     BillingPageConfigService,
     BillingSubscriptionsService,

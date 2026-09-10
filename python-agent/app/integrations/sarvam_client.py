@@ -13,6 +13,7 @@ from typing import Optional
 import requests
 
 from app.config import settings
+from app.memory import integration_store
 
 _BASE_URL = "https://api.sarvam.ai"
 _TIMEOUT_SECONDS = 30
@@ -62,9 +63,14 @@ def resolve_language_code(language: str) -> str:
 
 
 def _require_api_key() -> str:
-    if not settings.sarvam_api_key:
-        raise SarvamApiError("Voice is not configured on this server yet.", status_code=503)
-    return settings.sarvam_api_key
+    # Platform-wide credential ONLY (organizationId="platform"), same exact
+    # rule as anthropic_client.py._resolve_api_key — no static .env fallback,
+    # no arbitrary-organization credential. Set via Admin-haive Settings ->
+    # AI Provider -> Sarvam.
+    key = integration_store.get_api_key("sarvam", organization_id="platform")
+    if not key:
+        raise SarvamApiError("Sarvam AI provider is not configured. Please connect Sarvam from Platform Admin Settings.", status_code=503)
+    return key
 
 
 def transcribe_audio(file_bytes: bytes, filename: str, content_type: str, language: str) -> dict:

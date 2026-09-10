@@ -63,7 +63,7 @@ exports.default = () => ({
         creditValueInCurrency: parseFloat(process.env.CREDIT_VALUE_INR ?? '1'),
         targetGrossMargin: parseFloat(process.env.TARGET_GROSS_MARGIN ?? '0.5'),
         freeTrialCredits: parseInt(process.env.FREE_TRIAL_CREDITS ?? '20', 10),
-        autoRechargeDefault: (process.env.AUTO_RECHARGE_DEFAULT ?? 'false').toLowerCase() === 'true',
+        autoRechargeDefault: (process.env.AUTO_RECHARGE_DEFAULT ?? 'true').toLowerCase() === 'true',
         reservationCeilingCredits: parseInt(process.env.RESERVATION_CEILING_CREDITS ?? '500', 10),
         reservationTimeoutMinutes: parseInt(process.env.RESERVATION_TIMEOUT_MINUTES ?? '10', 10),
         lowBalanceThresholdCredits: parseInt(process.env.LOW_BALANCE_THRESHOLD_CREDITS ?? '200', 10),

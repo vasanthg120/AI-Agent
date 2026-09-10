@@ -5,8 +5,14 @@ import { Badge, Button, Card, Input, Modal, SectionCard, Skeleton, Switch, Tabs 
 import { billingSettingsAdminService, type BillingSettings } from '@/services/billingSettingsAdminService';
 import { billingCatalogAdminService, type AdminTaxRate } from '@/services/billingCatalogAdminService';
 import { billingMigrationAdminService, type MigrationRunResult } from '@/services/billingMigrationAdminService';
-import { adminIntegrationsService } from '@/services/adminIntegrationsService';
+import { adminIntegrationsService, type AiProvider } from '@/services/adminIntegrationsService';
+import {
+  billingProviderPricingAdminService,
+  type CreateProviderPricingPayload,
+  type ProviderPricingRow,
+} from '@/services/billingProviderPricingAdminService';
 import { extractErrorMessage } from '@/utils/errors';
+import { formatFullDate } from '@/utils/date';
 // Same card visual the Anthropic integration used on /settings/integrations
 // before it moved here — reused verbatim (not copied) so the design stays
 // pixel-identical and never drifts from Gmail/Outlook's still-current cards
@@ -14,12 +20,13 @@ import { extractErrorMessage } from '@/utils/errors';
 import integrationsStyles from '../integrations/IntegrationsPage.module.css';
 import shared from './adminShared.module.css';
 
-type TabId = 'company' | 'taxes' | 'migration' | 'aiProvider';
+type TabId = 'company' | 'taxes' | 'migration' | 'aiProvider' | 'providerPricing';
 const TABS: { id: TabId; label: string }[] = [
   { id: 'company', label: 'Company & Invoicing' },
   { id: 'taxes', label: 'Tax Rates' },
   { id: 'migration', label: 'Wallet Migration' },
   { id: 'aiProvider', label: 'AI Provider' },
+  { id: 'providerPricing', label: 'Provider Pricing' },
 ];
 
 function CompanySettingsTab() {
@@ -296,27 +303,42 @@ function WalletMigrationTab() {
   );
 }
 
-type AnthropicStatus = { status: 'loading' | 'connected' | 'disconnected' | 'error'; detail?: string };
+type ProviderCardStatus = { status: 'loading' | 'connected' | 'disconnected' | 'error'; detail?: string };
 
-// Moved from the customer-facing /settings/integrations page — Anthropic's
-// credential has always been read platform-wide at the point it actually
-// matters (python-agent's anthropic_client.py._resolve_api_key reads it
-// with no organizationId filter), so this belongs here rather than under
-// any one organization. Reuses the exact same backend IntegrationsService
-// methods (connect/status/disconnect) the old customer card called — see
-// adminIntegrationsService.ts and backend/src/integrations/
-// admin-integrations.controller.ts — just through the admin session's own
-// auth instead. Same copy, same validation, same masked-key display; only
-// the visual shell changed to match this page's own SectionCard-based tabs.
-function AnthropicSettingsTab() {
-  const [status, setStatus] = useState<AnthropicStatus>({ status: 'loading' });
+interface AiProviderCardConfig {
+  provider: AiProvider;
+  name: string;
+  category: string;
+  description: string;
+  logoSrc?: string;
+  logoGlyph?: string;
+  modalTitle: string;
+  modalDescription: string;
+  placeholder: string;
+  connectedToastMessage: string;
+  minKeyLength: number;
+  invalidKeyMessage: string;
+}
+
+// Platform-wide AI provider credentials (Anthropic, Sarvam) — both resolved
+// server-side to organizationId="platform" explicitly (never an arbitrary
+// organization's own credential, never a static .env fallback — see
+// python-agent's anthropic_client.py._resolve_api_key/sarvam_client.py.
+// _require_api_key). One shared card component since both providers use the
+// identical connect/status/disconnect shape — see adminIntegrationsService.ts
+// and backend/src/integrations/admin-integrations.controller.ts. Anthropic's
+// card was originally on the customer-facing /settings/integrations page;
+// this reuses that same visual design (IntegrationsPage.module.css) rather
+// than redesigning, per this page's own established pattern.
+function AiProviderCard({ config }: { config: AiProviderCardConfig }) {
+  const [status, setStatus] = useState<ProviderCardStatus>({ status: 'loading' });
   const [modalOpen, setModalOpen] = useState(false);
   const [apiKeyInput, setApiKeyInput] = useState('');
   const [connecting, setConnecting] = useState(false);
 
   const load = () => {
     adminIntegrationsService
-      .getAnthropicStatus()
+      .getStatus(config.provider)
       .then((s) => setStatus({ status: s.connected ? 'connected' : 'disconnected', detail: s.maskedKey }))
       .catch((error) => setStatus({ status: 'error', detail: extractErrorMessage(error) }));
   };
@@ -336,15 +358,15 @@ function AnthropicSettingsTab() {
   };
 
   const save = async () => {
-    if (apiKeyInput.trim().length < 10) {
-      toast.error('That doesn’t look like a valid Anthropic API key.');
+    if (apiKeyInput.trim().length < config.minKeyLength) {
+      toast.error(config.invalidKeyMessage);
       return;
     }
     setConnecting(true);
     try {
-      const result = await adminIntegrationsService.connectAnthropic(apiKeyInput.trim());
+      const result = await adminIntegrationsService.connect(config.provider, apiKeyInput.trim());
       setStatus({ status: 'connected', detail: result.maskedKey });
-      toast.success('Anthropic connected — Claude will now be used for chat and Outlook mail analysis.');
+      toast.success(config.connectedToastMessage);
       setModalOpen(false);
       setApiKeyInput('');
     } catch (error) {
@@ -356,9 +378,9 @@ function AnthropicSettingsTab() {
 
   const disconnect = async () => {
     try {
-      await adminIntegrationsService.disconnectAnthropic();
+      await adminIntegrationsService.disconnect(config.provider);
       setStatus({ status: 'disconnected' });
-      toast.success('Anthropic disconnected');
+      toast.success(`${config.name} disconnected`);
     } catch (error) {
       toast.error(extractErrorMessage(error));
     }
@@ -369,15 +391,21 @@ function AnthropicSettingsTab() {
       <Card className={integrationsStyles.card}>
         <div className={integrationsStyles.cardHeader}>
           <span className={integrationsStyles.logoTile}>
-            <img src="/integrations/anthropic.svg" alt="" />
+            {config.logoSrc ? (
+              <img src={config.logoSrc} alt="" />
+            ) : (
+              <span aria-hidden style={{ fontSize: 'var(--text-lg)', fontWeight: 700, color: 'var(--color-accent)' }}>
+                {config.logoGlyph}
+              </span>
+            )}
           </span>
           <div className={integrationsStyles.cardTitleRow}>
-            <div className={integrationsStyles.cardName}>Anthropic</div>
-            <div className={integrationsStyles.cardCategory}>AI Model</div>
+            <div className={integrationsStyles.cardName}>{config.name}</div>
+            <div className={integrationsStyles.cardCategory}>{config.category}</div>
           </div>
           {badge()}
         </div>
-        <p className={integrationsStyles.cardDescription}>Claude models for chat, reasoning, and Outlook mail analysis.</p>
+        <p className={integrationsStyles.cardDescription}>{config.description}</p>
         {(status.status === 'connected' || status.status === 'error') && status.detail && (
           <div className={integrationsStyles.keyPreview}>{status.detail}</div>
         )}
@@ -394,16 +422,11 @@ function AnthropicSettingsTab() {
         </div>
       </Card>
 
-      <Modal
-        open={modalOpen}
-        onClose={() => setModalOpen(false)}
-        title="Connect Anthropic"
-        description="Paste your Anthropic API key. It's stored server-side and used by the chat agent — never exposed to the browser."
-      >
+      <Modal open={modalOpen} onClose={() => setModalOpen(false)} title={config.modalTitle} description={config.modalDescription}>
         <Input
           label="API key"
           type="password"
-          placeholder="sk-ant-api03-..."
+          placeholder={config.placeholder}
           value={apiKeyInput}
           onChange={(e) => setApiKeyInput(e.target.value)}
           autoFocus
@@ -418,6 +441,254 @@ function AnthropicSettingsTab() {
         </div>
       </Modal>
     </div>
+  );
+}
+
+const ANTHROPIC_CARD_CONFIG: AiProviderCardConfig = {
+  provider: 'anthropic',
+  name: 'Anthropic',
+  category: 'AI Model',
+  description: 'Claude models for chat, reasoning, and Outlook mail analysis.',
+  logoSrc: '/integrations/anthropic.svg',
+  modalTitle: 'Connect Anthropic',
+  modalDescription: "Paste your Anthropic API key. It's stored server-side and used by the chat agent — never exposed to the browser.",
+  placeholder: 'sk-ant-api03-...',
+  connectedToastMessage: 'Anthropic connected — Claude will now be used for chat and Outlook mail analysis.',
+  minKeyLength: 10,
+  invalidKeyMessage: 'That doesn’t look like a valid Anthropic API key.',
+};
+
+const SARVAM_CARD_CONFIG: AiProviderCardConfig = {
+  provider: 'sarvam',
+  name: 'Sarvam AI',
+  category: 'Voice AI',
+  description: 'Speech-to-text and text-to-speech for the Indian-language voice assistant.',
+  logoGlyph: 'S',
+  modalTitle: 'Connect Sarvam AI',
+  modalDescription: "Paste your Sarvam AI API key. It's stored server-side and used for voice input/output — never exposed to the browser.",
+  placeholder: 'Sarvam API key',
+  connectedToastMessage: 'Sarvam AI connected — voice input/output will now use it.',
+  minKeyLength: 10,
+  invalidKeyMessage: 'That doesn’t look like a valid Sarvam AI API key.',
+};
+
+function AiProviderTab() {
+  return (
+    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--space-4)' }}>
+      <AiProviderCard config={ANTHROPIC_CARD_CONFIG} />
+      <AiProviderCard config={SARVAM_CARD_CONFIG} />
+    </div>
+  );
+}
+
+const emptyProviderPricingForm: CreateProviderPricingPayload & { marginMode: 'global' | 'override' } = {
+  provider: '',
+  model: '',
+  inputCostPerMTokUsd: 0,
+  outputCostPerMTokUsd: 0,
+  marginOverridePct: undefined,
+  marginMode: 'global',
+};
+
+// Admin control over the ProviderPricing registry (section 9/15B) —
+// ReservationService.settle() reads this per (provider, model) at every
+// settlement; "Add Rate" always creates a NEW versioned row (never edits an
+// existing one), so a rate/margin change only ever affects usage settled
+// AFTER it, never rewriting how a past transaction was already priced. See
+// billing-admin-provider-pricing.service.ts's own doc comment.
+function ProviderPricingTab() {
+  const [rows, setRows] = useState<ProviderPricingRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [modalOpen, setModalOpen] = useState(false);
+  const [form, setForm] = useState(emptyProviderPricingForm);
+  const [submitting, setSubmitting] = useState(false);
+
+  const load = () => {
+    setLoading(true);
+    billingProviderPricingAdminService
+      .list()
+      .then(setRows)
+      .catch((error) => toast.error(extractErrorMessage(error)))
+      .finally(() => setLoading(false));
+  };
+
+  useEffect(load, []);
+
+  const activeRows = rows.filter((r) => !r.effectiveTo);
+  const historyRows = rows.filter((r) => r.effectiveTo);
+
+  const submit = async () => {
+    if (!form.provider.trim() || !(form.inputCostPerMTokUsd >= 0) || !(form.outputCostPerMTokUsd >= 0)) {
+      toast.error('Provider, input cost, and output cost are required.');
+      return;
+    }
+    setSubmitting(true);
+    try {
+      await billingProviderPricingAdminService.create({
+        provider: form.provider.trim(),
+        model: form.model?.trim() || undefined,
+        inputCostPerMTokUsd: form.inputCostPerMTokUsd,
+        outputCostPerMTokUsd: form.outputCostPerMTokUsd,
+        marginOverridePct: form.marginMode === 'override' ? form.marginOverridePct : undefined,
+      });
+      toast.success('Rate saved — takes effect for usage settled from now on.');
+      setModalOpen(false);
+      setForm(emptyProviderPricingForm);
+      load();
+    } catch (error) {
+      toast.error(extractErrorMessage(error));
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <SectionCard
+      title="Provider / Model Pricing"
+      action={
+        <Button size="sm" leftIcon={<FiPlus size={12} />} onClick={() => setModalOpen(true)}>
+          Add Rate
+        </Button>
+      }
+    >
+      <p style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-muted)', margin: '0 0 var(--space-4)' }}>
+        The source of truth ReservationService.settle() reads at every AI usage settlement. Adding a rate never edits or deletes
+        an existing one — it creates a new version effective from now, so past settled transactions are never recalculated.
+        Leave the margin as "Use Global" to follow the Target Gross Margin set on the AI Provider tab.
+      </p>
+      <div className={shared.tableWrap}>
+        <table className={shared.table}>
+          <thead>
+            <tr>
+              <th>Provider</th>
+              <th>Model</th>
+              <th>Input $/MTok</th>
+              <th>Output $/MTok</th>
+              <th>Margin</th>
+              <th>Effective From</th>
+            </tr>
+          </thead>
+          <tbody>
+            {loading && (
+              <tr>
+                <td colSpan={6}>
+                  <Skeleton height={20} />
+                </td>
+              </tr>
+            )}
+            {!loading && activeRows.length === 0 && (
+              <tr>
+                <td colSpan={6} className={shared.emptyState}>
+                  No provider pricing configured yet.
+                </td>
+              </tr>
+            )}
+            {!loading &&
+              activeRows.map((r) => (
+                <tr key={r._id}>
+                  <td className={shared.mono}>{r.provider}</td>
+                  <td className={shared.mono}>{r.model}</td>
+                  <td>${r.inputCostPerMTokUsd}</td>
+                  <td>${r.outputCostPerMTokUsd}</td>
+                  <td>{r.marginOverridePct !== undefined ? <Badge variant="accent">{r.marginOverridePct}%</Badge> : <Badge variant="neutral">Use Global</Badge>}</td>
+                  <td>{formatFullDate(r.effectiveFrom)}</td>
+                </tr>
+              ))}
+          </tbody>
+        </table>
+      </div>
+
+      {historyRows.length > 0 && (
+        <details style={{ marginTop: 'var(--space-4)' }}>
+          <summary style={{ cursor: 'pointer', fontSize: 'var(--text-sm)', color: 'var(--color-text-muted)' }}>
+            {historyRows.length} historical rate{historyRows.length === 1 ? '' : 's'} (superseded, kept for past-transaction accuracy)
+          </summary>
+          <div className={shared.tableWrap} style={{ marginTop: 'var(--space-3)' }}>
+            <table className={shared.table}>
+              <thead>
+                <tr>
+                  <th>Provider</th>
+                  <th>Model</th>
+                  <th>Input $/MTok</th>
+                  <th>Output $/MTok</th>
+                  <th>Margin</th>
+                  <th>Effective From</th>
+                  <th>Effective To</th>
+                </tr>
+              </thead>
+              <tbody>
+                {historyRows.map((r) => (
+                  <tr key={r._id}>
+                    <td className={shared.mono}>{r.provider}</td>
+                    <td className={shared.mono}>{r.model}</td>
+                    <td>${r.inputCostPerMTokUsd}</td>
+                    <td>${r.outputCostPerMTokUsd}</td>
+                    <td>{r.marginOverridePct !== undefined ? `${r.marginOverridePct}%` : 'Use Global'}</td>
+                    <td>{formatFullDate(r.effectiveFrom)}</td>
+                    <td>{r.effectiveTo ? formatFullDate(r.effectiveTo) : '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </details>
+      )}
+
+      <Modal open={modalOpen} onClose={() => setModalOpen(false)} title="Add Provider Pricing Rate">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
+          <Input label="Provider" placeholder="anthropic" value={form.provider} onChange={(e) => setForm({ ...form, provider: e.target.value })} />
+          <Input
+            label="Model (optional — blank means provider-wide default, '*')"
+            placeholder="claude-sonnet-4-6"
+            value={form.model ?? ''}
+            onChange={(e) => setForm({ ...form, model: e.target.value })}
+          />
+          <div style={{ display: 'flex', gap: 'var(--space-3)' }}>
+            <Input
+              label="Input cost ($ per million tokens)"
+              type="number"
+              min={0}
+              step="0.01"
+              value={form.inputCostPerMTokUsd}
+              onChange={(e) => setForm({ ...form, inputCostPerMTokUsd: Number.parseFloat(e.target.value) || 0 })}
+            />
+            <Input
+              label="Output cost ($ per million tokens)"
+              type="number"
+              min={0}
+              step="0.01"
+              value={form.outputCostPerMTokUsd}
+              onChange={(e) => setForm({ ...form, outputCostPerMTokUsd: Number.parseFloat(e.target.value) || 0 })}
+            />
+          </div>
+          <label className={shared.mono} style={{ fontSize: 'var(--text-sm)', fontFamily: 'inherit', display: 'flex', flexDirection: 'column', gap: 4 }}>
+            Margin
+            <select
+              value={form.marginMode}
+              onChange={(e) => setForm({ ...form, marginMode: e.target.value as 'global' | 'override' })}
+              style={{ padding: 'var(--space-2)', borderRadius: 'var(--radius-md)', border: '1px solid var(--color-border)' }}
+            >
+              <option value="global">Use Global</option>
+              <option value="override">Override</option>
+            </select>
+          </label>
+          {form.marginMode === 'override' && (
+            <Input
+              label="Margin override (%)"
+              type="number"
+              min={0}
+              max={99.99}
+              step="0.01"
+              value={form.marginOverridePct ?? ''}
+              onChange={(e) => setForm({ ...form, marginOverridePct: e.target.value ? Number.parseFloat(e.target.value) : undefined })}
+            />
+          )}
+          <Button fullWidth loading={submitting} onClick={submit}>
+            Save Rate
+          </Button>
+        </div>
+      </Modal>
+    </SectionCard>
   );
 }
 
@@ -442,7 +713,8 @@ export function AdminSettingsPage() {
       {tab === 'company' && <CompanySettingsTab />}
       {tab === 'taxes' && <TaxRatesTab />}
       {tab === 'migration' && <WalletMigrationTab />}
-      {tab === 'aiProvider' && <AnthropicSettingsTab />}
+      {tab === 'aiProvider' && <AiProviderTab />}
+      {tab === 'providerPricing' && <ProviderPricingTab />}
     </div>
   );
 }
