@@ -255,6 +255,12 @@ export class DealPerformanceDashboardService {
     match: Record<string, unknown>,
     storeConstraint: string | undefined,
     storeFilter: string[] | undefined,
+    // Every existing caller omits this (default false), preserving the
+    // original manager/consultant-only roster exactly. Agent Activity's
+    // team-wide view (analytics-dashboard.service.ts) is the one caller that
+    // passes true, since it wants every admin-created user listed, not just
+    // the revenue-bearing sales roles.
+    includeAllRoles = false,
   ) {
     const scopeStoreIds = storeConstraint ? [storeConstraint] : storeFilter;
 
@@ -269,12 +275,14 @@ export class DealPerformanceDashboardService {
     ]);
 
     const employees = users.filter(
-      (u) => u.roles.some((r) => SALES_ROLES.has(r)) && (!scopeStoreIds?.length || (u.storeId && scopeStoreIds.includes(u.storeId))),
+      (u) =>
+        (includeAllRoles || u.roles.some((r) => SALES_ROLES.has(r))) &&
+        (!scopeStoreIds?.length || (u.storeId && scopeStoreIds.includes(u.storeId))),
     );
 
-    const byOwner = new Map<string, { wonCount: number; lostCount: number; openCount: number; wonValue: number }>();
+    const byOwner = new Map<string, { wonCount: number; lostCount: number; openCount: number; wonValue: number; openValue: number }>();
     for (const r of rows) {
-      const entry = byOwner.get(r._id.ownerId) ?? { wonCount: 0, lostCount: 0, openCount: 0, wonValue: 0 };
+      const entry = byOwner.get(r._id.ownerId) ?? { wonCount: 0, lostCount: 0, openCount: 0, wonValue: 0, openValue: 0 };
       if (r._id.status === 'won') {
         entry.wonCount = r.count;
         entry.wonValue = r.value;
@@ -282,6 +290,7 @@ export class DealPerformanceDashboardService {
         entry.lostCount = r.count;
       } else {
         entry.openCount = r.count;
+        entry.openValue = r.value;
       }
       byOwner.set(r._id.ownerId, entry);
     }
@@ -289,7 +298,7 @@ export class DealPerformanceDashboardService {
     return employees
       .map((u) => {
         const id = u._id.toString();
-        const stats = byOwner.get(id) ?? { wonCount: 0, lostCount: 0, openCount: 0, wonValue: 0 };
+        const stats = byOwner.get(id) ?? { wonCount: 0, lostCount: 0, openCount: 0, wonValue: 0, openValue: 0 };
         const total = stats.wonCount + stats.lostCount + stats.openCount;
         return {
           userId: id,
@@ -298,6 +307,9 @@ export class DealPerformanceDashboardService {
           lostCount: stats.lostCount,
           openCount: stats.openCount,
           wonValue: stats.wonValue,
+          // Open (not-yet-closed) deal value — the "pipeline" figure for
+          // this owner, additive alongside wonValue rather than replacing it.
+          pipelineValue: stats.openValue,
           conversionRate: total > 0 ? round1((stats.wonCount / total) * 100) : null,
           winRate: stats.wonCount + stats.lostCount > 0 ? round1((stats.wonCount / (stats.wonCount + stats.lostCount)) * 100) : null,
           avgDealSize: stats.wonCount > 0 ? Math.round((stats.wonValue / stats.wonCount) * 100) / 100 : null,

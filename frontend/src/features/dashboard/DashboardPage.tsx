@@ -1,200 +1,107 @@
 import { useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
-import { useQuery } from '@tanstack/react-query';
-import { Link } from 'react-router-dom';
-import { FiAlertTriangle, FiBarChart2, FiClipboard, FiClock, FiFileText, FiTrendingUp, FiUsers } from 'react-icons/fi';
-import { Avatar, Badge, Card, SectionCard, Skeleton, StatTile, Tabs } from '@/components/ui';
-import { ROUTES } from '@/constants/routes';
-import { dashboardService } from '@/services/dashboardService';
-import { PRIORITY_VARIANT } from './priorityVariant';
-import { AgentComparisonChart } from './components/AgentComparisonChart';
-import { AgentFocusedView } from './components/AgentFocusedView';
+import { useQuery, keepPreviousData } from '@tanstack/react-query';
+import { FiBarChart2, FiClock, FiDollarSign, FiTarget, FiTrendingUp } from 'react-icons/fi';
+import { Card, MonthYearFilterPopup, SectionCard, Skeleton, StatTile } from '@/components/ui';
+import type { DateRange } from '@/components/ui';
+import { CURRENT_MONTH, CURRENT_YEAR, rangeForMonth } from '@/components/ui';
+import { formatINR as money } from '@/utils/currency';
+import { analyticsDashboardService } from '@/services/analyticsDashboardService';
+import { UserPerformanceDetailView } from './components/UserPerformanceDetailView';
+import { UserRevenueComparisonChart } from './components/UserRevenueComparisonChart';
 import styles from './DashboardPage.module.css';
 
-// Grouped into tabs so the 5 stat tiles + chart + agent grid + 2 unbounded
-// lists don't all stack in one continuous scroll — the same crowding fix
-// already proven on Deal Performance/Finance AI, applied here since this
-// was confirmed the most crowded page in the app.
-const TAB_ITEMS = [
-  { id: 'overview', label: 'Overview' },
-  { id: 'agents', label: 'Agents' },
-  { id: 'activity', label: 'Activity' },
-];
-const TAB_IDS = TAB_ITEMS.map((t) => t.id);
+function defaultRange(): DateRange {
+  return rangeForMonth(CURRENT_YEAR, CURRENT_MONTH);
+}
 
+// Agent Activity — redesigned from an AI chat-agent task/report tracker into
+// a team revenue/pipeline/dues view: every admin-created user compared on
+// one chart, with a click-through to that user's own numbers. Backed by the
+// same GET /analytics-dashboard/overview endpoint the Analytics Dashboard
+// page uses (includeAllUsers=true here so every org user is listed, not just
+// manager/consultant — see that endpoint's own comments). An admin/owner
+// sees the whole org; a manager/consultant/agent_user sees only their own
+// row (server-scoped, not a client-side check) — the chart and drill-down
+// code paths are identical either way, just with a shorter roster.
 export function DashboardPage() {
-  const [searchParams, setSearchParams] = useSearchParams();
-  const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
-  const [activeFilter, setActiveFilter] = useState<'urgent' | 'overdue' | null>(null);
-  const initialTab = searchParams.get('tab');
-  const [activeTab, setActiveTab] = useState(initialTab && TAB_IDS.includes(initialTab) ? initialTab : 'overview');
-
-  const changeTab = (tab: string) => {
-    setActiveTab(tab);
-    setSearchParams((prev) => {
-      const next = new URLSearchParams(prev);
-      next.set('tab', tab);
-      return next;
-    });
-  };
+  const [range, setRange] = useState<DateRange>(defaultRange());
+  const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
+  const dateFrom = range.dateFrom ?? defaultRange().dateFrom!;
+  const dateTo = range.dateTo ?? defaultRange().dateTo!;
 
   const { data, isLoading } = useQuery({
-    queryKey: ['dashboard-overview'],
-    queryFn: () => dashboardService.getOverview(),
+    queryKey: ['agent-activity-overview', dateFrom, dateTo],
+    queryFn: () => analyticsDashboardService.getOverview(dateFrom, dateTo, undefined, undefined, true),
     refetchInterval: 60_000,
+    placeholderData: keepPreviousData,
   });
+
+  if (selectedUserId) {
+    return (
+      <UserPerformanceDetailView
+        userId={selectedUserId}
+        dateFrom={dateFrom}
+        dateTo={dateTo}
+        onBack={() => setSelectedUserId(null)}
+      />
+    );
+  }
 
   if (isLoading || !data) {
     return (
       <div className={styles.page}>
         <Skeleton height={100} />
         <Skeleton height={160} />
-        <Skeleton height={160} />
+        <Skeleton height={280} />
       </div>
     );
   }
-
-  // RBAC already guarantees an agent_user's unscoped overview has exactly
-  // one agent — land them straight in the focused view, no click needed.
-  // Same for an admin viewing a workspace that only has one agent total.
-  const isFocused = selectedAgentId !== null || data.agents.length === 1;
-  if (isFocused) {
-    const focusedAgentId = selectedAgentId ?? data.agents[0].id;
-    return (
-      <AgentFocusedView
-        agentId={focusedAgentId}
-        onBack={selectedAgentId ? () => setSelectedAgentId(null) : undefined}
-      />
-    );
-  }
-
-  // Falls back to a readable placeholder, never the raw id — same
-  // convention as UsersSettings.tsx's agentName/storeName helpers.
-  const agentName = (agentId: string) => data.agents.find((a) => a.id === agentId)?.name ?? 'Unknown agent';
-
-  const visibleAlerts = data.criticalAlerts.filter((t) => {
-    if (activeFilter === 'urgent') return t.priority === 'urgent';
-    if (activeFilter === 'overdue') return t.isOverdue;
-    return true;
-  });
 
   return (
     <div className={styles.page}>
-      <div>
-        <div className={styles.pageTitle}>AI Workforce Dashboard</div>
-        <div className={styles.pageSubtitle}>{data.date}</div>
+      <div className={styles.headerRow}>
+        <div>
+          <div className={styles.pageTitle}>Agent Activity</div>
+          <div className={styles.pageSubtitle}>Team revenue, pipeline, and dues across your organization</div>
+        </div>
+        <MonthYearFilterPopup value={range} onChange={setRange} />
       </div>
 
-      <div className={styles.tabBar}>
-        <Tabs items={TAB_ITEMS} activeId={activeTab} onChange={changeTab} />
-      </div>
+      <SectionCard title="Overview" icon={FiBarChart2}>
+        <div className={styles.statsGrid}>
+          <StatTile value={money(data.revenue.achieved)} label="Total Revenue" icon={FiDollarSign} />
+          <StatTile value={money(data.deals.openValue)} label="Pipeline" icon={FiTrendingUp} />
+          <StatTile value={money(data.outstanding.total)} label="Dues" icon={FiClock} />
+          <StatTile value={data.deals.wonCount} label="Deals Won" icon={FiTarget} />
+        </div>
+      </SectionCard>
 
-      {activeTab === 'overview' && (
-        <SectionCard title="Today's Overview" icon={FiBarChart2}>
-          <div className={styles.statsGrid}>
-            <StatTile
-              value={data.stats.totalTasks}
-              label="Total Tasks"
-              icon={FiClipboard}
-              active={activeFilter === null}
-              onClick={() => setActiveFilter(null)}
-            />
-            <StatTile
-              value={data.stats.urgentCount}
-              label="Urgent"
-              icon={FiAlertTriangle}
-              active={activeFilter === 'urgent'}
-              onClick={() => setActiveFilter((f) => (f === 'urgent' ? null : 'urgent'))}
-            />
-            <StatTile
-              value={data.stats.overdueCount}
-              label="Overdue"
-              icon={FiClock}
-              active={activeFilter === 'overdue'}
-              onClick={() => setActiveFilter((f) => (f === 'overdue' ? null : 'overdue'))}
-            />
-            <StatTile value={data.stats.reportsGenerated} label="Reports Generated" icon={FiFileText} />
-            <StatTile
-              value={data.stats.followUpHealthPct === null ? '—' : `${data.stats.followUpHealthPct}%`}
-              label="Follow-up Health"
-              icon={FiTrendingUp}
-            />
-          </div>
-        </SectionCard>
-      )}
+      <SectionCard title="Team Performance" icon={FiBarChart2}>
+        {data.employeeLeaderboard.length === 0 ? (
+          <div className={styles.emptyState}>No users to show yet.</div>
+        ) : (
+          <UserRevenueComparisonChart rows={data.employeeLeaderboard} onSelect={setSelectedUserId} />
+        )}
+      </SectionCard>
 
-      {activeTab === 'agents' && (
-        <>
-          <SectionCard title="Performance Comparison" icon={FiBarChart2}>
-            <AgentComparisonChart agents={data.agents} onSelect={setSelectedAgentId} />
-          </SectionCard>
-
-          <SectionCard title="Agent Status" icon={FiUsers}>
-            <div className={styles.agentsGrid}>
-              {data.agents.map((agent) => (
-                <Card
-                  key={agent.id}
-                  interactive
-                  className={styles.agentCard}
-                  onClick={() => setSelectedAgentId(agent.id)}
-                >
-                  <div className={styles.agentCardHeader}>
-                    <Avatar name={agent.name} color={agent.avatarColor} size="sm" />
-                    <span className={styles.agentName}>{agent.name}</span>
-                  </div>
-                  <Badge variant={agent.status === 'reported' ? 'success' : 'neutral'} dot>
-                    {agent.status === 'reported' ? 'Reported today' : 'Pending'}
-                  </Badge>
-                  <span className={styles.agentTaskCount}>{agent.todaysTaskCount} task(s) today</span>
-                </Card>
-              ))}
-            </div>
-          </SectionCard>
-        </>
-      )}
-
-      {activeTab === 'activity' && (
-        <>
-          <SectionCard
-            title={`Critical Alerts${activeFilter ? ` — ${activeFilter === 'urgent' ? 'Urgent' : 'Overdue'} only` : ''}`}
-            icon={FiAlertTriangle}
-          >
-            {visibleAlerts.length === 0 ? (
-              <div className={styles.emptyState}>
-                {activeFilter ? `No ${activeFilter} items today.` : 'No urgent or overdue items today.'}
-              </div>
-            ) : (
-              visibleAlerts.map((task, index) => (
-                <div key={index} className={styles.listItem}>
-                  <div className={styles.listItemMain}>
-                    <span className={styles.listItemTitle}>{task.title}</span>
-                    <span className={styles.listItemMeta}>{agentName(task.agentId)}</span>
-                  </div>
-                  <Badge variant={PRIORITY_VARIANT[task.priority]}>{task.isOverdue ? 'Overdue' : task.priority}</Badge>
+      <SectionCard title="All Users" icon={FiTarget}>
+        {data.employeeLeaderboard.length === 0 ? (
+          <div className={styles.emptyState}>No admin-created users to show yet.</div>
+        ) : (
+          <div className={styles.agentsGrid}>
+            {data.employeeLeaderboard.map((row) => (
+              <Card key={row.userId} interactive className={styles.agentCard} onClick={() => setSelectedUserId(row.userId)}>
+                <div className={styles.agentCardHeader}>
+                  <span className={styles.agentName}>{row.userName}</span>
                 </div>
-              ))
-            )}
-          </SectionCard>
-
-          <SectionCard title="Recent Reports" icon={FiFileText}>
-            {data.recentReports.length === 0 ? (
-              <div className={styles.emptyState}>No reports generated yet today.</div>
-            ) : (
-              data.recentReports.map((report) => (
-                <Link key={report.id} to={ROUTES.chatConversation(report.sourceConversationId)} className={styles.listItem}>
-                  <div className={styles.listItemMain}>
-                    <span className={styles.listItemTitle}>
-                      {agentName(report.agentId)} — {report.reportType === 'morning' ? 'Morning to-do' : 'EOD report'}
-                    </span>
-                    <span className={styles.listItemMeta}>{report.summary}</span>
-                  </div>
-                  <Badge variant="neutral">{report.taskCount} tasks</Badge>
-                </Link>
-              ))
-            )}
-          </SectionCard>
-        </>
-      )}
+                <span className={styles.agentTaskCount}>{money(row.revenue)} revenue</span>
+                <span className={styles.agentTaskCount}>{money(row.pipelineValue)} pipeline</span>
+                <span className={styles.agentTaskCount}>{money(row.outstanding)} dues</span>
+              </Card>
+            ))}
+          </div>
+        )}
+      </SectionCard>
     </div>
   );
 }

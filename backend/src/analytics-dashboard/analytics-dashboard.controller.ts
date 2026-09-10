@@ -20,13 +20,23 @@ export class AnalyticsDashboardController {
   constructor(private analyticsDashboardService: AnalyticsDashboardService) {}
 
   @Get('overview')
-  @Roles('owner', 'admin', 'manager', 'consultant')
+  // agent_user added for Agent Activity's team-wide view — self-scoped only
+  // (see the else branch below), same as manager/consultant; they were never
+  // given org/store override and still aren't.
+  @Roles('owner', 'admin', 'manager', 'consultant', 'agent_user')
   overview(@CurrentUser() user: JwtPayload, @Query() query: GetAnalyticsOverviewQueryDto) {
     const canOverride = user.roles.includes('admin') || user.roles.includes('owner');
 
     let scope: ScopeInfo;
     if (canOverride) {
-      scope = query.storeId ? { level: 'store', storeId: query.storeId } : { level: 'org' };
+      // Agent Activity's drill-down: view one specific user's data. Takes
+      // priority over storeId (a userId request is always more specific)
+      // — both are still admin/owner-only, never trusted from anyone else.
+      if (query.userId) {
+        scope = { level: 'user', userId: query.userId };
+      } else {
+        scope = query.storeId ? { level: 'store', storeId: query.storeId } : { level: 'org' };
+      }
     } else if (user.roles.includes('manager')) {
       if (!user.storeId) throw new BadRequestException('No store assigned to this account');
       scope = { level: 'store', storeId: user.storeId };
@@ -34,6 +44,6 @@ export class AnalyticsDashboardController {
       scope = { level: 'user', userId: user.sub };
     }
 
-    return this.analyticsDashboardService.getOverview(user, scope, query.dateFrom, query.dateTo);
+    return this.analyticsDashboardService.getOverview(user, scope, query.dateFrom, query.dateTo, query.includeAllUsers);
   }
 }

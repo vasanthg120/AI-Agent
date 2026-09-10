@@ -441,6 +441,23 @@ export class QuotesService {
     };
   }
 
+  // "Dues" for Agent Activity's team-wide view (analytics-dashboard.service.ts)
+  // — what each owner currently has outstanding, right now. Deliberately NOT
+  // date-range scoped like getBiSummary above: a quote created last quarter
+  // that's still unpaid is still a real due today, not something that should
+  // disappear once its creation month rolls out of the selected reporting
+  // period. Mirrors getOpenDealAgingByOwner's per-owner Map shape/style.
+  async getOutstandingByOwner(organizationId: string): Promise<Map<string, number>> {
+    const rows = await this.quoteModel
+      .aggregate<{ _id: string; totalQuoted: number; totalPaid: number }>([
+        { $match: { organizationId, ownerUserId: { $exists: true, $ne: null } } },
+        { $group: { _id: '$ownerUserId', totalQuoted: { $sum: '$quoteAmount' }, totalPaid: { $sum: '$paidAmount' } } },
+      ])
+      .exec();
+
+    return new Map(rows.map((r) => [r._id, r.totalQuoted - r.totalPaid]));
+  }
+
   private async buildBiMatch(organizationId: string, start: Date, end: Date, filters: BiQuoteFilters): Promise<FilterQuery<Quote>> {
     const match: FilterQuery<Quote> = { organizationId, createdAt: { $gte: start, $lt: end } };
     if (filters.employeeId?.length) match.ownerUserId = { $in: filters.employeeId };

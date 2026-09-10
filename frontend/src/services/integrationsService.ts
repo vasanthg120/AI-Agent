@@ -255,6 +255,13 @@ export const integrationsService = {
     await axiosClient.post(`/integrations/${provider}/connect`, payload);
   },
 
+  // Pulls fresh CRM data immediately instead of waiting for python-agent's
+  // background poll or having to disconnect/reconnect to trigger a sync.
+  async syncCrmNow(): Promise<{ dealsSynced: number; quotesSynced: number }> {
+    const { data } = await axiosClient.post<{ dealsSynced: number; quotesSynced: number }>('/integrations/crm/sync');
+    return data;
+  },
+
   // Body omitted (or partial) re-tests whatever's already saved; a full
   // payload tests it before saving, from the connect wizard.
   async testCustomIntegrationConnection(

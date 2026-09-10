@@ -55,6 +55,23 @@ export class IntegrationsService {
     this.pythonAgentUrl = this.config.get<string>('pythonAgentUrl') ?? 'http://localhost:8000';
   }
 
+  /** The actual sync call, awaited — used both by the fire-and-forget
+   * post-connect trigger below and by the explicit "Sync Now" endpoint
+   * (POST /integrations/crm/sync), which needs a real result to show the
+   * user rather than firing blind. Throws on failure (e.g. python-agent
+   * unreachable) so callers can decide how to surface that. */
+  async syncCrmNow(organizationId: string): Promise<{ dealsSynced: number; quotesSynced: number }> {
+    const token = this.jwt.sign({ sub: 'system', organizationId }, { expiresIn: '5m' });
+    const { data } = await firstValueFrom(
+      this.http.post<{ dealsSynced: number; quotesSynced: number }>(
+        `${this.pythonAgentUrl}/sync/crm/run-for-org`,
+        {},
+        { headers: { Authorization: `Bearer ${token}` } },
+      ),
+    );
+    return data;
+  }
+
   /** Fires an immediate, org-scoped CRM sync right after a customer connects
    * (or reconnects) their CRM — without this, real data only shows up on
    * the dashboard after the next crm_mongo_sync_interval_minutes poll (up to
@@ -66,10 +83,7 @@ export class IntegrationsService {
    * REST API, ...) has nothing to sync. */
   private triggerCrmSyncIfApplicable(organizationId: string, provider: string): void {
     if (!CRM_PROVIDERS.has(provider)) return;
-    const token = this.jwt.sign({ sub: 'system', organizationId }, { expiresIn: '5m' });
-    firstValueFrom(
-      this.http.post(`${this.pythonAgentUrl}/sync/crm/run-for-org`, {}, { headers: { Authorization: `Bearer ${token}` } }),
-    ).catch((err) => {
+    this.syncCrmNow(organizationId).catch((err) => {
       this.logger.error(`Immediate CRM sync failed for org ${organizationId}: ${(err as Error).message}`);
     });
   }

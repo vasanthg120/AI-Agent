@@ -4,6 +4,7 @@ import { Model } from 'mongoose';
 import { JwtPayload } from '../auth/jwt-payload.interface';
 import { CustomerActivityService } from '../crm/customer-activity.service';
 import { DealPerformanceDashboardService } from '../crm/deal-performance-dashboard.service';
+import { QuotesService } from '../crm/quotes.service';
 import { Deal, DealDocument } from '../crm/schemas/deal.schema';
 import { Quote, QuoteDocument } from '../crm/schemas/quote.schema';
 import { SalesAnalyticsService } from '../crm/sales-analytics.service';
@@ -29,6 +30,7 @@ export class AnalyticsDashboardService {
     @InjectModel(Quote.name) private quoteModel: Model<QuoteDocument>,
     private salesAnalyticsService: SalesAnalyticsService,
     private dealPerformanceDashboardService: DealPerformanceDashboardService,
+    private quotesService: QuotesService,
     private customerActivityService: CustomerActivityService,
     private emailIntelligenceService: EmailIntelligenceService,
     private dashboardService: DashboardService,
@@ -42,7 +44,18 @@ export class AnalyticsDashboardService {
   // no longer applies once the range itself is always exactly one month.
   // achievement (widget 3) uses dateFrom's month directly; revenueTrend
   // (widget 8) uses it as the trailing-6-month window's end instead of "now".
-  async getOverview(caller: JwtPayload, scope: ScopeInfo, dateFrom: string, dateTo: string): Promise<AnalyticsDashboardOverview> {
+  async getOverview(
+    caller: JwtPayload,
+    scope: ScopeInfo,
+    dateFrom: string,
+    dateTo: string,
+    // Agent Activity's team-wide view passes true so every admin-created
+    // user is listed, not just manager/consultant — see
+    // DealPerformanceDashboardService.getConsultantPerformance's own comment.
+    // Defaults false so this endpoint's original consumer (the Analytics
+    // Dashboard page's employeeLeaderboard/workBreakdown) is unaffected.
+    includeAllUsers = false,
+  ): Promise<AnalyticsDashboardOverview> {
     const organizationId = caller.organizationId;
     const scopeId = scope.level === 'store' ? scope.storeId : scope.level === 'user' ? scope.userId : undefined;
 
@@ -105,6 +118,7 @@ export class AnalyticsDashboardService {
       achievement,
       workforceOverview,
       consultantRows,
+      outstandingByOwner,
       revenueTrend,
       emailStats,
       customerBreakdown,
@@ -133,7 +147,9 @@ export class AnalyticsDashboardService {
         dealMatch,
         scope.level === 'store' ? scope.storeId : undefined,
         undefined,
+        includeAllUsers,
       ),
+      this.quotesService.getOutstandingByOwner(organizationId),
       // Trailing 6 months ending on the selected month (dateFrom's own
       // "YYYY-MM"), same reasoning as achievement above.
       this.dealPerformanceDashboardService.getRevenueProgress(organizationId, scope.level, scopeId, 6, dateFrom.slice(0, 7)),
@@ -184,7 +200,14 @@ export class AnalyticsDashboardService {
       scope.level === 'user' && scope.userId ? consultantRows.filter((r) => r.userId === scope.userId) : consultantRows;
 
     const employeeLeaderboard = scopedConsultantRows
-      .map((r) => ({ userId: r.userId, userName: r.userName, revenue: r.wonValue, wonCount: r.wonCount }))
+      .map((r) => ({
+        userId: r.userId,
+        userName: r.userName,
+        revenue: r.wonValue,
+        wonCount: r.wonCount,
+        pipelineValue: r.pipelineValue,
+        outstanding: outstandingByOwner.get(r.userId) ?? 0,
+      }))
       .sort((a, b) => b.revenue - a.revenue);
 
     const workBreakdown = scopedConsultantRows.map((r) => ({
@@ -194,7 +217,14 @@ export class AnalyticsDashboardService {
       lostCount: r.lostCount,
       openCount: r.openCount,
       conversionRate: r.conversionRate,
+      pipelineValue: r.pipelineValue,
+      outstanding: outstandingByOwner.get(r.userId) ?? 0,
     }));
+
+    // Scoped the same way employeeLeaderboard/workBreakdown already are
+    // (scopedConsultantRows) — org scope sums everyone in scope, store scope
+    // sums just that store's roster, user scope sums just that one user.
+    const outstandingTotal = scopedConsultantRows.reduce((sum, r) => sum + (outstandingByOwner.get(r.userId) ?? 0), 0);
 
     return {
       dateFrom,
@@ -203,6 +233,7 @@ export class AnalyticsDashboardService {
       emailActivity: emailStats,
       deals: { wonCount, lostCount, openCount, wonValue, lostValue, openValue },
       revenue: { ...achievement, businessHealthScore },
+      outstanding: { total: outstandingTotal },
       employeeLeaderboard,
       workBreakdown,
       quotes: {

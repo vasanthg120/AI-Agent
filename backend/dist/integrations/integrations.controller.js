@@ -31,6 +31,9 @@ let IntegrationsController = class IntegrationsController {
     getProviderRule(provider) {
         return this.integrationsService.getProviderRule(provider);
     }
+    syncCrmNow(user) {
+        return this.integrationsService.syncCrmNow(user.organizationId);
+    }
     connect(user, provider, dto) {
         return this.integrationsService.connectFromDto(user.organizationId, provider, dto);
     }
@@ -59,6 +62,15 @@ __decorate([
     __metadata("design:paramtypes", [String]),
     __metadata("design:returntype", void 0)
 ], IntegrationsController.prototype, "getProviderRule", null);
+__decorate([
+    (0, common_1.Post)('crm/sync'),
+    (0, common_1.UseGuards)(roles_guard_1.RolesGuard),
+    (0, roles_decorator_1.Roles)('admin'),
+    __param(0, (0, current_user_decorator_1.CurrentUser)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object]),
+    __metadata("design:returntype", void 0)
+], IntegrationsController.prototype, "syncCrmNow", null);
 __decorate([
     (0, common_1.Post)(':provider/connect'),
     (0, common_1.UseGuards)(roles_guard_1.RolesGuard),

@@ -28,6 +28,10 @@ export declare class IntegrationsService {
     private readonly logger;
     private readonly pythonAgentUrl;
     constructor(credentialModel: Model<IntegrationCredentialDocument>, encryption: EncryptionService, http: HttpService, jwt: JwtService, config: ConfigService);
+    syncCrmNow(organizationId: string): Promise<{
+        dealsSynced: number;
+        quotesSynced: number;
+    }>;
     private triggerCrmSyncIfApplicable;
     connect(organizationId: string, provider: string, apiKey: string, baseUrl?: string): Promise<{
         connected: true;

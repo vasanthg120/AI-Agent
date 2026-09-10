@@ -7,6 +7,14 @@
   gap: var(--space-6);
 }
 
+.headerRow {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+}
+
 .pageTitle {
   font-size: var(--text-xl);
   font-weight: 700;

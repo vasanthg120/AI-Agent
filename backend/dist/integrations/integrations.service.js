@@ -38,11 +38,15 @@ let IntegrationsService = IntegrationsService_1 = class IntegrationsService {
         this.logger = new common_1.Logger(IntegrationsService_1.name);
         this.pythonAgentUrl = this.config.get('pythonAgentUrl') ?? 'http://localhost:8000';
     }
+    async syncCrmNow(organizationId) {
+        const token = this.jwt.sign({ sub: 'system', organizationId }, { expiresIn: '5m' });
+        const { data } = await (0, rxjs_1.firstValueFrom)(this.http.post(`${this.pythonAgentUrl}/sync/crm/run-for-org`, {}, { headers: { Authorization: `Bearer ${token}` } }));
+        return data;
+    }
     triggerCrmSyncIfApplicable(organizationId, provider) {
         if (!CRM_PROVIDERS.has(provider))
             return;
-        const token = this.jwt.sign({ sub: 'system', organizationId }, { expiresIn: '5m' });
-        (0, rxjs_1.firstValueFrom)(this.http.post(`${this.pythonAgentUrl}/sync/crm/run-for-org`, {}, { headers: { Authorization: `Bearer ${token}` } })).catch((err) => {
+        this.syncCrmNow(organizationId).catch((err) => {
             this.logger.error(`Immediate CRM sync failed for org ${organizationId}: ${err.message}`);
         });
     }

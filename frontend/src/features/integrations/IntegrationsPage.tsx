@@ -7,6 +7,7 @@ import {
   FiGrid,
   FiLink,
   FiPlus,
+  FiRefreshCw,
   FiSettings,
   FiShield,
   FiSliders,
@@ -84,6 +85,12 @@ const GORILLA_DASH_BASE_URL = 'https://api.gorilladash.com';
 const GORILLA_DASH_API_KEY_HEADER = 'GorillaDash-Api-Key';
 const GORILLA_DASH_API_SECRET_HEADER = 'GorillaDash-Api-Secret';
 
+// The two provider slugs a connected CRM is ever stored under — mirrors
+// backend/src/integrations/integrations.service.ts's CRM_PROVIDERS. Only
+// these rows get the "Sync Now" action; every other custom integration has
+// nothing for /integrations/crm/sync to pull.
+const CRM_PROVIDERS = new Set(['crm', 'prospectconnect']);
+
 export function IntegrationsPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const [outlookAccounts, setOutlookAccounts] = useState<OutlookAccount[]>([]);
@@ -117,6 +124,7 @@ export function IntegrationsPage() {
   // API Integration Engine — which custom integration's resource/endpoint
   // builder modal is open (see ResourceEndpointBuilder.tsx), null when closed.
   const [builderProvider, setBuilderProvider] = useState<string | null>(null);
+  const [syncingCrm, setSyncingCrm] = useState(false);
 
   // Gorilla Dash — its own dedicated card/modal (2 named fields, not a raw
   // "Header: value" textarea), but wired to the exact same connect/test
@@ -343,6 +351,21 @@ export function IntegrationsPage() {
       loadCustomIntegrations();
     } catch (error) {
       toast.error(extractErrorMessage(error));
+    }
+  };
+
+  // "Sync Now" — pulls fresh CRM data immediately instead of waiting on
+  // python-agent's background poll (up to CRM_MONGO_SYNC_INTERVAL_MINUTES)
+  // or disconnecting/reconnecting just to force a refresh.
+  const handleSyncCrmNow = async () => {
+    setSyncingCrm(true);
+    try {
+      const result = await integrationsService.syncCrmNow();
+      toast.success(`CRM synced — ${result.dealsSynced} deal(s), ${result.quotesSynced} quote(s) updated.`);
+    } catch (error) {
+      toast.error(extractErrorMessage(error));
+    } finally {
+      setSyncingCrm(false);
     }
   };
 
@@ -752,6 +775,17 @@ export function IntegrationsPage() {
                   <Badge variant="success" dot>
                     Connected
                   </Badge>
+                  {CRM_PROVIDERS.has(integration.provider) && (
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      leftIcon={<FiRefreshCw />}
+                      loading={syncingCrm}
+                      onClick={handleSyncCrmNow}
+                    >
+                      Sync Now
+                    </Button>
+                  )}
                   <Button
                     size="sm"
                     variant="secondary"

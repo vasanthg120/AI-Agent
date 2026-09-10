@@ -32,7 +32,12 @@ export interface AnalyticsDashboardOverview {
   };
   deals: { wonCount: number; lostCount: number; openCount: number; wonValue: number; lostValue: number; openValue: number };
   revenue: Achievement & { businessHealthScore: number | null };
-  employeeLeaderboard: { userId: string; userName: string; revenue: number; wonCount: number }[];
+  // Outstanding customer receivables (quoteAmount - paidAmount, summed) —
+  // "dues" in Agent Activity's team-wide view. Not date-range scoped, unlike
+  // the rest of this response (see QuotesService.getOutstandingByOwner) —
+  // this is a current balance, not a per-period figure.
+  outstanding: { total: number };
+  employeeLeaderboard: { userId: string; userName: string; revenue: number; wonCount: number; pipelineValue: number; outstanding: number }[];
   workBreakdown: {
     userId: string;
     userName: string;
@@ -40,6 +45,8 @@ export interface AnalyticsDashboardOverview {
     lostCount: number;
     openCount: number;
     conversionRate: number | null;
+    pipelineValue: number;
+    outstanding: number;
   }[];
   quotes: { acceptedCount: number; acceptedValue: number; notAcceptedCount: number; notAcceptedValue: number };
   revenueTrend: { period: string; achieved: number; targetAmount: number | null; achievementPct: number | null }[];

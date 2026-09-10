@@ -30,6 +30,18 @@ export class IntegrationsController {
     return this.integrationsService.getProviderRule(provider);
   }
 
+  // Manual "Sync Now" — pulls fresh CRM data immediately instead of waiting
+  // for python-agent's background poll (crm_mongo_sync_interval_minutes) or
+  // having to disconnect/reconnect to trigger IntegrationsService's
+  // post-connect sync. Same admin gate as connect/disconnect below: this
+  // still causes real outbound calls to the connected CRM's API.
+  @Post('crm/sync')
+  @UseGuards(RolesGuard)
+  @Roles('admin')
+  syncCrmNow(@CurrentUser() user: JwtPayload) {
+    return this.integrationsService.syncCrmNow(user.organizationId);
+  }
+
   // Writes a per-org credential (see integration-credential.schema.ts — one
   // doc per (org, provider), not per-user) — previously connectable/
   // disconnectable by any authenticated user regardless of role. Routes to

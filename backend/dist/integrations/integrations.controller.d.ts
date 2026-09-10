@@ -7,6 +7,10 @@ export declare class IntegrationsController {
     constructor(integrationsService: IntegrationsService);
     listCustom(user: JwtPayload): Promise<import("./integrations.service").IntegrationSummary[]>;
     getProviderRule(provider: string): import("./provider-rules").ProviderRule;
+    syncCrmNow(user: JwtPayload): Promise<{
+        dealsSynced: number;
+        quotesSynced: number;
+    }>;
     connect(user: JwtPayload, provider: string, dto: ConnectIntegrationDto): Promise<{
         connected: true;
         maskedKey: string;
