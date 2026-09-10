@@ -13,7 +13,13 @@ class Settings:
     # stay compatible even if only one side sets this explicitly.
     encryption_key: str = os.environ.get("ENCRYPTION_KEY", "")
 
-    anthropic_api_key: str = os.environ.get("ANTHROPIC_API_KEY", "")
+    # No anthropic_api_key field — the Anthropic API key is no longer read
+    # from the environment at all. It's a platform-wide credential stored
+    # (AES-256-GCM encrypted) in MongoDB's integration_credentials collection
+    # under organizationId="platform", managed from Admin-haive Settings ->
+    # AI Provider, and resolved at call time by
+    # anthropic_client.py._resolve_api_key(). See that function's docstring
+    # for why there is deliberately no .env fallback.
     anthropic_model: str = os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-4-6")
     # Cheaper/faster model for routing decisions (classify_request, critique_response) —
     # both are one-shot forced-tool-choice judgments, not final-answer generation, so they
@@ -80,9 +86,11 @@ class Settings:
     search_api_key: str = os.environ.get("SEARCH_API_KEY", "")
 
     # Voice (Sarvam AI STT/TTS) — see app/integrations/sarvam_client.py.
-    # Never sent to the frontend; NestJS's voice module only ever forwards
-    # raw audio bytes/JSON through to this service, it never sees this key.
-    sarvam_api_key: str = os.environ.get("SARVAM_API_KEY", "")
+    # No sarvam_api_key field — same platform-wide, MongoDB-only credential
+    # rule as Anthropic above (organizationId="platform", no .env fallback),
+    # resolved at call time by sarvam_client.py._require_api_key(). Never
+    # sent to the frontend either way; NestJS's voice module only ever
+    # forwards raw audio bytes/JSON through to this service.
     # Defaults match Sarvam's own current REST API defaults (verified against
     # docs.sarvam.ai as of this writing) — saaras:v3 for STT, bulbul:v3 for TTS.
     sarvam_stt_model: str = os.environ.get("SARVAM_STT_MODEL", "saaras:v3")

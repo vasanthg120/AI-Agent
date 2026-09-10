@@ -46,20 +46,35 @@ os.environ.setdefault("MEM0_TELEMETRY", "False")
 from mem0 import Memory  # noqa: E402 - must follow the telemetry env var above
 
 from app.config import settings
+from app.memory import integration_store
 from app.rag import embeddings, vector_store
 
 logger = logging.getLogger(__name__)
 
+# Same literal text as anthropic_client.py's _ANTHROPIC_NOT_CONFIGURED_MESSAGE
+# — not imported from there to avoid a circular import (anthropic_client.py
+# -> app.tools.registry -> business_search_tool -> this module).
+_ANTHROPIC_NOT_CONFIGURED_MESSAGE = "Anthropic AI provider is not configured. Please connect Anthropic from Platform Admin Settings."
+
 
 @lru_cache
 def get_memory() -> Memory:
+    # Same platform-only credential rule as anthropic_client.py._resolve_api_key
+    # — resolved once here (this whole Memory engine is @lru_cache'd, matching
+    # its pre-existing behavior of reading a module-level settings value once
+    # per process), not re-checked per Mem0 call. MongoDB remains the source
+    # of truth; only the read timing differs from the main chat path's
+    # per-call resolution.
+    api_key = integration_store.get_api_key("anthropic", organization_id="platform")
+    if not api_key:
+        raise RuntimeError(_ANTHROPIC_NOT_CONFIGURED_MESSAGE)
     return Memory.from_config(
         {
             "llm": {
                 "provider": "anthropic",
                 "config": {
                     "model": settings.anthropic_routing_model,
-                    "api_key": settings.anthropic_api_key,
+                    "api_key": api_key,
                 },
             },
             "embedder": {

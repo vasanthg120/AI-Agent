@@ -39,11 +39,22 @@ def _client(api_key: str) -> anthropic.Anthropic:
     return anthropic.Anthropic(api_key=api_key)
 
 
+_ANTHROPIC_NOT_CONFIGURED_MESSAGE = "Anthropic AI provider is not configured. Please connect Anthropic from Platform Admin Settings."
+
+
 def _resolve_api_key() -> str:
-    # A key saved via the frontend's Integrations page (Mongo-backed, can
-    # change at runtime without restarting this process) takes precedence
-    # over the static .env value.
-    return integration_store.get_api_key("anthropic") or settings.anthropic_api_key
+    # Platform-wide credential ONLY — organizationId="platform" is an exact
+    # filter, not a fallback chain. Deliberately does NOT fall back to any
+    # organization's own Anthropic credential (there may be several, from
+    # customers who connected one before this became a platform-level
+    # setting) and does NOT fall back to a static .env value — both of those
+    # would risk silently using the wrong/an arbitrary key. Raises here
+    # (rather than returning empty) so every call site below gets the same
+    # clear, actionable error without needing its own check.
+    key = integration_store.get_api_key("anthropic", organization_id="platform")
+    if not key:
+        raise RuntimeError(_ANTHROPIC_NOT_CONFIGURED_MESSAGE)
+    return key
 
 
 def _turn_role(item: dict) -> str:

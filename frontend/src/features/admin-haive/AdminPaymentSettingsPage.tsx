@@ -139,6 +139,7 @@ export function AdminPaymentSettingsPage() {
         enabledGateways: settings.enabledGateways,
         autoRechargeMinCredits: settings.autoRechargeMinCredits,
         autoRechargeMaxCredits: settings.autoRechargeMaxCredits,
+        targetGrossMarginPct: settings.targetGrossMarginPct,
       });
       toast.success('Payment settings saved.');
     } catch (error) {
@@ -292,6 +293,20 @@ export function AdminPaymentSettingsPage() {
             placeholder="No maximum"
             value={settings.autoRechargeMaxCredits ?? ''}
             onChange={(e) => setSettings({ ...settings, autoRechargeMaxCredits: e.target.value ? Number.parseInt(e.target.value, 10) : undefined })}
+          />
+        </div>
+
+        <div className={styles.numberRow} style={{ marginTop: 'var(--space-6)' }}>
+          <Input
+            label="Target Gross Margin"
+            type="number"
+            step="0.01"
+            min={0}
+            max={99.99}
+            placeholder="Use TARGET_GROSS_MARGIN env default (50%)"
+            hint="customerCharge = providerCost / (1 - margin). Applies to every future AI usage settlement; a provider/model with its own margin override in Provider Pricing uses that instead. Never rewrites already-settled transactions."
+            value={settings.targetGrossMarginPct ?? ''}
+            onChange={(e) => setSettings({ ...settings, targetGrossMarginPct: e.target.value ? Number.parseFloat(e.target.value) : undefined })}
           />
         </div>
 

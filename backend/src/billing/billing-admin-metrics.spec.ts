@@ -13,6 +13,7 @@ import { BillingPlan, BillingPlanDocument, BillingPlanSchema } from './schemas/b
 import { BillingPlanPrice, BillingPlanPriceDocument, BillingPlanPriceSchema } from './schemas/billing-plan-price.schema';
 import { BillingSubscriptionEvent, BillingSubscriptionEventDocument, BillingSubscriptionEventSchema } from './schemas/billing-subscription-event.schema';
 import { BillingSubscription, BillingSubscriptionDocument, BillingSubscriptionSchema } from './schemas/billing-subscription.schema';
+import { BillingSettings, BillingSettingsSchema } from './schemas/billing-settings.schema';
 import { Currency, CurrencyDocument, CurrencySchema } from './schemas/currency.schema';
 import { PaymentRecord, PaymentRecordDocument, PaymentRecordSchema } from './schemas/payment-record.schema';
 import { Wallet, WalletSchema } from './schemas/wallet.schema';
@@ -71,6 +72,7 @@ describe('BillingAdminService — Phase 7 metrics (real Mongo)', () => {
           { name: Currency.name, schema: CurrencySchema },
           { name: Wallet.name, schema: WalletSchema },
           { name: User.name, schema: UserSchema },
+          { name: BillingSettings.name, schema: BillingSettingsSchema },
         ]),
       ],
       providers: [

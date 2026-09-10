@@ -28,6 +28,11 @@ interface UsageGroup {
   inputTokens: number;
   outputTokens: number;
   costUsd: number;
+  // 0-100 percentage from this group's resolved ProviderPricing row, or
+  // undefined to use the global (BillingSettings/env) default margin — see
+  // settle()'s per-group credit calculation below. Never a blended/averaged
+  // margin across groups with different providers/models.
+  marginOverridePct?: number;
 }
 
 /**
@@ -130,17 +135,42 @@ export class ReservationService {
 
     const groups = await this.summarizeUsage(requestId);
     const totalCostUsd = groups.reduce((sum, g) => sum + g.costUsd, 0);
-    const creditsCharged = this.pricing.providerCostToCustomerCredits(totalCostUsd);
+    // Each group is priced at ITS OWN resolved margin (ProviderPricing.
+    // marginOverridePct when set, else the global default) and converted to
+    // credits independently, THEN summed — never summing USD cost across
+    // groups first and applying one blended margin, since two groups in the
+    // same turn (e.g. Anthropic + Sarvam) can legitimately have different
+    // margins. marginOverridePct is a 0-100 percentage; providerCostToCustomerCredits
+    // takes a 0-1 fraction, hence the /100.
+    let creditsCharged = 0;
+    for (const group of groups) {
+      const marginFraction = group.marginOverridePct !== undefined ? group.marginOverridePct / 100 : undefined;
+      creditsCharged += await this.pricing.providerCostToCustomerCredits(group.costUsd, marginFraction);
+    }
+    creditsCharged = Math.round(creditsCharged * 100) / 100;
 
     const walletDoc = await this.wallet.settleUsage(reservation.walletId, reservation.estimatedCredits, creditsCharged);
 
+    // The GLOBAL default margin, for backward-compat with any existing
+    // reporting that reads this top-level field — a group actually charged
+    // at its own ProviderPricing.marginOverridePct is separately recorded
+    // per-row in byProvider below, never blended into this one number.
+    const resolvedGlobalMarginPct = (await this.pricing.getTargetGrossMargin()).times(100).toNumber();
     await this.wallet.recordUsageTransaction(walletDoc, requestId, creditsCharged, {
       requestId,
       providerCostUsd: totalCostUsd,
-      marginPct: this.config.get<number>('billing.targetGrossMargin') ?? 0.5,
+      marginPct: resolvedGlobalMarginPct,
       executionCount: groups.length,
-      // Provider-identifying (admin-only): raw provider/model names.
-      byProvider: groups.map((g) => ({ provider: g.provider, model: g.model, inputTokens: g.inputTokens, outputTokens: g.outputTokens })),
+      // Provider-identifying (admin-only): raw provider/model names, plus
+      // the actual margin percentage applied to this specific group
+      // (its own override, or the global default recorded above).
+      byProvider: groups.map((g) => ({
+        provider: g.provider,
+        model: g.model,
+        inputTokens: g.inputTokens,
+        outputTokens: g.outputTokens,
+        marginPct: g.marginOverridePct ?? resolvedGlobalMarginPct,
+      })),
       // Non-identifying token totals — these ARE customer-facing ("Haive
       // Input/Output/Total Tokens"), unlike everything else in this
       // metadata object. billing.service.ts's listCustomerTransactions
@@ -198,7 +228,14 @@ export class ReservationService {
       const costUsd = pricingRow
         ? (row.inputTokens / 1_000_000) * pricingRow.inputCostPerMTokUsd + (row.outputTokens / 1_000_000) * pricingRow.outputCostPerMTokUsd
         : row.costUsd; // fallback: python-agent's own cost.py-derived estimate
-      groups.push({ provider, model, inputTokens: row.inputTokens, outputTokens: row.outputTokens, costUsd });
+      groups.push({
+        provider,
+        model,
+        inputTokens: row.inputTokens,
+        outputTokens: row.outputTokens,
+        costUsd,
+        marginOverridePct: pricingRow?.marginOverridePct,
+      });
     }
     return groups;
   }

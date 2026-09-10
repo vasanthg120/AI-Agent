@@ -1,7 +1,7 @@
 import base64
 import json
 
-from app.encryption import decrypt
+from app.encryption import decrypt, decrypt_token
 from app.memory.mongo_client import get_db
 
 
@@ -16,20 +16,26 @@ def get_api_key(provider: str, organization_id: str | None = None) -> str | None
 
     organization_id is opt-in, not required: passing it scopes the lookup to
     that org's own credential doc (used by prospectconnect.py's CRM
-    resolution, which has an org in context). Callers that don't pass it
-    (anthropic_client.py/groq_client.py's `_resolve_api_key`, which don't
-    thread an org through their many call sites yet) keep the exact
-    pre-Phase-1 behavior — first matching doc for that provider, regardless
-    of org — rather than being silently broken by a filter they don't know to
-    pass. Making those two properly org-aware is out of scope here; it needs
-    threading organization_id through every anthropic_client.py entry point,
-    not just the CRM path this pass is about.
+    resolution, and by anthropic_client.py/sarvam_client.py's platform-only
+    lookups). Callers that omit it get the first matching doc for that
+    provider, regardless of org — kept for groq_client.py, the one remaining
+    caller not yet threaded through an explicit scope.
+
+    The stored apiKey is AES-256-GCM encrypted by IntegrationsService.connect()
+    — decrypted here via decrypt_token(), which transparently tolerates rows
+    written before encryption existed (returns the value unchanged if it
+    doesn't parse as ciphertext), the same tolerance outlook_store.py/
+    gmail_store.py already rely on for OAuth tokens. Without this, a properly
+    encrypted row (every row written by the current connect flow) would
+    return raw ciphertext as the "API key" instead of the real value.
     """
     query: dict = {"provider": provider}
     if organization_id is not None:
         query["organizationId"] = organization_id
     doc = get_db().integration_credentials.find_one(query)
-    return doc.get("apiKey") if doc else None
+    if not doc or not doc.get("apiKey"):
+        return None
+    return decrypt_token(doc["apiKey"])
 
 
 def get_base_url(provider: str, organization_id: str | None = None) -> str | None:

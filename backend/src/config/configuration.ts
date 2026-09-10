@@ -97,10 +97,14 @@ export default () => ({
     // is written alongside it, only on the insert that actually created the
     // wallet, so retries/races can never grant it twice.
     freeTrialCredits: parseInt(process.env.FREE_TRIAL_CREDITS ?? '20', 10),
-    // Seeds Wallet.autoPay.enabled for a newly created wallet — Auto
-    // Recharge itself still requires a saved payment method before it can
-    // actually trigger, regardless of this default.
-    autoRechargeDefault: (process.env.AUTO_RECHARGE_DEFAULT ?? 'false').toLowerCase() === 'true',
+    // Seeds Wallet.autoPay.enabled for a newly created wallet ONLY — see
+    // WalletService.getOrCreateWallet's $setOnInsert, which only ever applies
+    // at first creation. Defaults to true per the product requirement that
+    // new wallets start with uninterrupted AI access; an EXISTING wallet's
+    // already-stored autoPay.enabled value is never touched by this default
+    // changing. Auto Recharge itself still requires a saved payment method
+    // before it can actually trigger, regardless of this default.
+    autoRechargeDefault: (process.env.AUTO_RECHARGE_DEFAULT ?? 'true').toLowerCase() === 'true',
     // Flat per-turn reservation ceiling — a chat turn's real cost is unknown
     // until the LLM responds (it may take several tool-calling rounds), so
     // this is a deliberately generous upper bound checked before any LLM

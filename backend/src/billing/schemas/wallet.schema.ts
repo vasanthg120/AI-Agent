@@ -8,10 +8,18 @@ export type WalletDocument = Wallet & Document<Types.ObjectId>;
 // internally since renaming every identifier across the module for a pure
 // copy change isn't worth the churn/risk.
 //
-// Fixed threshold + fixed recharge amount: when balanceCredits drops to
-// thresholdCredits or below, AutoPayService charges exactly
-// rechargeAmountCredits — a flat amount, not a computed gap to a target
-// balance. See AutoPayService.attemptRecharge for the actual trigger.
+// The ACTUAL trigger today is ReservationService.reserve()'s own
+// Wallet.tryReserve(ceiling) failing — i.e. whenever available credits can't
+// cover the next reservation ceiling (config.billing.reservationCeilingCredits,
+// admin-configurable), never waiting for the balance to hit exactly zero.
+// thresholdCredits below is NOT read by that trigger (an earlier design used
+// it as a flat "recharge when balance <= this" check; that was superseded by
+// the ceiling-based trigger and this field was left in place, unused, rather
+// than migrated) — kept for backward-compat storage only. rechargeAmountCredits
+// is read, but only as the last-resort floor when no admin-configured
+// BillingSettings.autoRechargeMinCredits exists (see AutoPayService.
+// attemptRecharge) — the real charge amount is always the caller's actual
+// computed shortfall, never this flat number, once an admin minimum exists.
 export class AutoPaySettings {
   @Prop({ default: false })
   enabled: boolean;

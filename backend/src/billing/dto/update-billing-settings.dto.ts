@@ -1,4 +1,4 @@
-import { IsArray, IsBoolean, IsIn, IsNumber, IsOptional, IsString, Min } from 'class-validator';
+import { IsArray, IsBoolean, IsIn, IsNumber, IsOptional, IsString, Max, Min } from 'class-validator';
 
 export class UpdateBillingSettingsDto {
   @IsOptional() @IsString() companyName?: string;
@@ -20,4 +20,5 @@ export class UpdateBillingSettingsDto {
   @IsOptional() @IsNumber() @Min(0) autoRechargeMinCredits?: number;
   @IsOptional() @IsNumber() @Min(0) autoRechargeMaxCredits?: number;
   @IsOptional() @IsBoolean() autoRechargeDefaultOn?: boolean;
+  @IsOptional() @IsNumber() @Min(0) @Max(99.99) targetGrossMarginPct?: number;
 }

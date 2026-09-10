@@ -1,6 +1,9 @@
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { InjectModel } from '@nestjs/mongoose';
+import { Model } from 'mongoose';
 import Decimal from 'decimal.js';
+import { BillingSettings, BillingSettingsDocument } from './schemas/billing-settings.schema';
 
 /**
  * The single place `customer_price = provider_cost / (1 - target_margin)`
@@ -24,19 +27,41 @@ import Decimal from 'decimal.js';
  */
 @Injectable()
 export class PricingService {
-  constructor(private config: ConfigService) {}
+  constructor(
+    private config: ConfigService,
+    @InjectModel(BillingSettings.name) private settingsModel: Model<BillingSettingsDocument>,
+  ) {}
 
   private get creditValueInCurrency(): Decimal {
     return new Decimal(this.config.get<number>('billing.creditValueInCurrency') ?? 1);
   }
 
-  private get targetGrossMargin(): Decimal {
+  /** Admin-configurable (BillingSettings.targetGrossMarginPct, a 0-100
+   * percentage set from Admin billing settings) takes precedence over the
+   * TARGET_GROSS_MARGIN env var — same "DB override, env fallback" pattern
+   * already established for autoRechargeMinCredits/defaultPaymentProvider
+   * elsewhere in this schema. Returns a 0-1 fraction (matching this
+   * service's own internal convention) either way. Async because the
+   * admin override lives in Mongo — every caller that doesn't pass an
+   * explicit marginOverride now awaits this, but there is exactly one
+   * production caller (ReservationService.settle) plus the admin revenue
+   * aggregations, which never touch margin at all (creditsToUsd is a pure
+   * currency conversion, no margin involved).
+   */
+  async getTargetGrossMargin(): Promise<Decimal> {
+    const settings = await this.settingsModel.findOne({ singletonKey: 'default' }, { targetGrossMarginPct: 1 }).exec();
+    const pct = settings?.targetGrossMarginPct;
+    if (pct !== undefined && pct !== null) return new Decimal(pct).dividedBy(100);
     return new Decimal(this.config.get<number>('billing.targetGrossMargin') ?? 0.5);
   }
 
-  /** provider_cost USD -> customer-facing USD, at the given (or default) margin. */
-  costToCustomerUsd(costUsd: number, marginOverride?: number): Decimal {
-    const margin = marginOverride !== undefined ? new Decimal(marginOverride) : this.targetGrossMargin;
+  /** provider_cost USD -> customer-facing USD, at the given (0-1 fraction)
+   * override or the resolved default margin. marginOverride is a FRACTION
+   * (0.5 = 50%), not a percentage — matches this method's pre-existing
+   * contract exactly; callers holding a 0-100 percentage (e.g.
+   * ProviderPricing.marginOverridePct) divide by 100 before calling. */
+  async costToCustomerUsd(costUsd: number, marginOverride?: number): Promise<Decimal> {
+    const margin = marginOverride !== undefined ? new Decimal(marginOverride) : await this.getTargetGrossMargin();
     const retained = new Decimal(1).minus(margin);
     if (retained.lte(0)) {
       throw new Error(`Invalid gross margin ${margin.toString()} — must be less than 1.`);
@@ -46,8 +71,8 @@ export class PricingService {
 
   /** provider_cost USD -> Haive Credits to charge, at 2-decimal precision
    * (never rounded to a whole credit). */
-  providerCostToCustomerCredits(costUsd: number, marginOverride?: number): number {
-    const customerUsd = this.costToCustomerUsd(costUsd, marginOverride);
+  async providerCostToCustomerCredits(costUsd: number, marginOverride?: number): Promise<number> {
+    const customerUsd = await this.costToCustomerUsd(costUsd, marginOverride);
     return this.usdToCredits(customerUsd);
   }
 

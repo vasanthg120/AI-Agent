@@ -80,6 +80,7 @@ export const PROVIDER_RULES: Record<string, ProviderRule> = {
     note: 'Slack only supports OAuth — not yet built as a dedicated flow.',
   },
   anthropic: { label: 'Anthropic', allowedAuthTypes: ['apiKey'] },
+  sarvam: { label: 'Sarvam AI', allowedAuthTypes: ['apiKey'] },
   openai: { label: 'OpenAI', allowedAuthTypes: ['apiKey'] },
   stripe: { label: 'Stripe', allowedAuthTypes: ['apiKey'] },
   twilio: { label: 'Twilio', allowedAuthTypes: ['apiKey'] },

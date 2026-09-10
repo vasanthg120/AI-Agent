@@ -39,6 +39,16 @@ export class ProviderPricing {
   // ProviderPricing.effectiveTo field".
   @Prop({ type: Date, default: null, index: true })
   effectiveTo: Date | null;
+
+  // Optional per-(provider, model) override of the global target gross
+  // margin, as a 0-100 percentage — unset means "use BillingSettings.
+  // targetGrossMarginPct / the TARGET_GROSS_MARGIN env default", same
+  // resolution PricingService.getTargetGrossMargin() already does for the
+  // global value. Read by ReservationService.settle() per usage group,
+  // never collapsed into one blended margin across groups with different
+  // providers/models.
+  @Prop({ min: 0, max: 99.99 })
+  marginOverridePct?: number;
 }
 
 export const ProviderPricingSchema = SchemaFactory.createForClass(ProviderPricing);
