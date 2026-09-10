@@ -1,18 +1,25 @@
 import { useEffect, useState } from 'react';
 import toast from 'react-hot-toast';
-import { FiPlus } from 'react-icons/fi';
-import { Badge, Button, Input, Modal, SectionCard, Skeleton, Switch, Tabs } from '@/components/ui';
+import { FiKey, FiPlus } from 'react-icons/fi';
+import { Badge, Button, Card, Input, Modal, SectionCard, Skeleton, Switch, Tabs } from '@/components/ui';
 import { billingSettingsAdminService, type BillingSettings } from '@/services/billingSettingsAdminService';
 import { billingCatalogAdminService, type AdminTaxRate } from '@/services/billingCatalogAdminService';
 import { billingMigrationAdminService, type MigrationRunResult } from '@/services/billingMigrationAdminService';
+import { adminIntegrationsService } from '@/services/adminIntegrationsService';
 import { extractErrorMessage } from '@/utils/errors';
+// Same card visual the Anthropic integration used on /settings/integrations
+// before it moved here — reused verbatim (not copied) so the design stays
+// pixel-identical and never drifts from Gmail/Outlook's still-current cards
+// on that page, which use this exact same module.
+import integrationsStyles from '../integrations/IntegrationsPage.module.css';
 import shared from './adminShared.module.css';
 
-type TabId = 'company' | 'taxes' | 'migration';
+type TabId = 'company' | 'taxes' | 'migration' | 'aiProvider';
 const TABS: { id: TabId; label: string }[] = [
   { id: 'company', label: 'Company & Invoicing' },
   { id: 'taxes', label: 'Tax Rates' },
   { id: 'migration', label: 'Wallet Migration' },
+  { id: 'aiProvider', label: 'AI Provider' },
 ];
 
 function CompanySettingsTab() {
@@ -289,6 +296,131 @@ function WalletMigrationTab() {
   );
 }
 
+type AnthropicStatus = { status: 'loading' | 'connected' | 'disconnected' | 'error'; detail?: string };
+
+// Moved from the customer-facing /settings/integrations page — Anthropic's
+// credential has always been read platform-wide at the point it actually
+// matters (python-agent's anthropic_client.py._resolve_api_key reads it
+// with no organizationId filter), so this belongs here rather than under
+// any one organization. Reuses the exact same backend IntegrationsService
+// methods (connect/status/disconnect) the old customer card called — see
+// adminIntegrationsService.ts and backend/src/integrations/
+// admin-integrations.controller.ts — just through the admin session's own
+// auth instead. Same copy, same validation, same masked-key display; only
+// the visual shell changed to match this page's own SectionCard-based tabs.
+function AnthropicSettingsTab() {
+  const [status, setStatus] = useState<AnthropicStatus>({ status: 'loading' });
+  const [modalOpen, setModalOpen] = useState(false);
+  const [apiKeyInput, setApiKeyInput] = useState('');
+  const [connecting, setConnecting] = useState(false);
+
+  const load = () => {
+    adminIntegrationsService
+      .getAnthropicStatus()
+      .then((s) => setStatus({ status: s.connected ? 'connected' : 'disconnected', detail: s.maskedKey }))
+      .catch((error) => setStatus({ status: 'error', detail: extractErrorMessage(error) }));
+  };
+
+  useEffect(load, []);
+
+  const badge = () => {
+    if (status.status === 'loading') return <Badge variant="neutral">Checking...</Badge>;
+    if (status.status === 'connected') return <Badge variant="success" dot>Connected</Badge>;
+    if (status.status === 'error') return <Badge variant="danger" dot>Connection error</Badge>;
+    return <Badge variant="neutral" dot>Not connected</Badge>;
+  };
+
+  const openModal = () => {
+    setApiKeyInput('');
+    setModalOpen(true);
+  };
+
+  const save = async () => {
+    if (apiKeyInput.trim().length < 10) {
+      toast.error('That doesn’t look like a valid Anthropic API key.');
+      return;
+    }
+    setConnecting(true);
+    try {
+      const result = await adminIntegrationsService.connectAnthropic(apiKeyInput.trim());
+      setStatus({ status: 'connected', detail: result.maskedKey });
+      toast.success('Anthropic connected — Claude will now be used for chat and Outlook mail analysis.');
+      setModalOpen(false);
+      setApiKeyInput('');
+    } catch (error) {
+      toast.error(extractErrorMessage(error));
+    } finally {
+      setConnecting(false);
+    }
+  };
+
+  const disconnect = async () => {
+    try {
+      await adminIntegrationsService.disconnectAnthropic();
+      setStatus({ status: 'disconnected' });
+      toast.success('Anthropic disconnected');
+    } catch (error) {
+      toast.error(extractErrorMessage(error));
+    }
+  };
+
+  return (
+    <div style={{ maxWidth: 360 }}>
+      <Card className={integrationsStyles.card}>
+        <div className={integrationsStyles.cardHeader}>
+          <span className={integrationsStyles.logoTile}>
+            <img src="/integrations/anthropic.svg" alt="" />
+          </span>
+          <div className={integrationsStyles.cardTitleRow}>
+            <div className={integrationsStyles.cardName}>Anthropic</div>
+            <div className={integrationsStyles.cardCategory}>AI Model</div>
+          </div>
+          {badge()}
+        </div>
+        <p className={integrationsStyles.cardDescription}>Claude models for chat, reasoning, and Outlook mail analysis.</p>
+        {(status.status === 'connected' || status.status === 'error') && status.detail && (
+          <div className={integrationsStyles.keyPreview}>{status.detail}</div>
+        )}
+        <div className={integrationsStyles.cardFooter}>
+          {status.status === 'connected' ? (
+            <Button size="sm" variant="secondary" onClick={disconnect}>
+              Disconnect
+            </Button>
+          ) : (
+            <Button size="sm" leftIcon={<FiKey />} onClick={openModal}>
+              Connect
+            </Button>
+          )}
+        </div>
+      </Card>
+
+      <Modal
+        open={modalOpen}
+        onClose={() => setModalOpen(false)}
+        title="Connect Anthropic"
+        description="Paste your Anthropic API key. It's stored server-side and used by the chat agent — never exposed to the browser."
+      >
+        <Input
+          label="API key"
+          type="password"
+          placeholder="sk-ant-api03-..."
+          value={apiKeyInput}
+          onChange={(e) => setApiKeyInput(e.target.value)}
+          autoFocus
+        />
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 'var(--space-2)', marginTop: 'var(--space-5)' }}>
+          <Button variant="ghost" onClick={() => setModalOpen(false)}>
+            Cancel
+          </Button>
+          <Button loading={connecting} onClick={save}>
+            Save Key
+          </Button>
+        </div>
+      </Modal>
+    </div>
+  );
+}
+
 export function AdminSettingsPage() {
   const [tab, setTab] = useState<TabId>('company');
 
@@ -297,7 +429,9 @@ export function AdminSettingsPage() {
       <div className={shared.headerRow}>
         <div>
           <h1 className={shared.pageTitle}>Settings</h1>
-          <p className={shared.pageSubtitle}>Company/invoice identity, tax configuration, and the org-scoped wallet migration tool.</p>
+          <p className={shared.pageSubtitle}>
+            Company/invoice identity, tax configuration, the org-scoped wallet migration tool, and the platform's AI provider.
+          </p>
         </div>
       </div>
 
@@ -308,6 +442,7 @@ export function AdminSettingsPage() {
       {tab === 'company' && <CompanySettingsTab />}
       {tab === 'taxes' && <TaxRatesTab />}
       {tab === 'migration' && <WalletMigrationTab />}
+      {tab === 'aiProvider' && <AnthropicSettingsTab />}
     </div>
   );
 }

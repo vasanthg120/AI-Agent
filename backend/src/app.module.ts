@@ -23,6 +23,7 @@ import { NotificationsModule } from './notifications/notifications.module';
 import { TimelineModule } from './timeline/timeline.module';
 import { CommandCenterModule } from './command-center/command-center.module';
 import { FinanceModule } from './finance/finance.module';
+import { VoiceModule } from './voice/voice.module';
 import { BusinessKnowledgeModule } from './business-knowledge/business-knowledge.module';
 import { EmailIntelligenceModule } from './email-intelligence/email-intelligence.module';
 import { EmailSlaModule } from './email-sla/email-sla.module';
@@ -73,6 +74,7 @@ import { HealthController } from './health/health.controller';
     TimelineModule,
     CommandCenterModule,
     FinanceModule,
+    VoiceModule,
     BusinessKnowledgeModule,
     EmailIntelligenceModule,
     EmailSlaModule,

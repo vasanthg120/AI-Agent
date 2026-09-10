@@ -11,6 +11,7 @@ const axios_1 = require("@nestjs/axios");
 const common_1 = require("@nestjs/common");
 const mongoose_1 = require("@nestjs/mongoose");
 const auth_module_1 = require("../auth/auth.module");
+const admin_integrations_controller_1 = require("./admin-integrations.controller");
 const dynamic_executor_service_1 = require("./dynamic-executor.service");
 const integration_resources_service_1 = require("./integration-resources.service");
 const integrations_controller_1 = require("./integrations.controller");
@@ -33,7 +34,7 @@ exports.IntegrationsModule = IntegrationsModule = __decorate([
             axios_1.HttpModule.register({ timeout: 15_000 }),
             auth_module_1.AuthModule,
         ],
-        controllers: [integrations_controller_1.IntegrationsController, resources_controller_1.ResourcesController],
+        controllers: [integrations_controller_1.IntegrationsController, resources_controller_1.ResourcesController, admin_integrations_controller_1.AdminIntegrationsController],
         providers: [integrations_service_1.IntegrationsService, integration_resources_service_1.IntegrationResourcesService, dynamic_executor_service_1.DynamicExecutorService],
     })
 ], IntegrationsModule);
