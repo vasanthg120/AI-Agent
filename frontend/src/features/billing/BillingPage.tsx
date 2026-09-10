@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import toast from 'react-hot-toast';
 import { useNavigate } from 'react-router-dom';
-import { FiCheckCircle, FiChevronDown, FiChevronUp, FiCreditCard, FiDatabase, FiPieChart, FiZap } from 'react-icons/fi';
+import { FiCheckCircle, FiChevronDown, FiChevronUp, FiCreditCard, FiDatabase, FiPieChart, FiSliders, FiZap } from 'react-icons/fi';
 import { Badge, SectionCard, StatTile } from '@/components/ui';
 import { ROUTES } from '@/constants/routes';
 import { billingService } from '@/services/billingService';
@@ -78,6 +78,11 @@ export function BillingPage() {
 
   return (
     <div className={styles.page}>
+      <div className={styles.pageHeader}>
+        <h1 className={styles.pageTitle}>Billing</h1>
+        <p className={styles.pageSubtitle}>Your plan, Haive Credits, and Auto Recharge — all in one place.</p>
+      </div>
+
       <CurrentPlanCard
         wallet={wallet}
         subscription={subscription}
@@ -87,28 +92,33 @@ export function BillingPage() {
 
       {entitlements.length > 0 && (
         <SectionCard title="Usage & Access" icon={FiCheckCircle}>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
+          <div>
             {entitlements.map((e) => (
-              <div key={e.key} style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-1)' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 'var(--space-2)' }}>
-                  <span>{e.name}</span>
+              <div key={e.key} className={styles.entitlementRow}>
+                <div className={styles.entitlementHeader}>
+                  <span className={styles.entitlementLabel}>
+                    <span className={styles.entitlementIconBadge}>
+                      {e.type === 'boolean' ? <FiCheckCircle size={13} /> : <FiSliders size={13} />}
+                    </span>
+                    {e.name}
+                  </span>
                   {e.type === 'boolean' ? (
                     <Badge variant={e.allowed ? 'success' : 'neutral'}>{e.allowed ? 'Included' : 'Not included'}</Badge>
                   ) : e.limit === undefined ? (
-                    <span className={styles.muted}>Unlimited</span>
+                    <Badge variant="accent">Unlimited</Badge>
                   ) : (
-                    <span className={styles.muted}>
-                      {(e.used ?? 0).toLocaleString()} / {e.limit.toLocaleString()}
+                    <span className={styles.creditsRowValue}>
+                      {(e.used ?? 0).toLocaleString()} <span className={styles.muted}>/ {e.limit.toLocaleString()}</span>
                     </span>
                   )}
                 </div>
                 {e.type === 'numeric' && e.limit !== undefined && (
-                  <div style={{ height: 6, borderRadius: 999, background: 'var(--color-bg-subtle)', overflow: 'hidden' }}>
+                  <div className={styles.entitlementProgressTrack}>
                     <div
+                      className={styles.entitlementProgressFill}
                       style={{
-                        height: '100%',
                         width: `${Math.min(100, ((e.used ?? 0) / e.limit) * 100)}%`,
-                        background: e.allowed ? 'var(--color-accent)' : 'var(--color-danger)',
+                        background: e.allowed ? 'var(--color-accent, var(--brand-accent-primary))' : 'var(--color-danger)',
                       }}
                     />
                   </div>
@@ -131,8 +141,13 @@ export function BillingPage() {
         </SectionCard>
       )}
 
-      <button type="button" className={styles.secondaryLink} onClick={() => setShowUsage((v) => !v)}>
-        {showUsage ? <FiChevronUp /> : <FiChevronDown />} Usage details
+      <button
+        type="button"
+        className={`${styles.disclosureToggle} ${showUsage ? styles.disclosureToggleOpen : ''}`}
+        onClick={() => setShowUsage((v) => !v)}
+      >
+        <span className={styles.disclosureToggleIcon}>{showUsage ? <FiChevronUp /> : <FiChevronDown />}</span>
+        Usage details
       </button>
       {showUsage && (
         <div className={styles.statGrid}>
@@ -147,15 +162,19 @@ export function BillingPage() {
         </div>
       )}
 
-      <button type="button" className={styles.secondaryLink} onClick={() => setShowHistory((v) => !v)}>
-        {showHistory ? <FiChevronUp /> : <FiChevronDown />} Transaction history
+      <button
+        type="button"
+        className={`${styles.disclosureToggle} ${showHistory ? styles.disclosureToggleOpen : ''}`}
+        onClick={() => setShowHistory((v) => !v)}
+      >
+        <span className={styles.disclosureToggleIcon}>{showHistory ? <FiChevronUp /> : <FiChevronDown />}</span>
+        Transaction history
       </button>
       {showHistory && (
         <SectionCard title="Transaction History" icon={FiCreditCard}>
           <TransactionHistoryTable transactions={transactions} />
         </SectionCard>
       )}
-
     </div>
   );
 }

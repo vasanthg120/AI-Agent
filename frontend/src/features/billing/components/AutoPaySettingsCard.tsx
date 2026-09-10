@@ -211,10 +211,16 @@ export function AutoPaySettingsCard({ autoPay, autoRechargePolicy, paymentMethod
       <div>
         <span className={styles.fieldLabel}>Payment method</span>
         {defaultMethod ? (
-          <div className={styles.paymentMethodRow}>
-            <span className={styles.muted}>
-              <FiCreditCard style={{ marginRight: 6, verticalAlign: 'middle' }} />
-              {defaultMethod.cardNetwork.toUpperCase()} •••• {defaultMethod.cardLast4}
+          <div className={styles.paymentMethodCard}>
+            <span className={styles.paymentMethodCardInfo}>
+              <span className={styles.paymentMethodIconBadge}>
+                <FiCreditCard size={15} />
+              </span>
+              <span className={styles.paymentMethodText}>
+                <span className={styles.paymentMethodLabel}>
+                  {defaultMethod.cardNetwork.toUpperCase()} •••• {defaultMethod.cardLast4}
+                </span>
+              </span>
             </span>
             <Badge variant="accent">Default</Badge>
           </div>
@@ -227,12 +233,7 @@ export function AutoPaySettingsCard({ autoPay, autoRechargePolicy, paymentMethod
       </div>
 
       <div>
-        <button
-          type="button"
-          className={styles.muted}
-          style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
-          onClick={() => setAdvancedOpen((v) => !v)}
-        >
+        <button type="button" className={styles.autopayAdvancedToggle} onClick={() => setAdvancedOpen((v) => !v)}>
           {advancedOpen ? <FiChevronUp /> : <FiChevronDown />} Advanced
         </button>
         {advancedOpen && (
@@ -273,10 +274,14 @@ export function AutoPaySettingsCard({ autoPay, autoRechargePolicy, paymentMethod
         <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
           {paymentMethods.length === 0 && <p className={styles.muted}>No cards on file yet.</p>}
           {paymentMethods.map((method) => (
-            <div key={method._id} className={styles.paymentMethodRow}>
-              <span className={styles.muted}>
-                <FiCreditCard style={{ marginRight: 6, verticalAlign: 'middle' }} />
-                {method.cardNetwork.toUpperCase()} •••• {method.cardLast4}
+            <div key={method._id} className={styles.paymentMethodCard}>
+              <span className={styles.paymentMethodCardInfo}>
+                <span className={styles.paymentMethodIconBadge}>
+                  <FiCreditCard size={15} />
+                </span>
+                <span className={styles.paymentMethodLabel}>
+                  {method.cardNetwork.toUpperCase()} •••• {method.cardLast4}
+                </span>
               </span>
               {method.isDefault ? (
                 <Badge variant="accent">Default</Badge>
