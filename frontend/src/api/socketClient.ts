@@ -20,3 +20,20 @@ export function disconnectSocket(): void {
   socket?.disconnect();
   socket = null;
 }
+
+// A separate socket/namespace for the Call Copilot (backend/src/call-copilot's
+// own CallCopilotGateway) — deliberately its own connection, not new event
+// names on the `/chat` socket above, so a call-copilot issue can never touch
+// the chat socket's stability. Same lazy-singleton/autoConnect:false shape.
+let callCopilotSocket: Socket | null = null;
+
+export function getCallCopilotSocket(token: string): Socket {
+  if (callCopilotSocket) return callCopilotSocket;
+  callCopilotSocket = io(`${env.socketUrl}/call-copilot`, { auth: { token }, autoConnect: false });
+  return callCopilotSocket;
+}
+
+export function disconnectCallCopilotSocket(): void {
+  callCopilotSocket?.disconnect();
+  callCopilotSocket = null;
+}

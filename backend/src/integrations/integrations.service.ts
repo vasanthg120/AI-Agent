@@ -59,14 +59,24 @@ export class IntegrationsService {
    * post-connect trigger below and by the explicit "Sync Now" endpoint
    * (POST /integrations/crm/sync), which needs a real result to show the
    * user rather than firing blind. Throws on failure (e.g. python-agent
-   * unreachable) so callers can decide how to surface that. */
+   * unreachable) so callers can decide how to surface that.
+   *
+   * Uses its own longer timeout, NOT the module's 15s default — that default
+   * is sized for Test Connection / Dynamic Executor calls to arbitrary
+   * customer endpoints (see integrations.module.ts), which should fail fast.
+   * This call instead drives python-agent's sync_deals_for_org +
+   * sync_quotes_for_org, a sequential, paginated crawl of the org's whole
+   * CRM (up to 50 pages of 100 records each, for deals and then quotes) —
+   * routinely well past 15s for a real org, which is exactly why "Sync Now"
+   * was timing out with a plain AxiosError even though python-agent itself
+   * was healthy and still working on the request. */
   async syncCrmNow(organizationId: string): Promise<{ dealsSynced: number; quotesSynced: number }> {
-    const token = this.jwt.sign({ sub: 'system', organizationId }, { expiresIn: '5m' });
+    const token = this.jwt.sign({ sub: 'system', organizationId }, { expiresIn: '10m' });
     const { data } = await firstValueFrom(
       this.http.post<{ dealsSynced: number; quotesSynced: number }>(
         `${this.pythonAgentUrl}/sync/crm/run-for-org`,
         {},
-        { headers: { Authorization: `Bearer ${token}` } },
+        { headers: { Authorization: `Bearer ${token}` }, timeout: 180_000 },
       ),
     );
     return data;

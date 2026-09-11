@@ -130,5 +130,24 @@ class Settings:
     rag_top_k: int = int(os.environ.get("RAG_TOP_K", "5"))
     rag_candidate_pool_size: int = int(os.environ.get("RAG_CANDIDATE_POOL_SIZE", "20"))
 
+    # --- Real-Time AI Sales Call Copilot (app/agent/call_copilot_analysis.py,
+    # app/routes/call_copilot.py) ---
+    # Minimum seconds between two analysis calls for the SAME call session —
+    # enforced via app.memory.rate_limiter.allow(), the same Redis
+    # fixed-window primitive app.tools.registry already uses to cap tool-call
+    # frequency. Exists specifically to satisfy "don't send every transcript
+    # fragment to Claude unnecessarily."
+    call_copilot_analysis_interval_seconds: int = int(os.environ.get("CALL_COPILOT_ANALYSIS_INTERVAL_SECONDS", "25"))
+    # The OTHER half of that throttle — even after the interval has elapsed,
+    # an analysis call is skipped unless at least this many new words have
+    # accumulated since the last one (a silent stretch of a call shouldn't
+    # burn a Claude call just because the clock ran out).
+    call_copilot_min_new_words: int = int(os.environ.get("CALL_COPILOT_MIN_NEW_WORDS", "40"))
+    # How much of the RUNNING transcript (most recent words) is sent as
+    # context on each analysis call — bounds token usage as a call gets
+    # long; the model only needs recent context plus the already-detected
+    # event list, not the entire call transcribed so far.
+    call_copilot_transcript_window_words: int = int(os.environ.get("CALL_COPILOT_TRANSCRIPT_WINDOW_WORDS", "500"))
+
 
 settings = Settings()

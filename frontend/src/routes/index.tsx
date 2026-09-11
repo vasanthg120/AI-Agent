@@ -26,6 +26,9 @@ const AgentWorkforceDashboardPage = lazy(() =>
   import('@/features/dashboard/DashboardPage').then((m) => ({ default: m.DashboardPage })),
 );
 const TimelinePage = lazy(() => import('@/features/timeline/TimelinePage').then((m) => ({ default: m.TimelinePage })));
+const CallCopilotPage = lazy(() =>
+  import('@/features/call-copilot/CallCopilotPage').then((m) => ({ default: m.CallCopilotPage })),
+);
 const CommandCenterPage = lazy(() =>
   import('@/features/command-center/CommandCenterPage').then((m) => ({ default: m.CommandCenterPage })),
 );
@@ -138,6 +141,7 @@ export function AppRoutes() {
             <Route index element={<Navigate to={ROUTES.chat} replace />} />
             <Route path={ROUTES.dashboard} element={<DashboardRouterPage />} />
             <Route path={ROUTES.agentActivity} element={<AgentWorkforceDashboardPage />} />
+            <Route path={ROUTES.callCopilot} element={<CallCopilotPage />} />
             <Route path={ROUTES.timeline} element={<TimelinePage />} />
             <Route element={<RequireRole role="admin" />}>
               <Route path={ROUTES.commandCenter} element={<CommandCenterPage />} />

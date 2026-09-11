@@ -174,6 +174,22 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
   async selectConversation(id) {
     set({ activeConversationId: id, isLoadingMessages: true });
+
+    // A "pending_..." id (see chatService.createConversation's own comment)
+    // is a client-only placeholder for a brand-new conversation that has no
+    // messages yet — the backend has never heard of it (no "create empty
+    // conversation" endpoint exists), so calling getMessages(id) for one
+    // always 500s. Whatever's already in `messages` for it (set locally by
+    // sendMessage/streamReply) is already correct; nothing to fetch.
+    if (id.startsWith('pending_')) {
+      set((state) => ({
+        isLoadingMessages: false,
+        activeAgentId: null,
+        messages: state.messages[id] ? state.messages : { ...state.messages, [id]: [] },
+      }));
+      return;
+    }
+
     const { messages, agentId } = await chatService.getMessages(id);
     set((state) => ({
       messages: { ...state.messages, [id]: messages },

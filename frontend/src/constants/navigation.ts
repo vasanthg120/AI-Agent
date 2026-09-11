@@ -9,6 +9,7 @@ import {
   FiFileText,
   FiInbox,
   FiMessageSquare,
+  FiMic,
   FiPieChart,
   FiTerminal,
 } from 'react-icons/fi';
@@ -45,6 +46,15 @@ export const NAV_GROUPS: NavGroup[] = [
         // Self-scoped to the caller's own connected mailbox — every real role
         // benefits, hidden only for agent_user (an AI-persona account, not a
         // real salesperson mailbox).
+        hideForRoles: ['agent_user'],
+      },
+      {
+        id: 'call-copilot',
+        label: 'Call Copilot',
+        path: ROUTES.callCopilot,
+        icon: FiMic,
+        // Same reasoning as AI Email Inbox above — a live sales-call tool for
+        // a real salesperson on the phone, not relevant to an AI-persona account.
         hideForRoles: ['agent_user'],
       },
       { id: 'chat-history', label: 'History', path: ROUTES.chatHistory, icon: FiMessageSquare },

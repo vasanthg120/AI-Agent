@@ -1,0 +1,17 @@
+warning: in the working copy of 'backend/dist/auth/jwt-payload.interface.d.ts', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'backend/dist/auth/strategies/jwt.strategy.js', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'backend/dist/crm/crm.module.js', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'backend/dist/dashboard/dashboard.module.js', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'backend/dist/dashboard/dashboard.service.d.ts', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'backend/dist/dashboard/dashboard.service.js', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'backend/dist/integrations/integrations.service.d.ts', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'backend/dist/integrations/integrations.service.js', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'backend/dist/users/dto/create-user.dto.d.ts', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'backend/dist/users/dto/create-user.dto.js', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'backend/dist/users/dto/update-user.dto.d.ts', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'backend/dist/users/dto/update-user.dto.js', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'backend/dist/users/schemas/user.schema.d.ts', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'backend/dist/users/schemas/user.schema.js', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'backend/dist/users/users.controller.d.ts', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'backend/dist/users/users.service.d.ts', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'backend/dist/users/users.service.js', LF will be replaced by CRLF the next time Git touches it

@@ -39,8 +39,8 @@ let IntegrationsService = IntegrationsService_1 = class IntegrationsService {
         this.pythonAgentUrl = this.config.get('pythonAgentUrl') ?? 'http://localhost:8000';
     }
     async syncCrmNow(organizationId) {
-        const token = this.jwt.sign({ sub: 'system', organizationId }, { expiresIn: '5m' });
-        const { data } = await (0, rxjs_1.firstValueFrom)(this.http.post(`${this.pythonAgentUrl}/sync/crm/run-for-org`, {}, { headers: { Authorization: `Bearer ${token}` } }));
+        const token = this.jwt.sign({ sub: 'system', organizationId }, { expiresIn: '10m' });
+        const { data } = await (0, rxjs_1.firstValueFrom)(this.http.post(`${this.pythonAgentUrl}/sync/crm/run-for-org`, {}, { headers: { Authorization: `Bearer ${token}` }, timeout: 180_000 }));
         return data;
     }
     triggerCrmSyncIfApplicable(organizationId, provider) {
