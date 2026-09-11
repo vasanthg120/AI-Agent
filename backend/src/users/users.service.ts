@@ -94,6 +94,7 @@ export class UsersService {
       assignedAgentId: dto.role === 'agent_user' ? dto.assignedAgentId : undefined,
       department: dto.department,
       active: true,
+      voiceAccessEnabled: dto.voiceAccessEnabled ?? true,
     });
     return { user: this.toPublic(user), tempPassword };
   }
@@ -115,6 +116,7 @@ export class UsersService {
     if (dto.storeId !== undefined) update.storeId = dto.storeId;
     if (dto.active !== undefined) update.active = dto.active;
     if (dto.department !== undefined) update.department = dto.department;
+    if (dto.voiceAccessEnabled !== undefined) update.voiceAccessEnabled = dto.voiceAccessEnabled;
 
     // Scoped by organizationId, not just _id — an admin from org A must
     // never be able to modify a user in org B, even by guessing/enumerating
@@ -148,6 +150,7 @@ export class UsersService {
       assignedAgentId: user.assignedAgentId,
       department: user.department,
       active: user.active,
+      voiceAccessEnabled: user.voiceAccessEnabled,
     };
   }
 

@@ -110,6 +110,7 @@ let UsersService = class UsersService {
             assignedAgentId: dto.role === 'agent_user' ? dto.assignedAgentId : undefined,
             department: dto.department,
             active: true,
+            voiceAccessEnabled: dto.voiceAccessEnabled ?? true,
         });
         return { user: this.toPublic(user), tempPassword };
     }
@@ -129,6 +130,8 @@ let UsersService = class UsersService {
             update.active = dto.active;
         if (dto.department !== undefined)
             update.department = dto.department;
+        if (dto.voiceAccessEnabled !== undefined)
+            update.voiceAccessEnabled = dto.voiceAccessEnabled;
         const updated = await this.userModel.findOneAndUpdate({ _id: id, organizationId }, update, { new: true }).exec();
         if (!updated)
             throw new common_1.NotFoundException('User not found');
@@ -157,6 +160,7 @@ let UsersService = class UsersService {
             assignedAgentId: user.assignedAgentId,
             department: user.department,
             active: user.active,
+            voiceAccessEnabled: user.voiceAccessEnabled,
         };
     }
     setVerifyOtp(userId, otpHash, expiresAt) {

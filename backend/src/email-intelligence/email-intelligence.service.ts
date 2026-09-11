@@ -1,3 +1,4 @@
+import { randomUUID } from 'crypto';
 import { HttpService } from '@nestjs/axios';
 import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -5,6 +6,7 @@ import { JwtService } from '@nestjs/jwt';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { firstValueFrom } from 'rxjs';
+import { ReservationService } from '../billing/reservation.service';
 import { correlateSingleEmail, EmailCorrelationContext } from '../crm/customer-grouping.util';
 import { EmailSlaService } from '../email-sla/email-sla.service';
 import { periodToDateRange } from '../common/period.util';
@@ -109,6 +111,7 @@ export class EmailIntelligenceService {
     private jwt: JwtService,
     private config: ConfigService,
     private emailSla: EmailSlaService,
+    private reservations: ReservationService,
   ) {
     this.pythonAgentUrl = this.config.get<string>('pythonAgentUrl') ?? 'http://localhost:8000';
   }
@@ -426,14 +429,33 @@ export class EmailIntelligenceService {
     };
   }
 
+  // Billed like business-knowledge-chat.service.ts's ask() — reserve() is a
+  // hard stop before any LLM call. The two callers behave correctly without
+  // any extra handling here: analyzeAndCreate() is only ever invoked from
+  // email-intelligence-sync.service.ts's cron loop, which already wraps
+  // each email in its own try/catch (isolating one insufficient-balance
+  // org from the rest of the sweep); regenerate() is a real, user-triggered
+  // controller action, so a 402 thrown here propagates straight through to
+  // the HTTP response unchanged, same as chat's existing error shape.
   private async callAnalyze(organizationId: string, userId: string, payload: Record<string, unknown>) {
-    const token = this.jwt.sign({ sub: userId, organizationId }, { expiresIn: '5m' });
-    const { data } = await firstValueFrom(
-      this.http.post<Record<string, unknown>>(`${this.pythonAgentUrl}/email-intelligence/analyze`, payload, {
-        headers: { Authorization: `Bearer ${token}` },
-      }),
-    );
-    return data;
+    const requestId = randomUUID();
+    await this.reservations.reserve(organizationId, userId, requestId, 'email-intelligence-analyze');
+
+    try {
+      const token = this.jwt.sign({ sub: userId, organizationId }, { expiresIn: '5m' });
+      const { data } = await firstValueFrom(
+        this.http.post<Record<string, unknown>>(
+          `${this.pythonAgentUrl}/email-intelligence/analyze`,
+          { ...payload, request_id: requestId },
+          { headers: { Authorization: `Bearer ${token}` } },
+        ),
+      );
+      await this.reservations.settle(requestId);
+      return data;
+    } catch (err) {
+      await this.reservations.release(requestId);
+      throw err;
+    }
   }
 
   // Phase 19 — Unified Analytics Dashboard's email activity widget, reworked

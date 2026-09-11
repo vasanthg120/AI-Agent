@@ -152,6 +152,29 @@ export class IntegrationsService {
     return this.connect(organizationId, provider, dto.apiKey!, dto.baseUrl);
   }
 
+  /** "Configured" (status() above — a DB-existence check) vs "actually
+   * reachable right now" — this makes a real, minimal call using the
+   * already-connected platform credential, via python-agent's new
+   * /admin/providers/{provider}/verify route (it owns the actual API key,
+   * this service never sees it decrypted here). Never throws on a bad/
+   * expired key — that's a normal {ok:false} result, not a 500. */
+  async verifyPlatformProvider(provider: 'anthropic' | 'sarvam' | 'groq'): Promise<{ ok: boolean; message: string }> {
+    const token = this.jwt.sign({ sub: 'platform-admin' }, { expiresIn: '5m' });
+    try {
+      const { data } = await firstValueFrom(
+        this.http.post<{ ok: boolean; message: string }>(
+          `${this.pythonAgentUrl}/admin/providers/${provider}/verify`,
+          {},
+          { headers: { Authorization: `Bearer ${token}` } },
+        ),
+      );
+      return data;
+    } catch (err) {
+      this.logger.error(`Provider verification failed for ${provider}: ${(err as Error).message}`);
+      return { ok: false, message: 'Could not reach the AI service to verify this connection. Please try again.' };
+    }
+  }
+
   async status(organizationId: string, provider: string): Promise<IntegrationStatus> {
     this.assertAllowed(provider);
     const doc = await this.credentialModel.findOne({ organizationId, provider });

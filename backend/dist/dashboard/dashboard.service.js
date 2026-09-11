@@ -13,6 +13,7 @@ var __param = (this && this.__param) || function (paramIndex, decorator) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.DashboardService = void 0;
+const crypto_1 = require("crypto");
 const axios_1 = require("@nestjs/axios");
 const common_1 = require("@nestjs/common");
 const config_1 = require("@nestjs/config");
@@ -20,6 +21,7 @@ const jwt_1 = require("@nestjs/jwt");
 const mongoose_1 = require("@nestjs/mongoose");
 const mongoose_2 = require("mongoose");
 const rxjs_1 = require("rxjs");
+const reservation_service_1 = require("../billing/reservation.service");
 const chat_service_1 = require("../chat/chat.service");
 const agent_scope_util_1 = require("./agent-scope.util");
 const daily_report_schema_1 = require("./schemas/daily-report.schema");
@@ -27,17 +29,29 @@ function todayStamp() {
     return new Date().toISOString().slice(0, 10);
 }
 let DashboardService = class DashboardService {
-    constructor(reportModel, http, config, jwt, chatService) {
+    constructor(reportModel, http, config, jwt, chatService, reservations) {
         this.reportModel = reportModel;
         this.http = http;
         this.config = config;
         this.jwt = jwt;
         this.chatService = chatService;
+        this.reservations = reservations;
         this.agentUrl = this.config.get('pythonAgentUrl') ?? 'http://localhost:8000';
     }
     async recordDailyReport(input) {
-        const userJwt = this.jwt.sign({ sub: input.userId }, { expiresIn: '5m' });
-        const { data } = await (0, rxjs_1.firstValueFrom)(this.http.post(`${this.agentUrl}/reports/generate`, { report_type: input.reportType }, { headers: { Authorization: `Bearer ${userJwt}` } }));
+        const requestId = (0, crypto_1.randomUUID)();
+        await this.reservations.reserve(input.organizationId, input.userId, requestId, 'scheduled-report');
+        const userJwt = this.jwt.sign({ sub: input.userId, organizationId: input.organizationId }, { expiresIn: '5m' });
+        let data;
+        try {
+            const response = await (0, rxjs_1.firstValueFrom)(this.http.post(`${this.agentUrl}/reports/generate`, { report_type: input.reportType, request_id: requestId }, { headers: { Authorization: `Bearer ${userJwt}` } }));
+            data = response.data;
+            await this.reservations.settle(requestId);
+        }
+        catch (err) {
+            await this.reservations.release(requestId);
+            throw err;
+        }
         return this.reportModel
             .findOneAndUpdate({
             organizationId: input.organizationId,
@@ -167,6 +181,7 @@ exports.DashboardService = DashboardService = __decorate([
         axios_1.HttpService,
         config_1.ConfigService,
         jwt_1.JwtService,
-        chat_service_1.ChatService])
+        chat_service_1.ChatService,
+        reservation_service_1.ReservationService])
 ], DashboardService);
 //# sourceMappingURL=dashboard.service.js.map

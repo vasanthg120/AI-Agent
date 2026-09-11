@@ -2,6 +2,7 @@ import { HttpService } from '@nestjs/axios';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { Model } from 'mongoose';
+import { ReservationService } from '../billing/reservation.service';
 import { ChatService } from '../chat/chat.service';
 import { JwtPayload } from '../auth/jwt-payload.interface';
 import { DailyReport, DailyReportDocument } from './schemas/daily-report.schema';
@@ -11,8 +12,9 @@ export declare class DashboardService {
     private config;
     private jwt;
     private chatService;
+    private reservations;
     private readonly agentUrl;
-    constructor(reportModel: Model<DailyReportDocument>, http: HttpService, config: ConfigService, jwt: JwtService, chatService: ChatService);
+    constructor(reportModel: Model<DailyReportDocument>, http: HttpService, config: ConfigService, jwt: JwtService, chatService: ChatService, reservations: ReservationService);
     recordDailyReport(input: {
         organizationId: string;
         storeId: string;

@@ -18,6 +18,10 @@ export interface AdminUser {
   // department (see chat.service.ts's listAgents, Phase 6).
   department?: string;
   active: boolean;
+  // Provider/model-availability control, NOT an AI on/off switch — chat
+  // stays automatically available regardless of this field; it only gates
+  // the separate voice (Sarvam) feature. Defaults true.
+  voiceAccessEnabled: boolean;
 }
 
 export interface CreateUserPayload {
@@ -27,6 +31,7 @@ export interface CreateUserPayload {
   assignedAgentId?: string;
   storeId?: string;
   department?: string;
+  voiceAccessEnabled?: boolean;
 }
 
 export interface CreateUserResult {
@@ -40,6 +45,7 @@ export interface UpdateUserPayload {
   storeId?: string;
   active?: boolean;
   department?: string;
+  voiceAccessEnabled?: boolean;
 }
 
 export const usersService = {

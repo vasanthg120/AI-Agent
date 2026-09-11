@@ -1,3 +1,4 @@
+import { randomUUID } from 'crypto';
 import { HttpService } from '@nestjs/axios';
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -5,6 +6,7 @@ import { JwtService } from '@nestjs/jwt';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { firstValueFrom } from 'rxjs';
+import { ReservationService } from '../billing/reservation.service';
 import { JwtPayload } from '../auth/jwt-payload.interface';
 import { TimelineService } from '../timeline/timeline.service';
 import { FinanceDocument, FinanceDocumentDocument } from './schemas/finance-document.schema';
@@ -43,6 +45,7 @@ export class FinanceSummaryService {
     private http: HttpService,
     private jwt: JwtService,
     private config: ConfigService,
+    private reservations: ReservationService,
   ) {
     this.pythonAgentUrl = this.config.get<string>('pythonAgentUrl') ?? 'http://localhost:8000';
   }
@@ -61,16 +64,26 @@ export class FinanceSummaryService {
     }
 
     const deterministicInput = await this.gatherDeterministicInput(caller.organizationId);
+    // Billed like business-knowledge-chat.service.ts's ask() — reserve() is
+    // a hard stop before the LLM call; this is a real, button-triggered
+    // action (already throttled at the controller), so a 402 propagates
+    // straight through to the HTTP response, same as chat's existing shape.
+    const requestId = randomUUID();
+    await this.reservations.reserve(caller.organizationId, caller.sub, requestId, 'finance-summary');
     let result: Record<string, unknown>;
     try {
       const token = this.jwt.sign({ sub: caller.sub, organizationId: caller.organizationId }, { expiresIn: '5m' });
       const { data } = await firstValueFrom(
-        this.http.post<Record<string, unknown>>(`${this.pythonAgentUrl}/finance/analyze`, deterministicInput, {
-          headers: { Authorization: `Bearer ${token}` },
-        }),
+        this.http.post<Record<string, unknown>>(
+          `${this.pythonAgentUrl}/finance/analyze`,
+          { ...deterministicInput, request_id: requestId },
+          { headers: { Authorization: `Bearer ${token}` } },
+        ),
       );
+      await this.reservations.settle(requestId);
       result = data;
     } catch (err) {
+      await this.reservations.release(requestId);
       this.logger.error(`Finance activity LLM analysis failed: ${(err as Error).message}`);
       throw err;
     }

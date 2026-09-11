@@ -32,6 +32,7 @@ def structure_report(payload: StructureReportRequest, user: dict = Depends(get_c
 
 class GenerateReportRequest(BaseModel):
     report_type: str
+    request_id: str = ""
 
 
 class GenerateReportResponse(BaseModel):
@@ -49,6 +50,11 @@ def generate_report(payload: GenerateReportRequest, user: dict = Depends(get_cur
     if payload.report_type not in REPORT_PROMPTS:
         raise ValueError(f"Unknown report_type: {payload.report_type}")
 
-    reply = run_report_crew(payload.report_type)
+    reply = run_report_crew(
+        payload.report_type,
+        organization_id=user.get("organizationId"),
+        user_id=user.get("sub", ""),
+        request_id=payload.request_id,
+    )
     structured = extract_report_structure(reply, payload.report_type)
     return GenerateReportResponse(reply=reply, **structured)

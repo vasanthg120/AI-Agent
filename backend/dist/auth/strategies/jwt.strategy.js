@@ -35,6 +35,9 @@ let JwtStrategy = class JwtStrategy extends (0, passport_1.PassportStrategy)(pas
         if (payload.purpose) {
             throw new common_1.UnauthorizedException();
         }
+        if (payload.roles?.includes('service')) {
+            return { ...payload, authMethod: 'service' };
+        }
         const user = await this.usersService.findById(payload.sub);
         if (!user || user.active === false) {
             throw new common_1.UnauthorizedException();
@@ -51,6 +54,7 @@ let JwtStrategy = class JwtStrategy extends (0, passport_1.PassportStrategy)(pas
             storeId: user.storeId,
             assignedAgentId: user.assignedAgentId,
             department: user.department,
+            voiceAccessEnabled: user.voiceAccessEnabled,
             jti: payload.jti,
             authMethod: 'session',
         };

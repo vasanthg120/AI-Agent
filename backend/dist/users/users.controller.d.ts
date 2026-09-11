@@ -15,6 +15,7 @@ export declare class UsersController {
         assignedAgentId: string | undefined;
         department: string | undefined;
         active: boolean;
+        voiceAccessEnabled: boolean;
     } | null>;
     list(caller: JwtPayload): Promise<{
         id: string;
@@ -26,6 +27,7 @@ export declare class UsersController {
         assignedAgentId: string | undefined;
         department: string | undefined;
         active: boolean;
+        voiceAccessEnabled: boolean;
     }[]>;
     create(caller: JwtPayload, dto: CreateUserDto): Promise<{
         user: {
@@ -38,6 +40,7 @@ export declare class UsersController {
             assignedAgentId: string | undefined;
             department: string | undefined;
             active: boolean;
+            voiceAccessEnabled: boolean;
         };
         tempPassword: string;
     }>;
@@ -51,6 +54,7 @@ export declare class UsersController {
         assignedAgentId: string | undefined;
         department: string | undefined;
         active: boolean;
+        voiceAccessEnabled: boolean;
     }>;
     remove(caller: JwtPayload, id: string): Promise<void>;
 }

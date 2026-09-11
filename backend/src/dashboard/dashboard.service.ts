@@ -1,3 +1,4 @@
+import { randomUUID } from 'crypto';
 import { HttpService } from '@nestjs/axios';
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -5,6 +6,7 @@ import { JwtService } from '@nestjs/jwt';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { firstValueFrom } from 'rxjs';
+import { ReservationService } from '../billing/reservation.service';
 import { ChatService } from '../chat/chat.service';
 import { JwtPayload } from '../auth/jwt-payload.interface';
 import { resolveAllowedAgentIds } from './agent-scope.util';
@@ -30,6 +32,7 @@ export class DashboardService {
     private config: ConfigService,
     private jwt: JwtService,
     private chatService: ChatService,
+    private reservations: ReservationService,
   ) {
     this.agentUrl = this.config.get<string>('pythonAgentUrl') ?? 'http://localhost:8000';
   }
@@ -53,14 +56,35 @@ export class DashboardService {
     userId: string;
     wasMissed?: boolean;
   }) {
-    const userJwt = this.jwt.sign({ sub: input.userId }, { expiresIn: '5m' });
-    const { data } = await firstValueFrom(
-      this.http.post<GenerateReportResult>(
-        `${this.agentUrl}/reports/generate`,
-        { report_type: input.reportType },
-        { headers: { Authorization: `Bearer ${userJwt}` } },
-      ),
-    );
+    // Billed like business-knowledge-chat.service.ts's ask() — reserve() is
+    // a hard stop before the crew's LLM calls run. This is invoked once per
+    // store by StoreSettingsService.runForStore's cron loop, which already
+    // wraps this exact call in a .catch() that logs and continues to the
+    // next store — an insufficient-balance org's report is skipped for that
+    // run, never blocking the sweep for anyone else.
+    const requestId = randomUUID();
+    await this.reservations.reserve(input.organizationId, input.userId, requestId, 'scheduled-report');
+
+    // Previously omitted organizationId (unlike every other python-agent
+    // bridge token in this codebase) — needed both for python-agent's
+    // get_current_user() to resolve org scope and for traced_llm_call's
+    // agent_executions attribution to work at all.
+    const userJwt = this.jwt.sign({ sub: input.userId, organizationId: input.organizationId }, { expiresIn: '5m' });
+    let data: GenerateReportResult;
+    try {
+      const response = await firstValueFrom(
+        this.http.post<GenerateReportResult>(
+          `${this.agentUrl}/reports/generate`,
+          { report_type: input.reportType, request_id: requestId },
+          { headers: { Authorization: `Bearer ${userJwt}` } },
+        ),
+      );
+      data = response.data;
+      await this.reservations.settle(requestId);
+    } catch (err) {
+      await this.reservations.release(requestId);
+      throw err;
+    }
 
     return this.reportModel
       .findOneAndUpdate(

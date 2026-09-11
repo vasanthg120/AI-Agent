@@ -35,4 +35,10 @@ export class UpdateUserDto {
   @IsOptional()
   @IsString()
   department?: string;
+
+  // Provider/model-availability control, not an AI on/off switch — see
+  // user.schema.ts's own comment. Only ever gates the voice (Sarvam) route.
+  @IsOptional()
+  @IsBoolean()
+  voiceAccessEnabled?: boolean;
 }

@@ -52,6 +52,10 @@ export declare class IntegrationsService {
         authType: AuthType;
         baseUrl?: string;
     }>;
+    verifyPlatformProvider(provider: 'anthropic' | 'sarvam' | 'groq'): Promise<{
+        ok: boolean;
+        message: string;
+    }>;
     status(organizationId: string, provider: string): Promise<IntegrationStatus>;
     listCustom(organizationId: string): Promise<IntegrationSummary[]>;
     disconnect(organizationId: string, provider: string): Promise<void>;

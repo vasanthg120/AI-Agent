@@ -81,6 +81,17 @@ let IntegrationsService = IntegrationsService_1 = class IntegrationsService {
             return this.connectWithAuth(organizationId, provider, dto);
         return this.connect(organizationId, provider, dto.apiKey, dto.baseUrl);
     }
+    async verifyPlatformProvider(provider) {
+        const token = this.jwt.sign({ sub: 'platform-admin' }, { expiresIn: '5m' });
+        try {
+            const { data } = await (0, rxjs_1.firstValueFrom)(this.http.post(`${this.pythonAgentUrl}/admin/providers/${provider}/verify`, {}, { headers: { Authorization: `Bearer ${token}` } }));
+            return data;
+        }
+        catch (err) {
+            this.logger.error(`Provider verification failed for ${provider}: ${err.message}`);
+            return { ok: false, message: 'Could not reach the AI service to verify this connection. Please try again.' };
+        }
+    }
     async status(organizationId, provider) {
         this.assertAllowed(provider);
         const doc = await this.credentialModel.findOne({ organizationId, provider });

@@ -124,6 +124,15 @@ export class User {
   @Prop({ default: true })
   active: boolean;
 
+  // Provider/model-availability control, NOT an AI on/off switch — chat
+  // (Anthropic) stays automatically available to every authenticated user
+  // regardless of this field; it only gates the separate voice (Sarvam
+  // STT/TTS) feature (see voice.controller.ts). Mongoose applies this
+  // default at hydration time for any document that predates this field, so
+  // every existing user reads back as enabled with no migration needed.
+  @Prop({ default: true })
+  voiceAccessEnabled: boolean;
+
   @Prop({ type: Object, default: {} })
   preferences: Record<string, unknown>;
 

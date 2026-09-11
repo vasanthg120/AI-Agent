@@ -50,11 +50,13 @@ export function UsersSettings() {
     assignedAgentId: string;
     storeId: string;
     department: string;
+    voiceAccessEnabled: boolean;
   }>({
     role: 'agent_user',
     assignedAgentId: '',
     storeId: '',
     department: '',
+    voiceAccessEnabled: true,
   });
   const [saving, setSaving] = useState(false);
 
@@ -131,6 +133,7 @@ export function UsersSettings() {
       assignedAgentId: user.assignedAgentId ?? '',
       storeId: user.storeId ?? '',
       department: user.department ?? '',
+      voiceAccessEnabled: user.voiceAccessEnabled,
     });
   };
 
@@ -143,6 +146,7 @@ export function UsersSettings() {
         assignedAgentId: editForm.role === 'agent_user' ? editForm.assignedAgentId : undefined,
         storeId: STORE_SCOPED_ROLES.has(editForm.role) ? editForm.storeId : undefined,
         department: editForm.department || undefined,
+        voiceAccessEnabled: editForm.voiceAccessEnabled,
       });
       setUsers((prev) => prev.map((u) => (u.id === updated.id ? updated : u)));
       toast.success('User updated');
@@ -206,6 +210,7 @@ export function UsersSettings() {
                 ))}
                 {user.assignedAgentId && <Badge variant="neutral">{agentName(user.assignedAgentId)}</Badge>}
                 {user.storeId && <Badge variant="neutral">{storeName(user.storeId)}</Badge>}
+                {!user.voiceAccessEnabled && <Badge variant="warning">Voice off</Badge>}
                 <div className={styles.userActions}>
                   <Switch checked={user.active} onChange={() => void handleToggleActive(user)} />
                   <Button type="button" variant="ghost" size="sm" onClick={() => openEdit(user)}>
@@ -390,6 +395,15 @@ export function UsersSettings() {
             value={editForm.department}
             onChange={(e) => setEditForm({ ...editForm, department: e.target.value })}
           />
+          <SettingsField label="Voice AI access">
+            <Switch
+              checked={editForm.voiceAccessEnabled}
+              onChange={(checked) => setEditForm({ ...editForm, voiceAccessEnabled: checked })}
+            />
+            <p className={styles.hint}>
+              Controls only the voice (speech-to-text/text-to-speech) feature — text chat stays available either way.
+            </p>
+          </SettingsField>
         </div>
         <div className={styles.modalFooter}>
           <Button type="button" variant="ghost" onClick={() => setEditingUser(null)}>

@@ -1,4 +1,4 @@
-import { IsEmail, IsIn, IsOptional, IsString, MinLength, ValidateIf } from 'class-validator';
+import { IsBoolean, IsEmail, IsIn, IsOptional, IsString, MinLength, ValidateIf } from 'class-validator';
 import { ASSIGNABLE_ROLES, AssignableRole } from './update-user.dto';
 
 const STORE_SCOPED_ROLES = new Set(['manager', 'consultant']);
@@ -28,4 +28,10 @@ export class CreateUserDto {
   @IsOptional()
   @IsString()
   department?: string;
+
+  // Optional at creation — schema defaults to true (voice enabled) when
+  // omitted. See update-user.dto.ts's identical field for what this gates.
+  @IsOptional()
+  @IsBoolean()
+  voiceAccessEnabled?: boolean;
 }

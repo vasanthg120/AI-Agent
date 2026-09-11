@@ -11,6 +11,7 @@ const axios_1 = require("@nestjs/axios");
 const common_1 = require("@nestjs/common");
 const mongoose_1 = require("@nestjs/mongoose");
 const auth_module_1 = require("../auth/auth.module");
+const billing_module_1 = require("../billing/billing.module");
 const dashboard_module_1 = require("../dashboard/dashboard.module");
 const organizations_module_1 = require("../organizations/organizations.module");
 const timeline_module_1 = require("../timeline/timeline.module");
@@ -73,6 +74,7 @@ exports.CrmModule = CrmModule = __decorate([
             organizations_module_1.OrganizationsModule,
             users_module_1.UsersModule,
             auth_module_1.AuthModule,
+            billing_module_1.BillingModule,
             timeline_module_1.TimelineModule,
             axios_1.HttpModule.register({ timeout: 60_000 }),
         ],

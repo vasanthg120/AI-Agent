@@ -472,6 +472,7 @@ def _run_forced_tool_extraction(
     name: str,
     organization_id: str | None = None,
     user_id: str = "",
+    request_id: str = "",
 ) -> dict:
     """Shared forced-tool-choice call — the original retry-once-then-raise
     shape extract_role established, generalized to accept content blocks
@@ -504,6 +505,7 @@ def _run_forced_tool_extraction(
                 user_id=user_id,
                 provider="anthropic",
                 model=settings.anthropic_model,
+                request_id=request_id,
             ) as usage:
                 response = _client(api_key).messages.create(
                     model=settings.anthropic_model,
@@ -616,7 +618,7 @@ inconsistencyNotes. Always call extract_business_document exactly once."""
 
 
 def _run_business_document_extraction(
-    user_content: list[dict], *, organization_id: str | None = None, user_id: str = ""
+    user_content: list[dict], *, organization_id: str | None = None, user_id: str = "", request_id: str = ""
 ) -> dict:
     return _run_forced_tool_extraction(
         BUSINESS_DOCUMENT_EXTRACTION_SYSTEM_PROMPT,
@@ -625,11 +627,18 @@ def _run_business_document_extraction(
         name="business_document_extraction",
         organization_id=organization_id,
         user_id=user_id,
+        request_id=request_id,
     )
 
 
 def extract_business_document(
-    file_bytes: bytes, mime_type: str, filename: str, *, organization_id: str | None = None, user_id: str = ""
+    file_bytes: bytes,
+    mime_type: str,
+    filename: str,
+    *,
+    organization_id: str | None = None,
+    user_id: str = "",
+    request_id: str = "",
 ) -> dict:
     """PDF/image-native path — identical construction to extract_finance_document,
     reusing the same base64 content-block approach for scanned/image documents."""
@@ -641,15 +650,20 @@ def extract_business_document(
         },
         {"type": "text", "text": f"Summarize and classify '{filename}' using the extract_business_document tool."},
     ]
-    return _run_business_document_extraction(content, organization_id=organization_id, user_id=user_id)
+    return _run_business_document_extraction(content, organization_id=organization_id, user_id=user_id, request_id=request_id)
 
 
 def extract_business_document_from_text(
-    document_text: str, filename: str, *, organization_id: str | None = None, user_id: str = ""
+    document_text: str,
+    filename: str,
+    *,
+    organization_id: str | None = None,
+    user_id: str = "",
+    request_id: str = "",
 ) -> dict:
     """Text path for spreadsheet/already-text formats — mirrors extract_finance_document_from_text."""
     content = [{"type": "text", "text": f"Document '{filename}':\n\n{document_text[:60000]}"}]
-    return _run_business_document_extraction(content, organization_id=organization_id, user_id=user_id)
+    return _run_business_document_extraction(content, organization_id=organization_id, user_id=user_id, request_id=request_id)
 
 
 REPORT_EXTRACTION_TOOL = {
@@ -1233,12 +1247,19 @@ mail. If there is no real activity to report, say so plainly rather than inventi
 analyze_customer_activity exactly once."""
 
 
-def analyze_customer_activity(payload: dict) -> dict:
+def analyze_customer_activity(
+    payload: dict, *, organization_id: str | None = None, user_id: str = "", request_id: str = ""
+) -> dict:
     """One-shot forced-tool-choice triage pass — same pattern as
     extract_report_structure/recommend_next_actions, operating on today's
     deterministically-gathered CRM+email activity (see
     backend/src/crm/customer-activity.service.ts). Retries once before
     surfacing an error.
+
+    Now traced (organization_id/user_id/request_id, added alongside real
+    billing enforcement for this feature) — previously this call wrote no
+    agent_executions row at all, so backend/src/billing/reservation.service.ts's
+    settle() would have found zero usage to charge for it.
     """
     api_key = _resolve_api_key()
     if not api_key:
@@ -1247,23 +1268,33 @@ def analyze_customer_activity(payload: dict) -> dict:
     last_error: Exception | None = None
     for _ in range(2):
         try:
-            response = _client(api_key).messages.create(
+            with traced_llm_call(
+                "customer_activity_analyze",
+                organization_id=organization_id,
+                user_id=user_id,
+                provider="anthropic",
                 model=settings.anthropic_model,
-                max_tokens=2048,
-                system=CUSTOMER_ACTIVITY_SYSTEM_PROMPT,
-                tools=[CUSTOMER_ACTIVITY_TOOL],
-                tool_choice={"type": "tool", "name": "analyze_customer_activity"},
-                messages=[
-                    {
-                        "role": "user",
-                        "content": f"Today's customer activity data:\n\n{json.dumps(_truncate_payload_for_prompt(payload), default=str)}",
-                    }
-                ],
-            )
-            block = next((b for b in response.content if b.type == "tool_use"), None)
-            if block is None:
-                raise ValueError("Model did not return a tool_use block")
-            return block.input
+                request_id=request_id,
+            ) as usage:
+                response = _client(api_key).messages.create(
+                    model=settings.anthropic_model,
+                    max_tokens=2048,
+                    system=CUSTOMER_ACTIVITY_SYSTEM_PROMPT,
+                    tools=[CUSTOMER_ACTIVITY_TOOL],
+                    tool_choice={"type": "tool", "name": "analyze_customer_activity"},
+                    messages=[
+                        {
+                            "role": "user",
+                            "content": f"Today's customer activity data:\n\n{json.dumps(_truncate_payload_for_prompt(payload), default=str)}",
+                        }
+                    ],
+                )
+                usage["input_tokens"] = response.usage.input_tokens
+                usage["output_tokens"] = response.usage.output_tokens
+                block = next((b for b in response.content if b.type == "tool_use"), None)
+                if block is None:
+                    raise ValueError("Model did not return a tool_use block")
+                return block.input
         except Exception as exc:  # noqa: BLE001 - deliberately broad, retried once then surfaced
             last_error = exc
     raise RuntimeError(f"Customer activity analysis failed after retry: {last_error}")
@@ -1324,12 +1355,18 @@ notable to report, say so plainly in aiSummary rather than inventing filler. Alw
 analyze_finance_activity exactly once."""
 
 
-def analyze_finance_activity(payload: dict) -> dict:
+def analyze_finance_activity(
+    payload: dict, *, organization_id: str | None = None, user_id: str = "", request_id: str = ""
+) -> dict:
     """One-shot forced-tool-choice triage pass — same pattern as
     analyze_customer_activity, operating on today's deterministically-
     gathered vendor payment activity (see
     backend/src/finance/finance-summary.service.ts). Retries once before
     surfacing an error.
+
+    Now traced (organization_id/user_id/request_id, added alongside real
+    billing enforcement for this feature) — see analyze_customer_activity's
+    identical comment for why this matters for settle().
     """
     api_key = _resolve_api_key()
     if not api_key:
@@ -1338,28 +1375,36 @@ def analyze_finance_activity(payload: dict) -> dict:
     last_error: Exception | None = None
     for _ in range(2):
         try:
-            response = _client(api_key).messages.create(
+            with traced_llm_call(
+                "finance_activity_analyze",
+                organization_id=organization_id,
+                user_id=user_id,
+                provider="anthropic",
                 model=settings.anthropic_model,
-                max_tokens=2048,
-                system=FINANCE_ACTIVITY_SYSTEM_PROMPT,
-                tools=[FINANCE_ACTIVITY_TOOL],
-                tool_choice={"type": "tool", "name": "analyze_finance_activity"},
-                messages=[
-                    {
-                        "role": "user",
-                        "content": f"Today's vendor payment activity data:\n\n{json.dumps(_truncate_payload_for_prompt(payload), default=str)}",
-                    }
-                ],
-            )
-            block = next((b for b in response.content if b.type == "tool_use"), None)
-            if block is None:
-                raise ValueError("Model did not return a tool_use block")
-            return block.input
+                request_id=request_id,
+            ) as usage:
+                response = _client(api_key).messages.create(
+                    model=settings.anthropic_model,
+                    max_tokens=2048,
+                    system=FINANCE_ACTIVITY_SYSTEM_PROMPT,
+                    tools=[FINANCE_ACTIVITY_TOOL],
+                    tool_choice={"type": "tool", "name": "analyze_finance_activity"},
+                    messages=[
+                        {
+                            "role": "user",
+                            "content": f"Today's vendor payment activity data:\n\n{json.dumps(_truncate_payload_for_prompt(payload), default=str)}",
+                        }
+                    ],
+                )
+                usage["input_tokens"] = response.usage.input_tokens
+                usage["output_tokens"] = response.usage.output_tokens
+                block = next((b for b in response.content if b.type == "tool_use"), None)
+                if block is None:
+                    raise ValueError("Model did not return a tool_use block")
+                return block.input
         except Exception as exc:  # noqa: BLE001 - deliberately broad, retried once then surfaced
             last_error = exc
     raise RuntimeError(f"Finance activity analysis failed after retry: {last_error}")
-
-    return _normalize_response(response)
 
 
 # strict: true (+ additionalProperties: false, every property in `required`)
@@ -1526,7 +1571,9 @@ other side — set it false if you have any real doubt, rather than guessing tru
 shouldDraft is false. Always call analyze_email exactly once."""
 
 
-def analyze_email(payload: dict, *, organization_id: str | None = None, user_id: str = "") -> dict:
+def analyze_email(
+    payload: dict, *, organization_id: str | None = None, user_id: str = "", request_id: str = ""
+) -> dict:
     """One-shot forced-tool-choice classification+draft pass for Phase 14b —
     reuses _run_forced_tool_extraction (already generalized in Phase 14a for
     exactly this system_prompt/tool/user_content shape), operating on one
@@ -1535,7 +1582,10 @@ def analyze_email(payload: dict, *, organization_id: str | None = None, user_id:
 
     Phase 21 follow-up: now traced as "email_analyze" — real token/cost
     history here is what lets Email Sync's preview show a genuine estimate
-    instead of just an operation count."""
+    instead of just an operation count. request_id (added alongside real
+    billing enforcement for this feature) correlates this call back to the
+    NestJS-side credit reservation for the same email — see
+    backend/src/billing/reservation.service.ts's settle()."""
     return _run_forced_tool_extraction(
         EMAIL_INTENT_SYSTEM_PROMPT,
         EMAIL_INTENT_TOOL,
@@ -1543,6 +1593,7 @@ def analyze_email(payload: dict, *, organization_id: str | None = None, user_id:
         name="email_analyze",
         organization_id=organization_id,
         user_id=user_id,
+        request_id=request_id,
     )
 
 

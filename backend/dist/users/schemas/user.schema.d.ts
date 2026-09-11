@@ -33,6 +33,7 @@ export declare class User {
     assignedAgentId?: string;
     department?: string;
     active: boolean;
+    voiceAccessEnabled: boolean;
     preferences: Record<string, unknown>;
     emailVerified: boolean;
     verifyOtpHash?: string;

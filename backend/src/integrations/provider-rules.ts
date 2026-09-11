@@ -81,6 +81,7 @@ export const PROVIDER_RULES: Record<string, ProviderRule> = {
   },
   anthropic: { label: 'Anthropic', allowedAuthTypes: ['apiKey'] },
   sarvam: { label: 'Sarvam AI', allowedAuthTypes: ['apiKey'] },
+  groq: { label: 'Groq', allowedAuthTypes: ['apiKey'] },
   openai: { label: 'OpenAI', allowedAuthTypes: ['apiKey'] },
   stripe: { label: 'Stripe', allowedAuthTypes: ['apiKey'] },
   twilio: { label: 'Twilio', allowedAuthTypes: ['apiKey'] },

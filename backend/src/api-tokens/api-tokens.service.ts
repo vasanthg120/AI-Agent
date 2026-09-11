@@ -104,6 +104,7 @@ export class ApiTokensService {
       storeId: user.storeId,
       assignedAgentId: user.assignedAgentId,
       department: user.department,
+      voiceAccessEnabled: user.voiceAccessEnabled,
       // No jti — API tokens aren't sessions, there's nothing to look up in
       // User.sessions for them. authMethod is what RequireSessionAuthGuard
       // reads to block this credential from security-management routes.

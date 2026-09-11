@@ -11,6 +11,7 @@ const axios_1 = require("@nestjs/axios");
 const common_1 = require("@nestjs/common");
 const mongoose_1 = require("@nestjs/mongoose");
 const auth_module_1 = require("../auth/auth.module");
+const billing_module_1 = require("../billing/billing.module");
 const chat_module_1 = require("../chat/chat.module");
 const gamification_module_1 = require("../gamification/gamification.module");
 const timeline_module_1 = require("../timeline/timeline.module");
@@ -32,6 +33,7 @@ exports.DashboardModule = DashboardModule = __decorate([
             chat_module_1.ChatModule,
             gamification_module_1.GamificationModule,
             timeline_module_1.TimelineModule,
+            billing_module_1.BillingModule,
         ],
         controllers: [dashboard_controller_1.DashboardController, tasks_controller_1.TasksController],
         providers: [dashboard_service_1.DashboardService, tasks_service_1.TasksService, tasks_export_service_1.TasksExportService],

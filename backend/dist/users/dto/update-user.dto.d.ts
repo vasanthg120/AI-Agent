@@ -6,4 +6,5 @@ export declare class UpdateUserDto {
     storeId?: string;
     active?: boolean;
     department?: string;
+    voiceAccessEnabled?: boolean;
 }

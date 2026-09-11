@@ -6,7 +6,8 @@ export interface JwtPayload {
     storeId?: string;
     assignedAgentId?: string;
     department?: string;
+    voiceAccessEnabled?: boolean;
     jti?: string;
-    authMethod?: 'session' | 'api_token';
+    authMethod?: 'session' | 'api_token' | 'service';
     purpose?: string;
 }

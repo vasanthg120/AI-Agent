@@ -129,4 +129,11 @@ class FinanceActivityResponse(BaseModel):
 # enforced, via FINANCE_ACTIVITY_TOOL's forced tool_choice).
 @router.post("/finance/analyze", response_model=FinanceActivityResponse)
 def analyze_finance(payload: dict, user: dict = Depends(get_current_user)):
-    return FinanceActivityResponse(**analyze_finance_activity(payload))
+    return FinanceActivityResponse(
+        **analyze_finance_activity(
+            payload,
+            organization_id=user.get("organizationId"),
+            user_id=user.get("sub", ""),
+            request_id=payload.get("request_id", ""),
+        )
+    )

@@ -27,7 +27,15 @@ def _client(api_key: str) -> Groq:
 
 
 def _resolve_api_key() -> str:
-    return integration_store.get_api_key("groq") or settings.groq_api_key
+    # Platform-wide credential ONLY (organizationId="platform"), same exact
+    # rule as anthropic_client.py._resolve_api_key / sarvam_client.py's
+    # _require_api_key — no static .env fallback, no arbitrary-organization
+    # credential. Set via Admin-haive Settings -> AI Provider -> Groq.
+    # Safe to enforce strictly here: call() below raises on a missing key,
+    # and orchestrator.py already treats ANY Groq failure as "fall through to
+    # the unchanged Claude path" — so an unconnected Groq credential just
+    # means the fast lane stays off, never a broken reply.
+    return integration_store.get_api_key("groq", organization_id="platform")
 
 
 def _item_text(item: dict) -> str:

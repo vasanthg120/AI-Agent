@@ -1,3 +1,4 @@
+import { randomUUID } from 'crypto';
 import { HttpService } from '@nestjs/axios';
 import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -6,6 +7,7 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import FormData from 'form-data';
 import { firstValueFrom } from 'rxjs';
+import { ReservationService } from '../billing/reservation.service';
 import { BusinessKnowledgeDocument, BusinessKnowledgeDocumentDocument } from './schemas/business-knowledge-document.schema';
 import { BusinessKnowledgeGridFsService } from './business-knowledge-gridfs.service';
 import { BusinessKnowledgeDocumentListQueryDto } from './dto/business-knowledge-document-list-query.dto';
@@ -54,6 +56,7 @@ export class BusinessKnowledgeDocumentsService {
     private http: HttpService,
     private jwt: JwtService,
     private config: ConfigService,
+    private reservations: ReservationService,
   ) {
     this.pythonAgentUrl = this.config.get<string>('pythonAgentUrl') ?? 'http://localhost:8000';
   }
@@ -89,19 +92,31 @@ export class BusinessKnowledgeDocumentsService {
     return this.runExtraction(doc, organizationId, userId, file);
   }
 
+  // Billed like business-knowledge-chat.service.ts's ask() — reserve()
+  // called as a hard stop BEFORE any LLM call, outside the try/catch below,
+  // so an insufficient-balance 402 propagates straight to the controller
+  // (and the frontend's existing chat-error handling) instead of being
+  // silently recorded as a generic "failed" document, which would hide the
+  // real reason. Genuine extraction failures (bad file, python-agent error)
+  // still land in the existing extractionStatus:'failed' path unchanged.
   private async runExtraction(
     doc: BusinessKnowledgeDocumentDocument,
     organizationId: string,
     userId: string,
     file: Express.Multer.File,
   ): Promise<BusinessKnowledgeDocumentDocument> {
+    const requestId = randomUUID();
+    await this.reservations.reserve(organizationId, userId, requestId, `business-knowledge-doc:${doc._id.toString()}`);
+
     try {
-      const extracted = await this.callExtraction(organizationId, userId, file);
+      const extracted = await this.callExtraction(organizationId, userId, file, requestId);
+      await this.reservations.settle(requestId);
       const updated = await this.documentModel
         .findByIdAndUpdate(doc._id, { $set: { ...extracted, extractionStatus: 'completed' }, $unset: { extractionError: '' } }, { new: true })
         .exec();
       return updated!;
     } catch (err) {
+      await this.reservations.release(requestId);
       this.logger.error(`Business knowledge document extraction failed for ${doc._id}: ${(err as Error).message}`);
       const updated = await this.documentModel
         .findByIdAndUpdate(doc._id, { extractionStatus: 'failed', extractionError: (err as Error).message }, { new: true })
@@ -110,10 +125,11 @@ export class BusinessKnowledgeDocumentsService {
     }
   }
 
-  private async callExtraction(organizationId: string, userId: string, file: Express.Multer.File) {
+  private async callExtraction(organizationId: string, userId: string, file: Express.Multer.File, requestId: string) {
     const token = this.jwt.sign({ sub: userId, organizationId }, { expiresIn: '5m' });
     const form = new FormData();
     form.append('file', file.buffer, { filename: file.originalname, contentType: file.mimetype });
+    form.append('request_id', requestId);
 
     const { data } = await firstValueFrom(
       this.http.post(`${this.pythonAgentUrl}/business-knowledge/documents/extract`, form, {

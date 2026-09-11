@@ -33,4 +33,11 @@ class CustomerActivityResponse(BaseModel):
 # CUSTOMER_ACTIVITY_TOOL's forced tool_choice.
 @router.post("/customer-activity/analyze", response_model=CustomerActivityResponse)
 def analyze(payload: dict, user: dict = Depends(get_current_user)):
-    return CustomerActivityResponse(**analyze_customer_activity(payload))
+    return CustomerActivityResponse(
+        **analyze_customer_activity(
+            payload,
+            organization_id=user.get("organizationId"),
+            user_id=user.get("sub", ""),
+            request_id=payload.get("request_id", ""),
+        )
+    )

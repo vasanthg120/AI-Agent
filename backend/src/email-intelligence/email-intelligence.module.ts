@@ -2,6 +2,7 @@ import { HttpModule } from '@nestjs/axios';
 import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { AuthModule } from '../auth/auth.module';
+import { BillingModule } from '../billing/billing.module';
 import { CrmModule } from '../crm/crm.module';
 import { EmailSlaModule } from '../email-sla/email-sla.module';
 import { NotificationsModule } from '../notifications/notifications.module';
@@ -48,6 +49,10 @@ import { EmailIntelligenceService } from './email-intelligence.service';
     // reverse — same shape as TimelineModule's documented pattern elsewhere.
     CrmModule,
     NotificationsModule,
+    // Reuses ReservationService.reserve/settle/release exactly as chat.py
+    // and business-knowledge-chat.service.ts already do — see callAnalyze's
+    // own comment.
+    BillingModule,
     // Email SLA + AI Follow-up action layer (isolated extension) — this
     // module calls EmailSlaService at two best-effort call-sites in
     // email-intelligence.service.ts; EmailSlaModule never imports back.

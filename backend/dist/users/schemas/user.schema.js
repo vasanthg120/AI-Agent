@@ -125,6 +125,10 @@ __decorate([
     __metadata("design:type", Boolean)
 ], User.prototype, "active", void 0);
 __decorate([
+    (0, mongoose_1.Prop)({ default: true }),
+    __metadata("design:type", Boolean)
+], User.prototype, "voiceAccessEnabled", void 0);
+__decorate([
     (0, mongoose_1.Prop)({ type: Object, default: {} }),
     __metadata("design:type", Object)
 ], User.prototype, "preferences", void 0);

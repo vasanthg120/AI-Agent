@@ -23,6 +23,7 @@ entirely while fetching the same context the old single-agent flow did.
 from app.agent.anthropic_client import _resolve_api_key
 from app.agent.personas import STORE_MANAGER_PROMPT
 from app.config import settings
+from app.observability.tracing import traced_llm_call
 from app.tools import business_search_tool
 from app.tools.registry import execute_tool
 from crewai import Agent, Crew, LLM, Process, Task
@@ -56,12 +57,25 @@ def _make_llm() -> LLM:
     return LLM(model=f"anthropic/{settings.anthropic_model}", api_key=api_key)
 
 
-def run_report_crew(report_type: str) -> str:
+def run_report_crew(
+    report_type: str, *, organization_id: str | None = None, user_id: str = "", request_id: str = ""
+) -> str:
     """Runs the prioritize -> write crew synchronously (mirrors the existing
     synchronous /chat route - no new async pattern needed) over pre-fetched
     CRM/Outlook context and returns the final prose report. Callers structure
     that prose into tasks the same way the plain chat path already does, via
-    anthropic_client.extract_report_structure()."""
+    anthropic_client.extract_report_structure().
+
+    organization_id/user_id/request_id (added alongside real billing
+    enforcement for Scheduled Reports) let this write a real agent_executions
+    row for backend/src/billing/reservation.service.ts's settle() to find.
+    CrewAI's own LLM wrapper makes the actual Anthropic calls internally
+    (bypassing anthropic_client.py's traced_llm_call entirely), so real usage
+    is captured differently here: crew.kickoff()'s CrewOutput.token_usage
+    aggregates prompt/completion tokens across both agents' calls, which is
+    exactly as accurate as this feature can honestly report (per-agent
+    attribution isn't exposed by this CrewAI version) and is billed as one
+    combined "scheduled_report" execution rather than two separate ones."""
     if report_type not in REPORT_PROMPTS:
         raise ValueError(f"Unknown report_type: {report_type}")
 
@@ -111,5 +125,17 @@ def run_report_crew(report_type: str) -> str:
         process=Process.sequential,
         verbose=False,
     )
-    result = crew.kickoff()
+    with traced_llm_call(
+        "scheduled_report",
+        organization_id=organization_id,
+        user_id=user_id,
+        provider="anthropic",
+        model=settings.anthropic_model,
+        request_id=request_id,
+    ) as usage:
+        result = crew.kickoff()
+        token_usage = getattr(result, "token_usage", None)
+        if token_usage is not None:
+            usage["input_tokens"] = getattr(token_usage, "prompt_tokens", 0) or 0
+            usage["output_tokens"] = getattr(token_usage, "completion_tokens", 0) or 0
     return str(result)

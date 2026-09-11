@@ -11,7 +11,7 @@ import type { CredentialStatus } from './integrationsService';
 // authenticate the customer-facing routes with. The backend always resolves
 // these to organizationId="platform" server-side — the frontend never sends
 // or controls that scope.
-export type AiProvider = 'anthropic' | 'sarvam';
+export type AiProvider = 'anthropic' | 'sarvam' | 'groq';
 
 export const adminIntegrationsService = {
   async connect(provider: AiProvider, apiKey: string): Promise<CredentialStatus> {
@@ -26,5 +26,13 @@ export const adminIntegrationsService = {
 
   async disconnect(provider: AiProvider): Promise<void> {
     await adminAxiosClient.delete(`/integrations/admin/${provider}`);
+  },
+
+  // Distinct from getStatus() above — that's a DB-existence check
+  // ("Configured"); this makes one real, minimal call through python-agent
+  // using the already-connected key ("Verified").
+  async verify(provider: AiProvider): Promise<{ ok: boolean; message: string }> {
+    const { data } = await adminAxiosClient.post<{ ok: boolean; message: string }>(`/integrations/admin/${provider}/verify`);
+    return data;
   },
 };

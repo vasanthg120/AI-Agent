@@ -32,5 +32,6 @@ def analyze(payload: dict, user: dict = Depends(get_current_user)):
             {**payload, "businessKnowledgeContext": kb_context},
             organization_id=organization_id,
             user_id=user.get("sub", ""),
+            request_id=payload.get("request_id", ""),
         )
     )

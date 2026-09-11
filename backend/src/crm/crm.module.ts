@@ -2,6 +2,7 @@ import { HttpModule } from '@nestjs/axios';
 import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { AuthModule } from '../auth/auth.module';
+import { BillingModule } from '../billing/billing.module';
 import { DashboardModule } from '../dashboard/dashboard.module';
 import { OrganizationsModule } from '../organizations/organizations.module';
 import { TimelineModule } from '../timeline/timeline.module';
@@ -72,6 +73,10 @@ import { SalesTargetController } from './sales-target.controller';
     OrganizationsModule,
     UsersModule,
     AuthModule,
+    // Reuses ReservationService.reserve/settle/release for Customer
+    // Activity's "Generate Summary" AI call — see
+    // customer-activity.service.ts's own comment.
+    BillingModule,
     // Phase 11's Customer Activity summary generation writes a Timeline
     // event on every LLM-generated summary — one-directional import,
     // TimelineModule never imports CrmModule back (see TimelineModule's

@@ -2,6 +2,7 @@ import { HttpModule } from '@nestjs/axios';
 import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { AuthModule } from '../auth/auth.module';
+import { BillingModule } from '../billing/billing.module';
 import { GridFsService } from '../common/gridfs/gridfs.service';
 import { CrmModule } from '../crm/crm.module';
 import { NotificationsModule } from '../notifications/notifications.module';
@@ -31,6 +32,9 @@ import { FinanceSummaryService } from './finance-summary.service';
     AuthModule,
     UsersModule,
     NotificationsModule,
+    // Reuses ReservationService.reserve/settle/release for the "Generate
+    // Summary" AI call — see finance-summary.service.ts's own comment.
+    BillingModule,
     // Business Intelligence's Vendor Profitability links FinanceDocument
     // rows to real Vendor master records (see FinanceDocument.vendorRef) —
     // no live consumer of VendorsService here yet, wired ahead for the

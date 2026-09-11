@@ -2,7 +2,7 @@ import io
 import mimetypes
 import uuid
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel
 from pypdf import PdfReader
 
@@ -120,7 +120,9 @@ def chat_business_knowledge(payload: BusinessKnowledgeChatRequest, user: dict = 
 
 
 @router.post("/business-knowledge/documents/extract", response_model=BusinessDocumentExtractResponse)
-async def extract_business_knowledge_document(file: UploadFile = File(...), user: dict = Depends(get_current_user)):
+async def extract_business_knowledge_document(
+    file: UploadFile = File(...), request_id: str = Form(""), user: dict = Depends(get_current_user)
+):
     organization_id = user.get("organizationId")
     if not organization_id:
         raise HTTPException(400, "organizationId is required for business document extraction")
@@ -145,16 +147,22 @@ async def extract_business_knowledge_document(file: UploadFile = File(...), user
                 f"This PDF has {page_count} pages, over the {_MAX_PDF_PAGES}-page limit for direct "
                 "processing — split it into smaller files and re-upload",
             )
-        extracted = extract_business_document(content, "application/pdf", filename, organization_id=organization_id, user_id=user_id)
+        extracted = extract_business_document(
+            content, "application/pdf", filename, organization_id=organization_id, user_id=user_id, request_id=request_id
+        )
         text = load_text(filename, content)  # text layer, if any — free, already read the bytes above
     elif ext in _IMAGE_EXTENSIONS:
         mime_type = mimetypes.guess_type(filename)[0] or "image/png"
-        extracted = extract_business_document(content, mime_type, filename, organization_id=organization_id, user_id=user_id)
+        extracted = extract_business_document(
+            content, mime_type, filename, organization_id=organization_id, user_id=user_id, request_id=request_id
+        )
     elif ext in _TEXT_EXTENSIONS:
         text = load_text(filename, content)
         if not text.strip():
             raise HTTPException(422, "Could not extract any text from the uploaded document")
-        extracted = extract_business_document_from_text(text, filename, organization_id=organization_id, user_id=user_id)
+        extracted = extract_business_document_from_text(
+            text, filename, organization_id=organization_id, user_id=user_id, request_id=request_id
+        )
     else:
         raise HTTPException(422, f"Unsupported file type '{ext}' for business knowledge document extraction")
 

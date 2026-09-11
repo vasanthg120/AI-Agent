@@ -2,6 +2,7 @@ import { HttpModule } from '@nestjs/axios';
 import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { AuthModule } from '../auth/auth.module';
+import { BillingModule } from '../billing/billing.module';
 import { ChatModule } from '../chat/chat.module';
 import { GamificationModule } from '../gamification/gamification.module';
 import { TimelineModule } from '../timeline/timeline.module';
@@ -25,6 +26,13 @@ import { DailyReport, DailyReportSchema } from './schemas/daily-report.schema';
     ChatModule,
     GamificationModule,
     TimelineModule,
+    // Reuses ReservationService.reserve/settle/release for the Scheduled
+    // Reports crew call — see DashboardService.recordDailyReport's own
+    // comment. Cron-triggered (StoreSettingsService.runForAllUsers), so an
+    // insufficient-balance org's report is skipped and logged for that run,
+    // never blocking the sweep for other orgs — same per-item isolation
+    // that loop already has.
+    BillingModule,
   ],
   controllers: [DashboardController, TasksController],
   providers: [DashboardService, TasksService, TasksExportService],

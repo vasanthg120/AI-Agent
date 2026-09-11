@@ -335,12 +335,32 @@ function AiProviderCard({ config }: { config: AiProviderCardConfig }) {
   const [modalOpen, setModalOpen] = useState(false);
   const [apiKeyInput, setApiKeyInput] = useState('');
   const [connecting, setConnecting] = useState(false);
+  // Transient, never persisted — a fresh "is it reachable right now" result,
+  // distinct from the Connected/Not connected badge above (a DB-existence
+  // check). Resets whenever the credential changes (reconnect/disconnect).
+  const [verified, setVerified] = useState<boolean | null>(null);
+  const [verifying, setVerifying] = useState(false);
 
   const load = () => {
     adminIntegrationsService
       .getStatus(config.provider)
       .then((s) => setStatus({ status: s.connected ? 'connected' : 'disconnected', detail: s.maskedKey }))
       .catch((error) => setStatus({ status: 'error', detail: extractErrorMessage(error) }));
+  };
+
+  const verify = async () => {
+    setVerifying(true);
+    try {
+      const result = await adminIntegrationsService.verify(config.provider);
+      setVerified(result.ok);
+      if (result.ok) toast.success(result.message);
+      else toast.error(result.message);
+    } catch (error) {
+      setVerified(false);
+      toast.error(extractErrorMessage(error));
+    } finally {
+      setVerifying(false);
+    }
   };
 
   useEffect(load, []);
@@ -366,6 +386,7 @@ function AiProviderCard({ config }: { config: AiProviderCardConfig }) {
     try {
       const result = await adminIntegrationsService.connect(config.provider, apiKeyInput.trim());
       setStatus({ status: 'connected', detail: result.maskedKey });
+      setVerified(null);
       toast.success(config.connectedToastMessage);
       setModalOpen(false);
       setApiKeyInput('');
@@ -380,6 +401,7 @@ function AiProviderCard({ config }: { config: AiProviderCardConfig }) {
     try {
       await adminIntegrationsService.disconnect(config.provider);
       setStatus({ status: 'disconnected' });
+      setVerified(null);
       toast.success(`${config.name} disconnected`);
     } catch (error) {
       toast.error(extractErrorMessage(error));
@@ -404,6 +426,9 @@ function AiProviderCard({ config }: { config: AiProviderCardConfig }) {
             <div className={integrationsStyles.cardCategory}>{config.category}</div>
           </div>
           {badge()}
+          {status.status === 'connected' && verified !== null && (
+            <Badge variant={verified ? 'success' : 'danger'}>{verified ? 'Verified' : 'Not verified'}</Badge>
+          )}
         </div>
         <p className={integrationsStyles.cardDescription}>{config.description}</p>
         {(status.status === 'connected' || status.status === 'error') && status.detail && (
@@ -411,9 +436,14 @@ function AiProviderCard({ config }: { config: AiProviderCardConfig }) {
         )}
         <div className={integrationsStyles.cardFooter}>
           {status.status === 'connected' ? (
-            <Button size="sm" variant="secondary" onClick={disconnect}>
-              Disconnect
-            </Button>
+            <>
+              <Button size="sm" variant="outline" loading={verifying} onClick={verify}>
+                Test Connection
+              </Button>
+              <Button size="sm" variant="secondary" onClick={disconnect}>
+                Disconnect
+              </Button>
+            </>
           ) : (
             <Button size="sm" leftIcon={<FiKey />} onClick={openModal}>
               Connect
@@ -472,11 +502,26 @@ const SARVAM_CARD_CONFIG: AiProviderCardConfig = {
   invalidKeyMessage: 'That doesn’t look like a valid Sarvam AI API key.',
 };
 
+const GROQ_CARD_CONFIG: AiProviderCardConfig = {
+  provider: 'groq',
+  name: 'Groq',
+  category: 'AI Model',
+  description: 'Optional fast lane for simple, tool-free chat questions. Chat keeps working on Claude alone if this is left disconnected.',
+  logoGlyph: 'G',
+  modalTitle: 'Connect Groq',
+  modalDescription: "Paste your Groq API key. It's stored server-side and used only for quick general-knowledge replies — never exposed to the browser.",
+  placeholder: 'gsk_...',
+  connectedToastMessage: 'Groq connected — simple chat questions will now get faster replies.',
+  minKeyLength: 10,
+  invalidKeyMessage: 'That doesn’t look like a valid Groq API key.',
+};
+
 function AiProviderTab() {
   return (
     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--space-4)' }}>
       <AiProviderCard config={ANTHROPIC_CARD_CONFIG} />
       <AiProviderCard config={SARVAM_CARD_CONFIG} />
+      <AiProviderCard config={GROQ_CARD_CONFIG} />
     </div>
   );
 }
