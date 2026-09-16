@@ -8,7 +8,21 @@ export class CallTranscriptSegment {
   @Prop({ required: true })
   sequence: number;
 
-  @Prop({ required: true })
+  // NOT required, unlike every other `text` field in this schema — an empty
+  // string is a legitimate value here (a silent segment, or one Sarvam
+  // failed to transcribe; see call-copilot.service.ts's appendAudioSegment),
+  // not an error state. Mongoose's required validator rejects '' the same
+  // as missing/null for a String path (the exact bug already hit once for
+  // ChatMessage.content — see conversation.schema.ts), which turned every
+  // quiet moment of a call into a save failure that cascaded: the failed
+  // save left the invalid segment sitting in the in-memory document, so the
+  // NEXT segment's save failed too, compounding until call:end's own save
+  // failed the same way, leaving the session stuck 'active' with its credit
+  // reservation never settled. Unlike ChatMessage.content, this can't be
+  // fixed by substituting a placeholder string instead — that would pollute
+  // both the analysis transcript window (`.filter(Boolean)` no longer drops
+  // it) and the live transcript shown to the user.
+  @Prop({ default: '' })
   text: string;
 
   // GridFS file id (bucket: call_recordings) for this segment's raw audio —

@@ -109,7 +109,7 @@ export class CallCopilotGateway implements OnGatewayConnection, OnGatewayDisconn
 
     try {
       const audioBuffer = Buffer.isBuffer(body.audio) ? body.audio : Buffer.from(body.audio);
-      const transcript = await this.callCopilotService.appendAudioSegment(
+      const { transcript, transcribeFailed } = await this.callCopilotService.appendAudioSegment(
         session,
         body.sequence,
         audioBuffer,
@@ -118,6 +118,13 @@ export class CallCopilotGateway implements OnGatewayConnection, OnGatewayDisconn
       );
       if (transcript) {
         client.emit('call:transcript', { sequence: body.sequence, text: transcript });
+      } else if (transcribeFailed) {
+        // A genuinely quiet segment (Sarvam ran fine, found nothing to
+        // transcribe) also comes back with an empty transcript — this branch
+        // only fires when the transcribe call itself errored, so the
+        // salesperson sees a real problem immediately instead of the call
+        // just going quiet on them with no explanation until the very end.
+        client.emit('call:warning', { message: 'A moment of audio could not be transcribed — the call continues.' });
       }
 
       // Fire-and-forget from the caller's perspective — the socket handler

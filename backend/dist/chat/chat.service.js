@@ -25,6 +25,19 @@ const redis_cache_service_1 = require("../common/redis/redis-cache.service");
 const agent_role_schema_1 = require("../agent-roles/schemas/agent-role.schema");
 const agents_1 = require("./agents");
 const conversation_schema_1 = require("./schemas/conversation.schema");
+class AgentUserFacingError extends Error {
+}
+function extractAgentErrorMessage(err) {
+    if (err instanceof AgentUserFacingError)
+        return err.message;
+    const detail = err.response?.data?.detail;
+    if (typeof detail === 'string')
+        return detail;
+    if (detail && typeof detail === 'object' && typeof detail.message === 'string') {
+        return detail.message;
+    }
+    return null;
+}
 const CACHE_TTL_SECONDS = 45;
 function stripAssignment(agent) {
     const { assignedDepartments: _d, assignedUserIds: _u, ...rest } = agent;
@@ -176,8 +189,9 @@ let ChatService = ChatService_1 = class ChatService {
         }
         catch (err) {
             this.logger.error(`python-agent call failed: ${err.message}`);
+            const userMessage = extractAgentErrorMessage(err);
             return {
-                reply: "I couldn't reach the AI agent service. Please try again shortly.",
+                reply: userMessage ?? "I couldn't reach the AI agent service. Please try again shortly.",
                 tools_used: [],
             };
         }
@@ -217,9 +231,9 @@ let ChatService = ChatService_1 = class ChatService {
                             settled = true;
                             resolve({ reply: event.reply, tools_used: event.tools_used, suggestions: event.suggestions });
                         }
-                        else if (event.type === 'error') {
+                        else if (event.type === 'error' || event.type === 'billing_error') {
                             settled = true;
-                            reject(new Error(event.message));
+                            reject(new AgentUserFacingError(event.message));
                         }
                     }
                 });
@@ -235,8 +249,9 @@ let ChatService = ChatService_1 = class ChatService {
         }
         catch (err) {
             this.logger.error(`python-agent streaming call failed: ${err.message}`);
+            const userMessage = extractAgentErrorMessage(err);
             return {
-                reply: "I couldn't reach the AI agent service. Please try again shortly.",
+                reply: userMessage ?? "I couldn't reach the AI agent service. Please try again shortly.",
                 tools_used: [],
             };
         }
