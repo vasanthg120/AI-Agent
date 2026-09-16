@@ -1,7 +1,16 @@
+import logging
 import sys
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from fastapi import FastAPI
+
+# Python's root logger has no handler by default, so every logger.info() call
+# anywhere in this app (this file's own workflow logs, the new [PERF] timing
+# lines in routes/chat.py, etc.) was silently dropped rather than reaching
+# stdout — uvicorn's default logging config only wires up its own
+# 'uvicorn'/'uvicorn.access'/'uvicorn.error' loggers, not the root logger.
+# This only adds a handler + level; it changes no behavior of any request.
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
 from app.config import settings
 from app.integrations.crm_mongo_sync import sync_all_orgs as sync_crm_deals_to_mongo

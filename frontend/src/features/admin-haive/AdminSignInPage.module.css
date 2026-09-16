@@ -35,6 +35,22 @@
   margin-bottom: var(--space-4);
 }
 
+.brandMarkImg {
+  width: 26px;
+  height: 26px;
+  object-fit: contain;
+  display: block;
+}
+
+.passwordToggle {
+  background: none;
+  border: none;
+  cursor: pointer;
+  display: flex;
+  color: var(--color-text-muted);
+  pointer-events: all;
+}
+
 .title {
   font-size: var(--text-xl);
   font-weight: 700;
