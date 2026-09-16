@@ -120,7 +120,7 @@ def chat(payload: ChatRequest, user: dict = Depends(get_current_user)):
     reply = redact_secrets(final_text(result))
     _extract_memory_in_background(payload.user_id, payload.message, reply)
     _perf(request_id, "total", turn_started_at)
-    return ChatResponse(reply=reply, tools_used=result["tools_used"])
+    return ChatResponse(reply=reply, tools_used=result["tools_used"], suggestions=result.get("suggestions", []))
 
 
 @router.post("/chat/stream")
@@ -191,7 +191,7 @@ def chat_stream(payload: ChatRequest, user: dict = Depends(get_current_user)):
                 reply = redact_secrets(final_text(result))
                 _extract_memory_in_background(payload.user_id, payload.message, reply)
                 _perf(request_id, "total", turn_started_at)
-                q.put({"type": "done", "reply": reply, "tools_used": result["tools_used"]})
+                q.put({"type": "done", "reply": reply, "tools_used": result["tools_used"], "suggestions": result.get("suggestions", [])})
             except Exception as exc:
                 billing_client.release(organization_id, payload.user_id, request_id)
                 q.put({"type": "error", "message": str(exc)})

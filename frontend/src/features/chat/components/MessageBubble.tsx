@@ -163,6 +163,21 @@ export function MessageBubble({ message, isLast }: MessageBubbleProps) {
             )}
           </div>
         )}
+
+        {!isUser && isLast && message.status !== 'streaming' && !!message.suggestions?.length && (
+          <div className={styles.suggestionsRow}>
+            {message.suggestions.map((suggestion) => (
+              <button
+                key={suggestion}
+                type="button"
+                className={styles.suggestionChip}
+                onClick={() => void sendMessage(suggestion)}
+              >
+                {suggestion}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );

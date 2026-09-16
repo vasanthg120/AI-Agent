@@ -111,6 +111,35 @@ def _reflect(state_input: dict, output_items: list[dict], tools_used: list[str])
         "tools_used": tools_used + corrected.get("tools_used", []),
     }
 
+
+def _attach_suggestions(state_input: dict, result: dict) -> dict:
+    """Contextual Chat Suggestions — best-effort, additive. Called only from
+    the two call sites below that already call _reflect(), so this never
+    runs on the Groq "general" fast lane (that path returns before either
+    call site is reached) — preserving that lane's latency untouched. Any
+    failure (bad model config, rate limit, timeout) or an in-flight
+    cancellation degrades to an empty suggestions list, exactly like
+    _reflect's own failure handling degrades to the unchanged draft — the
+    real reply is never delayed beyond this one bounded call, never blocked,
+    never altered."""
+    cancel_event = state_input.get("cancel_event")
+    if cancel_event is not None and cancel_event.is_set():
+        return {**result, "suggestions": []}
+    try:
+        reply_text = final_text({"messages": result["messages"]})
+        suggestions = anthropic_client.suggest_follow_ups(
+            _last_user_text(state_input["messages"]),
+            reply_text,
+            organization_id=state_input.get("organization_id"),
+            user_id=state_input.get("user_id", ""),
+            conversation_id=state_input.get("conversation_id", ""),
+            request_id=state_input.get("request_id", ""),
+        )
+    except Exception:
+        suggestions = []
+    return {**result, "suggestions": suggestions}
+
+
 SYNTHESIS_PROMPT_SUFFIX = """
 
 You are synthesizing findings gathered by specialized sub-agents into one final answer for \
@@ -208,7 +237,7 @@ def run(state_input: dict) -> dict:
         assignments = [a for a in plan.get("assignments", []) if a.get("agent") in SPECIALISTS][:MAX_ASSIGNMENTS]
         if plan.get("mode") != "delegate" or not assignments:
             result = get_graph().invoke(state_input)
-            return _reflect(state_input, result["messages"], result.get("tools_used", []))
+            return _attach_suggestions(state_input, _reflect(state_input, result["messages"], result.get("tools_used", [])))
 
         if on_event:
             on_event({"type": "plan", "agents": [a["agent"] for a in assignments]})
@@ -255,7 +284,7 @@ def run(state_input: dict) -> dict:
         )
         tools_used = [tool for f in findings for tool in f["tools_used"]]
 
-        return _reflect(state_input, output_items, tools_used)
+        return _attach_suggestions(state_input, _reflect(state_input, output_items, tools_used))
     finally:
         if conversation_id:
             cancellation.finish(conversation_id)
