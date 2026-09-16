@@ -5,6 +5,7 @@ import { JwtService } from '@nestjs/jwt';
 import { InjectModel } from '@nestjs/mongoose';
 import { firstValueFrom } from 'rxjs';
 import { Model } from 'mongoose';
+import { AxiosError } from 'axios';
 import { RedisCacheService } from '../common/redis/redis-cache.service';
 import { AgentRole, AgentRoleDocument } from '../agent-roles/schemas/agent-role.schema';
 import { CHAT_AGENTS } from './agents';
@@ -14,6 +15,35 @@ import { JwtPayload } from '../auth/jwt-payload.interface';
 interface AgentReply {
   reply: string;
   tools_used?: string[];
+}
+
+// A structured, already-user-safe message python-agent sent on purpose (e.g.
+// billing/insufficient-credits — see billing/client.py's to_http_exception
+// and routes/chat.py's 'billing_error' SSE frame) — as opposed to a raw
+// network/timeout failure. Marks the two call*Agent* catch blocks below so
+// they show the caller's real reason instead of overwriting it with the
+// generic "couldn't reach the AI agent service" fallback, which used to
+// happen unconditionally (including for a real 402 insufficient-balance
+// response, which every prior "AI agent unreachable" report in this app
+// turned out to actually be).
+class AgentUserFacingError extends Error {}
+
+// Pulls a safe, already-human-readable message out of a failed python-agent
+// call — either an AgentUserFacingError raised while relaying an SSE frame
+// (see callAgentStreaming below), or an HTTPException python-agent itself
+// raised with a structured `detail` (e.g. {code, message, ...} for
+// INSUFFICIENT_BALANCE — see billing/client.py's to_http_exception). Returns
+// null for anything else (a genuine network/timeout/5xx failure), so the
+// caller keeps its generic "couldn't reach the AI agent service" fallback
+// for those instead of surfacing raw Axios/HTTP internals.
+function extractAgentErrorMessage(err: unknown): string | null {
+  if (err instanceof AgentUserFacingError) return err.message;
+  const detail = (err as AxiosError<{ detail?: unknown }>).response?.data?.detail;
+  if (typeof detail === 'string') return detail;
+  if (detail && typeof detail === 'object' && typeof (detail as { message?: unknown }).message === 'string') {
+    return (detail as { message: string }).message;
+  }
+  return null;
 }
 
 export interface StreamEvent {
@@ -298,8 +328,9 @@ export class ChatService {
       return response.data;
     } catch (err) {
       this.logger.error(`python-agent call failed: ${(err as Error).message}`);
+      const userMessage = extractAgentErrorMessage(err);
       return {
-        reply: "I couldn't reach the AI agent service. Please try again shortly.",
+        reply: userMessage ?? "I couldn't reach the AI agent service. Please try again shortly.",
         tools_used: [],
       };
     }
@@ -369,9 +400,14 @@ export class ChatService {
             } else if (event.type === 'done') {
               settled = true;
               resolve({ reply: event.reply, tools_used: event.tools_used });
-            } else if (event.type === 'error') {
+            } else if (event.type === 'error' || event.type === 'billing_error') {
+              // event.message is already a clean, user-safe string here (a
+              // billing_error's is the same INSUFFICIENT_BALANCE message the
+              // non-streaming path gets via HTTP detail — see routes/chat.py)
+              // — wrapped so the outer catch below can tell it apart from a
+              // raw network/timeout Error and show it as-is.
               settled = true;
-              reject(new Error(event.message));
+              reject(new AgentUserFacingError(event.message));
             }
           }
         });
@@ -384,8 +420,9 @@ export class ChatService {
       });
     } catch (err) {
       this.logger.error(`python-agent streaming call failed: ${(err as Error).message}`);
+      const userMessage = extractAgentErrorMessage(err);
       return {
-        reply: "I couldn't reach the AI agent service. Please try again shortly.",
+        reply: userMessage ?? "I couldn't reach the AI agent service. Please try again shortly.",
         tools_used: [],
       };
     }

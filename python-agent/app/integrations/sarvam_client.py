@@ -8,12 +8,15 @@ the existing chat pipeline's job for anything downstream of a transcript.
 """
 
 import base64
+import logging
 from typing import Optional
 
 import requests
 
 from app.config import settings
 from app.memory import integration_store
+
+logger = logging.getLogger(__name__)
 
 _BASE_URL = "https://api.sarvam.ai"
 _TIMEOUT_SECONDS = 30
@@ -95,18 +98,41 @@ def transcribe_audio(file_bytes: bytes, filename: str, content_type: str, langua
                 # English (see the "mixed language support" requirement).
                 "mode": "codemix",
             },
-            files={"file": (filename, file_bytes, content_type or "application/octet-stream")},
+            # A real browser's MediaRecorder reports mimeType as
+            # "audio/webm;codecs=opus" (the ';codecs=' parameter included) —
+            # both VoiceInputModal.tsx and useSegmentedRecording.ts pick this
+            # as their first candidate since it's what Chrome/Edge/Firefox
+            # actually support. Sarvam's own allow-list only contains the
+            # bare "audio/webm" (confirmed via its own 400 error body), so it
+            # rejects the codec-qualified string outright — every real
+            # recording failed this way while every synthetic test using a
+            # bare "audio/webm" string (this file's own earlier manual tests
+            # included) passed, which is why it looked healthy until now.
+            files={"file": (filename, file_bytes, (content_type or "application/octet-stream").split(";")[0].strip())},
             timeout=_TIMEOUT_SECONDS,
         )
     except requests.exceptions.Timeout:
+        logger.warning("Sarvam speech-to-text timed out after %ss", _TIMEOUT_SECONDS)
         raise SarvamApiError("Sarvam AI took too long to respond. Please try again.", status_code=504) from None
-    except requests.exceptions.RequestException:
+    except requests.exceptions.RequestException as exc:
+        logger.warning("Sarvam speech-to-text connection error: %s", exc)
         raise SarvamApiError("Unable to connect to Sarvam AI. Please try again.", status_code=502) from None
 
     if response.status_code == 403:
+        logger.warning("Sarvam speech-to-text auth failed: body=%s", response.text[:500])
         raise SarvamApiError("Voice service authentication failed.", status_code=502)
     if not response.ok:
-        raise SarvamApiError("Speech could not be recognized. Please try again.", status_code=502)
+        # Logged with the REAL upstream status/body (a 429 rate-limit, a
+        # transient 5xx, a malformed-request 400, ...) even though the
+        # user-facing message stays generic — this is the one place that
+        # tells you WHY a segment failed after the fact, since the frontend
+        # only ever sees "A moment of audio could not be transcribed."
+        # Previously this was hardcoded to 502 regardless of what Sarvam
+        # actually returned, so every failure looked identical in hindsight.
+        logger.warning(
+            "Sarvam speech-to-text call failed: status=%s body=%s", response.status_code, response.text[:500]
+        )
+        raise SarvamApiError("Speech could not be recognized. Please try again.", status_code=response.status_code)
 
     data = response.json()
     return {
@@ -139,18 +165,28 @@ def synthesize_speech(text: str, language: str, speaker: Optional[str] = None) -
             timeout=_TIMEOUT_SECONDS,
         )
     except requests.exceptions.Timeout:
+        logger.warning("Sarvam text-to-speech timed out after %ss", _TIMEOUT_SECONDS)
         raise SarvamApiError("Sarvam AI took too long to respond. Please try again.", status_code=504) from None
-    except requests.exceptions.RequestException:
+    except requests.exceptions.RequestException as exc:
+        logger.warning("Sarvam text-to-speech connection error: %s", exc)
         raise SarvamApiError("Unable to connect to Sarvam AI. Please try again.", status_code=502) from None
 
     if response.status_code == 403:
+        logger.warning("Sarvam text-to-speech auth failed: body=%s", response.text[:500])
         raise SarvamApiError("Voice service authentication failed.", status_code=502)
     if not response.ok:
-        raise SarvamApiError("Unable to generate speech for this response. Please try again.", status_code=502)
+        # See transcribe_audio's identical comment — real status/body logged,
+        # generic message kept for the caller, real status_code propagated
+        # instead of a hardcoded 502.
+        logger.warning(
+            "Sarvam text-to-speech call failed: status=%s body=%s", response.status_code, response.text[:500]
+        )
+        raise SarvamApiError("Unable to generate speech for this response. Please try again.", status_code=response.status_code)
 
     data = response.json()
     audios = data.get("audios") or []
     if not audios:
+        logger.warning("Sarvam text-to-speech returned no audio: body=%s", response.text[:500])
         raise SarvamApiError("Unable to generate speech for this response. Please try again.", status_code=502)
 
     return base64.b64decode(audios[0])

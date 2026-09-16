@@ -115,15 +115,26 @@ export class CallCopilotService {
   /** One audio segment: stored in GridFS (its own independently-playable
    * file — see the schema's comment on why segments aren't concatenated),
    * transcribed via the existing batch Sarvam endpoint, appended to the
-   * session's transcript. Returns the new segment's text (empty string for
-   * a silent/empty segment — not an error). */
+   * session's transcript.
+   *
+   * Returns `transcript` (empty string for a silent/empty segment — not an
+   * error) AND `transcribeFailed`, which the gateway uses to decide whether
+   * to emit 'call:warning'. Distinguishing these matters: before this, an
+   * empty transcript meant either "genuinely nothing was said" or "the
+   * transcribe call to python-agent errored" — indistinguishable from the
+   * salesperson's point of view, both silently produced nothing. That silent
+   * failure mode is exactly what made a real outage (python-agent/backend
+   * briefly down mid-call) look identical to a normal quiet moment, right up
+   * until the call-ending "No speech was transcribed" summary — by which
+   * point it's too late to do anything about it. Now a real failure surfaces
+   * immediately as a warning while the call is still live. */
   async appendAudioSegment(
     session: CallSessionDocument,
     sequence: number,
     audioBuffer: Buffer,
     mimeType: string,
     languageCode: string,
-  ): Promise<string> {
+  ): Promise<{ transcript: string; transcribeFailed: boolean }> {
     const extension = mimeType.includes('mp4') ? 'mp4' : mimeType.includes('ogg') ? 'ogg' : 'webm';
     const audioFileId = await this.gridFs.upload(AUDIO_BUCKET, `${session._id.toString()}-${sequence}.${extension}`, audioBuffer, {
       organizationId: session.organizationId,
@@ -132,6 +143,7 @@ export class CallCopilotService {
     });
 
     let transcript = '';
+    let transcribeFailed = false;
     try {
       const token = this.bridgeToken(session.userId, session.organizationId);
       const form = new FormData();
@@ -148,14 +160,14 @@ export class CallCopilotService {
     } catch (err) {
       // The segment's audio is already safely in GridFS regardless — a
       // transcription hiccup loses this segment's text but never the
-      // recording, and never tears down the session (see gateway's
-      // 'call:warning' handling).
+      // recording, and never tears down the session.
+      transcribeFailed = true;
       this.logger.warn(`Call copilot transcribe failed for session ${session._id} seg ${sequence}: ${(err as Error).message}`);
     }
 
     session.transcript.push({ sequence, text: transcript, audioFileId, recordedAt: new Date() } as never);
     await session.save();
-    return transcript;
+    return { transcript, transcribeFailed };
   }
 
   /** Throttling itself happens on the python-agent side (Redis rate limiter
