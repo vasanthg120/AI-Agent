@@ -34,7 +34,6 @@ revisit if python-agent is ever run as multiple replicas.
 
 import logging
 import os
-from functools import lru_cache
 
 # Must be set before `mem0` is first imported anywhere in the process — it's
 # read once at module import time (mem0.memory.telemetry). Mem0 defaults to
@@ -57,42 +56,70 @@ logger = logging.getLogger(__name__)
 _ANTHROPIC_NOT_CONFIGURED_MESSAGE = "Anthropic AI provider is not configured. Please connect Anthropic from Platform Admin Settings."
 
 
-@lru_cache
+_memory_instance: Memory | None = None
+_memory_init_error: Exception | None = None
+
+
 def get_memory() -> Memory:
     # Same platform-only credential rule as anthropic_client.py._resolve_api_key
-    # — resolved once here (this whole Memory engine is @lru_cache'd, matching
-    # its pre-existing behavior of reading a module-level settings value once
-    # per process), not re-checked per Mem0 call. MongoDB remains the source
-    # of truth; only the read timing differs from the main chat path's
-    # per-call resolution.
-    api_key = integration_store.get_api_key("anthropic", organization_id="platform")
-    if not api_key:
-        raise RuntimeError(_ANTHROPIC_NOT_CONFIGURED_MESSAGE)
-    return Memory.from_config(
-        {
-            "llm": {
-                "provider": "anthropic",
-                "config": {
-                    "model": settings.anthropic_routing_model,
-                    "api_key": api_key,
+    # — resolved once here (this whole Memory engine is initialized once per
+    # process, matching its pre-existing @lru_cache behavior of reading a
+    # module-level settings value once), not re-checked per Mem0 call. MongoDB
+    # remains the source of truth; only the read timing differs from the main
+    # chat path's per-call resolution.
+    #
+    # Was @lru_cache — but lru_cache only memoizes a SUCCESSFUL return, never
+    # a raised exception, so when Qdrant (or the platform Anthropic key) is
+    # unavailable, every single caller (i.e. every chat turn's memory lookup)
+    # re-attempted the full Memory.from_config() — including a real network
+    # connection attempt to Qdrant — and paid that full connect/retry cost
+    # again, every time, even though every caller already treats this as a
+    # simple "memory unavailable" case. This now caches the failure too (the
+    # exact same exception instance, re-raised) so a second call fails fast
+    # instead of slow — no caller's behavior changes: every existing caller
+    # already wraps this in a broad `except Exception`, so the same class of
+    # failure is still what they see, just without repeating the expensive
+    # connection attempt. A real recovery (e.g. Qdrant coming back up) still
+    # requires a process restart, exactly like the prior @lru_cache's cached
+    # success would have required a restart to pick up rotated credentials.
+    global _memory_instance, _memory_init_error
+    if _memory_instance is not None:
+        return _memory_instance
+    if _memory_init_error is not None:
+        raise _memory_init_error
+    try:
+        api_key = integration_store.get_api_key("anthropic", organization_id="platform")
+        if not api_key:
+            raise RuntimeError(_ANTHROPIC_NOT_CONFIGURED_MESSAGE)
+        _memory_instance = Memory.from_config(
+            {
+                "llm": {
+                    "provider": "anthropic",
+                    "config": {
+                        "model": settings.anthropic_routing_model,
+                        "api_key": api_key,
+                    },
                 },
-            },
-            "embedder": {
-                "provider": "huggingface",
-                "config": {
-                    "model": settings.embedding_model,
+                "embedder": {
+                    "provider": "huggingface",
+                    "config": {
+                        "model": settings.embedding_model,
+                    },
                 },
-            },
-            "vector_store": {
-                "provider": "qdrant",
-                "config": {
-                    "collection_name": settings.qdrant_mem0_collection,
-                    "embedding_model_dims": embeddings.vector_size(),
-                    "client": vector_store.get_client(),
+                "vector_store": {
+                    "provider": "qdrant",
+                    "config": {
+                        "collection_name": settings.qdrant_mem0_collection,
+                        "embedding_model_dims": embeddings.vector_size(),
+                        "client": vector_store.get_client(),
+                    },
                 },
-            },
-        }
-    )
+            }
+        )
+        return _memory_instance
+    except Exception as exc:
+        _memory_init_error = exc
+        raise
 
 
 def add_from_turn(user_id: str, user_message: str, assistant_reply: str) -> None:

@@ -1,6 +1,8 @@
 import json
+import logging
 import queue
 import threading
+import time
 import uuid
 
 from fastapi import APIRouter, Depends
@@ -21,6 +23,14 @@ from app.observability.guardrails import redact_secrets
 from app.security import get_current_user
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
+
+
+def _perf(request_id: str, stage: str, started_at: float) -> None:
+    # Timing-only instrumentation — never logs prompt content, tokens, or
+    # credentials, only a stage name and a duration, so this is safe to leave
+    # on in any environment.
+    logger.info("[PERF] request_id=%s stage=%s ms=%d", request_id, stage, round((time.monotonic() - started_at) * 1000))
 
 
 def _build_messages(payload: ChatRequest) -> list[dict]:
@@ -58,17 +68,25 @@ def _extract_memory_in_background(user_id: str, message: str, reply: str) -> Non
 def chat(payload: ChatRequest, user: dict = Depends(get_current_user)):
     organization_id = user.get("organizationId")
     request_id = str(uuid.uuid4())
+    turn_started_at = time.monotonic()
 
     # Hard stop — reserved BEFORE run_agent() is ever invoked, a structural
     # early return rather than a downstream check. Raises InsufficientCreditsError
     # (-> HTTP 402) on insufficient balance with AutoPay off/failed; see
     # app.billing.client.reserve.
+    stage_started_at = time.monotonic()
     try:
         billing_client.reserve(organization_id, payload.user_id, request_id, payload.conversation_id)
     except InsufficientCreditsError as exc:
         raise billing_client.to_http_exception(exc) from exc
+    _perf(request_id, "reserve", stage_started_at)
 
     persona = resolve_persona(payload.agent_id, organization_id)
+    stage_started_at = time.monotonic()
+    system_prompt = _system_prompt_with_memory(persona, payload.message, payload.user_id)
+    _perf(request_id, "memory", stage_started_at)
+
+    stage_started_at = time.monotonic()
     try:
         result = run_agent(
             {
@@ -80,7 +98,7 @@ def chat(payload: ChatRequest, user: dict = Depends(get_current_user)):
                 "user_id": payload.user_id,
                 "organization_id": organization_id,
                 "conversation_id": payload.conversation_id,
-                "system_prompt": _system_prompt_with_memory(persona, payload.message, payload.user_id),
+                "system_prompt": system_prompt,
                 "allowed_tools": persona.allowed_tools,
                 "model_tier": persona.model_tier,
                 "request_id": request_id,
@@ -89,10 +107,19 @@ def chat(payload: ChatRequest, user: dict = Depends(get_current_user)):
     except Exception:
         billing_client.release(organization_id, payload.user_id, request_id)
         raise
+    _perf(request_id, "run_agent", stage_started_at)
 
-    billing_client.settle(organization_id, payload.user_id, request_id)
+    # Fire-and-forget — settle() already fails soft (see billing/client.py),
+    # so this can never affect the reply; it only removes its own network+DB
+    # round-trip from the time the user waits. The existing
+    # sweepExpiredReservations cron on the NestJS side already covers a
+    # process crash in the small window before this thread completes.
+    threading.Thread(
+        target=billing_client.settle, args=(organization_id, payload.user_id, request_id), daemon=True
+    ).start()
     reply = redact_secrets(final_text(result))
     _extract_memory_in_background(payload.user_id, payload.message, reply)
+    _perf(request_id, "total", turn_started_at)
     return ChatResponse(reply=reply, tools_used=result["tools_used"])
 
 
@@ -100,7 +127,9 @@ def chat(payload: ChatRequest, user: dict = Depends(get_current_user)):
 def chat_stream(payload: ChatRequest, user: dict = Depends(get_current_user)):
     organization_id = user.get("organizationId")
     request_id = str(uuid.uuid4())
+    turn_started_at = time.monotonic()
 
+    reserve_started_at = time.monotonic()
     try:
         billing_client.reserve(organization_id, payload.user_id, request_id, payload.conversation_id)
     except InsufficientCreditsError as exc:
@@ -122,6 +151,7 @@ def chat_stream(payload: ChatRequest, user: dict = Depends(get_current_user)):
             yield f"data: {json.dumps({'type': 'billing_error', 'code': 'INSUFFICIENT_BALANCE', 'message': error_message, 'availableCredits': available_credits, 'requiredCredits': required_credits})}\n\n"
 
         return StreamingResponse(error_only(), media_type="text/event-stream")
+    _perf(request_id, "reserve", reserve_started_at)
 
     messages = _build_messages(payload)
     persona = resolve_persona(payload.agent_id, organization_id)
@@ -131,6 +161,11 @@ def chat_stream(payload: ChatRequest, user: dict = Depends(get_current_user)):
 
         def run():
             try:
+                memory_started_at = time.monotonic()
+                system_prompt = _system_prompt_with_memory(persona, payload.message, payload.user_id)
+                _perf(request_id, "memory", memory_started_at)
+
+                run_agent_started_at = time.monotonic()
                 result = run_agent(
                     {
                         "messages": messages,
@@ -142,15 +177,20 @@ def chat_stream(payload: ChatRequest, user: dict = Depends(get_current_user)):
                         "organization_id": organization_id,
                         "conversation_id": payload.conversation_id,
                         "on_event": q.put,
-                        "system_prompt": _system_prompt_with_memory(persona, payload.message, payload.user_id),
+                        "system_prompt": system_prompt,
                         "allowed_tools": persona.allowed_tools,
                         "model_tier": persona.model_tier,
                         "request_id": request_id,
                     }
                 )
-                billing_client.settle(organization_id, payload.user_id, request_id)
+                _perf(request_id, "run_agent", run_agent_started_at)
+                # Fire-and-forget — see chat()'s identical comment above.
+                threading.Thread(
+                    target=billing_client.settle, args=(organization_id, payload.user_id, request_id), daemon=True
+                ).start()
                 reply = redact_secrets(final_text(result))
                 _extract_memory_in_background(payload.user_id, payload.message, reply)
+                _perf(request_id, "total", turn_started_at)
                 q.put({"type": "done", "reply": reply, "tools_used": result["tools_used"]})
             except Exception as exc:
                 billing_client.release(organization_id, payload.user_id, request_id)

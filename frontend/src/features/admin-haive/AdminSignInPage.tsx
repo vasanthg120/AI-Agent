@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
-import { FiLock, FiMail, FiShield } from 'react-icons/fi';
+import { FiEye, FiEyeOff, FiLock, FiMail } from 'react-icons/fi';
 import { Button, Input } from '@/components/ui';
 import { useAdminAuthStore } from '@/stores/adminAuthStore';
 import { extractErrorMessage } from '@/utils/errors';
@@ -18,6 +18,7 @@ export function AdminSignInPage() {
   const navigate = useNavigate();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -40,7 +41,7 @@ export function AdminSignInPage() {
     <div className={styles.page}>
       <div className={styles.card}>
         <div className={styles.brandMark}>
-          <FiShield size={20} />
+          <img src="/haive-logo.png" alt="" className={styles.brandMarkImg} />
         </div>
         <h1 className={styles.title}>Haive Platform Admin</h1>
         <p className={styles.subtitle}>Sign in with your platform admin account.</p>
@@ -57,9 +58,19 @@ export function AdminSignInPage() {
           />
           <Input
             label="Password"
-            type="password"
+            type={showPassword ? 'text' : 'password'}
             autoComplete="current-password"
             leftIcon={<FiLock />}
+            rightIcon={
+              <button
+                type="button"
+                className={styles.passwordToggle}
+                onClick={() => setShowPassword((prev) => !prev)}
+                aria-label={showPassword ? 'Hide password' : 'Show password'}
+              >
+                {showPassword ? <FiEyeOff /> : <FiEye />}
+              </button>
+            }
             value={password}
             onChange={(event) => setPassword(event.target.value)}
             required

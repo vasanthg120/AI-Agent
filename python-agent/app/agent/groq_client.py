@@ -101,6 +101,23 @@ def call(
         stream = _client(api_key).chat.completions.create(
             model=settings.groq_model,
             max_tokens=1024,
+            # Reasoning-capable Groq models (e.g. openai/gpt-oss-*, the
+            # current GROQ_MODEL default) otherwise spend the entire
+            # max_tokens budget on an internal chain-of-thought (a separate
+            # `reasoning` field) before ever emitting visible content —
+            # confirmed live: without this, a 100-token reply could come back
+            # completely empty (finish_reason="length", zero visible output).
+            # "low" still gets a fast, correct reply for this fast lane's
+            # tool-free general-knowledge/casual use case.
+            # NOTE: confirmed live that Groq rejects this parameter outright
+            # (400 "reasoning_effort is not supported with this model") on a
+            # non-reasoning model — if GROQ_MODEL is ever changed to a plain
+            # chat model, this line must be removed at the same time, or
+            # call() will raise on every request (safe — orchestrator.py's
+            # caller already falls back to Claude on any exception here —
+            # but it would silently take Groq's fast lane out of service
+            # again exactly like the deprecated-model bug this fixes).
+            reasoning_effort="low",
             messages=messages,
             stream=True,
             # Groq's OpenAI-wire-compatible REST API emits a final usage-only

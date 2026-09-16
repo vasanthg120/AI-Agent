@@ -894,7 +894,11 @@ def classify_request(
         response = _client(api_key).messages.create(
             model=settings.anthropic_routing_model,
             max_tokens=1024,
-            system=PLAN_SYSTEM_PROMPT,
+            # Identical prompt on every single call (once per chat turn) —
+            # cached the same way call()'s own system prompt already is, so
+            # a repeat within Anthropic's rolling cache window is faster to
+            # process. Purely additive: output is unaffected either way.
+            system=[{"type": "text", "text": PLAN_SYSTEM_PROMPT, "cache_control": {"type": "ephemeral"}}],
             tools=[PLAN_TOOL],
             tool_choice={"type": "tool", "name": "plan_execution"},
             messages=_to_anthropic_messages(input_items),
@@ -963,7 +967,8 @@ def critique_response(
         response = _client(api_key).messages.create(
             model=settings.anthropic_routing_model,
             max_tokens=512,
-            system=CRITIQUE_SYSTEM_PROMPT,
+            # Same rationale as classify_request's identical change above.
+            system=[{"type": "text", "text": CRITIQUE_SYSTEM_PROMPT, "cache_control": {"type": "ephemeral"}}],
             tools=[CRITIQUE_TOOL],
             tool_choice={"type": "tool", "name": "critique_response"},
             messages=[{"role": "user", "content": f"Request:\n{user_message}\n\nDraft reply:\n{draft_reply}"}],
