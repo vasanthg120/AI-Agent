@@ -197,6 +197,7 @@ let ChatService = ChatService_1 = class ChatService {
             conversationId,
             reply: agentReply.reply,
             toolsUsed: agentReply.tools_used ?? [],
+            suggestions: agentReply.suggestions ?? [],
         };
     }
     async callAgent(userId, userJwt, conversationId, message, agentId) {
@@ -246,7 +247,7 @@ let ChatService = ChatService_1 = class ChatService {
                         }
                         else if (event.type === 'done') {
                             settled = true;
-                            resolve({ reply: event.reply, tools_used: event.tools_used });
+                            resolve({ reply: event.reply, tools_used: event.tools_used, suggestions: event.suggestions });
                         }
                         else if (event.type === 'error' || event.type === 'billing_error') {
                             settled = true;

@@ -981,6 +981,81 @@ def critique_response(
     return block.input
 
 
+SUGGEST_FOLLOWUPS_TOOL = {
+    "name": "suggest_follow_ups",
+    "description": "Propose short, natural follow-up messages the user might genuinely want to send next, based on the exchange that just happened.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "suggestions": {
+                "type": "array",
+                "description": (
+                    "0-4 short (under ~8 words each) candidate next messages, written from the "
+                    "USER's point of view as if they were about to type them next — never generic "
+                    "filler like 'Tell me more' or 'Thanks'. Return fewer than 4, or an empty array, "
+                    "if the exchange doesn't naturally suggest any genuinely useful next step."
+                ),
+                "items": {"type": "string"},
+                "maxItems": 4,
+            },
+        },
+        "required": ["suggestions"],
+    },
+}
+
+SUGGEST_FOLLOWUPS_SYSTEM_PROMPT = """Given one user message and the assistant's reply to it, suggest a \
+few short follow-up messages the user might realistically want to send next — the kind of thing a sharp \
+assistant would anticipate. Ground every suggestion in what was actually discussed (a specific CRM record, \
+a specific number, a next logical step in what was asked) — never a generic, could-apply-to-any-conversation \
+suggestion. If the exchange was a simple pleasantry or closing remark with no natural next step, return an \
+empty array rather than inventing one. Always call suggest_follow_ups exactly once."""
+
+
+def suggest_follow_ups(
+    user_message: str,
+    reply: str,
+    *,
+    organization_id: str | None = None,
+    user_id: str = "",
+    conversation_id: str = "",
+    request_id: str = "",
+) -> list[str]:
+    """Contextual Chat Suggestions — same one-shot forced-tool-choice pattern
+    as classify_request/critique_response, on the same fast routing model,
+    with the same prompt-caching treatment. Called by
+    app.agent.orchestrator._attach_suggestions, which is the sole place that
+    catches failures and applies the "never on the Groq general lane" rule —
+    this function itself just raises on failure, exactly like
+    classify_request/critique_response already do."""
+    api_key = _resolve_api_key()
+    if not api_key:
+        raise RuntimeError("No Anthropic API key configured")
+
+    with traced_llm_call(
+        "suggest_follow_ups",
+        organization_id=organization_id,
+        user_id=user_id,
+        conversation_id=conversation_id,
+        provider="anthropic",
+        model=settings.anthropic_routing_model,
+        request_id=request_id,
+    ) as usage:
+        response = _client(api_key).messages.create(
+            model=settings.anthropic_routing_model,
+            max_tokens=256,
+            system=[{"type": "text", "text": SUGGEST_FOLLOWUPS_SYSTEM_PROMPT, "cache_control": {"type": "ephemeral"}}],
+            tools=[SUGGEST_FOLLOWUPS_TOOL],
+            tool_choice={"type": "tool", "name": "suggest_follow_ups"},
+            messages=[{"role": "user", "content": f"User's message:\n{user_message}\n\nAssistant's reply:\n{reply}"}],
+        )
+        usage["input_tokens"] = response.usage.input_tokens
+        usage["output_tokens"] = response.usage.output_tokens
+    block = next((b for b in response.content if b.type == "tool_use"), None)
+    if block is None:
+        raise ValueError("suggest_follow_ups did not return a tool_use block")
+    return (block.input.get("suggestions") or [])[:4]
+
+
 BUSINESS_ADVISOR_SYSTEM_PROMPT = """You are the Business Knowledge Advisor for this company — a focused Q&A \
 assistant grounded entirely in the business's own profile and uploaded documents, not general knowledge or \
 other companies' practices.

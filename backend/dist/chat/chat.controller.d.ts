@@ -30,5 +30,6 @@ export declare class ChatController {
         conversationId: string;
         reply: string;
         toolsUsed: string[];
+        suggestions: string[];
     }>;
 }

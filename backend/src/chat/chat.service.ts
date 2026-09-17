@@ -15,6 +15,11 @@ import { JwtPayload } from '../auth/jwt-payload.interface';
 interface AgentReply {
   reply: string;
   tools_used?: string[];
+  // Contextual follow-up prompts (see python-agent's app.agent.orchestrator
+  // ._attach_suggestions) — optional/additive, always [] on the Groq
+  // "general" fast lane, never present on the pre-existing failure-fallback
+  // replies below.
+  suggestions?: string[];
 }
 
 // A structured, already-user-safe message python-agent sent on purpose (e.g.
@@ -330,6 +335,7 @@ export class ChatService {
       conversationId,
       reply: agentReply.reply,
       toolsUsed: agentReply.tools_used ?? [],
+      suggestions: agentReply.suggestions ?? [],
     };
   }
 
@@ -422,7 +428,7 @@ export class ChatService {
               onEvent(event);
             } else if (event.type === 'done') {
               settled = true;
-              resolve({ reply: event.reply, tools_used: event.tools_used });
+              resolve({ reply: event.reply, tools_used: event.tools_used, suggestions: event.suggestions });
             } else if (event.type === 'error' || event.type === 'billing_error') {
               // event.message is already a clean, user-safe string here (a
               // billing_error's is the same INSUFFICIENT_BALANCE message the

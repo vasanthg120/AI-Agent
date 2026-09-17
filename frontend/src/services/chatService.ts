@@ -35,6 +35,7 @@ interface BackendChatResult {
   conversationId: string;
   reply: string;
   toolsUsed: string[];
+  suggestions?: string[];
 }
 
 const PREVIEW_MAX_LENGTH = 140;
@@ -197,6 +198,7 @@ export const chatService = {
           status: 'complete',
           createdAt: new Date().toISOString(),
           toolsUsed: result.toolsUsed?.length ? result.toolsUsed : undefined,
+          suggestions: result.suggestions?.length ? result.suggestions : undefined,
         },
         resolvedId,
       );

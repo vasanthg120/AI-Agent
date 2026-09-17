@@ -11,6 +11,10 @@ class ChatRequest(BaseModel):
 class ChatResponse(BaseModel):
     reply: str
     tools_used: list[str] = []
+    # Contextual follow-up prompts (see app.agent.orchestrator._attach_suggestions)
+    # — default-valued so this is backward compatible with any existing caller
+    # that doesn't read it. Always [] for the Groq "general" fast lane.
+    suggestions: list[str] = []
 
 
 class IngestResponse(BaseModel):

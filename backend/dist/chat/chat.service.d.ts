@@ -41,16 +41,19 @@ export declare class ChatService {
         conversationId: string;
         reply: string;
         toolsUsed: string[];
+        suggestions: string[];
     }>;
     sendMessageStreaming(userId: string, organizationId: string, userJwt: string, message: string, conversationId: string | undefined, onEvent: (event: StreamEvent) => void, agentId?: string, onConversationId?: (id: string) => void): Promise<{
         conversationId: string;
         reply: string;
         toolsUsed: string[];
+        suggestions: string[];
     }>;
     generateSystemConversation(userId: string, organizationId: string, agentId: string, promptText: string, title: string): Promise<{
         conversationId: string;
         reply: string;
         toolsUsed: string[];
+        suggestions: string[];
     }>;
     private getOrCreateConversation;
     private resolveConversationAgent;

@@ -22,6 +22,10 @@ export interface ChatMessage {
   createdAt: string;
   attachments?: MessageAttachment[];
   toolsUsed?: string[];
+  /** Contextual follow-up prompts for this reply — only ever present on a
+   * live, just-streamed assistant message (not persisted, not present after
+   * reloading history). See MessageBubble.tsx's suggestion-chips row. */
+  suggestions?: string[];
   feedback?: FeedbackVote;
   editedAt?: string;
   model?: string;
