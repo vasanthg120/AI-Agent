@@ -59,3 +59,10 @@ openpyxl==3.1.5
 beautifulsoup4==4.12.3
 requests==2.32.3
 groq==1.6.0
+
+# Official SDK, used only by app/integrations/sarvam_client.py's batch-STT
+# functions (uploaded call recordings) — the existing sync speech-to-text/
+# text-to-speech calls above stay on raw `requests`, unchanged. The batch
+# workflow's file-upload step isn't safe to hand-roll (undocumented
+# presigned-URL mechanics); the SDK is Sarvam's own supported way to do it.
+sarvamai==0.1.33

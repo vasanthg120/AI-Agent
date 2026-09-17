@@ -18,7 +18,9 @@ const throttler_1 = require("@nestjs/throttler");
 const jwt_auth_guard_1 = require("../common/guards/jwt-auth.guard");
 const current_user_decorator_1 = require("../common/decorators/current-user.decorator");
 const chat_service_1 = require("./chat.service");
+const rename_conversation_dto_1 = require("./dto/rename-conversation.dto");
 const send_message_dto_1 = require("./dto/send-message.dto");
+const set_conversation_flag_dto_1 = require("./dto/set-conversation-flag.dto");
 const CHAT_THROTTLE = { default: { limit: 20, ttl: 60_000 } };
 let ChatController = class ChatController {
     constructor(chatService) {
@@ -32,6 +34,18 @@ let ChatController = class ChatController {
     }
     getConversation(user, id) {
         return this.chatService.getConversation(user.sub, id);
+    }
+    async renameConversation(user, id, dto) {
+        await this.chatService.renameConversation(user.sub, id, dto.title);
+        return { status: 'ok' };
+    }
+    async setConversationFlag(user, id, dto) {
+        await this.chatService.setConversationFlag(user.sub, id, dto.flag, dto.value);
+        return { status: 'ok' };
+    }
+    async deleteConversation(user, id) {
+        await this.chatService.deleteConversation(user.sub, id);
+        return { status: 'ok' };
     }
     sendMessage(user, req, dto) {
         const bearerToken = (req.headers.authorization ?? '').replace(/^Bearer\s+/i, '');
@@ -62,6 +76,32 @@ __decorate([
     __metadata("design:paramtypes", [Object, String]),
     __metadata("design:returntype", void 0)
 ], ChatController.prototype, "getConversation", null);
+__decorate([
+    (0, common_1.Patch)('conversations/:id'),
+    __param(0, (0, current_user_decorator_1.CurrentUser)()),
+    __param(1, (0, common_1.Param)('id')),
+    __param(2, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, String, rename_conversation_dto_1.RenameConversationDto]),
+    __metadata("design:returntype", Promise)
+], ChatController.prototype, "renameConversation", null);
+__decorate([
+    (0, common_1.Patch)('conversations/:id/flag'),
+    __param(0, (0, current_user_decorator_1.CurrentUser)()),
+    __param(1, (0, common_1.Param)('id')),
+    __param(2, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, String, set_conversation_flag_dto_1.SetConversationFlagDto]),
+    __metadata("design:returntype", Promise)
+], ChatController.prototype, "setConversationFlag", null);
+__decorate([
+    (0, common_1.Delete)('conversations/:id'),
+    __param(0, (0, current_user_decorator_1.CurrentUser)()),
+    __param(1, (0, common_1.Param)('id')),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, String]),
+    __metadata("design:returntype", Promise)
+], ChatController.prototype, "deleteConversation", null);
 __decorate([
     (0, common_1.Post)('messages'),
     (0, throttler_1.Throttle)(CHAT_THROTTLE),

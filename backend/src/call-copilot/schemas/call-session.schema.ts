@@ -35,6 +35,13 @@ export class CallTranscriptSegment {
 
   @Prop({ default: () => new Date() })
   recordedAt: Date;
+
+  // Diarization label ("0"/"1", per Sarvam's batch STT speaker_id) — only
+  // ever set for an uploaded recording processed with diarization; always
+  // undefined for a live call (single-mic capture has no speaker channel to
+  // separate) and for an upload where diarization wasn't available.
+  @Prop()
+  speaker?: string;
 }
 
 @Schema({ _id: false })
@@ -74,6 +81,16 @@ export class CallFollowUpAction {
 
   @Prop({ required: true, enum: ['high', 'medium', 'low'] })
   priority: string;
+
+  // Optional, NOT required — added after this schema shipped, so existing
+  // ended sessions' stored follow-up actions have no owner field at all.
+  // Marking it required would fail Mongoose validation the next time one of
+  // those old documents gets re-saved (e.g. a future unrelated field update
+  // on the same session), the exact class of bug already hit once for
+  // CallTranscriptSegment.text above. The frontend defaults a missing value
+  // to 'salesperson' for display.
+  @Prop({ enum: ['salesperson', 'customer'] })
+  owner?: string;
 }
 
 // One row per Record session. Mirrors credit-reservation.schema.ts's
@@ -98,8 +115,30 @@ export class CallSession {
   @Prop()
   contactId?: string;
 
-  @Prop({ required: true, enum: ['active', 'ended', 'error'], default: 'active', index: true })
-  status: 'active' | 'ended' | 'error';
+  // 'processing' is new — an uploaded recording's session sits here while
+  // the background transcribe/analyze/summarize pipeline runs (see
+  // call-copilot-upload.service.ts), before landing on 'ended'/'error' the
+  // same as a live call. A live call never enters 'processing' — it goes
+  // straight from 'active' to 'ended'/'error'.
+  @Prop({ required: true, enum: ['active', 'processing', 'ended', 'error'], default: 'active', index: true })
+  status: 'active' | 'processing' | 'ended' | 'error';
+
+  // Distinguishes a live-recorded call from an uploaded pre-recorded one —
+  // drives the Library page's Live/Uploaded badge and which playback
+  // granularity applies (per-segment clips vs. one call-level file).
+  @Prop({ required: true, enum: ['live', 'upload'], default: 'live' })
+  source: 'live' | 'upload';
+
+  // GridFS id (bucket: call_recordings) of the untouched originally-uploaded
+  // file — only set for source:'upload'. Distinct from transcript[].audioFileId:
+  // an uploaded call's segments all point back at THIS one file (there's no
+  // per-turn clip, since the whole file went to Sarvam's batch API in one
+  // shot), unlike a live call where every segment has its own GridFS file.
+  @Prop()
+  originalRecordingFileId?: string;
+
+  @Prop()
+  originalFilename?: string;
 
   // Fetched once at call start (business_search_tool.run() — CRM + shared
   // documents + business knowledge + Mem0), never re-fetched mid-call.
@@ -127,8 +166,28 @@ export class CallSession {
   @Prop()
   sentiment?: string;
 
+  // Legacy single-paragraph summary — kept for backward compatibility with
+  // every session ended before the structured summary shipped (see headline/
+  // outcome/summaryPoints below). New sessions leave this empty and use the
+  // structured fields instead; CallSummaryModal falls back to rendering this
+  // when summaryPoints is empty, so old sessions keep displaying correctly.
   @Prop()
   summary?: string;
+
+  @Prop()
+  headline?: string;
+
+  @Prop({ enum: ['moving_forward', 'needs_follow_up', 'objection_raised', 'no_decision', 'lost', 'not_applicable'] })
+  outcome?: string;
+
+  @Prop({ type: [String], default: [] })
+  summaryPoints: string[];
+
+  @Prop({ type: [String], default: [] })
+  customerNeeds: string[];
+
+  @Prop({ type: [String], default: [] })
+  concernsRaised: string[];
 
   @Prop({ type: [String], default: [] })
   keyTakeaways: string[];

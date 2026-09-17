@@ -8,6 +8,7 @@ import { GridFsService } from '../common/gridfs/gridfs.service';
 import { CallCopilotController } from './call-copilot.controller';
 import { CallCopilotGateway } from './call-copilot.gateway';
 import { CallCopilotService } from './call-copilot.service';
+import { CallCopilotUploadService } from './call-copilot-upload.service';
 import { CallSession, CallSessionSchema } from './schemas/call-session.schema';
 
 @Module({
@@ -29,6 +30,6 @@ import { CallSession, CallSessionSchema } from './schemas/call-session.schema';
     BillingModule,
   ],
   controllers: [CallCopilotController],
-  providers: [CallCopilotService, CallCopilotGateway, GridFsService],
+  providers: [CallCopilotService, CallCopilotUploadService, CallCopilotGateway, GridFsService],
 })
 export class CallCopilotModule {}

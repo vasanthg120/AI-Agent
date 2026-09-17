@@ -34,6 +34,9 @@ export declare class ChatService {
     }, "assignedDepartments" | "assignedUserIds">[]>;
     listConversations(userId: string): Promise<{}>;
     getConversation(userId: string, conversationId: string): Promise<{} | null>;
+    renameConversation(userId: string, conversationId: string, title: string): Promise<void>;
+    setConversationFlag(userId: string, conversationId: string, flag: 'pinned' | 'favorite' | 'archived', value: boolean): Promise<void>;
+    deleteConversation(userId: string, conversationId: string): Promise<void>;
     sendMessage(userId: string, organizationId: string, userJwt: string, message: string, conversationId?: string, agentId?: string): Promise<{
         conversationId: string;
         reply: string;

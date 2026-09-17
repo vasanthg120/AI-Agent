@@ -57,14 +57,22 @@ export class GrossMarginReportService {
     groupBy: GrossMarginGroupBy,
     storeConstraint?: string,
   ): Promise<GrossMarginReportSummary> {
-    const empty = (note: string): GrossMarginReportSummary => ({
+    // Real counts default to 0 for the quotesCustomer/quotesUser early
+    // return below, where no invoice query has run yet — but the "invoices
+    // exist, none have cost" case further down MUST pass its actual counts
+    // here. Previously these were hardcoded to 0 unconditionally, so the
+    // note text would correctly say e.g. "39 invoice(s) fall within this
+    // range" while the numeric totalInvoicesInRange field sitting right next
+    // to it in the same response said 0 — any UI reading the numeric field
+    // instead of parsing the note showed "0 of 0", not the real coverage.
+    const empty = (note: string, counts?: { totalInvoicesInRange: number; invoicesWithCost: number; coveragePct: number }): GrossMarginReportSummary => ({
       dateFrom,
       dateTo,
       groupBy,
       hasCostData: false,
-      totalInvoicesInRange: 0,
-      invoicesWithCost: 0,
-      coveragePct: 0,
+      totalInvoicesInRange: counts?.totalInvoicesInRange ?? 0,
+      invoicesWithCost: counts?.invoicesWithCost ?? 0,
+      coveragePct: counts?.coveragePct ?? 0,
       totalCost: 0,
       totalIncome: 0,
       marginAmount: 0,
@@ -101,6 +109,7 @@ export class GrossMarginReportService {
         totalInvoicesInRange === 0
           ? 'No invoices fall within this date range yet, so there is nothing to compute a Gross Margin from.'
           : `${totalInvoicesInRange} invoice(s) fall within this date range, but none has a Cost entered yet. Add a Cost value on an invoice (Royalty Invoices page) to start seeing real Gross Margin numbers here.`,
+        { totalInvoicesInRange, invoicesWithCost, coveragePct },
       );
     }
 

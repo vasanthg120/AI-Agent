@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
-import { FiAlertCircle, FiMic, FiSquare } from 'react-icons/fi';
-import { Badge, Button, Card, SectionCard, Skeleton } from '@/components/ui';
+import { FiAlertCircle, FiMic, FiSquare, FiUploadCloud } from 'react-icons/fi';
+import { Button, Card, SectionCard, Skeleton, StatTile, Tabs } from '@/components/ui';
 import { useCallSessionStore } from '@/stores/callSessionStore';
 import { VOICE_LANGUAGES } from '@/services/voiceService';
 import { CustomerPicker, type SelectedCustomer } from './components/CustomerPicker';
@@ -8,8 +8,9 @@ import { CustomerContextCard } from './components/CustomerContextCard';
 import { TranscriptPanel } from './components/TranscriptPanel';
 import { EventsFeed } from './components/EventsFeed';
 import { RecommendationsPanel } from './components/RecommendationsPanel';
-import { SentimentIndicator } from './components/SentimentIndicator';
 import { CallSummaryModal } from './components/CallSummaryModal';
+import { UploadRecordingModal } from './components/UploadRecordingModal';
+import { CallLibraryListView } from './components/CallLibraryListView';
 import { useSegmentedRecording, micErrorMessage } from './hooks/useSegmentedRecording';
 import styles from './CallCopilotPage.module.css';
 
@@ -38,10 +39,13 @@ function formatDuration(seconds: number): string {
 // useCallSessionStore, which owns the /call-copilot socket entirely — this
 // component only renders what the store already has and issues start/stop.
 export function CallCopilotPage() {
+  const [activeTab, setActiveTab] = useState('live');
   const [customer, setCustomer] = useState<SelectedCustomer | null>(null);
   const [language, setLanguage] = useState(readStoredLanguage);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [summaryOpen, setSummaryOpen] = useState(false);
+  const [uploadModalOpen, setUploadModalOpen] = useState(false);
+  const [librarySwitch, setLibrarySwitch] = useState(0);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const { status, contextBlob, transcript, events, recommendations, sentiment, warning, error, summary, startCall, appendAudioSegment, endCall, reset } =
@@ -111,6 +115,11 @@ export function CallCopilotPage() {
   const isIdle = status === 'idle' || status === 'error';
   const isLive = status === 'starting' || status === 'recording' || status === 'ending';
 
+  const tabItems = [
+    { id: 'live', label: 'Live Call' },
+    { id: 'library', label: 'Call Library' },
+  ];
+
   return (
     <div className={styles.page}>
       <div className={styles.headerRow}>
@@ -118,88 +127,102 @@ export function CallCopilotPage() {
           <div className={styles.pageTitle}>Call Copilot</div>
           <div className={styles.pageSubtitle}>Live AI assistance during a sales call — transcript, signals, and recommendations as you talk.</div>
         </div>
-        {isLive && (
-          <div className={styles.statusBadges}>
-            <Badge variant={status === 'recording' ? 'success' : 'neutral'} dot>
-              {status === 'starting' ? 'Starting…' : status === 'ending' ? 'Ending…' : formatDuration(elapsedSeconds)}
-            </Badge>
-            <SentimentIndicator sentiment={sentiment} />
-          </div>
+        {activeTab === 'live' && isIdle && (
+          <Button type="button" variant="secondary" leftIcon={<FiUploadCloud />} onClick={() => setUploadModalOpen(true)}>
+            Upload a Recording
+          </Button>
         )}
       </div>
 
-      {isIdle && (
-        <Card className={styles.startCard}>
-          <CustomerPicker value={customer} onChange={setCustomer} />
-          <label className={styles.languageRow}>
-            <span>Language</span>
-            <select className={styles.select} value={language} onChange={(e) => changeLanguage(e.target.value)}>
-              {VOICE_LANGUAGES.map((l) => (
-                <option key={l.code} value={l.code}>
-                  {l.label}
-                </option>
-              ))}
-            </select>
-          </label>
-          {recording.error && (
-            <div className={styles.errorBox} role="alert">
-              <FiAlertCircle size={16} />
-              <span>{micErrorMessage(recording.error)}</span>
-            </div>
-          )}
-          {error && (
-            <div className={styles.errorBox} role="alert">
-              <FiAlertCircle size={16} />
-              <span>{error}</span>
-            </div>
-          )}
-          <Button type="button" leftIcon={<FiMic />} onClick={() => void handleStart()}>
-            Record
-          </Button>
-        </Card>
-      )}
+      <Tabs items={tabItems} activeId={activeTab} onChange={setActiveTab} />
 
-      {isLive && (
+      {activeTab === 'library' && <CallLibraryListView key={librarySwitch} />}
+
+      {activeTab === 'live' && (
         <>
-          {warning && (
-            <div className={styles.warningBox} role="status">
-              <FiAlertCircle size={14} /> {warning}
+          {isLive && (
+            <div className={styles.statRow}>
+              <StatTile label="Status" value={status === 'starting' ? 'Starting…' : status === 'ending' ? 'Ending…' : 'Recording'} />
+              <StatTile label="Duration" value={formatDuration(elapsedSeconds)} />
+              <StatTile label="Events Detected" value={events.length} />
+              <StatTile label="Sentiment" value={sentiment ?? '—'} />
             </div>
           )}
 
-          <div className={styles.grid}>
-            <div className={styles.mainColumn}>
-              <SectionCard title="Live Transcript">
-                <TranscriptPanel transcript={transcript} isRecording={status === 'recording'} />
-              </SectionCard>
-              <SectionCard title="Recommendations">
-                <RecommendationsPanel recommendations={recommendations} />
-              </SectionCard>
-            </div>
-            <div className={styles.sideColumn}>
-              <SectionCard title="Customer Context">
-                {contextBlob === '' && status === 'starting' ? <Skeleton height={80} /> : <CustomerContextCard contextBlob={contextBlob} />}
-              </SectionCard>
-              <SectionCard title="Detected Signals">
-                <EventsFeed events={events} />
-              </SectionCard>
-            </div>
-          </div>
+          {isIdle && (
+            <Card className={styles.startCard}>
+              <CustomerPicker value={customer} onChange={setCustomer} />
+              <label className={styles.languageRow}>
+                <span>Language</span>
+                <select className={styles.select} value={language} onChange={(e) => changeLanguage(e.target.value)}>
+                  {VOICE_LANGUAGES.map((l) => (
+                    <option key={l.code} value={l.code}>
+                      {l.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              {recording.error && (
+                <div className={styles.errorBox} role="alert">
+                  <FiAlertCircle size={16} />
+                  <span>{micErrorMessage(recording.error)}</span>
+                </div>
+              )}
+              {error && (
+                <div className={styles.errorBox} role="alert">
+                  <FiAlertCircle size={16} />
+                  <span>{error}</span>
+                </div>
+              )}
+              <Button type="button" leftIcon={<FiMic />} onClick={() => void handleStart()}>
+                Record
+              </Button>
+            </Card>
+          )}
 
-          <div className={styles.endBar}>
-            <Button type="button" variant="danger" leftIcon={<FiSquare />} onClick={handleEnd} disabled={status === 'ending'}>
-              End Call
-            </Button>
-          </div>
+          {isLive && (
+            <>
+              {warning && (
+                <div className={styles.warningBox} role="status">
+                  <FiAlertCircle size={14} /> {warning}
+                </div>
+              )}
+
+              <div className={styles.grid}>
+                <div className={styles.mainColumn}>
+                  <SectionCard title="Live Transcript">
+                    <TranscriptPanel transcript={transcript} isRecording={status === 'recording'} />
+                  </SectionCard>
+                  <SectionCard title="Recommendations">
+                    <RecommendationsPanel recommendations={recommendations} />
+                  </SectionCard>
+                </div>
+                <div className={styles.sideColumn}>
+                  <SectionCard title="Customer Context">
+                    {contextBlob === '' && status === 'starting' ? <Skeleton height={80} /> : <CustomerContextCard contextBlob={contextBlob} />}
+                  </SectionCard>
+                  <SectionCard title="Detected Signals">
+                    <EventsFeed events={events} />
+                  </SectionCard>
+                </div>
+              </div>
+
+              <div className={styles.endBar}>
+                <Button type="button" variant="danger" leftIcon={<FiSquare />} onClick={handleEnd} disabled={status === 'ending'}>
+                  End Call
+                </Button>
+              </div>
+            </>
+          )}
         </>
       )}
 
-      <CallSummaryModal
-        open={summaryOpen}
-        onClose={handleCloseSummary}
-        summary={summary?.summary ?? ''}
-        keyTakeaways={summary?.keyTakeaways ?? []}
-        followUpActions={summary?.followUpActions ?? []}
+      <CallSummaryModal open={summaryOpen} onClose={handleCloseSummary} source="live" summaryResult={summary} transcript={transcript} events={events} sentiment={sentiment} />
+
+      <UploadRecordingModal
+        open={uploadModalOpen}
+        onClose={() => setUploadModalOpen(false)}
+        onProcessed={() => setLibrarySwitch((n) => n + 1)}
       />
     </div>
   );

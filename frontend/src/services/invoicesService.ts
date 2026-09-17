@@ -14,6 +14,11 @@ export interface Invoice {
   previousValue?: number;
   currentValue: number;
   currency: string;
+  // What the Gross Margin report (reporting/gross-margin-report.service.ts)
+  // is computed from — manually entered here, never fabricated. Undefined
+  // (not 0) means "not entered yet," excluded from every margin total
+  // rather than counted as a real zero-cost invoice.
+  costAmount?: number;
   invoiceStatus: 'draft' | 'invoiced' | 'paid';
   voidStatus: boolean;
   voidDate?: string;
@@ -51,6 +56,14 @@ export const invoicesService = {
 
   async setStatus(id: string, invoiceStatus: 'draft' | 'invoiced' | 'paid'): Promise<Invoice> {
     const { data } = await axiosClient.patch<Invoice>(`/royalty/invoices/${id}`, { invoiceStatus });
+    return data;
+  },
+
+  // The Gross Margin report has always had a field for this on the backend
+  // (UpdateInvoiceDto.costAmount) but no way to actually enter it anywhere
+  // in the app — this is that missing entry point.
+  async setCost(id: string, costAmount: number): Promise<Invoice> {
+    const { data } = await axiosClient.patch<Invoice>(`/royalty/invoices/${id}`, { costAmount });
     return data;
   },
 };

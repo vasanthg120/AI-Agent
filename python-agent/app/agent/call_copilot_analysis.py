@@ -65,25 +65,66 @@ CALL_ANALYSIS_TOOL = {
 
 CALL_SUMMARY_TOOL = {
     "name": "summarize_call",
-    "description": "Summarize a completed sales call end-to-end for the salesperson's records and follow-up.",
+    "description": (
+        "Summarize a completed sales call end-to-end for the salesperson's records and follow-up, "
+        "in a structured, scannable format — never a single dense paragraph."
+    ),
     "input_schema": {
         "type": "object",
         "properties": {
-            "summary": {"type": "string", "description": "3-6 sentence narrative summary of the whole call."},
-            "keyTakeaways": {"type": "array", "items": {"type": "string"}},
+            "headline": {
+                "type": "string",
+                "description": (
+                    "One plain-language sentence capturing the single most important outcome of the "
+                    "call — the first thing a busy manager reads, e.g. 'Customer is ready to move "
+                    "forward pending legal review of the contract.'"
+                ),
+            },
+            "outcome": {
+                "type": "string",
+                "enum": ["moving_forward", "needs_follow_up", "objection_raised", "no_decision", "lost", "not_applicable"],
+                "description": "The single best-fitting overall outcome classification for this call.",
+            },
+            "summaryPoints": {
+                "type": "array",
+                "description": (
+                    "3-5 short, plain-language bullet points narrating what happened, in "
+                    "chronological order — one idea per bullet, no jargon."
+                ),
+                "items": {"type": "string"},
+            },
+            "customerNeeds": {
+                "type": "array",
+                "description": "Concrete needs/requirements the customer expressed, in their own terms. Empty array if none were discussed.",
+                "items": {"type": "string"},
+            },
+            "concernsRaised": {
+                "type": "array",
+                "description": "Objections, hesitations, or risks the customer raised. Empty array if none.",
+                "items": {"type": "string"},
+            },
+            "keyTakeaways": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": (
+                    "The handful of facts most worth remembering later (budget figures, timelines, "
+                    "decision-makers named, competitor mentions) — short, specific, standalone statements."
+                ),
+            },
             "followUpActions": {
                 "type": "array",
                 "items": {
                     "type": "object",
                     "properties": {
-                        "text": {"type": "string", "description": "A concrete next step, e.g. 'Send pricing document for the enterprise tier'."},
+                        "text": {"type": "string", "description": "A concrete next step, phrased as an action, e.g. 'Send pricing document for the enterprise tier'."},
                         "priority": {"type": "string", "enum": ["high", "medium", "low"]},
+                        "owner": {"type": "string", "enum": ["salesperson", "customer"], "description": "Who needs to do this next."},
                     },
-                    "required": ["text", "priority"],
+                    "required": ["text", "priority", "owner"],
                 },
             },
         },
-        "required": ["summary", "keyTakeaways", "followUpActions"],
+        "required": ["headline", "outcome", "summaryPoints", "customerNeeds", "concernsRaised", "keyTakeaways", "followUpActions"],
     },
 }
 
@@ -99,9 +140,14 @@ _ANALYSIS_SYSTEM_PROMPT = (
 )
 
 _SUMMARY_SYSTEM_PROMPT = (
-    "You are summarizing a completed sales call for the salesperson's CRM records. Base the "
-    "summary, takeaways, and follow-up actions ONLY on what the transcript and detected-events "
-    "list actually show — never invent a commitment, number, or next step that wasn't discussed."
+    "You are summarizing a completed sales call for a busy salesperson's CRM records. They will "
+    "skim this in seconds between calls, so prioritize plain, concrete language over formal or "
+    "vague business-speak — write the way you'd explain the call out loud to a colleague, not the "
+    "way you'd write a report. Every field must be grounded ONLY in what the transcript and "
+    "detected-events list actually show — never invent a commitment, number, name, or next step "
+    "that wasn't actually discussed. If the call was too short or unclear to support a field "
+    "confidently, return an empty array or the most neutral applicable enum value rather than "
+    "guessing. The headline and summary bullets are the most-read part of this output — make them count."
 )
 
 

@@ -73,3 +73,29 @@ def retrieve_business_knowledge_as_context(query: str, organization_id: str, top
     if not hits:
         return ""
     return "\n\n".join(f"[{h['filename']}] {h['text']}" for h in hits)
+
+
+def _call_recording_filter(organization_id: str, user_id: str) -> qmodels.Filter:
+    # Private to the recording salesperson (BOTH fields required), unlike
+    # _finance_document_filter/_business_knowledge_filter above — this
+    # matches the EXISTING Mongo access model (CallCopilotController's
+    # getSession/listSessions already scope by organizationId AND userId), so
+    # a call session is already private to whoever recorded/uploaded it.
+    # Scoping the Qdrant search org-wide like Finance/Business Knowledge
+    # would let one salesperson's calls surface in every other org member's
+    # search results — a privacy regression relative to what the app already
+    # does today, not a deliberate access-control decision.
+    return qmodels.Filter(
+        must=[
+            qmodels.FieldCondition(
+                key="source_type",
+                match=qmodels.MatchAny(any=["call_recording", "call_recording_summary"]),
+            ),
+            qmodels.FieldCondition(key="organization_id", match=qmodels.MatchValue(value=organization_id)),
+            qmodels.FieldCondition(key="user_id", match=qmodels.MatchValue(value=user_id)),
+        ]
+    )
+
+
+def retrieve_call_recordings(query: str, organization_id: str, user_id: str, top_k: int = 8) -> list[dict]:
+    return hybrid_search.search(query, _call_recording_filter(organization_id, user_id), top_k=top_k)

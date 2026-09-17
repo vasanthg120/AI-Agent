@@ -43,6 +43,20 @@ export class Conversation {
 
   @Prop({ type: [ChatMessage], default: [] })
   messages: ChatMessage[];
+
+  // Previously session-local-only UI state on the frontend (chatService.ts's
+  // setConversationFlag/renameConversation/deleteConversation were all
+  // literal no-ops, "not supported by the backend yet") — every one of these
+  // was silently lost on reload, which is exactly why pinning/favoriting/
+  // archiving/renaming a conversation "didn't work." Real persisted fields now.
+  @Prop({ default: false, index: true })
+  pinned: boolean;
+
+  @Prop({ default: false })
+  favorite: boolean;
+
+  @Prop({ default: false, index: true })
+  archived: boolean;
 }
 
 export const ConversationSchema = SchemaFactory.createForClass(Conversation);
