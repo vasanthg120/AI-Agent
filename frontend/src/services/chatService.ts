@@ -11,6 +11,12 @@ interface BackendConversationSummary {
   title: string;
   createdAt: string;
   updatedAt: string;
+  pinned?: boolean;
+  favorite?: boolean;
+  archived?: boolean;
+  // listConversations projects only the LAST message ($slice: -1) for a
+  // preview snippet — never the full array, to keep the list endpoint light.
+  messages?: BackendMessage[];
 }
 
 interface BackendMessage {
@@ -32,18 +38,20 @@ interface BackendChatResult {
   suggestions?: string[];
 }
 
+const PREVIEW_MAX_LENGTH = 140;
+
 function toConversation(c: BackendConversationSummary): Conversation {
+  const lastMessage = c.messages?.[0];
   return {
     id: c._id,
     title: c.title,
     createdAt: c.createdAt,
     updatedAt: c.updatedAt,
-    // The backend doesn't persist these yet — pin/favorite/archive are
-    // session-local UI state until a real endpoint exists for them.
-    pinned: false,
-    favorite: false,
-    archived: false,
+    pinned: c.pinned ?? false,
+    favorite: c.favorite ?? false,
+    archived: c.archived ?? false,
     messageCount: 0,
+    preview: lastMessage ? lastMessage.content.slice(0, PREVIEW_MAX_LENGTH) : undefined,
   };
 }
 
@@ -113,17 +121,16 @@ export const chatService = {
     };
   },
 
-  async renameConversation(_id: string, _title: string): Promise<void> {
-    // Not supported by the backend yet — the sidebar still updates its own
-    // local state after this resolves, it just won't survive a reload.
+  async renameConversation(id: string, title: string): Promise<void> {
+    await axiosClient.patch(`/chat/conversations/${id}`, { title });
   },
 
-  async deleteConversation(_id: string): Promise<void> {
-    // Same as renameConversation — local-only until a real endpoint exists.
+  async deleteConversation(id: string): Promise<void> {
+    await axiosClient.delete(`/chat/conversations/${id}`);
   },
 
-  async setConversationFlag(_id: string, _flag: 'pinned' | 'favorite' | 'archived', _value: boolean): Promise<void> {
-    // Pin/favorite/archive are local-only (see toConversation above).
+  async setConversationFlag(id: string, flag: 'pinned' | 'favorite' | 'archived', value: boolean): Promise<void> {
+    await axiosClient.patch(`/chat/conversations/${id}/flag`, { flag, value });
   },
 
   streamReply(

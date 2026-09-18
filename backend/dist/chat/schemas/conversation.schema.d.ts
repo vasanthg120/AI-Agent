@@ -12,6 +12,9 @@ export declare class Conversation {
     title: string;
     agentId?: string;
     messages: ChatMessage[];
+    pinned: boolean;
+    favorite: boolean;
+    archived: boolean;
 }
 export declare const ConversationSchema: import("mongoose").Schema<Conversation, import("mongoose").Model<Conversation, any, any, any, Document<unknown, any, Conversation, any, {}> & Conversation & {
     _id: Types.ObjectId;

@@ -3,18 +3,12 @@ import {
   callCopilotService,
   type CallController,
   type CallEvent,
-  type CallFollowUpAction,
   type CallRecommendation,
+  type CallSummaryResult,
   type StartCallParams,
 } from '@/services/callCopilotService';
 
 export type CallStatus = 'idle' | 'starting' | 'recording' | 'ending' | 'ended' | 'error';
-
-interface CallSummaryState {
-  summary: string;
-  keyTakeaways: string[];
-  followUpActions: CallFollowUpAction[];
-}
 
 interface CallSessionState {
   status: CallStatus;
@@ -26,7 +20,7 @@ interface CallSessionState {
   sentiment: string | null;
   warning: string | null;
   error: string | null;
-  summary: CallSummaryState | null;
+  summary: CallSummaryResult | null;
   controller: CallController | null;
 
   startCall: (params: StartCallParams) => void;
@@ -45,7 +39,7 @@ const initialState = {
   sentiment: null as string | null,
   warning: null as string | null,
   error: null as string | null,
-  summary: null as CallSummaryState | null,
+  summary: null as CallSummaryResult | null,
   controller: null as CallController | null,
 };
 

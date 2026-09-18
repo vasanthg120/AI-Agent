@@ -52,11 +52,26 @@ export class CallCopilotGateway implements OnGatewayConnection, OnGatewayDisconn
         throw new Error('revoked or missing session');
       }
       client.data.user = payload;
+      // Per-user room (mirrors chat.gateway.ts) — lets CallCopilotUploadService
+      // push progress for a background upload-processing job via emitToUser,
+      // reaching every tab this user has open on this namespace, not just
+      // whichever socket happened to issue the upload request.
+      client.join(payload.sub);
     } catch {
       this.logger.warn(`Rejected unauthenticated call-copilot socket ${client.id}`);
       client.emit('call:error', { message: 'Unauthorized' });
       client.disconnect(true);
     }
+  }
+
+  /** Pushes progress for a background upload-processing job (see
+   * CallCopilotUploadService) to every tab this user has open — unlike the
+   * live-call path's events (which ride the SAME socket that emitted
+   * call:start), an upload has no "the" socket to reply on since processing
+   * continues after the request that started it returns. Reaches the room
+   * joined in handleConnection above. */
+  emitToUser(userId: string, event: string, payload: unknown) {
+    this.server.to(userId).emit(event, payload);
   }
 
   /** A dropped connection mid-call (network blip, tab closed) never silently
@@ -89,7 +104,7 @@ export class CallCopilotGateway implements OnGatewayConnection, OnGatewayDisconn
       );
       client.data.activeSession = session;
       client.emit('call:started', { sessionId: session._id.toString() });
-      client.emit('call:contextReady', { contextBlob: session.contextBlob ?? '' });
+      client.emit('call:contextReady', { sessionId: session._id.toString(), contextBlob: session.contextBlob ?? '' });
     } catch (err) {
       this.logger.error(`call:start failed: ${(err as Error).message}`);
       client.emit('call:error', { message: 'Could not start the call session. Please try again.' });
@@ -116,15 +131,16 @@ export class CallCopilotGateway implements OnGatewayConnection, OnGatewayDisconn
         body.mimeType,
         body.languageCode,
       );
+      const sessionId = session._id.toString();
       if (transcript) {
-        client.emit('call:transcript', { sequence: body.sequence, text: transcript });
+        client.emit('call:transcript', { sessionId, sequence: body.sequence, text: transcript });
       } else if (transcribeFailed) {
         // A genuinely quiet segment (Sarvam ran fine, found nothing to
         // transcribe) also comes back with an empty transcript — this branch
         // only fires when the transcribe call itself errored, so the
         // salesperson sees a real problem immediately instead of the call
         // just going quiet on them with no explanation until the very end.
-        client.emit('call:warning', { message: 'A moment of audio could not be transcribed — the call continues.' });
+        client.emit('call:warning', { sessionId, message: 'A moment of audio could not be transcribed — the call continues.' });
       }
 
       // Fire-and-forget from the caller's perspective — the socket handler
@@ -135,6 +151,7 @@ export class CallCopilotGateway implements OnGatewayConnection, OnGatewayDisconn
       const result = await this.callCopilotService.maybeAnalyze(session);
       if (!result.skipped) {
         client.emit('call:analysis', {
+          sessionId,
           sentiment: result.sentiment,
           events: result.events,
           recommendations: result.recommendations,
@@ -145,7 +162,7 @@ export class CallCopilotGateway implements OnGatewayConnection, OnGatewayDisconn
       // never tear down the whole call — the salesperson is still live on
       // the phone. Surfaced as a soft warning, not a fatal error.
       this.logger.warn(`call:audioSegment failed for session ${session._id}: ${(err as Error).message}`);
-      client.emit('call:warning', { message: 'A moment of audio could not be processed — the call continues.' });
+      client.emit('call:warning', { sessionId: session._id.toString(), message: 'A moment of audio could not be processed — the call continues.' });
     }
   }
 
@@ -159,6 +176,12 @@ export class CallCopilotGateway implements OnGatewayConnection, OnGatewayDisconn
     try {
       const ended = await this.callCopilotService.endSession(session);
       client.emit('call:summary', {
+        sessionId: ended._id.toString(),
+        headline: ended.headline,
+        outcome: ended.outcome,
+        summaryPoints: ended.summaryPoints,
+        customerNeeds: ended.customerNeeds,
+        concernsRaised: ended.concernsRaised,
         summary: ended.summary,
         keyTakeaways: ended.keyTakeaways,
         followUpActions: ended.followUpActions,

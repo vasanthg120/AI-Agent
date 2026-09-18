@@ -59,6 +59,92 @@ export class CallCopilotService {
       .exec();
   }
 
+  /** Powers the Call Library page — a separate endpoint from listSessions
+   * above (which stays untouched for whatever already calls it) since this
+   * one has two genuinely different modes: plain filtered/paginated browsing
+   * when `q` is empty, or a ranked semantic-search hydrate when it's not.
+   * Search results are a ranked top-N, not a stable paginated set — the
+   * caller shows "top matches" rather than page controls in that mode. */
+  async searchSessions(
+    organizationId: string,
+    userId: string,
+    options: { q?: string; dealId?: string; dateFrom?: string; dateTo?: string; page?: number; pageSize?: number },
+  ): Promise<{ items: CallSessionDocument[]; total: number; page: number; pageSize: number; mode: 'browse' | 'search' }> {
+    const query = options.q?.trim();
+    if (query) {
+      const token = this.bridgeToken(userId, organizationId);
+      const { data } = await firstValueFrom(
+        this.http.post<{ hits: { sessionId: string; score: number; snippet: string; sourceType: string }[] }>(
+          `${this.pythonAgentUrl}/call-copilot/search`,
+          { query },
+          { headers: { Authorization: `Bearer ${token}` } },
+        ),
+      );
+      const match: Record<string, unknown> = { _id: { $in: data.hits.map((h) => h.sessionId) }, organizationId, userId };
+      if (options.dealId) match.dealId = options.dealId;
+      const docs = await this.sessionModel.find(match).select({ transcript: 0 }).exec();
+      const byId = new Map(docs.map((d) => [d._id.toString(), d]));
+      // Preserve the SEARCH's ranking (best match first), not Mongo's own
+      // find() order — hits are already sorted best-first by
+      // hybrid_search.search's rerank step.
+      const items = data.hits.map((h) => byId.get(h.sessionId)).filter(Boolean) as CallSessionDocument[];
+      return { items, total: items.length, page: 1, pageSize: items.length, mode: 'search' };
+    }
+
+    const page = options.page ?? 1;
+    const pageSize = options.pageSize ?? 25;
+    const match: Record<string, unknown> = { organizationId, userId };
+    if (options.dealId) match.dealId = options.dealId;
+    if (options.dateFrom || options.dateTo) {
+      const range: Record<string, Date> = {};
+      if (options.dateFrom) range.$gte = new Date(options.dateFrom);
+      if (options.dateTo) range.$lte = new Date(options.dateTo);
+      match.createdAt = range;
+    }
+
+    const [items, total] = await Promise.all([
+      this.sessionModel
+        .find(match)
+        .select({ transcript: 0 })
+        .sort({ createdAt: -1 })
+        .skip((page - 1) * pageSize)
+        .limit(pageSize)
+        .exec(),
+      this.sessionModel.countDocuments(match).exec(),
+    ]);
+    return { items, total, page, pageSize, mode: 'browse' };
+  }
+
+  /** Backs the Call Library's StatTile summary row — computed independently
+   * of whatever page is currently loaded, so the numbers stay accurate
+   * regardless of pagination/search state. */
+  async getStats(organizationId: string, userId: string): Promise<{ total: number; last7Days: number; live: number; uploaded: number; avgSentiment: string | null }> {
+    const base = { organizationId, userId };
+    const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60_000);
+    const [total, last7Days, live, uploaded, sentiments] = await Promise.all([
+      this.sessionModel.countDocuments(base).exec(),
+      this.sessionModel.countDocuments({ ...base, createdAt: { $gte: sevenDaysAgo } }).exec(),
+      // $exists:false catches every session created before the `source`
+      // field existed — Mongoose applies the schema default ('live') when
+      // HYDRATING a fetched document for display, but a raw query filter
+      // like {source:'live'} only matches what's actually stored in Mongo,
+      // so every pre-upload-feature session would otherwise be invisible to
+      // this count despite genuinely being a live call.
+      this.sessionModel.countDocuments({ ...base, $or: [{ source: 'live' }, { source: { $exists: false } }] }).exec(),
+      this.sessionModel.countDocuments({ ...base, source: 'upload' }).exec(),
+      this.sessionModel.find({ ...base, sentiment: { $exists: true, $ne: null } }).select({ sentiment: 1 }).exec(),
+    ]);
+
+    let avgSentiment: string | null = null;
+    if (sentiments.length > 0) {
+      const counts = new Map<string, number>();
+      for (const s of sentiments) counts.set(s.sentiment!, (counts.get(s.sentiment!) ?? 0) + 1);
+      avgSentiment = [...counts.entries()].sort((a, b) => b[1] - a[1])[0][0];
+    }
+
+    return { total, last7Days, live, uploaded, avgSentiment };
+  }
+
   /** Creates the session, reserves one credit hold for its whole duration
    * (see the schema's own comment on why this is one reservation, not
    * per-analysis-tick metering), and fetches the initial CRM/RAG/Mem0
@@ -170,6 +256,67 @@ export class CallCopilotService {
     return { transcript, transcribeFailed };
   }
 
+  /** The batch-upload equivalent of appendAudioSegment's "store the text"
+   * half — transcription already happened via Sarvam's Batch STT job (see
+   * CallCopilotUploadService), so there's no per-turn GridFS upload or
+   * Sarvam call here, just recording the already-known text. `audioFileId`
+   * always points at the ONE original uploaded file (every segment of an
+   * uploaded call shares it — there's no per-turn clip, since the whole
+   * recording went to Sarvam in one shot), unlike a live call where every
+   * segment has its own independently-playable GridFS file. */
+  async appendTranscriptSegment(
+    session: CallSessionDocument,
+    sequence: number,
+    text: string,
+    speaker: string | undefined,
+    audioFileId: string,
+  ): Promise<void> {
+    session.transcript.push({ sequence, text, speaker, audioFileId, recordedAt: new Date() } as never);
+    await session.save();
+  }
+
+  /** The HTTP-call-and-apply-result half of analysis — factored out of
+   * maybeAnalyze so the live path's throttled "everything since
+   * lastAnalyzedSequence" strategy and the upload pipeline's fixed
+   * word-count-window strategy over an already-complete transcript can each
+   * drive it without duplicating the events/recommendations/sentiment merge
+   * logic. Callers are responsible for deciding WHAT transcript window to
+   * send and for advancing session.lastAnalyzedSequence themselves (only
+   * the live path tracks that field — see maybeAnalyze below). */
+  private async runAnalysisCall(session: CallSessionDocument, transcriptWindow: string, mode: 'live' | 'batch'): Promise<AnalyzeResult> {
+    if (!transcriptWindow.trim()) {
+      return { skipped: true, events: [], recommendations: [] };
+    }
+
+    try {
+      const token = this.bridgeToken(session.userId, session.organizationId);
+      const { data } = await firstValueFrom(
+        this.http.post<AnalyzeResult>(
+          `${this.pythonAgentUrl}/call-copilot/analyze`,
+          {
+            sessionId: session._id.toString(),
+            contextBlob: session.contextBlob ?? '',
+            transcriptWindow,
+            alreadyDetected: session.events.map((e) => e.type),
+            mode,
+          },
+          { headers: { Authorization: `Bearer ${token}` } },
+        ),
+      );
+
+      if (!data.skipped) {
+        session.sentiment = data.sentiment ?? session.sentiment;
+        for (const event of data.events) session.events.push(event as never);
+        for (const rec of data.recommendations) session.recommendations.push(rec as never);
+        await session.save();
+      }
+      return data;
+    } catch (err) {
+      this.logger.warn(`Call copilot analyze failed for session ${session._id}: ${(err as Error).message}`);
+      return { skipped: true, events: [], recommendations: [] };
+    }
+  }
+
   /** Throttling itself happens on the python-agent side (Redis rate limiter
    * + minimum-new-words gate — see routes/call_copilot.py's own comment);
    * this always calls through and trusts the `skipped` flag back. Only the
@@ -187,48 +334,50 @@ export class CallCopilotService {
       return { skipped: true, events: [], recommendations: [] };
     }
 
-    try {
-      const token = this.bridgeToken(session.userId, session.organizationId);
-      const { data } = await firstValueFrom(
-        this.http.post<AnalyzeResult>(
-          `${this.pythonAgentUrl}/call-copilot/analyze`,
-          {
-            sessionId: session._id.toString(),
-            contextBlob: session.contextBlob ?? '',
-            transcriptWindow: newText,
-            alreadyDetected: session.events.map((e) => e.type),
-          },
-          { headers: { Authorization: `Bearer ${token}` } },
-        ),
-      );
-
-      if (!data.skipped) {
-        session.lastAnalyzedSequence = newSegments[newSegments.length - 1].sequence;
-        session.sentiment = data.sentiment ?? session.sentiment;
-        for (const event of data.events) session.events.push(event as never);
-        for (const rec of data.recommendations) session.recommendations.push(rec as never);
-        await session.save();
-      }
-      return data;
-    } catch (err) {
-      this.logger.warn(`Call copilot analyze failed for session ${session._id}: ${(err as Error).message}`);
-      return { skipped: true, events: [], recommendations: [] };
+    const result = await this.runAnalysisCall(session, newText, 'live');
+    if (!result.skipped) {
+      session.lastAnalyzedSequence = newSegments[newSegments.length - 1].sequence;
+      await session.save();
     }
+    return result;
+  }
+
+  /** Upload-pipeline entry point: runs one analysis pass over a fixed
+   * transcript window (a chunk of an already-complete transcript, not a
+   * "since last time" slice — see CallCopilotUploadService), in batch mode
+   * (bypasses the live path's rate-limit interval gate on the python-agent
+   * side, since there's no real-time clock to pace against). Does not touch
+   * lastAnalyzedSequence — that field is meaningless for a transcript that
+   * was never built up incrementally in the first place. */
+  async runBatchAnalysisWindow(session: CallSessionDocument, transcriptWindow: string): Promise<AnalyzeResult> {
+    return this.runAnalysisCall(session, transcriptWindow, 'batch');
   }
 
   /** Ends the call: settles the credit reservation, runs the one-shot final
    * summary, and marks the session ended. Follow-up actions are stored for
    * display only — nothing is written back to the CRM automatically (per
-   * the confirmed requirement; the salesperson decides what to action). */
+   * the confirmed requirement; the salesperson decides what to action). The
+   * ONE place both the live gateway's call:end handler and the upload
+   * pipeline's completion converge, so Qdrant indexing (fire-and-forget,
+   * below) covers both flows with no duplicated call site. */
   async endSession(session: CallSessionDocument): Promise<CallSessionDocument> {
+    let fullTranscript = '';
     try {
       const token = this.bridgeToken(session.userId, session.organizationId);
-      const fullTranscript = session.transcript
+      fullTranscript = session.transcript
         .map((s) => s.text)
         .filter(Boolean)
         .join(' ');
       const { data } = await firstValueFrom(
-        this.http.post<{ summary: string; keyTakeaways: string[]; followUpActions: { text: string; priority: string }[] }>(
+        this.http.post<{
+          headline: string;
+          outcome: string;
+          summaryPoints: string[];
+          customerNeeds: string[];
+          concernsRaised: string[];
+          keyTakeaways: string[];
+          followUpActions: { text: string; priority: string; owner: string }[];
+        }>(
           `${this.pythonAgentUrl}/call-copilot/summarize`,
           {
             sessionId: session._id.toString(),
@@ -239,7 +388,11 @@ export class CallCopilotService {
           { headers: { Authorization: `Bearer ${token}` } },
         ),
       );
-      session.summary = data.summary;
+      session.headline = data.headline;
+      session.outcome = data.outcome;
+      session.summaryPoints = data.summaryPoints;
+      session.customerNeeds = data.customerNeeds;
+      session.concernsRaised = data.concernsRaised;
       session.keyTakeaways = data.keyTakeaways;
       session.followUpActions = data.followUpActions as never;
     } catch (err) {
@@ -256,7 +409,37 @@ export class CallCopilotService {
       this.logger.warn(`Call copilot billing settle failed for session ${session._id}: ${(err as Error).message}`);
     }
 
+    // Fire-and-forget — indexing must never add latency to the "End Call"
+    // response the live salesperson is actively waiting on, nor block the
+    // upload pipeline's own already-async completion.
+    void this.indexSession(session, fullTranscript).catch((err) =>
+      this.logger.warn(`Call copilot Qdrant indexing failed for session ${session._id}: ${(err as Error).message}`),
+    );
+
     return session;
+  }
+
+  /** Indexes the ended call's transcript + summary into the shared Qdrant
+   * collection (python-agent's /call-copilot/index — see that route's own
+   * comment) so it surfaces in the Call Library's search. Never called
+   * directly except from endSession above. */
+  private async indexSession(session: CallSessionDocument, fullTranscript: string): Promise<void> {
+    const summaryText = [session.headline, ...session.summaryPoints, ...session.keyTakeaways].filter(Boolean).join('\n');
+    if (!fullTranscript.trim() && !summaryText.trim()) return;
+
+    const token = this.bridgeToken(session.userId, session.organizationId);
+    await firstValueFrom(
+      this.http.post(
+        `${this.pythonAgentUrl}/call-copilot/index`,
+        {
+          sessionId: session._id.toString(),
+          fullTranscript,
+          summaryText,
+          recordedAt: (session.endedAt ?? new Date()).toISOString(),
+        },
+        { headers: { Authorization: `Bearer ${token}` } },
+      ),
+    );
   }
 
   /** A session that errors out (client disconnect mid-call, an unhandled

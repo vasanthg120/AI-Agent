@@ -56,6 +56,18 @@ __decorate([
     (0, mongoose_1.Prop)({ type: [ChatMessage], default: [] }),
     __metadata("design:type", Array)
 ], Conversation.prototype, "messages", void 0);
+__decorate([
+    (0, mongoose_1.Prop)({ default: false, index: true }),
+    __metadata("design:type", Boolean)
+], Conversation.prototype, "pinned", void 0);
+__decorate([
+    (0, mongoose_1.Prop)({ default: false }),
+    __metadata("design:type", Boolean)
+], Conversation.prototype, "favorite", void 0);
+__decorate([
+    (0, mongoose_1.Prop)({ default: false, index: true }),
+    __metadata("design:type", Boolean)
+], Conversation.prototype, "archived", void 0);
 exports.Conversation = Conversation = __decorate([
     (0, mongoose_1.Schema)({ timestamps: true })
 ], Conversation);

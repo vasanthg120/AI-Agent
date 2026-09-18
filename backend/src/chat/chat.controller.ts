@@ -1,11 +1,13 @@
-import { Body, Controller, Get, Param, Post, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Req, UseGuards } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import { Request } from 'express';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { JwtPayload } from '../auth/jwt-payload.interface';
 import { ChatService } from './chat.service';
+import { RenameConversationDto } from './dto/rename-conversation.dto';
 import { SendMessageDto } from './dto/send-message.dto';
+import { SetConversationFlagDto } from './dto/set-conversation-flag.dto';
 
 // Tighter than the app-wide default (see ThrottlerModule.forRoot in
 // app.module.ts) — every message here is a real, billed LLM call
@@ -31,6 +33,24 @@ export class ChatController {
   @Get('conversations/:id')
   getConversation(@CurrentUser() user: JwtPayload, @Param('id') id: string) {
     return this.chatService.getConversation(user.sub, id);
+  }
+
+  @Patch('conversations/:id')
+  async renameConversation(@CurrentUser() user: JwtPayload, @Param('id') id: string, @Body() dto: RenameConversationDto) {
+    await this.chatService.renameConversation(user.sub, id, dto.title);
+    return { status: 'ok' };
+  }
+
+  @Patch('conversations/:id/flag')
+  async setConversationFlag(@CurrentUser() user: JwtPayload, @Param('id') id: string, @Body() dto: SetConversationFlagDto) {
+    await this.chatService.setConversationFlag(user.sub, id, dto.flag, dto.value);
+    return { status: 'ok' };
+  }
+
+  @Delete('conversations/:id')
+  async deleteConversation(@CurrentUser() user: JwtPayload, @Param('id') id: string) {
+    await this.chatService.deleteConversation(user.sub, id);
+    return { status: 'ok' };
   }
 
   @Post('messages')

@@ -1,5 +1,5 @@
 import { HttpService } from '@nestjs/axios';
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { InjectModel } from '@nestjs/mongoose';
@@ -146,7 +146,7 @@ export class ChatService {
 
     const result = await this.conversationModel
       .find({ userId })
-      .select({ title: 1, updatedAt: 1, createdAt: 1 })
+      .select({ title: 1, updatedAt: 1, createdAt: 1, pinned: 1, favorite: 1, archived: 1, messages: { $slice: -1 } })
       .sort({ updatedAt: -1 })
       .exec();
     await this.cache.set(cacheKey, result, CACHE_TTL_SECONDS);
@@ -165,6 +165,29 @@ export class ChatService {
     const result = await this.conversationModel.findOne({ _id: conversationId, userId }).exec();
     if (result) await this.cache.set(cacheKey, result, CACHE_TTL_SECONDS);
     return result;
+  }
+
+  async renameConversation(userId: string, conversationId: string, title: string): Promise<void> {
+    const result = await this.conversationModel.updateOne({ _id: conversationId, userId }, { title }).exec();
+    if (result.matchedCount === 0) throw new NotFoundException('Conversation not found');
+    await this.cache.del(`chat:conversations:${userId}`, `chat:conversation:${userId}:${conversationId}`);
+  }
+
+  async setConversationFlag(
+    userId: string,
+    conversationId: string,
+    flag: 'pinned' | 'favorite' | 'archived',
+    value: boolean,
+  ): Promise<void> {
+    const result = await this.conversationModel.updateOne({ _id: conversationId, userId }, { [flag]: value }).exec();
+    if (result.matchedCount === 0) throw new NotFoundException('Conversation not found');
+    await this.cache.del(`chat:conversations:${userId}`, `chat:conversation:${userId}:${conversationId}`);
+  }
+
+  async deleteConversation(userId: string, conversationId: string): Promise<void> {
+    const result = await this.conversationModel.deleteOne({ _id: conversationId, userId }).exec();
+    if (result.deletedCount === 0) throw new NotFoundException('Conversation not found');
+    await this.cache.del(`chat:conversations:${userId}`, `chat:conversation:${userId}:${conversationId}`);
   }
 
   async sendMessage(

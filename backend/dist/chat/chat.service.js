@@ -91,7 +91,7 @@ let ChatService = ChatService_1 = class ChatService {
             return cached;
         const result = await this.conversationModel
             .find({ userId })
-            .select({ title: 1, updatedAt: 1, createdAt: 1 })
+            .select({ title: 1, updatedAt: 1, createdAt: 1, pinned: 1, favorite: 1, archived: 1, messages: { $slice: -1 } })
             .sort({ updatedAt: -1 })
             .exec();
         await this.cache.set(cacheKey, result, CACHE_TTL_SECONDS);
@@ -106,6 +106,24 @@ let ChatService = ChatService_1 = class ChatService {
         if (result)
             await this.cache.set(cacheKey, result, CACHE_TTL_SECONDS);
         return result;
+    }
+    async renameConversation(userId, conversationId, title) {
+        const result = await this.conversationModel.updateOne({ _id: conversationId, userId }, { title }).exec();
+        if (result.matchedCount === 0)
+            throw new common_1.NotFoundException('Conversation not found');
+        await this.cache.del(`chat:conversations:${userId}`, `chat:conversation:${userId}:${conversationId}`);
+    }
+    async setConversationFlag(userId, conversationId, flag, value) {
+        const result = await this.conversationModel.updateOne({ _id: conversationId, userId }, { [flag]: value }).exec();
+        if (result.matchedCount === 0)
+            throw new common_1.NotFoundException('Conversation not found');
+        await this.cache.del(`chat:conversations:${userId}`, `chat:conversation:${userId}:${conversationId}`);
+    }
+    async deleteConversation(userId, conversationId) {
+        const result = await this.conversationModel.deleteOne({ _id: conversationId, userId }).exec();
+        if (result.deletedCount === 0)
+            throw new common_1.NotFoundException('Conversation not found');
+        await this.cache.del(`chat:conversations:${userId}`, `chat:conversation:${userId}:${conversationId}`);
     }
     async sendMessage(userId, organizationId, userJwt, message, conversationId, agentId) {
         const conversation = await this.getOrCreateConversation(userId, organizationId, message, conversationId, agentId);

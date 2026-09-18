@@ -109,3 +109,30 @@
   color: var(--color-text-muted);
   margin-top: var(--space-2);
 }
+
+.costButton {
+  all: unset;
+  cursor: pointer;
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-primary);
+}
+
+.costButton:hover {
+  background: var(--color-bg-hover);
+}
+
+.costPlaceholder {
+  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+}
+
+.costInput {
+  width: 100px;
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--color-border-strong);
+  background: var(--color-bg-surface);
+  color: var(--color-text-primary);
+  font: inherit;
+}

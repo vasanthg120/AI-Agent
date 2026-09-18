@@ -1,10 +1,10 @@
 .page {
   padding: var(--space-6);
-  max-width: 860px;
-  margin: 0 auto;
+  height: 100%;
   display: flex;
   flex-direction: column;
   gap: var(--space-4);
+  overflow: hidden;
 }
 
 .header {
@@ -19,6 +19,51 @@
   font-size: var(--text-xl);
   font-weight: 800;
   color: var(--color-text-primary);
+}
+
+.statRow {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: var(--space-3);
+}
+
+@media (max-width: 720px) {
+  .statRow {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+.layout {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(320px, 420px) 1fr;
+  gap: var(--space-4);
+}
+
+@media (max-width: 900px) {
+  .layout {
+    grid-template-columns: 1fr;
+  }
+  /* On narrow screens the detail pane replaces the list entirely while a
+     conversation is open, rather than squeezing both into half-width
+     columns — .listColumn/.detailColumn below toggle via a data attribute
+     the component sets based on selection + viewport width. */
+  .layout[data-mobile-detail='true'] .listColumn {
+    display: none;
+  }
+  .layout[data-mobile-detail='false'] .detailColumn {
+    display: none;
+  }
+}
+
+.listColumn {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: var(--space-1);
 }
 
 .toolbar {
@@ -179,4 +224,91 @@
   padding: var(--space-10);
   color: var(--color-text-muted);
   text-align: center;
+}
+
+.detailColumn {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--color-border);
+  background: var(--color-bg-surface);
+  overflow: hidden;
+}
+
+.detailEmpty {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  color: var(--color-text-muted);
+  text-align: center;
+  padding: var(--space-8);
+}
+
+.detailHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  border-bottom: 1px solid var(--color-border);
+  flex-wrap: wrap;
+}
+
+.detailBackButton {
+  display: none;
+}
+
+@media (max-width: 900px) {
+  .detailBackButton {
+    display: inline-flex;
+  }
+}
+
+.detailTitleRow {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.detailTitle {
+  font-size: var(--text-base);
+  font-weight: 700;
+  color: var(--color-text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.detailMeta {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+}
+
+.detailActions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-shrink: 0;
+}
+
+.detailMessages {
+  flex: 1;
+  min-height: 0;
+}
+
+.confirmBody {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.confirmActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
 }

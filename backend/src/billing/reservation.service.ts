@@ -129,6 +129,23 @@ export class ReservationService {
     return { reservationId: reservation._id.toString(), estimatedCredits: ceiling, availableCredits: postReserveSummary.availableCredits };
   }
 
+  /** Extends a still-pending reservation's expiresAt — for a job whose real
+   * duration can exceed billing.reservationTimeoutMinutes (default 10m),
+   * e.g. call-copilot's upload-processing pipeline (Sarvam batch job +
+   * polling + several analysis passes). Without this, sweepExpiredReservations
+   * force-releases the reservation mid-flight, and the eventual settle()
+   * call silently charges zero for real spend already incurred (see that
+   * method's 'released' branch above). A no-op (not an error) if the
+   * reservation is already settled/released/missing — callers touch()
+   * opportunistically at progress milestones and shouldn't need their own
+   * status checks first. */
+  async touch(requestId: string, extendMinutes = 10): Promise<void> {
+    const reservation = await this.reservationModel.findOne({ requestId, status: 'pending' });
+    if (!reservation) return;
+    reservation.expiresAt = new Date(Date.now() + extendMinutes * 60_000);
+    await reservation.save();
+  }
+
   async settle(requestId: string): Promise<SettleResult> {
     const reservation = await this.reservationModel.findOne({ requestId });
     if (!reservation) {

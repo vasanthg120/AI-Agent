@@ -8,10 +8,15 @@ the existing chat pipeline's job for anything downstream of a transcript.
 """
 
 import base64
+import json
 import logging
+import os
+import tempfile
 from typing import Optional
 
 import requests
+from sarvamai import SarvamAI
+from sarvamai.speech_to_text_job.job import SpeechToTextJob
 
 from app.config import settings
 from app.memory import integration_store
@@ -190,3 +195,138 @@ def synthesize_speech(text: str, language: str, speaker: Optional[str] = None) -
         raise SarvamApiError("Unable to generate speech for this response. Please try again.", status_code=502)
 
     return base64.b64decode(audios[0])
+
+
+# --- Batch STT (uploaded call recordings) ---------------------------------
+#
+# transcribe_audio() above wraps the SYNCHRONOUS /speech-to-text endpoint,
+# which Sarvam's own docs describe as "for quick responses under 30 seconds"
+# — exactly right for a live call's ~7s segments, categorically wrong for a
+# 10-30+ minute uploaded recording. Sarvam's separate Batch STT API is built
+# for that case (files up to 2 hours, optional speaker diarization). Unlike
+# the sync endpoint above (a single well-documented REST call, hand-rolled
+# directly), the batch workflow's exact HTTP mechanics (a presigned-URL file
+# upload step) aren't documented in a way that's safe to hand-roll — this
+# uses Sarvam's own official `sarvamai` SDK instead, confirmed against its
+# actual installed source (not just docs) at implementation time:
+# SpeechToTextJobClient.create_job(...) -> SpeechToTextJob, whose
+# .upload_files(file_paths=[...]) takes real filesystem paths (hence the
+# temp-file write below — FastAPI's UploadFile arrives as bytes/a spooled
+# file, not a path), .start() kicks off processing, .get_status() and
+# .download_outputs(dir) are stateless-by-job_id (a fresh SpeechToTextJob(job_id,
+# client) instance in a LATER, separate request can call them — confirmed via
+# SpeechToTextJob.__init__(self, job_id, client) accepting just an id), which
+# is exactly what this app's create-job-then-poll-separately split needs
+# across two separate FastAPI requests.
+
+
+def _sarvam_sdk_client() -> SarvamAI:
+    return SarvamAI(api_subscription_key=_require_api_key())
+
+
+def start_batch_transcription(
+    file_bytes: bytes,
+    filename: str,
+    language: str,
+    *,
+    with_diarization: bool = True,
+    num_speakers: int = 2,
+) -> str:
+    """Creates a Sarvam batch STT job, uploads the recording, and starts
+    processing — returns immediately with a job_id once started; the actual
+    transcription runs asynchronously on Sarvam's side (routes/call_copilot.py's
+    caller polls get_batch_job_status separately, never blocking one HTTP
+    request for the job's full duration)."""
+    language_code = resolve_language_code(language)
+    client = _sarvam_sdk_client()
+
+    ext = os.path.splitext(filename)[1] or ".webm"
+    tmp_path = None
+    try:
+        with tempfile.NamedTemporaryFile(suffix=ext, delete=False) as tmp:
+            tmp.write(file_bytes)
+            tmp_path = tmp.name
+
+        try:
+            job = client.speech_to_text_job.create_job(
+                model="saaras:v4",
+                mode="transcribe",
+                language_code=language_code,
+                with_diarization=with_diarization,
+                num_speakers=num_speakers if with_diarization else None,
+            )
+            job.upload_files(file_paths=[tmp_path])
+            job.start()
+        except Exception as exc:  # noqa: BLE001 - any SDK/HTTP failure here is a real, user-facing Sarvam error
+            logger.warning("Sarvam batch STT job creation failed: %s", exc)
+            raise SarvamApiError("Could not start processing this recording. Please try again.", status_code=502) from exc
+
+        return job.job_id
+    finally:
+        if tmp_path and os.path.exists(tmp_path):
+            os.remove(tmp_path)
+
+
+def get_batch_job_status(job_id: str) -> dict:
+    """Returns {"state": "queued"|"processing"|"completed"|"failed", "errorMessage": str|None}.
+    Sarvam's own job_state values (confirmed via the SDK's JobStatusResponse
+    type) are "Accepted"/"Pending"/"Running"/"Completed"/"Failed" — normalized
+    to a smaller set here since the caller only needs to distinguish
+    not-done/done/failed, not Sarvam's internal queueing stages."""
+    client = _sarvam_sdk_client()
+    job = SpeechToTextJob(job_id=job_id, client=client.speech_to_text_job)
+    try:
+        status = job.get_status()
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Sarvam batch STT status check failed for job %s: %s", job_id, exc)
+        raise SarvamApiError("Could not check the recording's processing status.", status_code=502) from exc
+
+    state = (status.job_state or "").lower()
+    if state in ("accepted", "pending", "running"):
+        normalized = "processing"
+    elif state == "completed":
+        normalized = "completed"
+    elif state == "failed":
+        normalized = "failed"
+    else:
+        normalized = "processing"  # unknown/new Sarvam state — treat as still-in-progress, never silently "done"
+
+    return {"state": normalized, "errorMessage": status.error_message if normalized == "failed" else None}
+
+
+def download_batch_job_result(job_id: str) -> dict:
+    """Once get_batch_job_status(job_id) reports "completed": downloads the
+    output JSON and returns {"transcript": str, "entries": [{"text","speaker","startSeconds","endSeconds"}]}.
+    `entries` is the diarized breakdown (empty list if diarization wasn't
+    requested/available — caller falls back to the single `transcript` field
+    in that case)."""
+    client = _sarvam_sdk_client()
+    job = SpeechToTextJob(job_id=job_id, client=client.speech_to_text_job)
+
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        try:
+            job.download_outputs(tmp_dir)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Sarvam batch STT result download failed for job %s: %s", job_id, exc)
+            raise SarvamApiError("Could not retrieve the transcription result.", status_code=502) from exc
+
+        transcript_parts: list[str] = []
+        entries: list[dict] = []
+        for name in os.listdir(tmp_dir):
+            if not name.endswith(".json"):
+                continue
+            with open(os.path.join(tmp_dir, name), "r", encoding="utf-8") as f:
+                data = json.load(f)
+            transcript_parts.append(data.get("transcript") or "")
+            diarized = data.get("diarized_transcript") or {}
+            for entry in diarized.get("entries") or []:
+                entries.append(
+                    {
+                        "text": entry.get("transcript") or "",
+                        "speaker": entry.get("speaker_id"),
+                        "startSeconds": entry.get("start_time_seconds"),
+                        "endSeconds": entry.get("end_time_seconds"),
+                    }
+                )
+
+        return {"transcript": " ".join(p for p in transcript_parts if p), "entries": entries}
