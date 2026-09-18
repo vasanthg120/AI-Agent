@@ -55,6 +55,19 @@ export class ReservationService {
     private config: ConfigService,
   ) {}
 
+  /** Same per-user/per-org toggle as BillingController's private
+   * tenantKey() (see that file's comment) — the single source of truth for
+   * whether a wallet is scoped by the real organizationId or by the acting
+   * user's own id. Exposed here so callers that reserve() directly with a
+   * real organizationId (business knowledge, email intelligence, finance,
+   * customer activity) draw from the exact same wallet as chat and the
+   * Billing page — which, with BILLING_ORG_SCOPED_WALLETS left at its
+   * documented `false` default, is the per-user wallet — instead of a
+   * separate org-keyed wallet the Billing UI never shows or lets top up. */
+  resolveTenantKey(organizationId: string, userId: string): string {
+    return this.config.get<boolean>('billing.orgScopingEnabled') ? organizationId : userId;
+  }
+
   async reserve(organizationId: string, userId: string, requestId: string, conversationId: string): Promise<ReserveResult> {
     const existing = await this.reservationModel.findOne({ requestId });
     if (existing) {

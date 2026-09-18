@@ -7,6 +7,10 @@ export declare class DailyReportTask {
     category?: string;
     isOverdue: boolean;
     status: 'todo' | 'in_progress' | 'done';
+    relatedDealId?: string;
+    relatedQuoteId?: string;
+    relatedEmailId?: string;
+    assignedUserId?: string;
 }
 export declare class DailyReport {
     organizationId: string;
@@ -19,6 +23,9 @@ export declare class DailyReport {
     sourceConversationId: string;
     sourceUserId: string;
     wasMissed: boolean;
+    emailStatus: 'pending' | 'sent' | 'failed';
+    emailSentAt?: Date;
+    emailError?: string;
     createdAt: Date;
     updatedAt: Date;
 }

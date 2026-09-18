@@ -4,7 +4,7 @@ import toast from 'react-hot-toast';
 import { FiEye, FiEyeOff, FiLock, FiMail } from 'react-icons/fi';
 import { Button, Input } from '@/components/ui';
 import { useAdminAuthStore } from '@/stores/adminAuthStore';
-import { extractErrorMessage } from '@/utils/errors';
+import { extractLoginErrorMessage } from '@/utils/errors';
 import { ADMIN_ROUTES } from '@/constants/routes';
 import styles from './AdminSignInPage.module.css';
 
@@ -31,7 +31,7 @@ export function AdminSignInPage() {
       toast.success('Welcome back');
       navigate(ADMIN_ROUTES.dashboard, { replace: true });
     } catch (err) {
-      setError(extractErrorMessage(err));
+      setError(extractLoginErrorMessage(err));
     } finally {
       setSubmitting(false);
     }

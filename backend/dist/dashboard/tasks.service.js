@@ -24,6 +24,7 @@ const chat_service_1 = require("../chat/chat.service");
 const gamification_service_1 = require("../gamification/gamification.service");
 const timeline_service_1 = require("../timeline/timeline.service");
 const agent_scope_util_1 = require("./agent-scope.util");
+const task_visibility_util_1 = require("./task-visibility.util");
 const daily_report_schema_1 = require("./schemas/daily-report.schema");
 function todayStamp() {
     return new Date().toISOString().slice(0, 10);
@@ -47,8 +48,10 @@ let TasksService = class TasksService {
             .find({ organizationId: caller.organizationId, agentId: { $in: allowedAgentIds }, date: { $gte: from, $lte: to } })
             .lean()
             .exec();
+        const mineFilter = query.mine ?? true;
         const tasks = reports.flatMap((r) => r.tasks
             .filter((t) => !query.status || t.status === query.status)
+            .filter((t) => !mineFilter || (0, task_visibility_util_1.isTaskVisibleToUser)(t, caller.sub))
             .map((t) => ({
             id: t._id.toString(),
             title: t.title,
@@ -60,10 +63,11 @@ let TasksService = class TasksService {
             reportId: r._id.toString(),
             reportType: r.reportType,
             date: r.date,
+            assignedUserId: t.assignedUserId,
         })));
         return { tasks };
     }
-    async calendarSummary(month, caller) {
+    async calendarSummary(month, caller, mine = true) {
         const allowedAgentIds = await (0, agent_scope_util_1.resolveAllowedAgentIds)(this.chatService, caller);
         const reports = await this.reportModel
             .find({ organizationId: caller.organizationId, agentId: { $in: allowedAgentIds }, date: { $regex: `^${month}` } })
@@ -71,10 +75,11 @@ let TasksService = class TasksService {
             .exec();
         const byDate = new Map();
         for (const r of reports) {
+            const visibleTasks = mine ? r.tasks.filter((t) => (0, task_visibility_util_1.isTaskVisibleToUser)(t, caller.sub)) : r.tasks;
             const cur = byDate.get(r.date) ?? { reportCount: 0, taskCount: 0, hasUrgent: false };
             cur.reportCount += 1;
-            cur.taskCount += r.tasks.length;
-            cur.hasUrgent = cur.hasUrgent || r.tasks.some((t) => t.priority === 'urgent');
+            cur.taskCount += visibleTasks.length;
+            cur.hasUrgent = cur.hasUrgent || visibleTasks.some((t) => t.priority === 'urgent');
             byDate.set(r.date, cur);
         }
         return { month, days: [...byDate.entries()].map(([date, v]) => ({ date, ...v })) };

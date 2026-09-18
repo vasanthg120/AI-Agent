@@ -42,10 +42,6 @@ const EmailIntelligencePage = lazy(() =>
   import('@/features/email-intelligence/EmailIntelligencePage').then((m) => ({ default: m.EmailIntelligencePage })),
 );
 const FinancePage = lazy(() => import('@/features/finance/FinancePage').then((m) => ({ default: m.FinancePage })));
-const QuotesListPage = lazy(() => import('@/features/quotes/QuotesListPage').then((m) => ({ default: m.QuotesListPage })));
-const QuoteFormPage = lazy(() => import('@/features/quotes/QuoteFormPage').then((m) => ({ default: m.QuoteFormPage })));
-const QuoteDetailPage = lazy(() => import('@/features/quotes/QuoteDetailPage').then((m) => ({ default: m.QuoteDetailPage })));
-const ProductsPage = lazy(() => import('@/features/quotes/ProductsPage').then((m) => ({ default: m.ProductsPage })));
 const ReportingPage = lazy(() => import('@/features/reporting/ReportingPage').then((m) => ({ default: m.ReportingPage })));
 const TodoEodPage = lazy(() => import('@/features/todo-eod/TodoEodPage').then((m) => ({ default: m.TodoEodPage })));
 const ChatPage = lazy(() => import('@/features/chat/ChatPage').then((m) => ({ default: m.ChatPage })));
@@ -179,11 +175,6 @@ export function AppRoutes() {
                   so that flow keeps working; Settings → Integrations below is
                   the discoverable entry point now. */}
               <Route path={ROUTES.integrations} element={<IntegrationsPage />} />
-              <Route path={ROUTES.quotes} element={<QuotesListPage />} />
-              <Route path={ROUTES.quoteNew} element={<QuoteFormPage />} />
-              <Route path={ROUTES.quoteProducts} element={<ProductsPage />} />
-              <Route path="/quotes/:id/edit" element={<QuoteFormPage />} />
-              <Route path="/quotes/:id" element={<QuoteDetailPage />} />
               <Route path={ROUTES.billing} element={<BillingPage />} />
               <Route path={ROUTES.pricing} element={<PricingPage />} />
               <Route path={ROUTES.addCredits} element={<AddCreditsPage />} />

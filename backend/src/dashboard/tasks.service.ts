@@ -11,6 +11,7 @@ import { Achievement } from '../gamification/achievements';
 import { GamificationService } from '../gamification/gamification.service';
 import { TimelineService } from '../timeline/timeline.service';
 import { resolveAllowedAgentIds } from './agent-scope.util';
+import { isTaskVisibleToUser } from './task-visibility.util';
 import { DailyReport, DailyReportDocument } from './schemas/daily-report.schema';
 import { ListTasksQueryDto } from './dto/list-tasks-query.dto';
 
@@ -25,6 +26,10 @@ export interface TaskOut {
   reportId: string;
   reportType: 'morning' | 'eod';
   date: string;
+  // Additive — set only when dashboard.service.ts's recordDailyReport could
+  // resolve a real owner (see its attributeTask); undefined means the task
+  // stays shared/unassigned exactly as every task was before this existed.
+  assignedUserId?: string;
 }
 
 function todayStamp(): string {
@@ -67,9 +72,20 @@ export class TasksService {
       .lean()
       .exec();
 
+    // Default (mine omitted) is now the personal view — assigned-to-me or
+    // still-unassigned tasks only, enforced here server-side regardless of
+    // what the frontend sends, so a caller can never see another user's
+    // explicitly-assigned tasks just by leaving a query param off. An
+    // explicit mine=false is the only way to see the full shared board (the
+    // pre-existing behavior, still available — e.g. an owner/manager
+    // reviewing the whole store — never gated behind caller-supplied
+    // identity, only behind this one boolean).
+    const mineFilter = query.mine ?? true;
+
     const tasks = reports.flatMap((r) =>
       r.tasks
         .filter((t) => !query.status || t.status === query.status)
+        .filter((t) => !mineFilter || isTaskVisibleToUser(t, caller.sub))
         .map((t) => ({
           id: t._id.toString(),
           title: t.title,
@@ -81,12 +97,16 @@ export class TasksService {
           reportId: r._id.toString(),
           reportType: r.reportType,
           date: r.date,
+          assignedUserId: t.assignedUserId,
         })),
     );
     return { tasks };
   }
 
-  async calendarSummary(month: string, caller: JwtPayload) {
+  // mine defaults to true (same reasoning as list() above) — the calendar
+  // heatmap's counts now reflect the viewer's own board by default, matching
+  // whatever they'd actually see if they clicked into that day.
+  async calendarSummary(month: string, caller: JwtPayload, mine = true) {
     const allowedAgentIds = await resolveAllowedAgentIds(this.chatService, caller);
     const reports = await this.reportModel
       .find({ organizationId: caller.organizationId, agentId: { $in: allowedAgentIds }, date: { $regex: `^${month}` } })
@@ -95,10 +115,11 @@ export class TasksService {
 
     const byDate = new Map<string, { reportCount: number; taskCount: number; hasUrgent: boolean }>();
     for (const r of reports) {
+      const visibleTasks = mine ? r.tasks.filter((t) => isTaskVisibleToUser(t, caller.sub)) : r.tasks;
       const cur = byDate.get(r.date) ?? { reportCount: 0, taskCount: 0, hasUrgent: false };
       cur.reportCount += 1;
-      cur.taskCount += r.tasks.length;
-      cur.hasUrgent = cur.hasUrgent || r.tasks.some((t) => t.priority === 'urgent');
+      cur.taskCount += visibleTasks.length;
+      cur.hasUrgent = cur.hasUrgent || visibleTasks.some((t) => t.priority === 'urgent');
       byDate.set(r.date, cur);
     }
     return { month, days: [...byDate.entries()].map(([date, v]) => ({ date, ...v })) };

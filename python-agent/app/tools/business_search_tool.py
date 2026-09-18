@@ -69,6 +69,13 @@ def run(tool_input: dict, context: dict) -> str:
         source = "all"
     user_id = context.get("user_id", "")
     organization_id = context.get("organization_id")
+    # Internal-only, never LLM-controlled (tool_input has no such property in
+    # its schema above, so a live chat tool call can never set this) — the
+    # scheduled report path sets it in its own context dict so a task can
+    # optionally be tied back to a real CRM record id (see
+    # crew_reports.py/REPORT_EXTRACTION_TOOL). Every other caller (live chat)
+    # never sets it, so their formatted output is byte-identical to before.
+    include_record_ids = bool(context.get("include_record_ids"))
 
     # Mem0-backed memories (app.memory.mem0_client) live in their own Qdrant
     # collection, separate from the hybrid_search-driven lookup below —
@@ -117,7 +124,12 @@ def run(tool_input: dict, context: dict) -> str:
             # [n] markers are a citation convention (see app.agent.llm_client's
             # SYSTEM_PROMPT) — the model is instructed to keep them next to the
             # claims they support in its final answer.
-            lines = [f"({h.get('source_type')}) {compression.compress(query, h.get('text', ''))}" for h in hits]
+            lines = []
+            for h in hits:
+                label = h.get("source_type")
+                if include_record_ids and h.get("record_id"):
+                    label = f"{label}, id={h.get('record_id')}"
+                lines.append(f"({label}) {compression.compress(query, h.get('text', ''))}")
 
     lines.extend(f"(memory) {text}" for text in memory_hits)
     if not lines:

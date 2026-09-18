@@ -9,12 +9,25 @@ import { firstValueFrom } from 'rxjs';
 import { ReservationService } from '../billing/reservation.service';
 import { ChatService } from '../chat/chat.service';
 import { JwtPayload } from '../auth/jwt-payload.interface';
+import { Deal, DealDocument } from '../crm/schemas/deal.schema';
+import { Quote, QuoteDocument } from '../crm/schemas/quote.schema';
+import { EmailIntelligenceItem, EmailIntelligenceItemDocument } from '../email-intelligence/schemas/email-intelligence-item.schema';
 import { resolveAllowedAgentIds } from './agent-scope.util';
-import { DailyReport, DailyReportDocument, DailyReportTask } from './schemas/daily-report.schema';
+import { DailyReport, DailyReportDocument } from './schemas/daily-report.schema';
+
+interface GenerateReportTask {
+  title: string;
+  priority: 'urgent' | 'high' | 'medium' | 'low';
+  category?: string;
+  isOverdue: boolean;
+  relatedDealId?: string;
+  relatedQuoteId?: string;
+  relatedEmailId?: string;
+}
 
 interface GenerateReportResult {
   reply: string;
-  tasks: DailyReportTask[];
+  tasks: GenerateReportTask[];
   summary: string;
 }
 
@@ -28,6 +41,9 @@ export class DashboardService {
 
   constructor(
     @InjectModel(DailyReport.name) private reportModel: Model<DailyReportDocument>,
+    @InjectModel(Deal.name) private dealModel: Model<DealDocument>,
+    @InjectModel(Quote.name) private quoteModel: Model<QuoteDocument>,
+    @InjectModel(EmailIntelligenceItem.name) private emailModel: Model<EmailIntelligenceItemDocument>,
     private http: HttpService,
     private config: ConfigService,
     private jwt: JwtService,
@@ -55,6 +71,11 @@ export class DashboardService {
     conversationId: string;
     userId: string;
     wasMissed?: boolean;
+    // Optional — the full store roster, forwarded to python-agent only so it
+    // can pull each connected user's Outlook calendar as extra report
+    // context (see crew_reports.py's _fetch_meetings_context). Omitted is
+    // identical to pre-existing behavior (no calendar section).
+    userIds?: string[];
   }) {
     // Billed like business-knowledge-chat.service.ts's ask() — reserve() is
     // a hard stop before the crew's LLM calls run. This is invoked once per
@@ -63,7 +84,7 @@ export class DashboardService {
     // next store — an insufficient-balance org's report is skipped for that
     // run, never blocking the sweep for anyone else.
     const requestId = randomUUID();
-    await this.reservations.reserve(input.organizationId, input.userId, requestId, 'scheduled-report');
+    await this.reservations.reserve(this.reservations.resolveTenantKey(input.organizationId, input.userId), input.userId, requestId, 'scheduled-report');
 
     // Previously omitted organizationId (unlike every other python-agent
     // bridge token in this codebase) — needed both for python-agent's
@@ -75,7 +96,7 @@ export class DashboardService {
       const response = await firstValueFrom(
         this.http.post<GenerateReportResult>(
           `${this.agentUrl}/reports/generate`,
-          { report_type: input.reportType, request_id: requestId },
+          { report_type: input.reportType, request_id: requestId, user_ids: input.userIds ?? [] },
           { headers: { Authorization: `Bearer ${userJwt}` } },
         ),
       );
@@ -85,6 +106,8 @@ export class DashboardService {
       await this.reservations.release(requestId);
       throw err;
     }
+
+    const tasks = await Promise.all(data.tasks.map((task) => this.attributeTask(task, input.organizationId)));
 
     return this.reportModel
       .findOneAndUpdate(
@@ -96,7 +119,7 @@ export class DashboardService {
           date: input.date,
         },
         {
-          tasks: data.tasks,
+          tasks,
           summary: data.summary,
           sourceConversationId: input.conversationId,
           sourceUserId: input.userId,
@@ -104,6 +127,53 @@ export class DashboardService {
         },
         { upsert: true, new: true },
       )
+      .exec();
+  }
+
+  /** Best-effort, deterministic per-task attribution (never AI-trusted): if
+   * the report-extraction step tied a task to a specific deal/quote/email it
+   * was given in its research context, resolve that id to its real owner
+   * here via a plain findOne — same organizationId-scoped lookup
+   * DealsService/QuotesService already do, just called directly (see
+   * dashboard.module.ts for why Deal/Quote/EmailIntelligenceItem models are
+   * registered here rather than importing CrmModule/EmailIntelligenceModule).
+   * A stale/invalid id, or no id at all, just leaves the task unassigned —
+   * it stays visible on the shared board exactly as before this was added,
+   * never dropped and never blocks the report. Checked in this order
+   * (deal, quote, email) and stops at the first match — a task is never
+   * expected to reference more than one kind of record. */
+  private async attributeTask(task: GenerateReportTask, organizationId: string): Promise<GenerateReportTask & { assignedUserId?: string }> {
+    const { relatedDealId, relatedQuoteId, relatedEmailId, ...rest } = task;
+    try {
+      if (relatedDealId) {
+        const deal = await this.dealModel.findOne({ _id: relatedDealId, organizationId }).exec();
+        if (deal?.ownerId) return { ...rest, relatedDealId, assignedUserId: deal.ownerId };
+      }
+      if (relatedQuoteId) {
+        const quote = await this.quoteModel.findOne({ _id: relatedQuoteId, organizationId }).exec();
+        if (quote?.ownerUserId) return { ...rest, relatedQuoteId, assignedUserId: quote.ownerUserId };
+      }
+      if (relatedEmailId) {
+        // Keyed by externalMessageId (the raw Outlook message id, what the
+        // research context/AI actually sees), never EmailIntelligenceItem's
+        // own Mongo _id — a different id space the AI has no way to know.
+        const email = await this.emailModel.findOne({ organizationId, externalMessageId: relatedEmailId }).exec();
+        if (email?.userId) return { ...rest, relatedEmailId, assignedUserId: email.userId };
+      }
+    } catch {
+      // Invalid ObjectId string, or any lookup failure — fall through to
+      // unassigned rather than failing the whole report over one bad id.
+    }
+    return { ...rest, relatedDealId, relatedQuoteId, relatedEmailId };
+  }
+
+  /** The "mark emailSent" step store-settings.service.ts's sendEodEmail asks
+   * for — keyed on the report's own _id (already unique), so calling this
+   * twice for the same report just overwrites the same status/timestamp
+   * rather than creating any duplicate anything. */
+  async markReportEmailStatus(reportId: string, status: 'sent' | 'failed', error?: string): Promise<void> {
+    await this.reportModel
+      .findByIdAndUpdate(reportId, { $set: { emailStatus: status, emailSentAt: status === 'sent' ? new Date() : undefined, emailError: error } })
       .exec();
   }
 

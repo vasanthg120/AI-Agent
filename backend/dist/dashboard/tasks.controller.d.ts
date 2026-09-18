@@ -12,7 +12,7 @@ export declare class TasksController {
     list(query: ListTasksQueryDto, user: JwtPayload): Promise<{
         tasks: import("./tasks.service").TaskOut[];
     }>;
-    calendar(month: string, user: JwtPayload): Promise<{
+    calendar(month: string, mine: string | undefined, user: JwtPayload): Promise<{
         month: string;
         days: {
             reportCount: number;

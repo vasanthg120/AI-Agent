@@ -69,7 +69,7 @@ export class FinanceSummaryService {
     // action (already throttled at the controller), so a 402 propagates
     // straight through to the HTTP response, same as chat's existing shape.
     const requestId = randomUUID();
-    await this.reservations.reserve(caller.organizationId, caller.sub, requestId, 'finance-summary');
+    await this.reservations.reserve(this.reservations.resolveTenantKey(caller.organizationId, caller.sub), caller.sub, requestId, 'finance-summary');
     let result: Record<string, unknown>;
     try {
       const token = this.jwt.sign({ sub: caller.sub, organizationId: caller.organizationId }, { expiresIn: '5m' });

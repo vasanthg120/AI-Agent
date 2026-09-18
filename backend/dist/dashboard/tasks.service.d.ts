@@ -20,6 +20,7 @@ export interface TaskOut {
     reportId: string;
     reportType: 'morning' | 'eod';
     date: string;
+    assignedUserId?: string;
 }
 export interface TaskRecommendation {
     taskId: string;
@@ -38,7 +39,7 @@ export declare class TasksService {
     list(query: ListTasksQueryDto, caller: JwtPayload): Promise<{
         tasks: TaskOut[];
     }>;
-    calendarSummary(month: string, caller: JwtPayload): Promise<{
+    calendarSummary(month: string, caller: JwtPayload, mine?: boolean): Promise<{
         month: string;
         days: {
             reportCount: number;

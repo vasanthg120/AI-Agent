@@ -681,6 +681,18 @@ REPORT_EXTRACTION_TOOL = {
                         "priority": {"type": "string", "enum": ["urgent", "high", "medium", "low"]},
                         "category": {"type": "string"},
                         "isOverdue": {"type": "boolean"},
+                        "relatedDealId": {
+                            "type": "string",
+                            "description": "Only when the reply text names a specific deal id it was given in its research context. Never invent one.",
+                        },
+                        "relatedQuoteId": {
+                            "type": "string",
+                            "description": "Only when the reply text names a specific quote id it was given in its research context. Never invent one.",
+                        },
+                        "relatedEmailId": {
+                            "type": "string",
+                            "description": "Only when the reply text names a specific Outlook email id it was given in its research context. Never invent one.",
+                        },
                     },
                     "required": ["title", "priority", "isOverdue"],
                 },
@@ -696,9 +708,12 @@ agent's already-written daily report reply (a morning to-do list or end-of-day s
 Parse what the reply actually says — do not invent new tasks or re-analyze underlying data. \
 Assign priority using explicit language cues ("urgent"/"ASAP"/"overdue"/"immediately" → \
 urgent; "today"/"before close" → high; otherwise medium/low). Mark isOverdue true only for \
-items the reply explicitly describes as overdue/late/missed. If the reply has no actionable \
-items, return an empty tasks array and a one-line summary explaining why. Always call \
-extract_report_structure exactly once."""
+items the reply explicitly describes as overdue/late/missed. Include relatedDealId, \
+relatedQuoteId, or relatedEmailId on a task only when the reply text itself states that \
+record's id (as given in the research context it was written from) — never guess or \
+fabricate an id, and omit the field entirely when no specific record is named. If the reply \
+has no actionable items, return an empty tasks array and a one-line summary explaining why. \
+Always call extract_report_structure exactly once."""
 
 
 def extract_report_structure(prose_reply: str, report_type: str) -> dict:

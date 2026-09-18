@@ -33,16 +33,59 @@
   border-bottom: none;
 }
 
+.table tbody tr:hover td {
+  background: var(--color-bg-hover);
+}
+
 .defaultHint {
   font-size: var(--text-xs);
   color: var(--color-text-muted);
+}
+
+/* Response Time Policies — one card per priority instead of a cramped,
+   horizontally-scrolling table row, so every field gets room to breathe and
+   the page reads sensibly on a narrow viewport too. */
+.policyGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: var(--space-4);
+}
+
+.policyCard {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border);
+  background: var(--color-bg-surface);
+}
+
+.policyCardHeader {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  text-transform: capitalize;
+}
+
+.policySwitches {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding-top: var(--space-1);
+  border-top: 1px solid var(--color-border);
+}
+
+.policyCardFooter {
+  display: flex;
+  justify-content: flex-end;
 }
 
 .hoursGrid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   gap: var(--space-3);
-  margin-bottom: var(--space-4);
+  margin-bottom: var(--space-2);
 }
 
 .field {
@@ -73,12 +116,33 @@
   color: var(--color-text-secondary);
   font-size: var(--text-sm);
   cursor: pointer;
+  transition: background var(--duration-fast, 120ms) var(--ease-out, ease), border-color var(--duration-fast, 120ms) var(--ease-out, ease);
+}
+
+.dayChip:hover {
+  background: var(--color-bg-hover);
 }
 
 .dayChipActive {
   background: var(--brand-accent-primary);
   border-color: var(--brand-accent-primary);
   color: var(--color-text-on-accent, #fff);
+}
+
+/* Live, plain-English readout of the business-hours draft above the Save
+   button — lets an admin sanity-check the combination before saving instead
+   of mentally re-assembling five separate fields. */
+.summaryBar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+  margin-bottom: var(--space-3);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-surface);
+  border: 1px solid var(--color-border);
+  color: var(--color-text-secondary);
+  font-size: var(--text-sm);
 }
 
 .footer {
@@ -93,17 +157,51 @@
   color: var(--color-text-muted);
 }
 
-.newRuleRow {
+.table .emptyState {
   display: flex;
   align-items: center;
-  gap: var(--space-3);
+  justify-content: center;
+  gap: var(--space-2);
+}
+
+.newRuleCard {
   margin-top: var(--space-4);
+  padding: var(--space-4);
+  border-radius: var(--radius-md);
+  border: 1px dashed var(--color-border-strong);
+}
+
+.newRuleTitle {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  margin-bottom: var(--space-3);
+}
+
+.newRuleRow {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--space-3);
   flex-wrap: wrap;
+}
+
+.newRuleRow > * {
+  flex: 1 1 160px;
+  min-width: 160px;
+}
+
+.newRuleAction {
+  flex: 0 0 auto;
+  min-width: 0;
+  padding-bottom: 2px;
 }
 
 .select {
   height: 44px;
-  min-width: 140px;
+  width: 100%;
   padding: 0 var(--space-4);
   border-radius: var(--radius-md);
   border: 1px solid var(--color-border-strong);

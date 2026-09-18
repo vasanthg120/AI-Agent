@@ -22,6 +22,7 @@ export declare class NotificationsService {
         __v: number;
     }>;
     private dispatchExternalChannels;
+    resolveEmailRecipient(userId: string, organizationId?: string): Promise<string | null>;
     list(userId: string): Promise<(import("mongoose").Document<unknown, {}, NotificationDocument, {}, {}> & Notification & import("mongoose").Document<import("mongoose").Types.ObjectId, any, any, Record<string, any>, {}> & Required<{
         _id: import("mongoose").Types.ObjectId;
     }> & {

@@ -18,6 +18,16 @@ class ReportTask(BaseModel):
     priority: str
     category: str | None = None
     isOverdue: bool = False
+    # Optional, best-effort — only set when the report reply explicitly ties
+    # a task to a specific deal/quote/email it was given in its research
+    # context (see REPORT_EXTRACTION_TOOL). NestJS resolves these to a real
+    # assignedUserId deterministically (a direct, read-only Deal/Quote/
+    # EmailIntelligenceItem model lookup — see dashboard.service.ts's
+    # attributeTask); never trusted as an id by itself, and never used to
+    # invent a user id here or in the LLM.
+    relatedDealId: str | None = None
+    relatedQuoteId: str | None = None
+    relatedEmailId: str | None = None
 
 
 class StructureReportResponse(BaseModel):
@@ -33,6 +43,11 @@ def structure_report(payload: StructureReportRequest, user: dict = Depends(get_c
 class GenerateReportRequest(BaseModel):
     report_type: str
     request_id: str = ""
+    # Optional — the full store roster, used only to pull each connected
+    # user's Outlook calendar as extra reference context (see
+    # crew_reports.py's _fetch_meetings_context). Omitted/empty means no
+    # calendar section, identical to pre-existing behavior.
+    user_ids: list[str] = []
 
 
 class GenerateReportResponse(BaseModel):
@@ -55,6 +70,7 @@ def generate_report(payload: GenerateReportRequest, user: dict = Depends(get_cur
         organization_id=user.get("organizationId"),
         user_id=user.get("sub", ""),
         request_id=payload.request_id,
+        user_ids=payload.user_ids,
     )
     structured = extract_report_structure(reply, payload.report_type)
     return GenerateReportResponse(reply=reply, **structured)

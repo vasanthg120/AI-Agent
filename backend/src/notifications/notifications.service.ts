@@ -52,16 +52,16 @@ export class NotificationsService {
     notification: NotificationDocument,
   ): Promise<void> {
     try {
+      const email = await this.resolveEmailRecipient(userId, organizationId);
+      if (email) {
+        void this.mailService.sendNotificationEmail(email, notification.title, notification.description);
+      }
       const user = await this.usersService.findById(userId);
       if (!user) return;
       const orgPolicy = organizationId
         ? await this.organizationsService.getNotificationPolicy(organizationId)
         : DEFAULT_POLICY;
       const prefs = user.notificationPreferences ?? DEFAULT_PREFS;
-
-      if (prefs.email && orgPolicy.emailEnabled) {
-        void this.mailService.sendNotificationEmail(user.email, notification.title, notification.description);
-      }
       if ((prefs.desktopPush || prefs.mobilePush) && orgPolicy.pushEnabled) {
         void this.webPushService.sendToUser(
           userId,
@@ -72,6 +72,22 @@ export class NotificationsService {
     } catch (err) {
       this.logger.warn(`Failed to dispatch external notification channels: ${(err as Error).message}`);
     }
+  }
+
+  /** Extracted from dispatchExternalChannels' own inline check (same
+   * behavior, not a new policy) so a caller that needs to send something
+   * other than the generic notification-email template (e.g.
+   * store-settings.service.ts's EOD report email) can reuse the exact same
+   * "is this user actually eligible for email" decision instead of
+   * duplicating the preference/policy lookup. Returns the user's email only
+   * when both the user's own preference and the org's policy allow it —
+   * null otherwise (no connection, no email set, or opted out). */
+  async resolveEmailRecipient(userId: string, organizationId?: string): Promise<string | null> {
+    const user = await this.usersService.findById(userId);
+    if (!user) return null;
+    const orgPolicy = organizationId ? await this.organizationsService.getNotificationPolicy(organizationId) : DEFAULT_POLICY;
+    const prefs = user.notificationPreferences ?? DEFAULT_PREFS;
+    return prefs.email && orgPolicy.emailEnabled ? user.email : null;
   }
 
   list(userId: string) {

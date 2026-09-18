@@ -33,8 +33,8 @@ let TasksController = class TasksController {
     list(query, user) {
         return this.tasksService.list(query, user);
     }
-    calendar(month, user) {
-        return this.tasksService.calendarSummary(month, user);
+    calendar(month, mine, user) {
+        return this.tasksService.calendarSummary(month, user, mine === undefined ? undefined : mine === 'true');
     }
     recommendations(user) {
         return this.tasksService.getRecommendations(user);
@@ -75,9 +75,10 @@ __decorate([
 __decorate([
     (0, common_1.Get)('calendar'),
     __param(0, (0, common_1.Query)('month')),
-    __param(1, (0, current_user_decorator_1.CurrentUser)()),
+    __param(1, (0, common_1.Query)('mine')),
+    __param(2, (0, current_user_decorator_1.CurrentUser)()),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", [String, Object]),
+    __metadata("design:paramtypes", [String, Object, Object]),
     __metadata("design:returntype", void 0)
 ], TasksController.prototype, "calendar", null);
 __decorate([

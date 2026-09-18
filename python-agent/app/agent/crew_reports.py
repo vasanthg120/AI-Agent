@@ -23,15 +23,11 @@ entirely while fetching the same context the old single-agent flow did.
 from app.agent.anthropic_client import _resolve_api_key
 from app.agent.personas import STORE_MANAGER_PROMPT
 from app.config import settings
+from app.memory import outlook_store
 from app.observability.tracing import traced_llm_call
-from app.tools import business_search_tool
+from app.tools import business_search_tool, calendar_tool
 from app.tools.registry import execute_tool
 from crewai import Agent, Crew, LLM, Process, Task
-
-# No real user is driving this - it's a scheduled job gathering business-wide
-# context. user_id="*" matches how CRM records (shared, no owner) are
-# already tagged in the vector store (see business_search_tool.py).
-_REPORT_CONTEXT = {"user_id": "*", "conversation_id": "scheduled-report"}
 
 REPORT_PROMPTS = {
     "morning": (
@@ -45,9 +41,58 @@ REPORT_PROMPTS = {
 }
 
 
-def _fetch_research_context(report_type: str) -> str:
+def _fetch_research_context(report_type: str, organization_id: str | None) -> str:
+    # user_id="*" matches how CRM/Outlook records (shared, no single owner)
+    # are already tagged in the vector store (see business_search_tool.py).
+    # organization_id is forwarded (previously omitted) so the org-scoped
+    # filter branch in business_search_tool.py actually activates for this
+    # scheduled path, matching the live chat path's own scoping — without
+    # it, CRM/Outlook retrieval here fell back to an org-unaware match.
     query = f"Generate {REPORT_PROMPTS[report_type]}"
-    return execute_tool("search_business_context", {"query": query}, _REPORT_CONTEXT)
+    context = {
+        "user_id": "*",
+        "conversation_id": "scheduled-report",
+        "organization_id": organization_id,
+        # Only this scheduled path opts into record ids appearing in the
+        # returned text (see business_search_tool.py) — live chat never sets
+        # this, so its own output is unaffected. Lets the writer optionally
+        # preserve a deal/quote id in its prose, which the later
+        # extract_report_structure pass can then attach to a task.
+        "include_record_ids": True,
+    }
+    return execute_tool("search_business_context", {"query": query}, context)
+
+
+def _fetch_meetings_context(user_ids: list[str]) -> str:
+    """Best-effort calendar snapshot — reuses the existing calendar_tool.py
+    (live Outlook Calendar via MS Graph) exactly as the interactive chat path
+    already does, never a second calendar integration. Silently skips any
+    user with no connected Outlook token (calendar_tool.py's own convention).
+
+    Unlike the CRM/Outlook-email research above, this is fed to the crew as
+    a distinctly-labeled section with its own evidence bar (see the
+    prioritizer's task description below): a meeting existing is NOT itself
+    grounds for a task — only genuine preparation needs or an explicit,
+    stated follow-up are. This keeps every calendar entry from turning into
+    a meaningless "attend meeting X" task."""
+    lines: list[str] = []
+    for user_id in user_ids:
+        # The whole per-user attempt is guarded, not just the calendar call —
+        # get_valid_access_token() itself can raise (e.g. a token-refresh
+        # request failing for a reason other than a revoked grant, which is
+        # the only case it handles internally) and this section must never
+        # take the scheduled report down over one user's stale connection.
+        try:
+            if not outlook_store.get_valid_access_token(user_id):
+                continue
+            events = calendar_tool.run({"action": "list_events"}, {"user_id": user_id})
+        except Exception:
+            continue
+        if events and "No upcoming events found." not in events:
+            lines.append(f"- {events}")
+    if not lines:
+        return ""
+    return "\n\nUpcoming Outlook calendar events for staff at this store:\n" + "\n".join(lines)
 
 
 def _make_llm() -> LLM:
@@ -58,7 +103,12 @@ def _make_llm() -> LLM:
 
 
 def run_report_crew(
-    report_type: str, *, organization_id: str | None = None, user_id: str = "", request_id: str = ""
+    report_type: str,
+    *,
+    organization_id: str | None = None,
+    user_id: str = "",
+    request_id: str = "",
+    user_ids: list[str] | None = None,
 ) -> str:
     """Runs the prioritize -> write crew synchronously (mirrors the existing
     synchronous /chat route - no new async pattern needed) over pre-fetched
@@ -75,11 +125,17 @@ def run_report_crew(
     aggregates prompt/completion tokens across both agents' calls, which is
     exactly as accurate as this feature can honestly report (per-agent
     attribution isn't exposed by this CrewAI version) and is billed as one
-    combined "scheduled_report" execution rather than two separate ones."""
+    combined "scheduled_report" execution rather than two separate ones.
+
+    user_ids (the full store roster, optional/best-effort) is used only to
+    pull each connected user's Outlook calendar as extra context — never
+    passed to search_business_context, and never required (defaults to no
+    calendar section at all, matching pre-existing behavior)."""
     if report_type not in REPORT_PROMPTS:
         raise ValueError(f"Unknown report_type: {report_type}")
 
-    research_context = _fetch_research_context(report_type)
+    research_context = _fetch_research_context(report_type, organization_id)
+    research_context += _fetch_meetings_context(user_ids or [])
     llm = _make_llm()
 
     prioritizer = Agent(
@@ -104,15 +160,26 @@ def run_report_crew(
         description=(
             f"Generate {REPORT_PROMPTS[report_type]}\n\n"
             f"Here is the raw research pulled from CRM and Outlook:\n\n{research_context}\n\n"
-            "Rank it into urgent/high/medium/low priorities, flagging anything overdue."
+            "Rank it into urgent/high/medium/low priorities, flagging anything overdue. "
+            "Some research lines are tagged with an id (e.g. 'crm_deal, id=...'/'crm_quote, id=...'/"
+            "'outlook_email, id=...') — when an action item clearly comes from one of those specific "
+            "records, keep that id next to it so it isn't lost; never invent one for items that don't "
+            "have one.\n\n"
+            "Calendar events (if any appear above) are a SEPARATE, higher evidence bar: do not create "
+            "an action item just because a meeting exists. Only include one when there's a concrete, "
+            "stated reason — e.g. it's an external customer meeting today that plainly needs "
+            "preparation, or the research/summary elsewhere already says a follow-up from a past "
+            "meeting is outstanding. A routine internal sync or a meeting with no other supporting "
+            "context is not itself an action item."
         ),
-        expected_output="A prioritized bullet list of concrete action items with priority labels.",
+        expected_output="A prioritized bullet list of concrete action items with priority labels, preserving any deal/quote/email ids the research provided, and free of meeting-existence-only items.",
         agent=prioritizer,
     )
     write_task = Task(
         description=(
             "Write the final report for the store team in a concise, direct tone - lead with the "
-            "most important items, use short bullet points, no more than a few sentences of framing."
+            "most important items, use short bullet points, no more than a few sentences of framing. "
+            "Keep any deal/quote/email id the prioritized list attached to an item exactly as given."
         ),
         expected_output="The final prose report ready to send to the store team.",
         agent=writer,

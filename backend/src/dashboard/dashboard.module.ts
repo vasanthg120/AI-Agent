@@ -12,10 +12,29 @@ import { TasksController } from './tasks.controller';
 import { TasksService } from './tasks.service';
 import { TasksExportService } from './tasks-export.service';
 import { DailyReport, DailyReportSchema } from './schemas/daily-report.schema';
+import { Deal, DealSchema } from '../crm/schemas/deal.schema';
+import { Quote, QuoteSchema } from '../crm/schemas/quote.schema';
+import { EmailIntelligenceItem, EmailIntelligenceItemSchema } from '../email-intelligence/schemas/email-intelligence-item.schema';
 
 @Module({
   imports: [
-    MongooseModule.forFeature([{ name: DailyReport.name, schema: DailyReportSchema }]),
+    // Deal/Quote/EmailIntelligenceItem models are registered directly here
+    // (read-only lookups in DashboardService, resolving a report task's
+    // relatedDealId/relatedQuoteId/relatedEmailId to its real owner) rather
+    // than importing CrmModule/EmailIntelligenceModule — CrmModule already
+    // imports DashboardModule itself, so importing it back would be a
+    // circular module dependency (EmailIntelligenceModule doesn't import
+    // DashboardModule, but registering it the same way keeps both consistent
+    // and equally zero-coupled). Registering the same schema in a second
+    // module is a normal, independent Mongoose/Nest pattern with no coupling
+    // to either module's own providers/controllers — no CRM or Email
+    // Intelligence file is touched by this.
+    MongooseModule.forFeature([
+      { name: DailyReport.name, schema: DailyReportSchema },
+      { name: Deal.name, schema: DealSchema },
+      { name: Quote.name, schema: QuoteSchema },
+      { name: EmailIntelligenceItem.name, schema: EmailIntelligenceItemSchema },
+    ]),
     // recordDailyReport() calls /reports/generate, which runs a multi-step
     // CrewAI crew (prioritize -> write, each its own LLM call) before
     // structuring the result — chained calls, so it needs at least as much

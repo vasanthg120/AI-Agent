@@ -6,7 +6,6 @@ import {
   FiClock,
   FiCreditCard,
   FiDollarSign,
-  FiFileText,
   FiInbox,
   FiMessageSquare,
   FiMic,
@@ -70,16 +69,6 @@ export const NAV_GROUPS: NavGroup[] = [
         path: ROUTES.commandCenter,
         icon: FiTerminal,
         hideForRoles: ['agent_user', 'user', 'manager', 'consultant'],
-      },
-      {
-        id: 'quotes',
-        label: 'Quotes',
-        path: ROUTES.quotes,
-        icon: FiFileText,
-        // Read access matches QuotesController's own tier (owner/admin/
-        // manager/consultant); only agent_user/user have no reason to see
-        // sales quotes.
-        hideForRoles: ['agent_user', 'user'],
       },
       {
         id: 'finance',

@@ -1,7 +1,8 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import * as nodemailer from 'nodemailer';
-import { notificationEmail, passwordResetOtp, twoFactorEnabledEmail, verifyEmailOtp, welcomeEmail } from './templates';
+import { dailyReportEmail, notificationEmail, passwordResetOtp, twoFactorEnabledEmail, verifyEmailOtp, welcomeEmail } from './templates';
+import type { DailyReportEmailTask } from './templates';
 
 // Fire-and-forget by design, same fail-open shape as RedisCacheService
 // (see common/redis/redis-cache.service.ts): an unreachable/misconfigured
@@ -79,5 +80,33 @@ export class MailService {
   sendTwoFactorEnabledEmail(to: string): Promise<void> {
     const { subject, html } = twoFactorEnabledEmail();
     return this.send(to, subject, html);
+  }
+
+  // Unlike every sendXxx above (fire-and-forget, Promise<void>), the caller
+  // here (store-settings.service.ts) needs to know whether the send actually
+  // succeeded so it can set DailyReport.emailStatus correctly — hence a
+  // separate boolean-returning method rather than changing the shared,
+  // already-fire-and-forget send()'s contract for its 5 existing callers.
+  async sendDailyReportEmail(
+    to: string,
+    storeName: string,
+    reportType: 'morning' | 'eod',
+    date: string,
+    tasks: DailyReportEmailTask[],
+    summary: string,
+  ): Promise<boolean> {
+    const { subject, html } = dailyReportEmail(storeName, reportType, date, tasks, summary);
+    if (!this.transporter) {
+      this.logger.warn(`Email suppressed (SMTP not configured): "${subject}" -> ${to}`);
+      return false;
+    }
+    try {
+      const info = await this.transporter.sendMail({ from: this.from, to, subject, html });
+      this.logger.log(`Email "${subject}" -> ${to} accepted by SMTP server (${info.response})`);
+      return true;
+    } catch (err) {
+      this.logger.error(`Failed to send email "${subject}" to ${to}: ${(err as Error).message}`);
+      return false;
+    }
   }
 }

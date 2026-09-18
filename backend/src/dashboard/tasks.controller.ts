@@ -24,8 +24,8 @@ export class TasksController {
   }
 
   @Get('calendar')
-  calendar(@Query('month') month: string, @CurrentUser() user: JwtPayload) {
-    return this.tasksService.calendarSummary(month, user);
+  calendar(@Query('month') month: string, @Query('mine') mine: string | undefined, @CurrentUser() user: JwtPayload) {
+    return this.tasksService.calendarSummary(month, user, mine === undefined ? undefined : mine === 'true');
   }
 
   // Registered before ':id' for the same reason 'calendar'/'export' are —

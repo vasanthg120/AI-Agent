@@ -14,6 +14,10 @@ export interface TodoTask {
   reportId: string;
   reportType: 'morning' | 'eod';
   date: string;
+  // Additive — set only when the backend could resolve a task to a real
+  // owner (see dashboard.service.ts's attributeTask). Undefined means
+  // shared/unassigned, exactly like every task before this existed.
+  assignedUserId?: string;
 }
 
 export interface CalendarDaySummary {
@@ -27,6 +31,10 @@ export interface ListTasksParams {
   status?: TaskStatus;
   dateFrom?: string;
   dateTo?: string;
+  // Additive — omitted (the default) returns the same shared board as
+  // always. true narrows to tasks assigned to the caller plus any
+  // still-unassigned/shared task.
+  mine?: boolean;
 }
 
 export interface TaskRecommendation {

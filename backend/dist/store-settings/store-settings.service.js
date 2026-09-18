@@ -11,10 +11,13 @@ var __metadata = (this && this.__metadata) || function (k, v) {
 var StoreSettingsService_1;
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.StoreSettingsService = void 0;
+exports.todayStamp = todayStamp;
 const common_1 = require("@nestjs/common");
 const schedule_1 = require("@nestjs/schedule");
 const chat_service_1 = require("../chat/chat.service");
 const dashboard_service_1 = require("../dashboard/dashboard.service");
+const task_visibility_util_1 = require("../dashboard/task-visibility.util");
+const mail_service_1 = require("../mail/mail.service");
 const notifications_service_1 = require("../notifications/notifications.service");
 const timeline_service_1 = require("../timeline/timeline.service");
 const organizations_service_1 = require("../organizations/organizations.service");
@@ -27,8 +30,8 @@ function toMinutes(hhmm) {
     const [h, m] = hhmm.split(':').map(Number);
     return h * 60 + m;
 }
-function todayStamp() {
-    return new Date().toISOString().slice(0, 10);
+function todayStamp(tz) {
+    return new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
 }
 function nowMinutesInZone(tz) {
     const parts = new Intl.DateTimeFormat('en-US', {
@@ -49,13 +52,14 @@ function scheduledInstant(tz, hhmm) {
     return new Date(`${todayParts.year}-${todayParts.month}-${todayParts.day}T${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:00`);
 }
 let StoreSettingsService = StoreSettingsService_1 = class StoreSettingsService {
-    constructor(organizationsService, chatService, dashboardService, usersService, notificationsService, timelineService) {
+    constructor(organizationsService, chatService, dashboardService, usersService, notificationsService, timelineService, mailService) {
         this.organizationsService = organizationsService;
         this.chatService = chatService;
         this.dashboardService = dashboardService;
         this.usersService = usersService;
         this.notificationsService = notificationsService;
         this.timelineService = timelineService;
+        this.mailService = mailService;
         this.logger = new common_1.Logger(StoreSettingsService_1.name);
     }
     getSettings(caller) {
@@ -67,23 +71,24 @@ let StoreSettingsService = StoreSettingsService_1 = class StoreSettingsService {
     async runNow(caller, type) {
         const store = await this.organizationsService.resolveStoreForUser(caller.organizationId, caller.storeId);
         const now = new Date().toLocaleDateString();
+        const date = todayStamp(store.timezone);
         if (type === 'eod') {
-            return this.runForStore(store, EOD_AGENT_ID, 'eod', EOD_PROMPT, `EOD report — ${now}`, false);
+            return this.runForStore(store, EOD_AGENT_ID, 'eod', EOD_PROMPT, `EOD report — ${now}`, false, date);
         }
-        return this.runForStore(store, MORNING_AGENT_ID, 'morning', MORNING_PROMPT, `Morning to-do — ${now}`, false);
+        return this.runForStore(store, MORNING_AGENT_ID, 'morning', MORNING_PROMPT, `Morning to-do — ${now}`, false, date);
     }
     async checkAndRunDailyJobs() {
         const stores = await this.organizationsService.listAllStores();
-        const today = todayStamp();
         const now = new Date();
         for (const store of stores) {
+            const today = todayStamp(store.timezone);
             const nowMin = nowMinutesInZone(store.timezone);
             const openMin = toMinutes(store.openingTime);
             if (nowMin >= openMin - 30 && store.lastMorningRunDate !== today) {
                 const claimed = await this.organizationsService.claimMorningRun(store._id.toString(), today);
                 if (claimed) {
                     const wasMissed = nowMin > openMin;
-                    await this.runForStore(store, MORNING_AGENT_ID, 'morning', MORNING_PROMPT, `Morning to-do — ${now.toLocaleDateString()}`, wasMissed);
+                    await this.runForStore(store, MORNING_AGENT_ID, 'morning', MORNING_PROMPT, `Morning to-do — ${now.toLocaleDateString()}`, wasMissed, today);
                 }
             }
             const closeMin = toMinutes(store.closingTime);
@@ -91,12 +96,12 @@ let StoreSettingsService = StoreSettingsService_1 = class StoreSettingsService {
                 const claimed = await this.organizationsService.claimEodRun(store._id.toString(), today);
                 if (claimed) {
                     const wasMissed = nowMin > closeMin;
-                    await this.runForStore(store, EOD_AGENT_ID, 'eod', EOD_PROMPT, `EOD report — ${now.toLocaleDateString()}`, wasMissed);
+                    await this.runForStore(store, EOD_AGENT_ID, 'eod', EOD_PROMPT, `EOD report — ${now.toLocaleDateString()}`, wasMissed, today);
                 }
             }
         }
     }
-    async runForStore(store, agentId, reportType, promptText, title, wasMissed) {
+    async runForStore(store, agentId, reportType, promptText, title, wasMissed, date) {
         const organizationId = store.organizationId;
         const storeId = store._id.toString();
         const userIds = await this.usersService.findIdsByOrgAndStore(organizationId, storeId);
@@ -112,8 +117,7 @@ let StoreSettingsService = StoreSettingsService_1 = class StoreSettingsService {
             .map((x) => ({ value: x.r.value, userId: x.userId }));
         if (successes.length > 0) {
             const chosen = successes[0];
-            const date = todayStamp();
-            await this.dashboardService
+            const savedReport = await this.dashboardService
                 .recordDailyReport({
                 organizationId,
                 storeId,
@@ -123,8 +127,15 @@ let StoreSettingsService = StoreSettingsService_1 = class StoreSettingsService {
                 conversationId: chosen.value.conversationId,
                 userId: chosen.userId,
                 wasMissed,
+                userIds,
             })
-                .catch((err) => this.logger.error(`Failed to generate ${reportType} report: ${err.message}`));
+                .catch((err) => {
+                this.logger.error(`Failed to generate ${reportType} report: ${err.message}`);
+                return null;
+            });
+            if (savedReport && reportType === 'eod') {
+                await this.sendEodEmail(savedReport, store, userIds);
+            }
             const occurredAt = wasMissed ? scheduledInstant(store.timezone, reportType === 'morning' ? store.openingTime : store.closingTime) : new Date();
             await this.timelineService
                 .record({
@@ -147,6 +158,31 @@ let StoreSettingsService = StoreSettingsService_1 = class StoreSettingsService {
         }
         return { usersNotified: successes.length, totalUsers: userIds.length };
     }
+    async sendEodEmail(report, store, userIds) {
+        if (report.emailStatus === 'sent')
+            return;
+        const recipients = (await Promise.all(userIds.map(async (userId) => {
+            const email = await this.notificationsService.resolveEmailRecipient(userId, store.organizationId);
+            return email ? { userId, email } : null;
+        }))).filter((r) => !!r);
+        if (recipients.length === 0) {
+            return;
+        }
+        try {
+            const results = await Promise.all(recipients.map(({ userId, email }) => {
+                const ownTasks = report.tasks.filter((t) => (0, task_visibility_util_1.isTaskVisibleToUser)(t, userId));
+                return this.mailService.sendDailyReportEmail(email, store.name, report.reportType, report.date, ownTasks, report.summary);
+            }));
+            const anySent = results.some(Boolean);
+            await this.dashboardService.markReportEmailStatus(report._id.toString(), anySent ? 'sent' : 'failed', anySent ? undefined : 'All recipient sends failed');
+        }
+        catch (err) {
+            this.logger.error(`EOD email dispatch failed for report ${report._id.toString()}: ${err.message}`);
+            await this.dashboardService
+                .markReportEmailStatus(report._id.toString(), 'failed', err.message)
+                .catch(() => undefined);
+        }
+    }
 };
 exports.StoreSettingsService = StoreSettingsService;
 __decorate([
@@ -162,6 +198,7 @@ exports.StoreSettingsService = StoreSettingsService = StoreSettingsService_1 = _
         dashboard_service_1.DashboardService,
         users_service_1.UsersService,
         notifications_service_1.NotificationsService,
-        timeline_service_1.TimelineService])
+        timeline_service_1.TimelineService,
+        mail_service_1.MailService])
 ], StoreSettingsService);
 //# sourceMappingURL=store-settings.service.js.map

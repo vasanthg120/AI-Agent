@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import { FiCalendar, FiCheckSquare, FiChevronLeft, FiChevronRight, FiDownload, FiZap } from 'react-icons/fi';
-import { Badge, Button, Card, Dropdown, IconButton, SectionCard, Skeleton, Tabs } from '@/components/ui';
+import { Badge, Button, Card, Dropdown, IconButton, SectionCard, Skeleton, Switch, Tabs } from '@/components/ui';
 import { extractErrorMessage } from '@/utils/errors';
 import { dayjs, todayUtc } from '@/utils/date';
 import { todoEodService } from '@/services/todoEodService';
@@ -73,6 +73,12 @@ const SOURCE_TABS: { id: TaskSource | 'all'; label: string }[] = [
 export function TodoEodPage() {
   const [view, setView] = useState<'board' | 'calendar'>('board');
   const [sourceFilter, setSourceFilter] = useState<TaskSource | 'all'>('all');
+  // Default ON — the personal view (assigned to me + still-unassigned) is
+  // now the normal page behavior, matching the server-side default in
+  // TasksService.list()/calendarSummary() (both already default to "mine"
+  // even if this param is omitted entirely — this toggle is the explicit
+  // opt-out to the full shared board, not the thing granting the filtering).
+  const [mineOnly, setMineOnly] = useState(true);
   const [month, setMonth] = useState(todayUtc().slice(0, 7));
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
   // The board is scoped to a single day (tasks are grouped per DailyReport,
@@ -148,8 +154,11 @@ export function TodoEodPage() {
             )}
           </div>
           {boardDate === todayUtc() && <RecommendedFocus />}
-          <Tabs items={SOURCE_TABS} activeId={sourceFilter} onChange={(id) => setSourceFilter(id as TaskSource | 'all')} />
-          <Board params={{ dateFrom: boardDate, dateTo: boardDate }} sourceFilter={sourceFilter} />
+          <div className={styles.boardFilterRow}>
+            <Tabs items={SOURCE_TABS} activeId={sourceFilter} onChange={(id) => setSourceFilter(id as TaskSource | 'all')} />
+            <Switch label="My tasks only" checked={mineOnly} onChange={setMineOnly} />
+          </div>
+          <Board params={{ dateFrom: boardDate, dateTo: boardDate, mine: mineOnly || undefined }} sourceFilter={sourceFilter} />
         </>
       ) : (
         <div className={styles.calendarLayout}>

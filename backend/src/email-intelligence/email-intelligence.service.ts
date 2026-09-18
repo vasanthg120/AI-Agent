@@ -439,7 +439,7 @@ export class EmailIntelligenceService {
   // the HTTP response unchanged, same as chat's existing error shape.
   private async callAnalyze(organizationId: string, userId: string, payload: Record<string, unknown>) {
     const requestId = randomUUID();
-    await this.reservations.reserve(organizationId, userId, requestId, 'email-intelligence-analyze');
+    await this.reservations.reserve(this.reservations.resolveTenantKey(organizationId, userId), userId, requestId, 'email-intelligence-analyze');
 
     try {
       const token = this.jwt.sign({ sub: userId, organizationId }, { expiresIn: '5m' });

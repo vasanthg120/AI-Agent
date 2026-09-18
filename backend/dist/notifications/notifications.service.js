@@ -43,6 +43,10 @@ let NotificationsService = NotificationsService_1 = class NotificationsService {
     }
     async dispatchExternalChannels(userId, organizationId, notification) {
         try {
+            const email = await this.resolveEmailRecipient(userId, organizationId);
+            if (email) {
+                void this.mailService.sendNotificationEmail(email, notification.title, notification.description);
+            }
             const user = await this.usersService.findById(userId);
             if (!user)
                 return;
@@ -50,9 +54,6 @@ let NotificationsService = NotificationsService_1 = class NotificationsService {
                 ? await this.organizationsService.getNotificationPolicy(organizationId)
                 : DEFAULT_POLICY;
             const prefs = user.notificationPreferences ?? DEFAULT_PREFS;
-            if (prefs.email && orgPolicy.emailEnabled) {
-                void this.mailService.sendNotificationEmail(user.email, notification.title, notification.description);
-            }
             if ((prefs.desktopPush || prefs.mobilePush) && orgPolicy.pushEnabled) {
                 void this.webPushService.sendToUser(userId, { title: notification.title, body: notification.description }, { allowDesktop: prefs.desktopPush, allowMobile: prefs.mobilePush });
             }
@@ -60,6 +61,14 @@ let NotificationsService = NotificationsService_1 = class NotificationsService {
         catch (err) {
             this.logger.warn(`Failed to dispatch external notification channels: ${err.message}`);
         }
+    }
+    async resolveEmailRecipient(userId, organizationId) {
+        const user = await this.usersService.findById(userId);
+        if (!user)
+            return null;
+        const orgPolicy = organizationId ? await this.organizationsService.getNotificationPolicy(organizationId) : DEFAULT_POLICY;
+        const prefs = user.notificationPreferences ?? DEFAULT_PREFS;
+        return prefs.email && orgPolicy.emailEnabled ? user.email : null;
     }
     list(userId) {
         return this.notificationModel.find({ userId }).sort({ createdAt: -1 }).limit(50).exec();

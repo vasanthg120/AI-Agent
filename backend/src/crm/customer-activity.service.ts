@@ -121,7 +121,7 @@ export class CustomerActivityService {
     // a hard stop before the LLM call; a real, button-triggered action, so
     // a 402 propagates straight through, same as chat's existing shape.
     const requestId = randomUUID();
-    await this.reservations.reserve(caller.organizationId, caller.sub, requestId, 'customer-activity-summary');
+    await this.reservations.reserve(this.reservations.resolveTenantKey(caller.organizationId, caller.sub), caller.sub, requestId, 'customer-activity-summary');
     let result: Record<string, unknown>;
     try {
       const token = this.jwt.sign({ sub: caller.sub, organizationId: caller.organizationId }, { expiresIn: '5m' });
@@ -193,7 +193,7 @@ export class CustomerActivityService {
 
     const deterministicInput = this.toLlmPayload(activity);
     const requestId = randomUUID();
-    await this.reservations.reserve(caller.organizationId, caller.sub, requestId, 'customer-activity-personal-summary');
+    await this.reservations.reserve(this.reservations.resolveTenantKey(caller.organizationId, caller.sub), caller.sub, requestId, 'customer-activity-personal-summary');
     let result: Record<string, unknown>;
     try {
       const token = this.jwt.sign({ sub: caller.sub, organizationId: caller.organizationId }, { expiresIn: '5m' });

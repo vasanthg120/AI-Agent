@@ -32,6 +32,10 @@ export declare class DashboardController {
             category?: string | undefined;
             isOverdue: boolean;
             status: "todo" | "in_progress" | "done";
+            relatedDealId?: string | undefined;
+            relatedQuoteId?: string | undefined;
+            relatedEmailId?: string | undefined;
+            assignedUserId?: string | undefined;
         }[];
         recentReports: {
             id: string;

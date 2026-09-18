@@ -21,13 +21,21 @@ const tasks_controller_1 = require("./tasks.controller");
 const tasks_service_1 = require("./tasks.service");
 const tasks_export_service_1 = require("./tasks-export.service");
 const daily_report_schema_1 = require("./schemas/daily-report.schema");
+const deal_schema_1 = require("../crm/schemas/deal.schema");
+const quote_schema_1 = require("../crm/schemas/quote.schema");
+const email_intelligence_item_schema_1 = require("../email-intelligence/schemas/email-intelligence-item.schema");
 let DashboardModule = class DashboardModule {
 };
 exports.DashboardModule = DashboardModule;
 exports.DashboardModule = DashboardModule = __decorate([
     (0, common_1.Module)({
         imports: [
-            mongoose_1.MongooseModule.forFeature([{ name: daily_report_schema_1.DailyReport.name, schema: daily_report_schema_1.DailyReportSchema }]),
+            mongoose_1.MongooseModule.forFeature([
+                { name: daily_report_schema_1.DailyReport.name, schema: daily_report_schema_1.DailyReportSchema },
+                { name: deal_schema_1.Deal.name, schema: deal_schema_1.DealSchema },
+                { name: quote_schema_1.Quote.name, schema: quote_schema_1.QuoteSchema },
+                { name: email_intelligence_item_schema_1.EmailIntelligenceItem.name, schema: email_intelligence_item_schema_1.EmailIntelligenceItemSchema },
+            ]),
             axios_1.HttpModule.register({ timeout: 120_000 }),
             auth_module_1.AuthModule,
             chat_module_1.ChatModule,

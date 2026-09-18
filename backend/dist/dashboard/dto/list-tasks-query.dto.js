@@ -10,6 +10,7 @@ var __metadata = (this && this.__metadata) || function (k, v) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.ListTasksQueryDto = void 0;
+const class_transformer_1 = require("class-transformer");
 const class_validator_1 = require("class-validator");
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
 class ListTasksQueryDto {
@@ -32,4 +33,10 @@ __decorate([
     (0, class_validator_1.Matches)(DATE, { message: 'dateTo must be YYYY-MM-DD' }),
     __metadata("design:type", String)
 ], ListTasksQueryDto.prototype, "dateTo", void 0);
+__decorate([
+    (0, class_validator_1.IsOptional)(),
+    (0, class_transformer_1.Transform)(({ value }) => (value === undefined || value === '' ? undefined : value === 'true')),
+    (0, class_validator_1.IsBoolean)(),
+    __metadata("design:type", Boolean)
+], ListTasksQueryDto.prototype, "mine", void 0);
 //# sourceMappingURL=list-tasks-query.dto.js.map

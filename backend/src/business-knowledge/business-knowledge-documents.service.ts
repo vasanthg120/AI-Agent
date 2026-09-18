@@ -1,6 +1,6 @@
 import { randomUUID } from 'crypto';
 import { HttpService } from '@nestjs/axios';
-import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { BadRequestException, HttpException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { InjectModel } from '@nestjs/mongoose';
@@ -106,7 +106,27 @@ export class BusinessKnowledgeDocumentsService {
     file: Express.Multer.File,
   ): Promise<BusinessKnowledgeDocumentDocument> {
     const requestId = randomUUID();
-    await this.reservations.reserve(organizationId, userId, requestId, `business-knowledge-doc:${doc._id.toString()}`);
+    const tenantKey = this.reservations.resolveTenantKey(organizationId, userId);
+    try {
+      await this.reservations.reserve(tenantKey, userId, requestId, `business-knowledge-doc:${doc._id.toString()}`);
+    } catch (err) {
+      // reserve() throws BEFORE doing any Mongo write of its own — but `doc`
+      // here was already persisted by upload()/retryExtraction() as
+      // extractionStatus:'processing'. Without this catch, a reserve()
+      // failure (e.g. insufficient balance) left that document stuck at
+      // 'processing' forever with no error, since the pre-existing
+      // catch below (around callExtraction/settle) never runs for a
+      // failure this early. Rethrows the original error unchanged so the
+      // controller/frontend still see the exact same error/status as before.
+      const response = err instanceof HttpException ? err.getResponse() : null;
+      const message =
+        response && typeof response === 'object' && 'message' in response
+          ? String((response as { message: unknown }).message)
+          : (err as Error).message;
+      this.logger.error(`Business knowledge document reservation failed for ${doc._id}: ${message}`);
+      await this.documentModel.findByIdAndUpdate(doc._id, { extractionStatus: 'failed', extractionError: message }).exec();
+      throw err;
+    }
 
     try {
       const extracted = await this.callExtraction(organizationId, userId, file, requestId);

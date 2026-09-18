@@ -19,6 +19,22 @@ export class DailyReportTask {
   // Moving a task to 'done' never touches isOverdue/priority.
   @Prop({ required: true, enum: ['todo', 'in_progress', 'done'], default: 'todo' })
   status: 'todo' | 'in_progress' | 'done';
+
+  // ---- Optional per-task attribution (additive) ----
+  // Set only when python-agent's report-extraction step ties a task to a
+  // specific record it was given in its research context (never invented —
+  // see anthropic_client.py's REPORT_EXTRACTION_SYSTEM_PROMPT). Resolved to
+  // assignedUserId deterministically in dashboard.service.ts's
+  // recordDailyReport() via a direct Deal/Quote model lookup; a task with
+  // neither field resolvable simply stays unassigned/shared, exactly like
+  // every task did before this was added.
+  @Prop() relatedDealId?: string;
+  @Prop() relatedQuoteId?: string;
+  // The raw Outlook message id (EmailIntelligenceItem.externalMessageId),
+  // not that item's own Mongo _id — see dashboard.service.ts's attributeTask
+  // for why the lookup is keyed this way.
+  @Prop() relatedEmailId?: string;
+  @Prop({ index: true }) assignedUserId?: string;
 }
 const DailyReportTaskSchema = SchemaFactory.createForClass(DailyReportTask);
 
@@ -58,6 +74,19 @@ export class DailyReport {
   // than on time — surfaced on the Owner/Manager dashboards and mirrored as
   // a `daily_report_missed` TimelineEvent + notification.
   @Prop({ default: false }) wasMissed: boolean;
+
+  // ---- Automatic EOD email tracking (additive) ----
+  // Mirrors the status/sentAt/error pattern already used by
+  // email-follow-up-reminder.schema.ts's draftStatus. This report document's
+  // own _id (already unique) is the idempotency key for "has this been
+  // emailed yet" — store-settings.service.ts checks emailStatus before
+  // sending, so a cron re-run/restart never re-sends. Only ever set for
+  // reportType:'eod' — morning reports are left at the 'pending' default and
+  // never dispatched.
+  @Prop({ enum: ['pending', 'sent', 'failed'], default: 'pending' })
+  emailStatus: 'pending' | 'sent' | 'failed';
+  @Prop() emailSentAt?: Date;
+  @Prop() emailError?: string;
 
   createdAt: Date;
   updatedAt: Date;

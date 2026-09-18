@@ -34,6 +34,22 @@ __decorate([
     (0, mongoose_1.Prop)({ required: true, enum: ['todo', 'in_progress', 'done'], default: 'todo' }),
     __metadata("design:type", String)
 ], DailyReportTask.prototype, "status", void 0);
+__decorate([
+    (0, mongoose_1.Prop)(),
+    __metadata("design:type", String)
+], DailyReportTask.prototype, "relatedDealId", void 0);
+__decorate([
+    (0, mongoose_1.Prop)(),
+    __metadata("design:type", String)
+], DailyReportTask.prototype, "relatedQuoteId", void 0);
+__decorate([
+    (0, mongoose_1.Prop)(),
+    __metadata("design:type", String)
+], DailyReportTask.prototype, "relatedEmailId", void 0);
+__decorate([
+    (0, mongoose_1.Prop)({ index: true }),
+    __metadata("design:type", String)
+], DailyReportTask.prototype, "assignedUserId", void 0);
 exports.DailyReportTask = DailyReportTask = __decorate([
     (0, mongoose_1.Schema)()
 ], DailyReportTask);
@@ -81,6 +97,18 @@ __decorate([
     (0, mongoose_1.Prop)({ default: false }),
     __metadata("design:type", Boolean)
 ], DailyReport.prototype, "wasMissed", void 0);
+__decorate([
+    (0, mongoose_1.Prop)({ enum: ['pending', 'sent', 'failed'], default: 'pending' }),
+    __metadata("design:type", String)
+], DailyReport.prototype, "emailStatus", void 0);
+__decorate([
+    (0, mongoose_1.Prop)(),
+    __metadata("design:type", Date)
+], DailyReport.prototype, "emailSentAt", void 0);
+__decorate([
+    (0, mongoose_1.Prop)(),
+    __metadata("design:type", String)
+], DailyReport.prototype, "emailError", void 0);
 exports.DailyReport = DailyReport = __decorate([
     (0, mongoose_1.Schema)({ timestamps: true, collection: 'daily_reports' })
 ], DailyReport);

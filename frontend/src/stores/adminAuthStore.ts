@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { adminAuthService, type AdminAccount } from '@/services/adminAuthService';
-import { extractErrorMessage } from '@/utils/errors';
+import { extractLoginErrorMessage } from '@/utils/errors';
 
 interface AdminAuthState {
   admin: AdminAccount | null;
@@ -34,7 +34,7 @@ export const useAdminAuthStore = create<AdminAuthState>()(
           const { accessToken, admin } = await adminAuthService.login(email, password);
           set({ admin, accessToken, isAuthenticated: true, isLoading: false, error: null });
         } catch (error) {
-          set({ isLoading: false, error: extractErrorMessage(error) });
+          set({ isLoading: false, error: extractLoginErrorMessage(error) });
           throw error;
         }
       },
