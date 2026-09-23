@@ -11,6 +11,11 @@ import { Sidebar } from './Sidebar';
 import { TopBar } from './TopBar';
 import styles from './AppLayout.module.css';
 
+// Must match GlobalAssistantPanel.module.css's `.panel` width exactly — that
+// CSS width is what the panel settles into once mounted; this is only the
+// number the OPEN/CLOSE animation itself grows/shrinks toward on desktop.
+const ASSISTANT_PANEL_WIDTH = 380;
+
 export function AppLayout() {
   const isMobile = useMediaQuery('(max-width: 900px)');
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
@@ -78,17 +83,31 @@ export function AppLayout() {
           </main>
         </div>
         {/* A flex sibling of mainColumn (which is itself `flex: 1; min-width: 0`)
-            — the main content naturally shrinks to make room, no overlay. Same
-            slide+fade motion language as the mobile drawers below (identical
-            easing curve) rather than an abrupt mount/unmount. */}
+            — the main content naturally shrinks to make room, no overlay.
+            Animating `width` itself (not just the panel's own x/opacity) is
+            what actually matters here: mainColumn is a flex sibling, so its
+            reflow happens the instant this element's layout width changes —
+            animating only transform/opacity (the previous approach) let the
+            panel fade in smoothly while the dashboard beside it still
+            snapped to its narrower width in a single frame. Growing this
+            wrapper's width from 0 -> the panel's own fixed width, with
+            overflow hidden so the panel is revealed rather than reflowed
+            internally, makes both sides of the split move together. */}
         <AnimatePresence>
           {assistantPanelOpen && (
             <motion.div
-              initial={{ x: 40, opacity: 0 }}
-              animate={{ x: 0, opacity: 1 }}
-              exit={{ x: 40, opacity: 0 }}
-              transition={{ duration: 0.25, ease: [0.16, 1, 0.3, 1] }}
-              style={{ display: 'flex', height: '100%' }}
+              initial={{ width: 0, opacity: 0 }}
+              animate={{ width: ASSISTANT_PANEL_WIDTH, opacity: 1 }}
+              exit={{ width: 0, opacity: 0 }}
+              // A gentler ease-in-out (not the sidebar drawers' aggressive
+              // ease-out-expo) — that curve resolves ~80% of the motion in
+              // the first third of its duration, which reads as an abrupt
+              // snap rather than a smooth open when it's the width itself
+              // (not just a transform) driving the reflow of everything
+              // beside it. This spreads the motion evenly across the whole
+              // duration instead.
+              transition={{ duration: 0.38, ease: [0.4, 0, 0.2, 1] }}
+              style={{ display: 'flex', height: '100%', overflow: 'hidden', flexShrink: 0 }}
             >
               <GlobalAssistantPanel />
             </motion.div>

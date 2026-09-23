@@ -7,19 +7,21 @@ import { hasRole } from '@/utils/roles';
 import { businessProfileService } from '@/services/businessProfileService';
 import { BusinessProfileForm } from './components/BusinessProfileForm';
 import { BusinessKnowledgeDocumentsSection } from './components/BusinessKnowledgeDocumentsSection';
-import { BusinessKnowledgeOverviewSection } from './components/BusinessKnowledgeOverviewSection';
-import { BusinessKnowledgeAdvisorSection } from './components/BusinessKnowledgeAdvisorSection';
-import { BusinessKnowledgeRecommendationsSection } from './components/BusinessKnowledgeRecommendationsSection';
-import { RelationshipsSection } from './components/RelationshipsSection';
 import styles from './business-knowledge.module.css';
 
+// Overview/AI Advisor/Recommendations/Relationships tabs were removed —
+// this page now only manages the two things that actually become permanent,
+// agent-retrievable Business Knowledge (the profile and uploaded documents).
+// Their backend routes/services are untouched (still used elsewhere or kept
+// as working, callable endpoints — see business-knowledge-advisor.controller.ts);
+// only this page's UI integration with them was removed. Business Knowledge
+// Q&A now happens exclusively through the existing agentic Chat/AI Assistant
+// (search_business_context already retrieves business_profile/
+// business_knowledge_document Qdrant points org-scoped — see
+// python-agent/app/tools/business_search_tool.py), not a dedicated advisor here.
 const TAB_ITEMS = [
-  { id: 'overview', label: 'Overview' },
   { id: 'profile', label: 'Business Profile' },
   { id: 'documents', label: 'Documents' },
-  { id: 'advisor', label: 'AI Advisor' },
-  { id: 'recommendations', label: 'Recommendations' },
-  { id: 'relationships', label: 'Relationships' },
 ];
 const TAB_IDS = TAB_ITEMS.map((t) => t.id);
 
@@ -30,7 +32,7 @@ export function BusinessKnowledgePage() {
   const [searchParams, setSearchParams] = useSearchParams();
 
   const initialTab = searchParams.get('tab');
-  const [activeTab, setActiveTab] = useState(initialTab && TAB_IDS.includes(initialTab) ? initialTab : 'overview');
+  const [activeTab, setActiveTab] = useState(initialTab && TAB_IDS.includes(initialTab) ? initialTab : 'profile');
 
   const changeTab = (tab: string) => {
     setActiveTab(tab);
@@ -61,8 +63,6 @@ export function BusinessKnowledgePage() {
         <Tabs items={TAB_ITEMS} activeId={activeTab} onChange={changeTab} />
       </div>
 
-      {activeTab === 'overview' && <BusinessKnowledgeOverviewSection />}
-
       {activeTab === 'profile' && (
         <BusinessProfileForm
           profile={profile}
@@ -73,12 +73,6 @@ export function BusinessKnowledgePage() {
       )}
 
       {activeTab === 'documents' && <BusinessKnowledgeDocumentsSection canEdit={canEdit} />}
-
-      {activeTab === 'advisor' && <BusinessKnowledgeAdvisorSection />}
-
-      {activeTab === 'recommendations' && <BusinessKnowledgeRecommendationsSection />}
-
-      {activeTab === 'relationships' && <RelationshipsSection />}
     </div>
   );
 }

@@ -22,6 +22,12 @@ export const ASSET_TYPES = [
   'marketing_material',
   'brand_guideline',
   'internal_manual',
+  // The Business Profile's document-based Terms & Conditions upload (see
+  // BusinessKnowledgeDocumentsService's generic upload/extract/delete flow —
+  // unchanged; this is purely a classification value, treated as a
+  // singleton-per-org by convention in the frontend's TermsAndConditionsPolicy
+  // component, "latest wins" via Replace Document deleting the old one first).
+  'terms_and_conditions',
   'other',
 ] as const;
 export type BusinessKnowledgeAssetType = (typeof ASSET_TYPES)[number];

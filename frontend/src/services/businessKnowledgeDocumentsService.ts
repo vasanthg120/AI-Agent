@@ -12,6 +12,7 @@ export const ASSET_TYPES = [
   'marketing_material',
   'brand_guideline',
   'internal_manual',
+  'terms_and_conditions',
   'other',
 ] as const;
 

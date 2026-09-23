@@ -1,5 +1,6 @@
 import { useMemo } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
+import clsx from 'clsx';
 import { FiBell, FiSidebar, FiMenu, FiCommand, FiChevronRight } from 'react-icons/fi';
 import { IconButton, Avatar } from '@/components/ui';
 import { useUiStore } from '@/stores/uiStore';
@@ -83,12 +84,16 @@ export function TopBar({ onMenuClick }: TopBarProps) {
             workspace-wide shortcut to (see AppLayout.tsx's matching
             auto-close effect). */}
         {!isChatRoute && (
-          <IconButton
-            icon={<img src="/haive-logo.png" alt="" className={styles.assistantTriggerIcon} />}
-            label={assistantPanelOpen ? 'Close AI Assistant' : 'Open AI Assistant'}
-            active={assistantPanelOpen}
+          <button
+            type="button"
+            className={clsx(styles.assistantTrigger, assistantPanelOpen && styles.assistantTriggerActive)}
+            aria-label={assistantPanelOpen ? 'Close AI Assistant' : 'Open AI Assistant'}
+            title={assistantPanelOpen ? 'Close AI Assistant' : 'Open AI Assistant'}
             onClick={toggleAssistantPanel}
-          />
+          >
+            <img src="/haive-logo.png" alt="" className={styles.assistantTriggerIcon} />
+            <span className={styles.assistantTriggerLabel}>Haive AI</span>
+          </button>
         )}
 
         <button type="button" className={styles.avatarButton} onClick={() => navigate(ROUTES.profile)} aria-label="Profile">

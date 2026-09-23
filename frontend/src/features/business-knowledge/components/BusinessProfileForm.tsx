@@ -1,51 +1,11 @@
 import { useState } from 'react';
-import { FiBookOpen, FiBriefcase, FiCompass, FiFileText, FiPlus, FiShield, FiX } from 'react-icons/fi';
+import { FiBookOpen, FiShield } from 'react-icons/fi';
 import toast from 'react-hot-toast';
-import { Button, IconButton, Input, SectionCard, Skeleton, StringListEditor } from '@/components/ui';
+import { Button, Input, SectionCard, Skeleton, StringListEditor } from '@/components/ui';
 import { extractErrorMessage } from '@/utils/errors';
-import {
-  businessProfileService,
-  type BusinessProfile,
-  type BusinessProfileFaq,
-  type UpsertBusinessProfilePayload,
-} from '@/services/businessProfileService';
+import { businessProfileService, type BusinessProfile, type UpsertBusinessProfilePayload } from '@/services/businessProfileService';
+import { TermsAndConditionsPolicy } from './TermsAndConditionsPolicy';
 import styles from '../business-knowledge.module.css';
-
-function FaqListEditor({ faqs, onChange }: { faqs: BusinessProfileFaq[]; onChange: (faqs: BusinessProfileFaq[]) => void }) {
-  return (
-    <div>
-      <span className={styles.fieldLabel}>FAQs</span>
-      <div className={styles.formGrid}>
-        {faqs.map((faq, index) => (
-          <div key={index} className={styles.faqRow}>
-            <Input
-              label="Question"
-              value={faq.question}
-              onChange={(e) => onChange(faqs.map((f, i) => (i === index ? { ...f, question: e.target.value } : f)))}
-            />
-            <Input
-              label="Answer"
-              value={faq.answer}
-              onChange={(e) => onChange(faqs.map((f, i) => (i === index ? { ...f, answer: e.target.value } : f)))}
-            />
-            <div className={styles.faqRowHead}>
-              <IconButton icon={<FiX />} label="Remove FAQ" size="sm" onClick={() => onChange(faqs.filter((_, i) => i !== index))} />
-            </div>
-          </div>
-        ))}
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          leftIcon={<FiPlus />}
-          onClick={() => onChange([...faqs, { question: '', answer: '' }])}
-        >
-          Add FAQ
-        </Button>
-      </div>
-    </div>
-  );
-}
 
 function TextAreaField({ label, value, onChange }: { label: string; value?: string; onChange: (value: string) => void }) {
   return (
@@ -149,52 +109,9 @@ export function BusinessProfileForm({
         </div>
       </SectionCard>
 
-      <SectionCard title="Offering" icon={FiBriefcase}>
-        <div className={styles.formGrid}>
-          <StringListEditor label="Products" items={working.products} onChange={(v) => set('products', v)} addLabel="Add product" />
-          <StringListEditor label="Services" items={working.services} onChange={(v) => set('services', v)} addLabel="Add service" />
-          <StringListEditor label="Brands" items={working.brands} onChange={(v) => set('brands', v)} addLabel="Add brand" />
-        </div>
-      </SectionCard>
-
-      <SectionCard title="Commercial Process" icon={FiCompass}>
-        <div className={styles.formGrid}>
-          <TextAreaField label="Pricing Policies" value={working.pricingPolicies} onChange={(v) => set('pricingPolicies', v)} />
-          <TextAreaField label="Sales Process" value={working.salesProcess} onChange={(v) => set('salesProcess', v)} />
-          <TextAreaField label="Customer Journey" value={working.customerJourney} onChange={(v) => set('customerJourney', v)} />
-          <TextAreaField label="Target Audience" value={working.targetAudience} onChange={(v) => set('targetAudience', v)} />
-        </div>
-      </SectionCard>
-
-      <SectionCard title="Culture & FAQs" icon={FiFileText}>
-        <div className={styles.formGrid}>
-          <div className={styles.twoColumn}>
-            <TextAreaField label="Vision" value={working.vision} onChange={(v) => set('vision', v)} />
-            <TextAreaField label="Mission" value={working.mission} onChange={(v) => set('mission', v)} />
-          </div>
-          <StringListEditor label="Values" items={working.values} onChange={(v) => set('values', v)} addLabel="Add value" />
-          <FaqListEditor faqs={working.faqs} onChange={(v) => set('faqs', v)} />
-        </div>
-      </SectionCard>
-
       <SectionCard title="Policies" icon={FiShield}>
         <div className={styles.formGrid}>
-          <TextAreaField label="Terms & Conditions" value={working.termsAndConditions} onChange={(v) => set('termsAndConditions', v)} />
-          <div className={styles.twoColumn}>
-            <TextAreaField label="Warranty Policy" value={working.warrantyPolicy} onChange={(v) => set('warrantyPolicy', v)} />
-            <TextAreaField label="Refund Policy" value={working.refundPolicy} onChange={(v) => set('refundPolicy', v)} />
-          </div>
-          <TextAreaField label="Shipping Policy" value={working.shippingPolicy} onChange={(v) => set('shippingPolicy', v)} />
-        </div>
-      </SectionCard>
-
-      <SectionCard title="Operating Guidance" icon={FiFileText}>
-        <div className={styles.formGrid}>
-          <TextAreaField label="Business Rules" value={working.businessRules} onChange={(v) => set('businessRules', v)} />
-          <TextAreaField label="Standard Operating Procedures" value={working.standardOperatingProcedures} onChange={(v) => set('standardOperatingProcedures', v)} />
-          <TextAreaField label="Sales Guidelines" value={working.salesGuidelines} onChange={(v) => set('salesGuidelines', v)} />
-          <TextAreaField label="Marketing Guidelines" value={working.marketingGuidelines} onChange={(v) => set('marketingGuidelines', v)} />
-          <TextAreaField label="Internal Policies" value={working.internalPolicies} onChange={(v) => set('internalPolicies', v)} />
+          <TermsAndConditionsPolicy canEdit={canEdit} />
         </div>
       </SectionCard>
 

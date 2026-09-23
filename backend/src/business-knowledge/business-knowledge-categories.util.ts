@@ -85,6 +85,7 @@ export const ASSET_TYPE_CATEGORY_BONUS: Partial<Record<BusinessKnowledgeAssetTyp
   quotation: ['commercial_process'],
   sales_deck: ['sales_process'],
   agreement: ['policies'],
+  terms_and_conditions: ['policies'],
   company_profile: ['identity'],
   brand_guideline: ['identity'],
   internal_manual: ['operating_guidance'],

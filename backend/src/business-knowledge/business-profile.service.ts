@@ -67,7 +67,14 @@ function toSyncText(profile: BusinessProfile): string {
   add('Mission', profile.mission);
   add('Values', profile.values);
   for (const faq of profile.faqs ?? []) lines.push(`FAQ: Q: ${faq.question} A: ${faq.answer}`);
-  add('Terms and conditions', profile.termsAndConditions);
+  // Terms & Conditions is now document-upload-based (see
+  // TermsAndConditionsPolicy.tsx, assetType: 'terms_and_conditions') — the
+  // uploaded document's own full extracted content is what gets embedded,
+  // through the existing BusinessKnowledgeDocumentsService pipeline, not
+  // this field. Deliberately excluded here so a pre-existing (now
+  // UI-frozen) profile.termsAndConditions value can never resurface as a
+  // second, possibly stale, "terms and conditions" fact alongside the
+  // document — the Mongo field itself is untouched, just no longer synced.
   add('Warranty policy', profile.warrantyPolicy);
   add('Refund policy', profile.refundPolicy);
   add('Shipping policy', profile.shippingPolicy);
