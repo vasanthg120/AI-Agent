@@ -106,6 +106,17 @@ export class EmailSlaService {
     await this.writeEvent(record, 'responded', { responseTimeSeconds: record.responseTimeSeconds, isBreached: record.isBreached });
   }
 
+  /** Read-only — the AI Follow-up Agent's trigger (backend/src/email-follow-up)
+   * polls this on the same 5-minute cadence EmailSlaEscalationService's own
+   * breach/escalation scan already runs on, as a second bounded query rather
+   * than a second scheduler on the same records (spec's own "do not create
+   * multiple schedulers for the same task" — this is a different task:
+   * drafting a follow-up, not detecting/escalating a breach). Never mutates
+   * anything here; email-sla stays the sole owner of SLA state. */
+  listBreached(limit = 200) {
+    return this.recordModel.find({ status: 'BREACHED' }).sort({ breachedAt: 1 }).limit(limit).exec();
+  }
+
   listRecords(organizationId: string, filters: { status?: EmailSlaStatus; assignedUserId?: string } = {}) {
     return this.recordModel
       .find({ organizationId, ...filters })

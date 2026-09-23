@@ -78,6 +78,29 @@ def reply_to_message(access_token: str, message_id: str, comment: str) -> None:
     response.raise_for_status()
 
 
+def list_conversation_messages(access_token: str, conversation_id: str, top: int = 20) -> list[dict]:
+    """All messages in one Outlook conversation thread, oldest first — used
+    by the AI Follow-up draft flow so the model sees the real back-and-forth
+    (customer -> employee -> customer -> ...) instead of only the latest
+    message. Falls back to an empty list on any Graph error (missing scope,
+    rate limit, malformed id) — the caller treats "no thread" as a normal,
+    valid outcome and drafts from the single email it already has instead."""
+    try:
+        data = graph_get(
+            "/me/messages",
+            access_token,
+            params={
+                "$filter": f"conversationId eq '{conversation_id}'",
+                "$orderby": "receivedDateTime asc",
+                "$top": top,
+                "$select": "from,receivedDateTime,bodyPreview,subject",
+            },
+        )
+    except requests.RequestException:
+        return []
+    return data.get("value", [])
+
+
 def list_recent_messages(access_token: str, top: int = 50) -> list[dict]:
     """Recent inbox messages for the RAG business sync job — includes `id`
     (needed for a deterministic Qdrant point id) alongside the fields

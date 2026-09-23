@@ -159,6 +159,11 @@ export class EmailIntelligenceController {
     return this.emailIntelligenceService.sendFollowUp(user.sub, id);
   }
 
+  @Post('follow-ups/:id/dismiss')
+  dismissFollowUp(@CurrentUser() user: JwtPayload, @Param('id') id: string, @Body() body: { reason?: string }) {
+    return this.emailIntelligenceService.dismissFollowUp(user.sub, id, body?.reason);
+  }
+
   @Get(':id')
   getOne(@CurrentUser() user: JwtPayload, @Param('id') id: string) {
     return this.emailIntelligenceService.getOne(user.sub, id);

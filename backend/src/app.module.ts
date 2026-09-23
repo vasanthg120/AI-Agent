@@ -28,6 +28,7 @@ import { CallCopilotModule } from './call-copilot/call-copilot.module';
 import { BusinessKnowledgeModule } from './business-knowledge/business-knowledge.module';
 import { EmailIntelligenceModule } from './email-intelligence/email-intelligence.module';
 import { EmailSlaModule } from './email-sla/email-sla.module';
+import { EmailFollowUpModule } from './email-follow-up/email-follow-up.module';
 import { HomeDashboardModule } from './home-dashboard/home-dashboard.module';
 import { AnalyticsDashboardModule } from './analytics-dashboard/analytics-dashboard.module';
 import { RoyaltyModule } from './royalty/royalty.module';
@@ -80,6 +81,7 @@ import { HealthController } from './health/health.controller';
     BusinessKnowledgeModule,
     EmailIntelligenceModule,
     EmailSlaModule,
+    EmailFollowUpModule,
     HomeDashboardModule,
     AnalyticsDashboardModule,
     RoyaltyModule,

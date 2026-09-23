@@ -1095,6 +1095,146 @@ export class EmailIntelligenceService {
     });
   }
 
+  // ---- AI Follow-up Agent (additive) — SLA-breach trigger. Called from
+  // backend/src/email-follow-up's scheduler (a thin orchestration module
+  // that polls EmailSlaService.listBreached() on the same 5-minute cadence
+  // EmailSlaEscalationService's own breach scan already runs on, then calls
+  // this method once per breached record — this module never imports that
+  // one, keeping the existing one-directional email-intelligence ->
+  // email-sla dependency intact). Reuses the exact same
+  // EmailFollowUpReminder schema/state-machine and generate/approve/send
+  // actions as the existing 'post_reply' reminders above — only the trigger
+  // and the draft-generation prompt differ (see
+  // draftSlaBreachReply/SLA_BREACH_FOLLOWUP_SYSTEM_PROMPT). ----
+
+  /** Idempotent: the existing {organizationId, emailIntelligenceItemId,
+   * reminderType} unique index (declared on the schema for the 'post_reply'
+   * dedup fix) guards this trigger too — calling this repeatedly for the
+   * same breached email (e.g. the scheduler's next tick before the record
+   * is resolved) never creates a second reminder. Best-effort past the
+   * initial create: a context-gathering or AI failure leaves the reminder
+   * at draftStatus:'failed' rather than throwing — this must never affect
+   * SLA tracking, Email Intelligence, or the underlying email itself, and
+   * the employee can still reply manually regardless. */
+  async createSlaBreachFollowUp(record: { organizationId: string; emailId: string; assignedUserId: string; slaRecordId: string }): Promise<void> {
+    if (!(this.config.get<boolean>('emailSla.aiFollowupActionsEnabled') ?? false)) return;
+
+    const sourceItem = await this.itemModel.findOne({ _id: record.emailId, organizationId: record.organizationId }).exec();
+    if (!sourceItem) return; // email no longer exists — nothing to follow up on
+
+    let reminder: EmailFollowUpReminderDocument;
+    try {
+      reminder = await this.followUpModel.create({
+        organizationId: record.organizationId,
+        userId: record.assignedUserId,
+        emailIntelligenceItemId: record.emailId,
+        reminderType: 'sla_breach',
+        slaRecordId: record.slaRecordId,
+        businessName: sourceItem.matchedBusinessName,
+        title: `AI follow-up: ${sourceItem.subject || '(no subject)'}`,
+        dueDate: new Date(),
+        status: 'pending',
+        draftStatus: 'generating',
+      });
+    } catch (err) {
+      if ((err as { code?: number }).code === DUPLICATE_KEY_ERROR) return; // already created — idempotent
+      this.logger.error(`SLA-breach follow-up creation failed for email ${record.emailId}: ${(err as Error).message}`);
+      return;
+    }
+
+    await this.draftSlaBreachReply(reminder, sourceItem);
+    await reminder.save();
+
+    if (reminder.draftStatus === 'pending_review') {
+      await this.notificationsService
+        .create(
+          record.assignedUserId,
+          {
+            kind: 'sla_breach',
+            title: 'AI follow-up ready',
+            description: `${reminder.businessName ?? sourceItem.fromAddress} — ${sourceItem.subject || '(no subject)'}`,
+            source: 'email-ai-followup',
+            // No 'emailFollowUp' entityType exists (only email/financeDocument/
+            // deal/task/outlookAccount/dailyReport) — 'email' pointing at the
+            // underlying email is the closest fit and the more useful deep
+            // link anyway (opens the actual email, not just the reminder).
+            entityType: 'email',
+            entityId: sourceItem._id.toString(),
+          },
+          record.organizationId,
+        )
+        .catch((err: Error) => this.logger.error(`AI follow-up notification failed for reminder ${reminder._id.toString()}: ${err.message}`));
+    }
+  }
+
+  // Shared by createSlaBreachFollowUp (first generation) and
+  // generateFollowUpDraft's sla_breach branch (Regenerate) — gathers CRM
+  // context via the EXISTING CustomerActivityService relationship view
+  // (never a new CRM query), then calls the new python-agent route, which
+  // itself gathers the Outlook thread + Business Knowledge context using
+  // already-existing primitives (see routes/email_intelligence.py's
+  // sla_breach_followup_draft). Mutates `reminder` in place; caller saves it.
+  private async draftSlaBreachReply(reminder: EmailFollowUpReminderDocument, sourceItem: EmailIntelligenceItemDocument): Promise<void> {
+    let crmContext: string | undefined;
+    const businessKey = sourceItem.resolvedGroupKey ?? sourceItem.matchedBusinessKey;
+    if (businessKey) {
+      try {
+        const syntheticCaller = { sub: reminder.userId, email: '', roles: [], organizationId: reminder.organizationId } as JwtPayload;
+        const view = await this.customerActivityService.getRelationshipView(syntheticCaller, businessKey);
+        crmContext = JSON.stringify(view);
+      } catch (err) {
+        // Not found in this scope, or any other lookup failure — CRM
+        // context is optional enrichment, never a hard requirement.
+        this.logger.warn(`CRM context lookup failed for AI follow-up ${reminder._id.toString()}: ${(err as Error).message}`);
+      }
+    }
+
+    const requestId = randomUUID();
+    try {
+      await this.reservations.reserve(
+        this.reservations.resolveTenantKey(reminder.organizationId, reminder.userId),
+        reminder.userId,
+        requestId,
+        'email-ai-followup',
+      );
+      const token = this.jwt.sign({ sub: reminder.userId, organizationId: reminder.organizationId }, { expiresIn: '5m' });
+      const { data } = await firstValueFrom(
+        this.http.post<{ draftReply: string; usedThreadMessages: number; usedCrmContext: boolean; usedBusinessKnowledge: boolean }>(
+          `${this.pythonAgentUrl}/email-intelligence/follow-ups/sla-breach-draft`,
+          {
+            subject: sourceItem.subject,
+            bodyPreview: sourceItem.bodyPreview,
+            fromAddress: sourceItem.fromAddress,
+            conversationId: sourceItem.conversationId,
+            priority: sourceItem.priority,
+            crmContext,
+            requestId,
+          },
+          { headers: { Authorization: `Bearer ${token}` } },
+        ),
+      );
+      await this.reservations.settle(requestId);
+      reminder.draftReply = data.draftReply;
+      reminder.draftStatus = 'pending_review';
+      reminder.draftGeneratedAt = new Date();
+      reminder.contextUsed = { thread: data.usedThreadMessages > 0, crm: data.usedCrmContext, businessKnowledge: data.usedBusinessKnowledge };
+    } catch (err) {
+      await this.reservations.release(requestId);
+      reminder.draftStatus = 'failed';
+      this.logger.error(`AI follow-up draft generation failed for reminder ${reminder._id.toString()}: ${(err as Error).message}`);
+    }
+  }
+
+  async dismissFollowUp(userId: string, id: string, reason?: string): Promise<EmailFollowUpReminderDocument> {
+    const reminder = await this.followUpModel.findOne({ _id: id, userId }).exec();
+    if (!reminder) throw new NotFoundException('Follow-up reminder not found');
+    reminder.status = 'dismissed';
+    reminder.dismissedAt = new Date();
+    reminder.dismissedReason = reason;
+    await reminder.save();
+    return reminder;
+  }
+
   // Only called for intent === 'quotation_request'. requestedItems comes
   // from analyze_email's own result (python-agent, never invented — see
   // EMAIL_INTENT_TOOL's system prompt) and may be absent; the created Quote
@@ -1162,6 +1302,18 @@ export class EmailIntelligenceService {
 
     reminder.draftStatus = 'generating';
     await reminder.save();
+
+    // SLA-breach reminders need a genuinely different draft (answer the
+    // customer's actual message, not a "just checking in" nudge — see
+    // draftSlaBreachReply/SLA_BREACH_FOLLOWUP_SYSTEM_PROMPT's own comment)
+    // and richer context-gathering (thread/CRM/Business Knowledge). Also
+    // doubles as this reminder type's "Regenerate" action — same method,
+    // fresh context gathered every call.
+    if (reminder.reminderType === 'sla_breach') {
+      await this.draftSlaBreachReply(reminder, sourceItem);
+      await reminder.save();
+      return reminder;
+    }
 
     try {
       const token = this.jwt.sign({ sub: userId, organizationId: reminder.organizationId }, { expiresIn: '5m' });
@@ -1236,6 +1388,21 @@ export class EmailIntelligenceService {
     reminder.draftStatus = 'sent';
     reminder.status = 'done';
     await reminder.save();
+
+    // The real "employee eventually responded" signal for the email that
+    // breached SLA — only for the sla_breach trigger; a 'post_reply'
+    // reminder's own email was already responded to long ago (that's WHY
+    // the reminder exists), so recordFirstResponse would be a no-op there
+    // anyway (see its own already-RESPONDED guard), but gating here keeps
+    // intent explicit. Never rewrites the fact that a breach happened —
+    // isBreached stays exactly what it was calculated as at breach time
+    // (see EmailSlaService.recordFirstResponse's own comment).
+    if (reminder.reminderType === 'sla_breach') {
+      this.emailSla
+        .recordFirstResponse(reminder.organizationId, reminder.emailIntelligenceItemId, reminder.sentAt)
+        .catch((err: Error) => this.logger.error(`SLA first-response recording failed for AI follow-up ${reminder._id.toString()}: ${err.message}`));
+    }
+
     return reminder;
   }
 

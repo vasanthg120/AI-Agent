@@ -1,8 +1,10 @@
 import { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { FiAlertTriangle } from 'react-icons/fi';
 import { Badge, Button, Modal, Skeleton } from '@/components/ui';
 import { emailIntelligenceService, type EmailFollowUpReminder } from '@/services/emailIntelligenceService';
 import { integrationsService } from '@/services/integrationsService';
+import { AiFollowUpDrawer } from './AiFollowUpDrawer';
 import styles from '../email-intelligence.module.css';
 
 const DRAFT_STATUS_BADGE: Record<EmailFollowUpReminder['draftStatus'], { label: string; variant: 'neutral' | 'accent' | 'success' | 'warning' | 'danger' }> = {
@@ -24,6 +26,11 @@ export function FollowUpsSection() {
   const [reviewing, setReviewing] = useState<EmailFollowUpReminder | null>(null);
   const [draftText, setDraftText] = useState('');
   const [busyId, setBusyId] = useState<string | null>(null);
+  // AI Follow-up Agent (SLA-breach trigger) reminders get the richer review
+  // drawer (customer email, context indicators, dismiss/regenerate/send);
+  // the existing 'post_reply' reminders keep using the plain textarea Modal
+  // below, completely unchanged.
+  const [aiFollowUpReviewing, setAiFollowUpReviewing] = useState<EmailFollowUpReminder | null>(null);
   const { data, isLoading } = useQuery({
     queryKey: ['email-intelligence-follow-ups'],
     queryFn: () => emailIntelligenceService.getFollowUps(),
@@ -91,6 +98,33 @@ export function FollowUpsSection() {
       {data.map((reminder) => {
         const badge = DRAFT_STATUS_BADGE[reminder.draftStatus] ?? DRAFT_STATUS_BADGE.none;
         const isBusy = busyId === reminder._id;
+
+        // AI Follow-up Agent (SLA-breach trigger) — a compact card that
+        // opens the richer AiFollowUpDrawer, distinct from the plain
+        // 'post_reply' reminders rendered below (same list, same query,
+        // same actions data — just a different card for a different reason
+        // the reminder exists).
+        if (reminder.reminderType === 'sla_breach') {
+          return (
+            <div key={reminder._id} className={styles.listItem}>
+              <div className={styles.listItemMain}>
+                <span className={styles.listItemTitle}>{reminder.businessName ?? reminder.title}</span>
+                <span className={styles.listItemMeta}>{reminder.title}</span>
+              </div>
+              <div className={styles.badgeRow}>
+                <Badge variant="danger">
+                  <FiAlertTriangle style={{ verticalAlign: 'middle', marginRight: 4 }} />
+                  SLA breached
+                </Badge>
+                <Badge variant={badge.variant}>{badge.label}</Badge>
+                <Button variant="secondary" size="sm" onClick={() => setAiFollowUpReviewing(reminder)}>
+                  Review draft
+                </Button>
+              </div>
+            </div>
+          );
+        }
+
         return (
           <div key={reminder._id} className={styles.listItem}>
             <div className={styles.listItemMain}>
@@ -160,6 +194,8 @@ export function FollowUpsSection() {
           </Button>
         </div>
       </Modal>
+
+      <AiFollowUpDrawer reminder={aiFollowUpReviewing} onClose={() => setAiFollowUpReviewing(null)} />
     </div>
   );
 }

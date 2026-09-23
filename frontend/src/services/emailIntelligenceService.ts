@@ -126,6 +126,14 @@ export interface EmailFollowUpReminder {
   draftGeneratedAt?: string;
   sentAt?: string;
   sendError?: string;
+  // AI Follow-up Agent (SLA-breach trigger) additions — always absent on
+  // the existing 'post_reply' reminder type.
+  slaRecordId?: string;
+  dismissedAt?: string;
+  dismissedReason?: string;
+  // Real per-generation facts, not a static capability flag — only ever set
+  // once a draft has actually been generated for this reminder.
+  contextUsed?: { thread: boolean; crm: boolean; businessKnowledge: boolean };
   createdAt: string;
   updatedAt: string;
 }
@@ -304,6 +312,11 @@ export const emailIntelligenceService = {
 
   async sendFollowUp(id: string): Promise<EmailFollowUpReminder> {
     const { data } = await axiosClient.post<EmailFollowUpReminder>(`/email-intelligence/follow-ups/${id}/send`);
+    return data;
+  },
+
+  async dismissFollowUp(id: string, reason?: string): Promise<EmailFollowUpReminder> {
+    const { data } = await axiosClient.post<EmailFollowUpReminder>(`/email-intelligence/follow-ups/${id}/dismiss`, { reason });
     return data;
   },
 };

@@ -1750,6 +1750,63 @@ def generate_followup_draft(payload: dict, *, organization_id: str | None = None
     )
 
 
+SLA_BREACH_FOLLOWUP_TOOL = {
+    "name": "generate_sla_breach_followup",
+    "description": "Draft a reply to a customer whose email has gone unanswered past the company's committed response-time SLA.",
+    "strict": True,
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "draftReply": {
+                "type": "string",
+                "description": "The reply email body, written from our company's perspective, actually answering the customer's message.",
+            },
+        },
+        "required": ["draftReply"],
+        "additionalProperties": False,
+    },
+}
+
+# Deliberately a SEPARATE prompt from FOLLOWUP_DRAFT_SYSTEM_PROMPT above, not
+# a shared one: that one drafts a gentle "just checking in" nudge for a
+# customer who went quiet after WE already replied. This one drafts an
+# actual answer to a customer message WE never responded to in time — using
+# the wrong prompt here would produce a backwards-sounding "just checking
+# in" email for a question nobody has answered yet. Same underlying call
+# shape (_run_forced_tool_extraction) and same model — only the prompt
+# differs, so this is not a second AI pipeline.
+SLA_BREACH_FOLLOWUP_SYSTEM_PROMPT = """You are drafting a reply, on behalf of a business, to a customer email that \
+has gone unanswered longer than the company's committed response-time SLA. This must actually ANSWER the \
+customer's original message using whatever real context is supplied (the email thread, CRM account/deal \
+information, and the company's own Business Knowledge/policies) — never a generic "just checking in" placeholder, \
+and never an apology-only message with no substance.
+
+Ground every factual claim (prices, policies, dates, quantities, terms, commitments) ONLY in the supplied context. \
+If the supplied context does not contain the answer to something the customer asked, say so honestly using safe \
+language such as "I'll confirm this and get back to you shortly" — never invent a price, discount, delivery date, \
+policy, or commitment that isn't backed by the supplied context. Do not mention SLA breaches, internal processes, \
+AI, or that this reply was drafted automatically. Keep a professional, warm tone. Always call \
+generate_sla_breach_followup exactly once."""
+
+
+def generate_sla_breach_followup_draft(
+    payload: dict, *, organization_id: str | None = None, user_id: str = "", request_id: str = ""
+) -> dict:
+    """SLA-breach-triggered counterpart to generate_followup_draft above —
+    see SLA_BREACH_FOLLOWUP_SYSTEM_PROMPT's own comment for why it's a
+    distinct prompt rather than a shared one. Same traced forced-tool-choice
+    shape as every other structured-output call in this module."""
+    return _run_forced_tool_extraction(
+        SLA_BREACH_FOLLOWUP_SYSTEM_PROMPT,
+        SLA_BREACH_FOLLOWUP_TOOL,
+        [{"type": "text", "text": f"Follow-up context:\n\n{json.dumps(_truncate_payload_for_prompt(payload), default=str)}"}],
+        name="sla_breach_followup_draft_generate",
+        organization_id=organization_id,
+        user_id=user_id,
+        request_id=request_id,
+    )
+
+
 def analyze_followup_priorities(payload: dict, *, organization_id: str | None = None, user_id: str = "") -> dict:
     """Business Intelligence's AI Follow-Up Summary (section 6) — cached
     per {organizationId, date} on the NestJS side, same shape as

@@ -1,16 +1,11 @@
 .container {
   position: relative;
   border-radius: var(--radius-xl);
-  border: 1px solid var(--color-border-strong);
+  border: 1px solid transparent;
   background: var(--color-bg-surface);
   box-shadow: var(--shadow-md);
   padding: var(--space-3);
   transition: border-color var(--duration-fast) var(--ease-out), box-shadow var(--duration-fast) var(--ease-out);
-}
-
-.containerFocused {
-  border-color: var(--color-accent);
-  box-shadow: var(--shadow-glow);
 }
 
 .dragOver {
@@ -75,6 +70,16 @@
 
 .textarea::placeholder {
   color: var(--color-text-muted);
+}
+
+/* Overrides the app-wide :focus-visible accent outline (global.css) for this
+   specific input only — the surrounding .container already communicates
+   focus, so the browser's own outline here just doubled up as a second,
+   unwanted border. Left untouched everywhere else in the app. */
+.textarea:focus,
+.textarea:focus-visible {
+  outline: none;
+  box-shadow: none;
 }
 
 .toolbarRow {

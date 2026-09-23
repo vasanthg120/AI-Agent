@@ -60,6 +60,32 @@ export class EmailFollowUpReminder {
   @Prop()
   sendError?: string;
 
+  // ---- SLA-breach trigger (additive) — reminderType: 'sla_breach', see
+  // email-intelligence.service.ts's createSlaBreachFollowUp. Everything
+  // above this line is shared unchanged with the existing 'post_reply'
+  // reminders (same status/draftStatus state machine, same generate/
+  // approve/send actions) — these fields are only ever populated for the
+  // new trigger type. ----
+
+  // Traceability back to the EmailSlaRecord that triggered this reminder —
+  // not used for dedup (the existing {organizationId, emailIntelligenceItemId,
+  // reminderType} unique index above already guarantees that), just audit.
+  @Prop()
+  slaRecordId?: string;
+
+  @Prop()
+  dismissedAt?: Date;
+
+  @Prop()
+  dismissedReason?: string;
+
+  // What the AI draft actually drew on for THIS specific draft — real,
+  // per-generation facts (not a static capability flag), so the review UI's
+  // "AI used relevant context" indicator never claims something that wasn't
+  // actually used.
+  @Prop({ type: Object })
+  contextUsed?: { thread: boolean; crm: boolean; businessKnowledge: boolean };
+
   createdAt: Date;
   updatedAt: Date;
 }
