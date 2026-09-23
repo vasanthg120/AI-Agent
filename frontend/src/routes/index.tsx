@@ -29,9 +29,6 @@ const TimelinePage = lazy(() => import('@/features/timeline/TimelinePage').then(
 const CallCopilotPage = lazy(() =>
   import('@/features/call-copilot/CallCopilotPage').then((m) => ({ default: m.CallCopilotPage })),
 );
-const CommandCenterPage = lazy(() =>
-  import('@/features/command-center/CommandCenterPage').then((m) => ({ default: m.CommandCenterPage })),
-);
 const MyCustomerActivityPage = lazy(() =>
   import('@/features/deal-performance/MyCustomerActivityPage').then((m) => ({ default: m.MyCustomerActivityPage })),
 );
@@ -140,9 +137,6 @@ export function AppRoutes() {
             <Route path={ROUTES.agentActivity} element={<AgentWorkforceDashboardPage />} />
             <Route path={ROUTES.callCopilot} element={<CallCopilotPage />} />
             <Route path={ROUTES.timeline} element={<TimelinePage />} />
-            <Route element={<RequireRole role="admin" />}>
-              <Route path={ROUTES.commandCenter} element={<CommandCenterPage />} />
-            </Route>
             <Route element={<RequireRole role="consultant" />}>
               <Route path={ROUTES.myCustomerActivity} element={<MyCustomerActivityPage />} />
             </Route>

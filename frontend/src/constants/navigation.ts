@@ -11,7 +11,6 @@ import {
   FiMic,
   FiPieChart,
   FiSun,
-  FiTerminal,
 } from 'react-icons/fi';
 import { ROUTES } from './routes';
 import type { NavGroup } from '@/types';
@@ -64,13 +63,6 @@ export const NAV_GROUPS: NavGroup[] = [
     id: 'operations',
     label: 'Operations',
     items: [
-      {
-        id: 'command-center',
-        label: 'Command Center',
-        path: ROUTES.commandCenter,
-        icon: FiTerminal,
-        hideForRoles: ['agent_user', 'user', 'manager', 'consultant'],
-      },
       {
         id: 'finance',
         label: 'Finance AI',

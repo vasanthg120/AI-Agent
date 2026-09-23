@@ -8,7 +8,6 @@ export const ROUTES = {
   agentActivity: '/agent-activity',
   callCopilot: '/call-copilot',
   timeline: '/timeline',
-  commandCenter: '/command-center',
   dealPerformance: '/deal-performance',
   myCustomerActivity: '/my-customer-activity',
   businessKnowledge: '/business-knowledge',

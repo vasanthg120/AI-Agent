@@ -17,7 +17,6 @@ import { CustomersAndEmailSection } from './components/CustomersAndEmailSection'
 import { DrillDownModal, type DrillDownRow } from './components/DrillDownModal';
 import { ProductivitySection } from './components/ProductivitySection';
 import { VendorProfitabilitySection } from './components/VendorProfitabilitySection';
-import { AiFollowupSummarySection } from './components/AiFollowupSummarySection';
 import { MonthlySalesPerformanceCard } from './components/MonthlySalesPerformanceCard';
 import { KeyStatsGrid } from './components/KeyStatsGrid';
 import { RevenueMomentumCard } from './components/RevenueMomentumCard';
@@ -65,9 +64,8 @@ function defaultRange(): DateRange {
 // into Team Performance (a strict superset of the old Won/Lost/Open table);
 // Enquiry Conversion and Quotes & Payments folded into Pipeline & Quotes
 // (all three are "what happened to this quote" questions). Vendor
-// Profitability and AI Follow-Ups stay as their own tabs — genuinely
-// different sensitivity tier / interaction pattern, not redundant with
-// anything else here.
+// Profitability stays as its own tab — genuinely different sensitivity
+// tier, not redundant with anything else here.
 const TAB_ITEMS = [
   { id: 'overview', label: 'Overview' },
   { id: 'pipeline', label: 'Pipeline & Quotes' },
@@ -76,7 +74,6 @@ const TAB_ITEMS = [
   // Owner/admin only — matches vendor-profitability.controller.ts's own
   // tighter RBAC tier (margin data is more sensitive than pipeline data).
   { id: 'bi-vendor', label: 'Vendor Profitability', requireRoles: ['owner', 'admin'] },
-  { id: 'bi-followups', label: 'AI Follow-Ups' },
 ];
 
 type DrillDownTarget =
@@ -264,7 +261,12 @@ export function AnalyticsDashboardPage() {
                   dateTo={dateTo}
                   storeId={canOverrideStore ? storeId : undefined}
                   newEnquiryCount={data.emailActivity.newEnquiryCount}
-                  onOpenFollowUps={() => setActiveTab('bi-followups')}
+                  // The dedicated "AI Follow-Ups" tab was removed — this
+                  // queue item still surfaces the org's most-overdue
+                  // follow-up (ActionQueueCard's own data/logic is
+                  // untouched), it just lands back on Overview now instead
+                  // of a tab that no longer exists.
+                  onOpenFollowUps={() => setActiveTab('overview')}
                   onOpenPipeline={() => setActiveTab('pipeline')}
                   onOpenCustomers={() => setActiveTab('customers')}
                 />
@@ -402,7 +404,6 @@ export function AnalyticsDashboardPage() {
           )}
 
           {activeTab === 'bi-vendor' && <VendorProfitabilitySection dateFrom={dateFrom} dateTo={dateTo} />}
-          {activeTab === 'bi-followups' && <AiFollowupSummarySection />}
         </>
       )}
 
