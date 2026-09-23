@@ -105,58 +105,50 @@ let StoreSettingsService = StoreSettingsService_1 = class StoreSettingsService {
         const organizationId = store.organizationId;
         const storeId = store._id.toString();
         const userIds = await this.usersService.findIdsByOrgAndStore(organizationId, storeId);
-        const settled = await Promise.allSettled(userIds.map((userId) => this.chatService.generateSystemConversation(userId, organizationId, agentId, promptText, title)));
+        if (userIds.length === 0) {
+            return { usersNotified: 0, totalUsers: 0 };
+        }
+        const result = await this.dashboardService
+            .recordDailyReport({ organizationId, storeId, agentId, reportType, date, promptText, title, userId: userIds[0], wasMissed, userIds })
+            .catch((err) => {
+            this.logger.error(`Failed to generate ${reportType} report: ${err.message}`);
+            return null;
+        });
+        if (!result) {
+            return { usersNotified: 0, totalUsers: userIds.length };
+        }
+        const { report: savedReport, replyText } = result;
+        const restUserIds = userIds.slice(1);
+        const settled = await Promise.allSettled(restUserIds.map((userId) => this.chatService.createSystemConversationRecord(userId, organizationId, agentId, title, promptText, replyText)));
         settled.forEach((r, i) => {
             if (r.status === 'rejected') {
-                this.logger.error(`Scheduled report failed for user ${userIds[i]}: ${r.reason.message}`);
+                this.logger.error(`Failed to record ${reportType} conversation for user ${restUserIds[i]}: ${r.reason.message}`);
             }
         });
-        const successes = settled
-            .map((r, i) => ({ r, userId: userIds[i] }))
-            .filter((x) => x.r.status === 'fulfilled')
-            .map((x) => ({ value: x.r.value, userId: x.userId }));
-        if (successes.length > 0) {
-            const chosen = successes[0];
-            const savedReport = await this.dashboardService
-                .recordDailyReport({
-                organizationId,
-                storeId,
-                agentId,
-                reportType,
-                date,
-                conversationId: chosen.value.conversationId,
-                userId: chosen.userId,
-                wasMissed,
-                userIds,
-            })
-                .catch((err) => {
-                this.logger.error(`Failed to generate ${reportType} report: ${err.message}`);
-                return null;
-            });
-            if (savedReport && reportType === 'eod') {
-                await this.sendEodEmail(savedReport, store, userIds);
-            }
-            const occurredAt = wasMissed ? scheduledInstant(store.timezone, reportType === 'morning' ? store.openingTime : store.closingTime) : new Date();
-            await this.timelineService
-                .record({
-                organizationId,
-                storeId,
-                type: wasMissed ? 'daily_report_missed' : 'daily_report_generated',
-                title: wasMissed ? `${title} (generated late)` : title,
-                sourceType: 'daily_report',
-                occurredAt,
-            })
-                .catch((err) => this.logger.error(`Failed to record timeline event: ${err.message}`));
-            if (wasMissed) {
-                await Promise.allSettled(userIds.map((userId) => this.notificationsService.create(userId, {
-                    kind: 'warning',
-                    title: `${reportType === 'morning' ? 'Morning briefing' : 'EOD report'} generated late`,
-                    description: `${store.name}'s scheduled ${reportType} report ran later than its usual trigger window today.`,
-                    source: 'store-settings',
-                }, organizationId)));
-            }
+        const usersNotified = 1 + settled.filter((r) => r.status === 'fulfilled').length;
+        if (reportType === 'eod') {
+            await this.sendEodEmail(savedReport, store, userIds);
         }
-        return { usersNotified: successes.length, totalUsers: userIds.length };
+        const occurredAt = wasMissed ? scheduledInstant(store.timezone, reportType === 'morning' ? store.openingTime : store.closingTime) : new Date();
+        await this.timelineService
+            .record({
+            organizationId,
+            storeId,
+            type: wasMissed ? 'daily_report_missed' : 'daily_report_generated',
+            title: wasMissed ? `${title} (generated late)` : title,
+            sourceType: 'daily_report',
+            occurredAt,
+        })
+            .catch((err) => this.logger.error(`Failed to record timeline event: ${err.message}`));
+        if (wasMissed) {
+            await Promise.allSettled(userIds.map((userId) => this.notificationsService.create(userId, {
+                kind: 'warning',
+                title: `${reportType === 'morning' ? 'Morning briefing' : 'EOD report'} generated late`,
+                description: `${store.name}'s scheduled ${reportType} report ran later than its usual trigger window today.`,
+                source: 'store-settings',
+            }, organizationId)));
+        }
+        return { usersNotified, totalUsers: userIds.length };
     }
     async sendEodEmail(report, store, userIds) {
         if (report.emailStatus === 'sent')

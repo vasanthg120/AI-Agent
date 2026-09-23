@@ -86,6 +86,15 @@ export function RazorpayCheckoutModal({ open, onClose, packages, initialPackage,
         return;
       }
 
+      // Surfaced before the Razorpay widget opens whenever the displayed
+      // price was converted (e.g. a USD package charged in INR) — the
+      // amount shown here is the exact figure Razorpay is about to charge,
+      // never a separately-computed estimate.
+      const pkgForCurrency = packages.find((p) => p.key === packageKey);
+      if (pkgForCurrency && order.gatewayCurrency !== pkgForCurrency.currency) {
+        toast(`Charged as ${formatCurrency(order.gatewayAmount, order.gatewayCurrency)} via Razorpay`, { icon: '💱' });
+      }
+
       const loaded = await loadRazorpayScript();
       if (!loaded || !window.Razorpay) {
         toast.error("Couldn't load the payment checkout. Please try again.");

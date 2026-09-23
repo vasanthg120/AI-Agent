@@ -1,25 +1,50 @@
 import { useEffect, useState } from 'react';
 import toast from 'react-hot-toast';
 import { useNavigate } from 'react-router-dom';
-import { FiCheckCircle, FiChevronDown, FiChevronUp, FiCreditCard, FiDatabase, FiPieChart, FiSliders, FiZap } from 'react-icons/fi';
-import { Badge, SectionCard, StatTile } from '@/components/ui';
+import {
+  FiArrowRight,
+  FiCheckCircle,
+  FiChevronDown,
+  FiChevronUp,
+  FiCreditCard,
+  FiDatabase,
+  FiDownload,
+  FiFileText,
+  FiPieChart,
+  FiSliders,
+  FiZap,
+} from 'react-icons/fi';
+import { Badge, Button, SectionCard, Skeleton, StatTile } from '@/components/ui';
 import { ROUTES } from '@/constants/routes';
 import { billingService } from '@/services/billingService';
 import type {
+  BillingInvoiceSummary,
   CustomerTransaction,
   EntitlementAccess,
   PaymentMethod,
+  PublicPlan,
   SubscriptionSummary,
   UsageSummary,
   WalletSummary,
 } from '@/services/billingService';
 import { useAuthStore } from '@/stores/authStore';
+import { formatCurrency } from '@/utils/currency';
+import { formatFullDate } from '@/utils/date';
 import { extractErrorMessage } from '@/utils/errors';
 import { hasRole } from '@/utils/roles';
 import { AutoPaySettingsCard } from './components/AutoPaySettingsCard';
 import { CurrentPlanCard } from './components/CurrentPlanCard';
+import { PlanPriceCard } from './components/PlanPriceCard';
 import { TransactionHistoryTable } from './components/TransactionHistoryTable';
+import { WalletBalanceCard } from './components/WalletBalanceCard';
 import styles from './BillingPage.module.css';
+
+const INVOICE_TYPE_LABEL: Record<BillingInvoiceSummary['type'], string> = {
+  purchase: 'Credit purchase',
+  autopay: 'Auto Recharge',
+  subscription_checkout: 'Subscription',
+  subscription_renewal: 'Subscription renewal',
+};
 
 // The customer-facing Command Center for Haive Credits — separate from the
 // admin-only /command-center page (which shows raw provider/cost internals
@@ -27,10 +52,14 @@ import styles from './BillingPage.module.css';
 // every real role; Auto Recharge configuration and purchasing are further
 // restricted to owner/admin below, mirroring Finance's role split.
 //
-// Deliberately a single flat page now (no Overview/History/Auto Recharge
-// tabs) — the Current Plan card is the primary view; usage stats and
-// transaction history are still fully available, just tucked behind
-// disclosures rather than being the default view, so nothing is removed.
+// Restructured around WalletBalanceCard as the one hero (available credits +
+// low-balance/exhausted banners, previously duplicated on CurrentPlanCard
+// too), a plan-comparison row (current plan alongside one upgrade
+// suggestion, reusing PricingPage.tsx's own PlanPriceCard rather than a
+// second copy of that markup), and a real Billing History section — the
+// backend/service layer for invoices (billingService.listInvoices, GET
+// /billing/invoices/:id/pdf) already existed and was simply never rendered
+// anywhere before this.
 export function BillingPage() {
   const navigate = useNavigate();
   const user = useAuthStore((state) => state.user);
@@ -42,9 +71,12 @@ export function BillingPage() {
   const [transactions, setTransactions] = useState<CustomerTransaction[]>([]);
   const [paymentMethods, setPaymentMethods] = useState<PaymentMethod[]>([]);
   const [entitlements, setEntitlements] = useState<EntitlementAccess[]>([]);
+  const [plans, setPlans] = useState<PublicPlan[]>([]);
+  const [invoices, setInvoices] = useState<BillingInvoiceSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [showUsage, setShowUsage] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
+  const [downloadingInvoiceId, setDownloadingInvoiceId] = useState<string | null>(null);
 
   const loadAll = () => {
     Promise.all([
@@ -54,14 +86,18 @@ export function BillingPage() {
       billingService.listTransactions(50),
       canManageBilling ? billingService.listPaymentMethods() : Promise.resolve([]),
       billingService.getEntitlements(),
+      billingService.listPlans(),
+      billingService.listInvoices(25),
     ])
-      .then(([w, sub, u, t, m, ent]) => {
+      .then(([w, sub, u, t, m, ent, p, inv]) => {
         setWallet(w);
         setSubscription(sub);
         setUsage(u);
         setTransactions(t);
         setPaymentMethods(m);
         setEntitlements(ent);
+        setPlans(p);
+        setInvoices(inv);
       })
       .catch((error) => toast.error(extractErrorMessage(error)))
       .finally(() => setLoading(false));
@@ -72,9 +108,33 @@ export function BillingPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  const handleDownloadInvoice = async (invoice: BillingInvoiceSummary) => {
+    setDownloadingInvoiceId(invoice._id);
+    try {
+      await billingService.downloadInvoicePdf(invoice._id, invoice.invoiceNumber);
+    } catch (error) {
+      toast.error(extractErrorMessage(error));
+    } finally {
+      setDownloadingInvoiceId(null);
+    }
+  };
+
   if (loading || !wallet || !usage) {
-    return <div className={styles.page}>Loading...</div>;
+    return (
+      <div className={styles.page}>
+        <Skeleton height={100} />
+        <Skeleton height={220} />
+        <Skeleton height={160} />
+      </div>
+    );
   }
+
+  // One upgrade suggestion alongside the current plan — prefers a
+  // recommended plan, then whatever's next after the current one, never the
+  // plan already active. The full comparison (every plan, every cycle)
+  // stays on PricingPage; this is a shortcut, not a replacement for it.
+  const upgradeCandidate = plans.find((p) => p.id !== subscription?.plan?.id && p.recommended) ?? plans.find((p) => p.id !== subscription?.plan?.id);
+  const upgradePrice = upgradeCandidate?.prices.find((pr) => pr.billingCycle !== 'one_time') ?? upgradeCandidate?.prices[0];
 
   return (
     <div className={styles.page}>
@@ -83,12 +143,41 @@ export function BillingPage() {
         <p className={styles.pageSubtitle}>Your plan, Haive Credits, and Auto Recharge — all in one place.</p>
       </div>
 
-      <CurrentPlanCard
+      <WalletBalanceCard
         wallet={wallet}
-        subscription={subscription}
-        onUpgrade={() => navigate(ROUTES.pricing)}
         onAddCredits={() => navigate(ROUTES.addCredits)}
+        onEnableAutoPay={() => {
+          if (!canManageBilling) {
+            toast.error('Only an owner or admin can manage Auto Recharge.');
+            return;
+          }
+          document.getElementById('auto-recharge-section')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }}
+        onViewPlans={() => navigate(ROUTES.pricing)}
       />
+
+      <div className={styles.planRow}>
+        <CurrentPlanCard
+          wallet={wallet}
+          subscription={subscription}
+          onUpgrade={() => navigate(ROUTES.pricing)}
+          onAddCredits={() => navigate(ROUTES.addCredits)}
+        />
+        {upgradeCandidate && (
+          <PlanPriceCard
+            plan={upgradeCandidate}
+            price={upgradePrice}
+            cycleLabel={upgradePrice?.billingCycle ?? ''}
+            ctaLabel={subscription ? 'Switch Plan' : 'Get Started'}
+            ctaDisabled={false}
+            onSelect={() => navigate(ROUTES.pricing)}
+          />
+        )}
+      </div>
+
+      <button type="button" className={styles.viewAllPlansLink} onClick={() => navigate(ROUTES.pricing)}>
+        View all plans <FiArrowRight size={14} />
+      </button>
 
       {entitlements.length > 0 && (
         <SectionCard title="Usage & Access" icon={FiCheckCircle}>
@@ -130,16 +219,55 @@ export function BillingPage() {
       )}
 
       {canManageBilling && (
-        <SectionCard title="Payment Method & Auto Recharge" icon={FiZap}>
-          <AutoPaySettingsCard
-            autoPay={wallet.autoPay}
-            autoRechargePolicy={wallet.autoRechargePolicy}
-            paymentMethods={paymentMethods}
-            onChanged={loadAll}
-            onRequirePurchase={() => navigate(ROUTES.addCredits)}
-          />
-        </SectionCard>
+        <div id="auto-recharge-section">
+          <SectionCard title="Payment Method & Auto Recharge" icon={FiZap}>
+            <AutoPaySettingsCard
+              autoPay={wallet.autoPay}
+              autoRechargePolicy={wallet.autoRechargePolicy}
+              paymentMethods={paymentMethods}
+              onChanged={loadAll}
+              onRequirePurchase={() => navigate(ROUTES.addCredits)}
+            />
+          </SectionCard>
+        </div>
       )}
+
+      <SectionCard title="Billing History" icon={FiFileText}>
+        {invoices.length === 0 ? (
+          <p className={styles.muted}>No invoices yet.</p>
+        ) : (
+          <div className={styles.invoiceList}>
+            {invoices.map((invoice) => (
+              <div key={invoice._id} className={styles.invoiceRow}>
+                <div className={styles.invoiceMain}>
+                  <span className={styles.invoiceIconBadge}>
+                    <FiFileText size={16} />
+                  </span>
+                  <div className={styles.invoiceText}>
+                    <span className={styles.invoiceNumber}>{invoice.invoiceNumber}</span>
+                    <span className={styles.muted}>
+                      {INVOICE_TYPE_LABEL[invoice.type]} &middot; {formatFullDate(invoice.issuedAt)}
+                    </span>
+                  </div>
+                </div>
+                <div className={styles.invoiceMeta}>
+                  <span className={styles.invoiceAmount}>{formatCurrency(invoice.total, invoice.currencyCode)}</span>
+                  <Badge variant={invoice.status === 'paid' ? 'success' : 'neutral'}>{invoice.status}</Badge>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    leftIcon={<FiDownload />}
+                    loading={downloadingInvoiceId === invoice._id}
+                    onClick={() => void handleDownloadInvoice(invoice)}
+                  >
+                    Download
+                  </Button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </SectionCard>
 
       <button
         type="button"

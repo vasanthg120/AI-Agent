@@ -1,5 +1,5 @@
-import { FiAlertTriangle, FiZap } from 'react-icons/fi';
-import { Button, Card } from '@/components/ui';
+import { FiZap } from 'react-icons/fi';
+import { Badge, Button, Card } from '@/components/ui';
 import type { SubscriptionSummary, WalletSummary } from '@/services/billingService';
 import { formatCurrency } from '@/utils/currency';
 import { formatFullDate } from '@/utils/date';
@@ -16,7 +16,9 @@ export interface CurrentPlanCardProps {
 // customer needs (plan, price, credits remaining, next billing date), never
 // the technical/internal fields (gateway, provider, plan key) that the admin
 // side works with. Falls back to a plain "no active plan" state rather than
-// fabricating a "Free" plan the admin may never have created.
+// fabricating a "Free" plan the admin may never have created. Low-balance/
+// exhausted banners live on WalletBalanceCard (the page's hero) instead of
+// here, so the two don't both render the same warning.
 export function CurrentPlanCard({ wallet, subscription, onUpgrade, onAddCredits }: CurrentPlanCardProps) {
   const price = subscription?.price;
   const granted = price?.creditsGranted ?? 0;
@@ -36,7 +38,9 @@ export function CurrentPlanCard({ wallet, subscription, onUpgrade, onAddCredits 
             <FiZap size={20} />
           </span>
           <div>
-            <div className={styles.currentPlanEyebrow}>Current Plan</div>
+            <div className={styles.currentPlanEyebrow}>
+              {subscription ? <Badge variant="accent">Current Plan</Badge> : 'Current Plan'}
+            </div>
             <div className={styles.currentPlanName}>{subscription?.plan?.name ?? 'No active plan'}</div>
           </div>
         </div>
@@ -63,26 +67,6 @@ export function CurrentPlanCard({ wallet, subscription, onUpgrade, onAddCredits 
         </div>
       ) : (
         <p className={styles.muted}>Upgrade to a plan to get recurring Haive Credits every billing cycle.</p>
-      )}
-
-      {isExhausted && (
-        <div className={`${styles.banner} ${styles.bannerDanger}`}>
-          <span className={styles.bannerText}>
-            <FiAlertTriangle className={styles.bannerIcon} />
-            Your Haive Credits are exhausted. Add credits or enable Auto Recharge to continue using Haive AI.
-          </span>
-        </div>
-      )}
-      {!isExhausted && wallet.lowBalance && (
-        <div className={`${styles.banner} ${styles.bannerWarning}`}>
-          <span className={styles.bannerText}>
-            <FiAlertTriangle className={styles.bannerIcon} />
-            Your Haive Credits are running low.{' '}
-            {wallet.autoPay.enabled
-              ? 'Auto Recharge is enabled and will automatically top up your credits.'
-              : 'Add credits to continue using Haive AI without interruption.'}
-          </span>
-        </div>
       )}
 
       <div className={styles.currentPlanActions}>

@@ -150,7 +150,7 @@ let ChatService = ChatService_1 = class ChatService {
         const agentReply = await this.callAgentStreaming(userId, userJwt, conversation._id.toString(), message, onEvent, resolvedAgentId);
         return this.finishTurn(conversation, agentReply);
     }
-    async generateSystemConversation(userId, organizationId, agentId, promptText, title) {
+    async createSystemConversationRecord(userId, organizationId, agentId, title, promptText, replyText) {
         const conversation = await this.conversationModel.create({ userId, organizationId, title, agentId, messages: [] });
         conversation.messages.push({
             role: 'user',
@@ -158,9 +158,7 @@ let ChatService = ChatService_1 = class ChatService {
             toolsUsed: [],
             createdAt: new Date(),
         });
-        const userJwt = this.jwt.sign({ sub: userId }, { expiresIn: '5m' });
-        const agentReply = await this.callAgent(userId, userJwt, conversation._id.toString(), promptText, agentId);
-        return this.finishTurn(conversation, agentReply);
+        return this.finishTurn(conversation, { reply: replyText, tools_used: [] });
     }
     async getOrCreateConversation(userId, organizationId, message, conversationId, agentId) {
         const existing = conversationId

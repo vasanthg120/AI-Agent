@@ -17,7 +17,7 @@ from app.integrations.crm_mongo_sync import sync_all_orgs as sync_crm_deals_to_m
 from app.integrations.crm_mongo_sync import sync_all_quote_orgs as sync_crm_quotes_to_mongo
 from app.mcp_server import app as mcp_app
 from app.rag.business_sync import sync_all
-from app.routes import admin_providers as admin_providers_routes, business_intelligence as business_intelligence_routes, business_knowledge as business_knowledge_routes, call_copilot as call_copilot_routes, chat, customer_activity as customer_activity_routes, documents, email_intelligence as email_intelligence_routes, finance as finance_routes, health, outlook as outlook_routes, prompts as prompt_routes, reports, roles, sync, tasks, voice as voice_routes, workflows as workflow_routes
+from app.routes import admin_providers as admin_providers_routes, business_intelligence as business_intelligence_routes, business_knowledge as business_knowledge_routes, call_copilot as call_copilot_routes, chat, customer_activity as customer_activity_routes, documents, email_intelligence as email_intelligence_routes, finance as finance_routes, health, outlook as outlook_routes, prompts as prompt_routes, reports, roles, sync, voice as voice_routes, workflows as workflow_routes
 from app.workflows import definitions as _workflow_definitions  # noqa: F401 - import triggers workflow registration
 
 # Windows' console defaults to a legacy codepage (cp1252) that can't encode
@@ -38,7 +38,6 @@ app.include_router(documents.router)
 app.include_router(roles.router)
 app.include_router(reports.router)
 app.include_router(sync.router)
-app.include_router(tasks.router)
 app.include_router(workflow_routes.router)
 app.include_router(prompt_routes.router)
 app.include_router(outlook_routes.router)

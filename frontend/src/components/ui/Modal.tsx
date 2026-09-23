@@ -4,6 +4,7 @@ import { createPortal } from 'react-dom';
 import { AnimatePresence, motion } from 'framer-motion';
 import { FiX } from 'react-icons/fi';
 import { IconButton } from './IconButton';
+import { BACKDROP_FADE, SURFACE_SPRING } from './motionPresets';
 import styles from './Modal.module.css';
 
 export interface ModalProps {
@@ -25,6 +26,18 @@ export function Modal({ open, onClose, title, description, children, maxWidth }:
     return () => document.removeEventListener('keydown', onKeyDown);
   }, [open, onClose]);
 
+  // Keeps the page behind the modal from scrolling while it's open — without
+  // this the backdrop covers the page but the page underneath can still
+  // scroll/jump, which reads as janky against an otherwise smooth overlay.
+  useEffect(() => {
+    if (!open) return;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [open]);
+
   return createPortal(
     <AnimatePresence>
       {open && (
@@ -37,10 +50,10 @@ export function Modal({ open, onClose, title, description, children, maxWidth }:
           // was underneath (e.g. a "Manage" button on a row that just
           // became visible) can land on the closing backdrop instead and
           // silently do nothing until the user tries again or reloads.
-          initial={{ opacity: 0, pointerEvents: 'none' }}
-          animate={{ opacity: 1, pointerEvents: 'auto' }}
-          exit={{ opacity: 0, pointerEvents: 'none' }}
-          transition={{ duration: 0.15 }}
+          initial={{ opacity: 0, backdropFilter: 'blur(0px)', pointerEvents: 'none' }}
+          animate={{ opacity: 1, backdropFilter: 'blur(4px)', pointerEvents: 'auto' }}
+          exit={{ opacity: 0, backdropFilter: 'blur(0px)', pointerEvents: 'none' }}
+          transition={BACKDROP_FADE}
           onClick={onClose}
         >
           <motion.div
@@ -49,10 +62,10 @@ export function Modal({ open, onClose, title, description, children, maxWidth }:
             aria-labelledby={title ? 'modal-title' : undefined}
             className={styles.modal}
             style={maxWidth ? ({ '--modal-max-width': `${maxWidth}px` } as React.CSSProperties) : undefined}
-            initial={{ opacity: 0, scale: 0.95, y: 12, pointerEvents: 'none' }}
+            initial={{ opacity: 0, scale: 0.93, y: 18, pointerEvents: 'none' }}
             animate={{ opacity: 1, scale: 1, y: 0, pointerEvents: 'auto' }}
-            exit={{ opacity: 0, scale: 0.95, y: 12, pointerEvents: 'none' }}
-            transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
+            exit={{ opacity: 0, scale: 0.96, y: 10, pointerEvents: 'none' }}
+            transition={SURFACE_SPRING}
             onClick={(event) => event.stopPropagation()}
           >
             {(title || description) && (

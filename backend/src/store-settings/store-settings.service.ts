@@ -168,84 +168,82 @@ export class StoreSettingsService {
     const organizationId = store.organizationId;
     const storeId = store._id.toString();
     const userIds = await this.usersService.findIdsByOrgAndStore(organizationId, storeId);
+    if (userIds.length === 0) {
+      return { usersNotified: 0, totalUsers: 0 };
+    }
+
+    // Exactly one structured DailyReport per (organizationId, agentId,
+    // reportType, date) — not one per user, and exactly one live-agent LLM
+    // call in the whole run (inside recordDailyReport, which also creates
+    // the first roster user's own Chat History conversation from that same
+    // call's reply — see its own comment). The first roster user
+    // (earliest-created, findIdsByOrgAndStore()'s natural order) is the
+    // audit-trail owner (sourceConversationId/sourceUserId), same as before
+    // this change — just no longer contingent on that specific user's own
+    // separate live-agent call happening to succeed, because there isn't
+    // one anymore.
+    const result = await this.dashboardService
+      .recordDailyReport({ organizationId, storeId, agentId, reportType, date, promptText, title, userId: userIds[0], wasMissed, userIds })
+      .catch((err: Error) => {
+        this.logger.error(`Failed to generate ${reportType} report: ${err.message}`);
+        return null;
+      });
+
+    if (!result) {
+      return { usersNotified: 0, totalUsers: userIds.length };
+    }
+    const { report: savedReport, replyText } = result;
+
+    // Every OTHER roster user gets the identical reply copied into their own
+    // Chat History too — same real content the DailyReport itself was built
+    // from, at zero additional LLM cost (previously this was a second,
+    // independent live-agent call per user whose own, different reply was
+    // never read by anything — see createSystemConversationRecord's comment).
+    const restUserIds = userIds.slice(1);
     const settled = await Promise.allSettled(
-      userIds.map((userId) =>
-        this.chatService.generateSystemConversation(userId, organizationId, agentId, promptText, title),
-      ),
+      restUserIds.map((userId) => this.chatService.createSystemConversationRecord(userId, organizationId, agentId, title, promptText, replyText)),
     );
     settled.forEach((r, i) => {
       if (r.status === 'rejected') {
-        this.logger.error(`Scheduled report failed for user ${userIds[i]}: ${(r.reason as Error).message}`);
+        this.logger.error(`Failed to record ${reportType} conversation for user ${restUserIds[i]}: ${(r.reason as Error).message}`);
       }
     });
+    const usersNotified = 1 + settled.filter((r) => r.status === 'fulfilled').length;
 
-    const successes = settled
-      .map((r, i) => ({ r, userId: userIds[i] }))
-      .filter((x) => x.r.status === 'fulfilled')
-      .map((x) => ({ value: (x.r as PromiseFulfilledResult<{ conversationId: string; reply: string }>).value, userId: x.userId }));
-
-    // Exactly one structured DailyReport per (organizationId, agentId,
-    // reportType, date) — not one per user. The first successful user
-    // (earliest-created, findIdsByOrgAndStore()'s natural order) is only the
-    // audit-trail owner (sourceConversationId/sourceUserId) here — the
-    // report's actual content comes from dashboardService's own
-    // CrewAI-backed generation (independent of any user's plain chat reply,
-    // and higher-quality for it), not from chosen.value.reply. A failure
-    // here must never break the per-user fan-out above.
-    if (successes.length > 0) {
-      const chosen = successes[0];
-      const savedReport = await this.dashboardService
-        .recordDailyReport({
-          organizationId,
-          storeId,
-          agentId,
-          reportType,
-          date,
-          conversationId: chosen.value.conversationId,
-          userId: chosen.userId,
-          wasMissed,
-          userIds,
-        })
-        .catch((err: Error) => {
-          this.logger.error(`Failed to generate ${reportType} report: ${err.message}`);
-          return null;
-        });
-
-      if (savedReport && reportType === 'eod') {
-        await this.sendEodEmail(savedReport, store, userIds);
-      }
-
-      const occurredAt = wasMissed ? scheduledInstant(store.timezone, reportType === 'morning' ? store.openingTime : store.closingTime) : new Date();
-      await this.timelineService
-        .record({
-          organizationId,
-          storeId,
-          type: wasMissed ? 'daily_report_missed' : 'daily_report_generated',
-          title: wasMissed ? `${title} (generated late)` : title,
-          sourceType: 'daily_report',
-          occurredAt,
-        })
-        .catch((err: Error) => this.logger.error(`Failed to record timeline event: ${err.message}`));
-
-      if (wasMissed) {
-        await Promise.allSettled(
-          userIds.map((userId) =>
-            this.notificationsService.create(
-              userId,
-              {
-                kind: 'warning',
-                title: `${reportType === 'morning' ? 'Morning briefing' : 'EOD report'} generated late`,
-                description: `${store.name}'s scheduled ${reportType} report ran later than its usual trigger window today.`,
-                source: 'store-settings',
-              },
-              organizationId,
-            ),
-          ),
-        );
-      }
+    if (reportType === 'eod') {
+      await this.sendEodEmail(savedReport, store, userIds);
     }
 
-    return { usersNotified: successes.length, totalUsers: userIds.length };
+    const occurredAt = wasMissed ? scheduledInstant(store.timezone, reportType === 'morning' ? store.openingTime : store.closingTime) : new Date();
+    await this.timelineService
+      .record({
+        organizationId,
+        storeId,
+        type: wasMissed ? 'daily_report_missed' : 'daily_report_generated',
+        title: wasMissed ? `${title} (generated late)` : title,
+        sourceType: 'daily_report',
+        occurredAt,
+      })
+      .catch((err: Error) => this.logger.error(`Failed to record timeline event: ${err.message}`));
+
+    if (wasMissed) {
+      await Promise.allSettled(
+        userIds.map((userId) =>
+          this.notificationsService.create(
+            userId,
+            {
+              kind: 'warning',
+              title: `${reportType === 'morning' ? 'Morning briefing' : 'EOD report'} generated late`,
+              description: `${store.name}'s scheduled ${reportType} report ran later than its usual trigger window today.`,
+              source: 'store-settings',
+            },
+            organizationId,
+          ),
+        ),
+      );
+    }
+
+    return { usersNotified, totalUsers: userIds.length };
   }
 
   /** Sends the actual EOD report content (not a generic "ready" notice —

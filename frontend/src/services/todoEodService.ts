@@ -37,15 +37,20 @@ export interface ListTasksParams {
   mine?: boolean;
 }
 
-export interface TaskRecommendation {
-  taskId: string;
-  rationale: string;
-  task: TodoTask;
-}
-
-export interface TaskRecommendations {
-  recommendations: TaskRecommendation[];
-  overallNote: string;
+export interface EodSummary {
+  date: string;
+  tasksCompleted: TodoTask[];
+  tasksPending: TodoTask[];
+  email: { received: number; sent: number; responded: number; pending: number };
+  crm: { dealsCreated: number; dealsUpdated: number; quotesCreated: number; quotesUpdated: number };
+  // Store-wide, never per-user — Contact/Account have no owner field to
+  // scope by (see tasks.service.ts's getEodSummary for why), so this is
+  // never presented as "your" new contacts/accounts.
+  newContactsAcrossOrg: number;
+  newAccountsAcrossOrg: number;
+  narrativeSummary: string | null;
+  reportExists: boolean;
+  reportGeneratedAt: string | null;
 }
 
 export const todoEodService = {
@@ -54,9 +59,13 @@ export const todoEodService = {
     return data.tasks;
   },
 
-  async getCalendar(month: string): Promise<{ month: string; days: CalendarDaySummary[] }> {
+  // reportType is optional — omitted (the To-Do board's own calendar) counts
+  // both morning+eod reports exactly as before; the EOD page's calendar
+  // passes 'eod' so a day with only a morning report doesn't show as having
+  // an EOD one.
+  async getCalendar(month: string, reportType?: 'morning' | 'eod'): Promise<{ month: string; days: CalendarDaySummary[] }> {
     const { data } = await axiosClient.get<{ month: string; days: CalendarDaySummary[] }>('/tasks/calendar', {
-      params: { month },
+      params: { month, reportType },
     });
     return data;
   },
@@ -66,8 +75,10 @@ export const todoEodService = {
     return data;
   },
 
-  async getRecommendations(): Promise<TaskRecommendations> {
-    const { data } = await axiosClient.get<TaskRecommendations>('/tasks/recommendations');
+  // date is optional (defaults to today on the backend) — the EOD page's
+  // Calendar view passes an explicit past date to look up that day's report.
+  async getEodSummary(date?: string): Promise<EodSummary> {
+    const { data } = await axiosClient.get<EodSummary>('/tasks/eod', { params: { date } });
     return data;
   },
 
@@ -76,13 +87,28 @@ export const todoEodService = {
       params: { ...params, format },
       responseType: 'blob',
     });
-    const disposition = response.headers['content-disposition'] as string | undefined;
-    const filename = disposition ? /filename="([^"]+)"/.exec(disposition)?.[1] : undefined;
-    const url = URL.createObjectURL(response.data as Blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = filename ?? `tasks.${format}`;
-    a.click();
-    URL.revokeObjectURL(url);
+    downloadBlobResponse(response, `tasks.${format}`);
+  },
+
+  // A real EOD report export (narrative/email/CRM breakdown), not a re-
+  // export of that day's task list — see backend/src/dashboard/tasks.controller.ts's
+  // own comment on the new GET /tasks/eod/export route this calls.
+  async downloadEodExport(format: 'pdf' | 'csv', date: string): Promise<void> {
+    const response = await axiosClient.get('/tasks/eod/export', {
+      params: { date, format },
+      responseType: 'blob',
+    });
+    downloadBlobResponse(response, `eod-${date}.${format}`);
   },
 };
+
+function downloadBlobResponse(response: { headers: Record<string, unknown>; data: unknown }, fallbackFilename: string): void {
+  const disposition = response.headers['content-disposition'] as string | undefined;
+  const filename = disposition ? /filename="([^"]+)"/.exec(disposition)?.[1] : undefined;
+  const url = URL.createObjectURL(response.data as Blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename ?? fallbackFilename;
+  a.click();
+  URL.revokeObjectURL(url);
+}

@@ -2,6 +2,7 @@ import { useState } from 'react';
 import type { ReactNode } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import clsx from 'clsx';
+import { TOOLTIP_SPRING } from './motionPresets';
 import styles from './Tooltip.module.css';
 
 export interface TooltipProps {
@@ -27,10 +28,10 @@ export function Tooltip({ content, children, placement = 'top' }: TooltipProps) 
           <motion.span
             role="tooltip"
             className={clsx(styles.bubble, styles[placement])}
-            initial={{ opacity: 0, scale: 0.92 }}
+            initial={{ opacity: 0, scale: 0.9 }}
             animate={{ opacity: 1, scale: 1 }}
             exit={{ opacity: 0, scale: 0.92 }}
-            transition={{ duration: 0.12 }}
+            transition={TOOLTIP_SPRING}
           >
             {content}
           </motion.span>

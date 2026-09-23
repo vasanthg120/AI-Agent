@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { Parser } from 'json2csv';
-import PDFDocument from 'pdfkit';
 import ExcelJS from 'exceljs';
+import { BRAND, drawHeader, drawTable, sectionHeading } from '../common/pdf/branded-pdf';
 import { RoyaltyReportSummary } from './royalty-report.service';
 
 export interface RoyaltyReportExportRow {
@@ -14,9 +14,8 @@ function money(value: number): string {
 }
 
 // Mirrors crm/deals-export.service.ts's / finance/finance-export.service.ts's
-// exact 4-method shape (json2csv for CSV, pdfkit for PDF, exceljs for Excel)
-// — the same proven export pattern, applied to a single report's Executive
-// Summary line items (label/value rows) instead of a list of records.
+// exact 4-method shape (json2csv for CSV, pdfkit via the shared branded-pdf
+// helpers for PDF, exceljs for Excel) — the same proven export pattern.
 @Injectable()
 export class RoyaltyReportExportService {
   buildRows(report: RoyaltyReportSummary): RoyaltyReportExportRow[] {
@@ -48,30 +47,76 @@ export class RoyaltyReportExportService {
     return parser.parse(rows);
   }
 
-  writePdf(doc: PDFKit.PDFDocument, rows: RoyaltyReportExportRow[], meta: { dateFrom: string; dateTo: string }): void {
-    doc.fontSize(18).text('Royalty Report', { align: 'left' });
-    doc.fontSize(10).fillColor('#666').text(`Period: ${meta.dateFrom} – ${meta.dateTo}`);
-    doc.fontSize(8).fillColor('#999').text(`Report run: ${new Date().toISOString().slice(0, 10)}`);
-    doc.moveDown();
+  // Takes the full report (not just the Executive Summary rows) so the PDF
+  // can show real Deals/Invoices/WIP tables — previously the PDF was
+  // Executive-Summary-only (a bullet label/value list) while the Excel
+  // export already had 4 real sheets; this brings the PDF to real parity.
+  writePdf(doc: PDFKit.PDFDocument, rows: RoyaltyReportExportRow[], meta: { dateFrom: string; dateTo: string }, report: RoyaltyReportSummary): void {
+    drawHeader(doc, {
+      title: 'Royalty Report',
+      subtitle: `Period: ${meta.dateFrom} – ${meta.dateTo}\nReport run: ${new Date().toISOString().slice(0, 10)}`,
+    });
 
-    doc.fontSize(13).fillColor('#000').text('Executive Summary');
-    doc.moveDown(0.3);
-    for (const row of rows) {
-      doc
-        .fontSize(10)
-        .fillColor('#000')
-        .text(row.item, { continued: true, width: 300 })
-        .fillColor('#333')
-        .text(`  ${row.value}`);
+    sectionHeading(doc, 'Executive Summary');
+    drawTable(doc, {
+      columns: [
+        { label: 'Item', width: 'auto', align: 'left', value: (r: RoyaltyReportExportRow) => r.item },
+        { label: 'Value', width: 150, align: 'right', value: (r: RoyaltyReportExportRow) => r.value },
+      ],
+      rows,
+    });
+
+    if (report.deals.length > 0) {
+      sectionHeading(doc, `Deals (${report.dealsSummary.totalRecords}) — ${money(report.dealsSummary.totalSalesExTax)}`);
+      drawTable(doc, {
+        columns: [
+          { label: 'Customer', width: 'auto', align: 'left', value: (d) => d.customerName },
+          { label: 'Quote #', width: 70, align: 'left', value: (d) => d.quoteNumber ?? '—' },
+          { label: 'Status', width: 55, align: 'left', value: (d) => d.dealStatus },
+          { label: 'Value', width: 85, align: 'right', value: (d) => money(d.value) },
+          { label: 'Closing Date', width: 75, align: 'left', value: (d) => d.closingDate ?? '—' },
+        ],
+        rows: report.deals,
+      });
+    }
+
+    if (report.invoices.length > 0) {
+      sectionHeading(doc, `Invoices (${report.invoicesSummary.totalRecords}) — ${money(report.invoicesSummary.totalSalesExTax)}`);
+      drawTable(doc, {
+        columns: [
+          { label: 'Invoice #', width: 70, align: 'left', value: (i) => i.invoiceNumber },
+          { label: 'Customer', width: 'auto', align: 'left', value: (i) => i.customerName },
+          { label: 'Ex Tax Value', width: 75, align: 'right', value: (i) => money(i.exTaxValue) },
+          { label: 'Eligible', width: 70, align: 'right', value: (i) => money(i.eligibleValue) },
+          { label: 'Royalty', width: 70, align: 'right', value: (i) => money(i.royalty) },
+          { label: 'Status', width: 55, align: 'left', value: (i) => (i.voidStatus ? 'Voided' : i.invoiceStatus) },
+        ],
+        rows: report.invoices,
+      });
+    }
+
+    if (report.wipQuotes.length > 0) {
+      sectionHeading(doc, `Work In Progress (${report.wipQuotesSummary.totalRecords}) — ${money(report.wipQuotesSummary.totalSalesExTax)}`);
+      drawTable(doc, {
+        columns: [
+          { label: 'Quote #', width: 80, align: 'left', value: (q) => q.quoteNumber ?? '—' },
+          { label: 'Customer', width: 'auto', align: 'left', value: (q) => q.customerName },
+          { label: 'Created Date', width: 90, align: 'left', value: (q) => q.createdDate },
+          { label: 'Quote Total (Ex Tax)', width: 110, align: 'right', value: (q) => money(q.quoteTotalExTax) },
+        ],
+        rows: report.wipQuotes,
+      });
+    }
+
+    if (report.deals.length === 0 && report.invoices.length === 0 && report.wipQuotes.length === 0) {
+      doc.moveDown(0.5).fontSize(10).fillColor(BRAND.muted).text('No itemized deal, invoice, or work-in-progress records in this period.');
     }
   }
 
   // Four sheets — Executive Summary (label/value, as CSV/PDF also show),
   // Deals, Invoices, and Work In Progress (Quotes) — the itemized line data
   // the summary's counts/sums are aggregated from, each ending in its own
-  // Summary row (record count + Total Sales Ex Tax). Excel's native multi-
-  // sheet support is the natural fit for this, unlike CSV/PDF which stay
-  // Executive-Summary-only this pass (a scoped decision, not an oversight).
+  // Summary row (record count + Total Sales Ex Tax).
   async toExcel(rows: RoyaltyReportExportRow[], report: RoyaltyReportSummary): Promise<Buffer> {
     const workbook = new ExcelJS.Workbook();
 

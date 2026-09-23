@@ -8,7 +8,7 @@ import { JwtPayload } from '../auth/jwt-payload.interface';
 import { DealDocument } from '../crm/schemas/deal.schema';
 import { QuoteDocument } from '../crm/schemas/quote.schema';
 import { EmailIntelligenceItemDocument } from '../email-intelligence/schemas/email-intelligence-item.schema';
-import { DailyReport, DailyReportDocument } from './schemas/daily-report.schema';
+import { DailyReportDocument } from './schemas/daily-report.schema';
 export declare class DashboardService {
     private reportModel;
     private dealModel;
@@ -27,14 +27,14 @@ export declare class DashboardService {
         agentId: string;
         reportType: 'morning' | 'eod';
         date: string;
-        conversationId: string;
+        promptText: string;
+        title: string;
         userId: string;
         wasMissed?: boolean;
         userIds?: string[];
-    }): Promise<import("mongoose").Document<unknown, {}, DailyReportDocument, {}, {}> & DailyReport & import("mongoose").Document<import("mongoose").Types.ObjectId, any, any, Record<string, any>, {}> & Required<{
-        _id: import("mongoose").Types.ObjectId;
-    }> & {
-        __v: number;
+    }): Promise<{
+        report: DailyReportDocument;
+        replyText: string;
     }>;
     private attributeTask;
     markReportEmailStatus(reportId: string, status: 'sent' | 'failed', error?: string): Promise<void>;

@@ -20,6 +20,11 @@ const CURRENCY_SYMBOLS: Record<string, string> = {
 
 export function formatCurrency(amount: number, currency: string): string {
   const symbol = CURRENCY_SYMBOLS[currency.toUpperCase()];
-  const formattedAmount = amount.toLocaleString();
+  // Always 2 decimal places — a bare toLocaleString() drops them for a whole
+  // number (99 -> "99") but keeps them for a converted figure (8217.34 ->
+  // "8,217.34"), which reads as inconsistent precision on the same page.
+  // Money is always shown to its minor unit, matching PricingService's own
+  // 2-decimal rounding convention on the backend.
+  const formattedAmount = amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   return symbol ? `${symbol}${formattedAmount}` : `${formattedAmount} ${currency.toUpperCase()}`;
 }

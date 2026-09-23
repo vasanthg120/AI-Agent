@@ -10,6 +10,7 @@ import {
   FiMessageSquare,
   FiMic,
   FiPieChart,
+  FiSun,
   FiTerminal,
 } from 'react-icons/fi';
 import { ROUTES } from './routes';
@@ -84,7 +85,12 @@ export const NAV_GROUPS: NavGroup[] = [
         icon: FiPieChart,
         hideForRoles: ['agent_user', 'user', 'consultant'],
       },
-      { id: 'todo-eod', label: 'To-Do / EOD', path: ROUTES.todoEod, icon: FiCheckSquare },
+      // Split from one combined "To-Do / EOD" entry into two — EOD now has
+      // its own real page (EodPage.tsx) instead of being invisible inside
+      // the To-Do board. Kept adjacent in this same group so they still
+      // read as connected, not unrelated, features.
+      { id: 'todo', label: 'To-Do', path: ROUTES.todoEod, icon: FiCheckSquare },
+      { id: 'eod', label: 'EOD Report', path: ROUTES.eod, icon: FiSun },
       {
         id: 'billing',
         label: 'Billing',

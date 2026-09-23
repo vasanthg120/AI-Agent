@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { Parser } from 'json2csv';
-import PDFDocument from 'pdfkit';
 import ExcelJS from 'exceljs';
+import { BRAND, drawHeader, drawTable } from '../common/pdf/branded-pdf';
 import { EmailIntelligenceItemDocument } from '../email-intelligence/schemas/email-intelligence-item.schema';
 
 export interface BiEmailExportRow {
@@ -43,25 +43,28 @@ export class EmailAnalyticsExportService {
   }
 
   writePdf(doc: PDFKit.PDFDocument, rows: BiEmailExportRow[], meta: { dateFrom?: string; dateTo?: string }): void {
-    doc.fontSize(18).text('Email Analytics Export', { align: 'left' });
     const range = meta.dateFrom
       ? meta.dateTo && meta.dateTo !== meta.dateFrom
         ? `${meta.dateFrom} – ${meta.dateTo}`
         : meta.dateFrom
       : 'Current month';
-    doc.fontSize(10).fillColor('#666').text(range);
-    doc.moveDown();
+    drawHeader(doc, { title: 'Email Analytics Export', subtitle: range });
 
     if (rows.length === 0) {
-      doc.fontSize(11).fillColor('#666').text('No emails match the current filters.');
+      doc.fontSize(11).fillColor(BRAND.muted).text('No emails match the current filters.');
       return;
     }
 
-    for (const r of rows) {
-      doc.fontSize(10).fillColor('#000').text(`• ${r.subject} — ${r.employeeName}`);
-      const meta2 = [r.fromAddress, r.intent, r.priority, r.status].filter(Boolean).join(' · ');
-      doc.fontSize(8).fillColor('#666').text(`  ${meta2}`);
-    }
+    drawTable(doc, {
+      columns: [
+        { label: 'Subject', width: 'auto', align: 'left', value: (r) => r.subject },
+        { label: 'From', width: 120, align: 'left', value: (r) => r.fromAddress },
+        { label: 'Employee', width: 100, align: 'left', value: (r) => r.employeeName },
+        { label: 'Intent', width: 70, align: 'left', value: (r) => r.intent },
+        { label: 'Status', width: 60, align: 'left', value: (r) => r.status },
+      ],
+      rows,
+    });
   }
 
   async toExcel(rows: BiEmailExportRow[]): Promise<Buffer> {

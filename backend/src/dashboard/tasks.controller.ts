@@ -1,6 +1,6 @@
 import { Body, Controller, Get, Param, Patch, Query, Res, UseGuards } from '@nestjs/common';
 import { Response } from 'express';
-import PDFDocument from 'pdfkit';
+import { createBrandedDocument, finalizePagedDocument } from '../common/pdf/branded-pdf';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { JwtPayload } from '../auth/jwt-payload.interface';
@@ -24,15 +24,26 @@ export class TasksController {
   }
 
   @Get('calendar')
-  calendar(@Query('month') month: string, @Query('mine') mine: string | undefined, @CurrentUser() user: JwtPayload) {
-    return this.tasksService.calendarSummary(month, user, mine === undefined ? undefined : mine === 'true');
+  calendar(
+    @Query('month') month: string,
+    @Query('mine') mine: string | undefined,
+    @Query('reportType') reportType: string | undefined,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.tasksService.calendarSummary(
+      month,
+      user,
+      mine === undefined ? undefined : mine === 'true',
+      reportType === 'morning' || reportType === 'eod' ? reportType : undefined,
+    );
   }
 
-  // Registered before ':id' for the same reason 'calendar'/'export' are —
-  // distinct static segment, no route-matching ambiguity with Patch(':id').
-  @Get('recommendations')
-  recommendations(@CurrentUser() user: JwtPayload) {
-    return this.tasksService.getRecommendations(user);
+  // Same static-segment-before-':id' reasoning as 'calendar'/'export' above.
+  // date is optional (defaults to today, see getEodSummary) — the EOD page's
+  // Calendar view passes an explicit past date to look up that day's report.
+  @Get('eod')
+  eodSummary(@Query('date') date: string | undefined, @CurrentUser() user: JwtPayload) {
+    return this.tasksService.getEodSummary(user, date);
   }
 
   // Registered before ':id' isn't needed here — 'export'/'calendar' are
@@ -58,10 +69,44 @@ export class TasksController {
       'Content-Type': 'application/pdf',
       'Content-Disposition': `attachment; filename="tasks-${filenameDate}.pdf"`,
     });
-    const doc = new PDFDocument();
+    const doc = createBrandedDocument();
     doc.pipe(res);
     this.tasksExportService.writePdf(doc, tasks, query);
-    doc.end();
+    finalizePagedDocument(doc);
+  }
+
+  // A real EOD report export — previously "downloading the EOD report" hit
+  // the same /tasks/export route above, scoped to one day, which only ever
+  // re-exported that day's task list, never the narrative/email/CRM
+  // breakdown the EOD page itself shows. Mirrors /tasks/export's csv/pdf
+  // branching exactly, just backed by getEodSummary instead of list().
+  @Get('eod/export')
+  async eodExport(
+    @Query('date') date: string | undefined,
+    @Query('format') format: 'csv' | 'pdf' | undefined,
+    @CurrentUser() user: JwtPayload,
+    @Res() res: Response,
+  ) {
+    const summary = await this.tasksService.getEodSummary(user, date);
+    const filenameDate = summary.date;
+
+    if (format === 'csv') {
+      res.set({
+        'Content-Type': 'text/csv; charset=utf-8',
+        'Content-Disposition': `attachment; filename="eod-${filenameDate}.csv"`,
+      });
+      res.send(this.tasksExportService.toEodCsv(summary));
+      return;
+    }
+
+    res.set({
+      'Content-Type': 'application/pdf',
+      'Content-Disposition': `attachment; filename="eod-${filenameDate}.pdf"`,
+    });
+    const doc = createBrandedDocument();
+    doc.pipe(res);
+    this.tasksExportService.writeEodPdf(doc, summary);
+    finalizePagedDocument(doc);
   }
 
   @Patch(':id')

@@ -12,6 +12,8 @@ import { TasksController } from './tasks.controller';
 import { TasksService } from './tasks.service';
 import { TasksExportService } from './tasks-export.service';
 import { DailyReport, DailyReportSchema } from './schemas/daily-report.schema';
+import { Account, AccountSchema } from '../crm/schemas/account.schema';
+import { Contact, ContactSchema } from '../crm/schemas/contact.schema';
 import { Deal, DealSchema } from '../crm/schemas/deal.schema';
 import { Quote, QuoteSchema } from '../crm/schemas/quote.schema';
 import { EmailIntelligenceItem, EmailIntelligenceItemSchema } from '../email-intelligence/schemas/email-intelligence-item.schema';
@@ -34,6 +36,12 @@ import { EmailIntelligenceItem, EmailIntelligenceItemSchema } from '../email-int
       { name: Deal.name, schema: DealSchema },
       { name: Quote.name, schema: QuoteSchema },
       { name: EmailIntelligenceItem.name, schema: EmailIntelligenceItemSchema },
+      // Additive — TasksService.getEodSummary()'s store-wide "new
+      // contacts/accounts today" counts. Same "register the schema
+      // directly, don't import the owning module" precedent as the four
+      // above (no CrmModule import here — see this module's own comment).
+      { name: Contact.name, schema: ContactSchema },
+      { name: Account.name, schema: AccountSchema },
     ]),
     // recordDailyReport() calls /reports/generate, which runs a multi-step
     // CrewAI crew (prioritize -> write, each its own LLM call) before

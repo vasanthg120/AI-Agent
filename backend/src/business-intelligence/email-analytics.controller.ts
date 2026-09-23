@@ -1,6 +1,6 @@
 import { Controller, Get, NotFoundException, Param, Query, Res, UseGuards } from '@nestjs/common';
 import { Response } from 'express';
-import PDFDocument from 'pdfkit';
+import { createBrandedDocument, finalizePagedDocument } from '../common/pdf/branded-pdf';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
@@ -105,10 +105,10 @@ export class EmailAnalyticsController {
       return;
     }
     res.set({ 'Content-Type': 'application/pdf', 'Content-Disposition': `attachment; filename="emails-${filenameDate}.pdf"` });
-    const doc = new PDFDocument();
+    const doc = createBrandedDocument();
     doc.pipe(res);
     this.exportService.writePdf(doc, rows, query);
-    doc.end();
+    finalizePagedDocument(doc);
   }
 
   @Get('emails/:id')

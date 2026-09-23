@@ -258,12 +258,23 @@ export class ChatService {
     return this.finishTurn(conversation, agentReply);
   }
 
-  /** Creates a conversation with no live user turn driving it — used by the
-   * scheduled morning to-do / EOD report job. Always creates fresh (no
-   * existing-conversation lookup), always non-streaming (no socket to push
-   * to for a background job). Reuses finishTurn() so the Redis cache
+  /** Creates a conversation with no live user turn driving it, without an
+   * actual LLM call — used by the scheduled morning/EOD report job
+   * (store-settings.service.ts's runForStore, via
+   * dashboardService.recordDailyReport) to give every store roster user a
+   * copy of the already-generated report in their own Chat History. Used to
+   * be one full live-agent /chat pipeline call PER roster user (as
+   * expensive as interactive chat), even though only the first successful
+   * call's conversationId was ever read afterward — the actual report
+   * content always came from one separate, independent crew call. That was
+   * N real LLM calls per report for content that was N-1 times provably
+   * discarded. This persists the SAME already-generated reply text into
+   * every user's own Chat History instead, so each user still gets an
+   * identical, accurate copy (not a different, lower-quality per-user chat
+   * reply) at zero additional LLM cost. Always creates fresh (no
+   * existing-conversation lookup). Reuses finishTurn() so the Redis cache
    * invalidation added for live chat covers this write path too. */
-  async generateSystemConversation(userId: string, organizationId: string, agentId: string, promptText: string, title: string) {
+  async createSystemConversationRecord(userId: string, organizationId: string, agentId: string, title: string, promptText: string, replyText: string) {
     const conversation = await this.conversationModel.create({ userId, organizationId, title, agentId, messages: [] });
     conversation.messages.push({
       role: 'user',
@@ -272,10 +283,7 @@ export class ChatService {
       createdAt: new Date(),
     });
 
-    const userJwt = this.jwt.sign({ sub: userId }, { expiresIn: '5m' });
-    const agentReply = await this.callAgent(userId, userJwt, conversation._id.toString(), promptText, agentId);
-
-    return this.finishTurn(conversation, agentReply);
+    return this.finishTurn(conversation, { reply: replyText, tools_used: [] });
   }
 
   private async getOrCreateConversation(

@@ -1,58 +1,32 @@
 import { useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
-import { FiCalendar, FiCheckSquare, FiChevronLeft, FiChevronRight, FiDownload, FiZap } from 'react-icons/fi';
-import { Badge, Button, Card, Dropdown, IconButton, SectionCard, Skeleton, Switch, Tabs } from '@/components/ui';
+import { FiCalendar, FiCheckSquare, FiChevronLeft, FiChevronRight, FiDownload } from 'react-icons/fi';
+import { Badge, Button, Card, Dropdown, IconButton, SectionCard, Switch, Tabs } from '@/components/ui';
 import { extractErrorMessage } from '@/utils/errors';
 import { dayjs, todayUtc } from '@/utils/date';
 import { todoEodService } from '@/services/todoEodService';
 import { Board } from './components/Board';
+import { GenerateReportEmptyState } from './components/GenerateReportEmptyState';
 import { MonthCalendar } from './components/MonthCalendar';
 import { PRIORITY_VARIANT } from './components/TaskCard';
 import type { TaskSource } from './utils/taskSource';
 import styles from './TodoEodPage.module.css';
 
-// Recommendations only mean something for today's open tasks — a past
-// board date's tasks are historical, not something to "focus on next".
-//
-// While loading, this used to return null and then pop in fully-formed
-// once the query resolved — since Board loads independently (its own
-// query, its own skeleton), whichever finished first would already be
-// settled on screen when the other popped in above/below it, visibly
-// shifting the board (reported as "the board suddenly changes to
-// Recommended Focus"). Reserving the space with a skeleton from the first
-// render fixes this — nothing pops in after the user is already looking
-// at settled content.
-function RecommendedFocus() {
+// Same queryKey shape as Board.tsx's own ['tasks', params] — React Query
+// dedupes identical keys, so this is a second subscriber to the exact same
+// cached fetch, never a duplicate request. Only used to decide whether
+// today's board is empty because nothing has been generated yet (in which
+// case Board's own per-column empty state doesn't explain why, or offer
+// anything to do about it) vs. genuinely no tasks — a past date is never
+// treated this way, since "Generate Now" can't retroactively backfill it.
+function useTodayBoardIsEmpty(params: { dateFrom: string; dateTo: string; mine?: boolean }, enabled: boolean) {
   const { data, isLoading } = useQuery({
-    queryKey: ['tasks-recommendations'],
-    queryFn: () => todoEodService.getRecommendations(),
+    queryKey: ['tasks', params],
+    queryFn: () => todoEodService.getTasks(params),
+    enabled,
   });
-
-  if (isLoading) return <Skeleton height={120} />;
-  if (!data || data.recommendations.length === 0) return null;
-
-  return (
-    <Card className={styles.recommendCard}>
-      <div className={styles.recommendHeader}>
-        <FiZap />
-        <span className={styles.recommendTitle}>Recommended Focus</span>
-      </div>
-      <span className={styles.recommendNote}>{data.overallNote}</span>
-      <div className={styles.recommendList}>
-        {data.recommendations.map((r) => (
-          <div key={r.taskId} className={styles.recommendRow}>
-            <div className={styles.recommendRowHead}>
-              <span className={styles.recommendRowTitle}>{r.task.title}</span>
-              <Badge variant={PRIORITY_VARIANT[r.task.priority]}>{r.task.priority}</Badge>
-              {r.task.isOverdue && <Badge variant="danger">Overdue</Badge>}
-            </div>
-            <span className={styles.recommendRationale}>{r.rationale}</span>
-          </div>
-        ))}
-      </div>
-    </Card>
-  );
+  return enabled && !isLoading && (data?.length ?? 0) === 0;
 }
 
 const VIEW_TABS = [
@@ -90,6 +64,11 @@ export function TodoEodPage() {
   // which made the board default to a date with no data.
   const [boardDate, setBoardDate] = useState(todayUtc());
 
+  const queryClient = useQueryClient();
+  const boardParams = { dateFrom: boardDate, dateTo: boardDate, mine: mineOnly || undefined };
+  const isToday = boardDate === todayUtc();
+  const todayBoardIsEmpty = useTodayBoardIsEmpty(boardParams, isToday);
+
   const { data: calendarData } = useQuery({
     queryKey: ['tasks-calendar', month],
     queryFn: () => todoEodService.getCalendar(month),
@@ -115,7 +94,7 @@ export function TodoEodPage() {
   return (
     <div className={styles.page}>
       <div className={styles.headerRow}>
-        <span className={styles.pageTitle}>To-Do / EOD</span>
+        <span className={styles.pageTitle}>To-Do</span>
         <div className={styles.headerActions}>
           <Tabs items={VIEW_TABS} activeId={view} onChange={(id) => setView(id as 'board' | 'calendar')} />
           <Dropdown
@@ -153,12 +132,22 @@ export function TodoEodPage() {
               </Button>
             )}
           </div>
-          {boardDate === todayUtc() && <RecommendedFocus />}
           <div className={styles.boardFilterRow}>
             <Tabs items={SOURCE_TABS} activeId={sourceFilter} onChange={(id) => setSourceFilter(id as TaskSource | 'all')} />
             <Switch label="My tasks only" checked={mineOnly} onChange={setMineOnly} />
           </div>
-          <Board params={{ dateFrom: boardDate, dateTo: boardDate, mine: mineOnly || undefined }} sourceFilter={sourceFilter} />
+          {todayBoardIsEmpty ? (
+            <Card>
+              <GenerateReportEmptyState
+                reportType="morning"
+                title="Today's to-do list hasn't been generated yet"
+                description="It runs automatically near opening time. An admin can generate it now instead of waiting."
+                onGenerated={() => void queryClient.invalidateQueries({ queryKey: ['tasks', boardParams] })}
+              />
+            </Card>
+          ) : (
+            <Board params={boardParams} sourceFilter={sourceFilter} />
+          )}
         </>
       ) : (
         <div className={styles.calendarLayout}>

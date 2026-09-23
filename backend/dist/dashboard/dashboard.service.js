@@ -59,7 +59,8 @@ let DashboardService = class DashboardService {
             throw err;
         }
         const tasks = await Promise.all(data.tasks.map((task) => this.attributeTask(task, input.organizationId)));
-        return this.reportModel
+        const { conversationId } = await this.chatService.createSystemConversationRecord(input.userId, input.organizationId, input.agentId, input.title, input.promptText, data.reply);
+        const report = await this.reportModel
             .findOneAndUpdate({
             organizationId: input.organizationId,
             storeId: input.storeId,
@@ -69,11 +70,12 @@ let DashboardService = class DashboardService {
         }, {
             tasks,
             summary: data.summary,
-            sourceConversationId: input.conversationId,
+            sourceConversationId: conversationId,
             sourceUserId: input.userId,
             wasMissed: input.wasMissed ?? false,
         }, { upsert: true, new: true })
             .exec();
+        return { report, replyText: data.reply };
     }
     async attributeTask(task, organizationId) {
         const { relatedDealId, relatedQuoteId, relatedEmailId, ...rest } = task;

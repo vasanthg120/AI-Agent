@@ -4,6 +4,7 @@ import { AnimatePresence, motion } from 'framer-motion';
 import clsx from 'clsx';
 import { FiInfo } from 'react-icons/fi';
 import { useClickOutside } from '@/hooks/useClickOutside';
+import { POPUP_SPRING } from './motionPresets';
 import styles from './InfoPopover.module.css';
 
 export interface InfoPopoverProps {
@@ -54,10 +55,10 @@ export function InfoPopover({ title, children, align = 'left', placement = 'bott
             role="dialog"
             aria-label={title}
             className={clsx(styles.panel, styles[align], styles[placement])}
-            initial={{ opacity: 0, y: placement === 'bottom' ? -4 : 4, scale: 0.97 }}
+            initial={{ opacity: 0, y: placement === 'bottom' ? -6 : 6, scale: 0.96 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: placement === 'bottom' ? -4 : 4, scale: 0.97 }}
-            transition={{ duration: 0.14, ease: [0.16, 1, 0.3, 1] }}
+            transition={POPUP_SPRING}
           >
             <div className={styles.panelTitle}>{title}</div>
             <div className={styles.panelBody}>{children}</div>

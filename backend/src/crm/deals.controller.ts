@@ -1,6 +1,6 @@
 import { Body, Controller, Delete, Get, Param, Patch, Post, Query, Res, UseGuards } from '@nestjs/common';
 import { Response } from 'express';
-import PDFDocument from 'pdfkit';
+import { createBrandedDocument, finalizePagedDocument } from '../common/pdf/branded-pdf';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
@@ -110,10 +110,10 @@ export class DealsController {
       'Content-Type': 'application/pdf',
       'Content-Disposition': `attachment; filename="deals-${filenameDate}.pdf"`,
     });
-    const doc = new PDFDocument();
+    const doc = createBrandedDocument();
     doc.pipe(res);
     this.dealsExportService.writePdf(doc, rows, query);
-    doc.end();
+    finalizePagedDocument(doc);
   }
 
   // Configurable, provider-agnostic deal-owner field mapping (see

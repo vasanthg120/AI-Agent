@@ -1,7 +1,7 @@
 import { Body, Controller, Delete, Get, Param, Post, Put, Query, Res, UseGuards } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Response } from 'express';
-import PDFDocument from 'pdfkit';
+import { createBrandedDocument, finalizePagedDocument } from '../common/pdf/branded-pdf';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { JwtPayload } from '../auth/jwt-payload.interface';
@@ -224,10 +224,10 @@ export class BillingController {
       'Content-Type': 'application/pdf',
       'Content-Disposition': `attachment; filename="${invoice.invoiceNumber}.pdf"`,
     });
-    const doc = new PDFDocument();
+    const doc = createBrandedDocument();
     doc.pipe(res);
     this.invoicePdfService.writePdf(doc, invoice, template);
-    doc.end();
+    finalizePagedDocument(doc);
   }
 
   @Get('invoices/:id/csv')

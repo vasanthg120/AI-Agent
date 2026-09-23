@@ -156,7 +156,14 @@ export function FinancePage() {
     }
   };
 
-  const refreshOverview = () => void queryClient.invalidateQueries({ queryKey: ['finance-dashboard-overview'] });
+  // Also invalidates the Vendor Profitability dashboard's transaction table
+  // (a different route/page, but one global QueryClient — see
+  // AppProviders.tsx) so linking/editing a vendor invoice here is reflected
+  // there immediately, without a manual refresh.
+  const refreshOverview = () => {
+    void queryClient.invalidateQueries({ queryKey: ['finance-dashboard-overview'] });
+    void queryClient.invalidateQueries({ queryKey: ['dash-vendor-profitability-transactions'] });
+  };
 
   const handleGenerateSummary = async (regenerate: boolean) => {
     const { summary } = await financeDashboardService.generateSummary(regenerate);

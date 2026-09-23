@@ -18,6 +18,35 @@ export interface VendorProfitabilityFilters {
   vendorId?: string[];
 }
 
+// One row per linked (Customer Quote <-> Vendor Invoice) transaction — the
+// FinanceDocument.quoteId link Finance AI's "Customer Quote No" field
+// creates (see FinanceDocumentsService.linkCustomerQuote), never the
+// FinanceDocument.dealId link getOverview()/computeDealProfitability() key
+// off below. quoteId is unconditionally set by that link flow; dealId is
+// only back-filled when the linked Quote itself happens to have one, which
+// most quotes never do — keying this view off quoteId instead is what makes
+// every successfully-linked invoice actually show up here, regardless of
+// whether a Deal exists.
+export interface VendorProfitabilityTransactionRow {
+  transactionId: string;
+  dealId?: string;
+  customerName?: string;
+  customerQuoteNo?: string;
+  customerQuoteAmount: number;
+  quoteCurrency: string;
+  quoteDate?: Date;
+  quoteStatus?: string;
+  vendorName?: string;
+  vendorInvoiceNumber?: string;
+  vendorInvoiceAmount: number;
+  vendorCurrency: string;
+  invoiceDate?: string;
+  status: string;
+  currencyMismatch: boolean;
+  profitAmount: number | null;
+  profitMarginPct: number | null;
+}
+
 export interface VendorProfitabilityRow {
   dealId: string;
   dealName?: string;
@@ -232,6 +261,107 @@ export class VendorProfitabilityService {
         markupPct: totalVendorCost > 0 ? Math.round((totalGrossProfit / totalVendorCost) * 1000) / 10 : null,
       },
       coveragePct: totalDealsAnyStatus > 0 ? Math.round((dealIds.length / totalDealsAnyStatus) * 1000) / 10 : null,
+      currencyMismatchCount,
+    };
+  }
+
+  // "How much we quoted the customer, how much we paid the vendor, and the
+  // resulting profit — for each customer transaction." One row per linked
+  // FinanceDocument (never grouped/summed the way getOverview() above
+  // groups by dealId) so a customer quote's own amount is never blended
+  // with another quote's on the same deal. quoteId is the only precondition
+  // — see this file's own VendorProfitabilityTransactionRow comment for why
+  // that (not dealId) is the correct, always-populated key here.
+  async getTransactions(
+    organizationId: string,
+    start: Date,
+    end: Date,
+    filters: VendorProfitabilityFilters,
+  ): Promise<{
+    rows: VendorProfitabilityTransactionRow[];
+    totals: {
+      customerQuoteAmount: number;
+      vendorInvoiceAmount: number;
+      profitAmount: number;
+      profitMarginPct: number | null;
+    };
+    currencyMismatchCount: number;
+  }> {
+    const financeMatch: FilterQuery<FinanceDocument> = {
+      organizationId,
+      quoteId: { $exists: true, $ne: null },
+      paymentStatus: { $ne: 'cancelled' },
+      createdAt: { $gte: start, $lt: end },
+    };
+    if (filters.vendorId?.length) financeMatch.vendorRef = { $in: filters.vendorId };
+
+    const financeDocs = await this.financeDocumentModel.find(financeMatch).sort({ createdAt: -1 }).exec();
+    if (financeDocs.length === 0) {
+      return {
+        rows: [],
+        totals: { customerQuoteAmount: 0, vendorInvoiceAmount: 0, profitAmount: 0, profitMarginPct: null },
+        currencyMismatchCount: 0,
+      };
+    }
+
+    const quoteIds = [...new Set(financeDocs.map((d) => d.quoteId!))];
+    const vendorRefs = [...new Set(financeDocs.map((d) => d.vendorRef).filter((v): v is string => !!v))];
+    const [quotes, vendors] = await Promise.all([
+      this.quoteModel.find({ organizationId, _id: { $in: quoteIds } }).exec(),
+      vendorRefs.length ? this.vendorModel.find({ organizationId, _id: { $in: vendorRefs } }).exec() : Promise.resolve([]),
+    ]);
+    const quoteById = new Map(quotes.map((q) => [q._id.toString(), q]));
+    const vendorNameById = new Map(vendors.map((v) => [v._id.toString(), v.name]));
+
+    let currencyMismatchCount = 0;
+    const rows: VendorProfitabilityTransactionRow[] = [];
+    for (const doc of financeDocs) {
+      const quote = quoteById.get(doc.quoteId!);
+      if (!quote) continue; // link points at a quote that no longer exists — never fabricate a row for it
+
+      const customerQuoteAmount = quote.quoteAmount;
+      const vendorInvoiceAmount = doc.paymentAmount;
+      const currencyMismatch = quote.currency !== doc.currency;
+      if (currencyMismatch) currencyMismatchCount += 1;
+
+      const profitAmount = currencyMismatch ? null : customerQuoteAmount - vendorInvoiceAmount;
+      const profitMarginPct =
+        profitAmount !== null && customerQuoteAmount > 0 ? Math.round((profitAmount / customerQuoteAmount) * 1000) / 10 : null;
+
+      rows.push({
+        transactionId: doc._id.toString(),
+        dealId: doc.dealId,
+        customerName: quote.clientDetails?.companyName ?? quote.quoteName,
+        customerQuoteNo: quote.quoteNumber,
+        customerQuoteAmount,
+        quoteCurrency: quote.currency,
+        quoteDate: quote.createdAt,
+        quoteStatus: quote.clientApprovalStatus,
+        vendorName: (doc.vendorRef && vendorNameById.get(doc.vendorRef)) ?? doc.vendorName,
+        vendorInvoiceNumber: doc.invoiceNumber,
+        vendorInvoiceAmount,
+        vendorCurrency: doc.currency,
+        invoiceDate: doc.invoiceDate,
+        status: doc.paymentStatus,
+        currencyMismatch,
+        profitAmount,
+        profitMarginPct,
+      });
+    }
+
+    const countable = rows.filter((r) => !r.currencyMismatch);
+    const totalQuoteAmount = countable.reduce((sum, r) => sum + r.customerQuoteAmount, 0);
+    const totalInvoiceAmount = countable.reduce((sum, r) => sum + r.vendorInvoiceAmount, 0);
+    const totalProfit = totalQuoteAmount - totalInvoiceAmount;
+
+    return {
+      rows,
+      totals: {
+        customerQuoteAmount: totalQuoteAmount,
+        vendorInvoiceAmount: totalInvoiceAmount,
+        profitAmount: totalProfit,
+        profitMarginPct: totalQuoteAmount > 0 ? Math.round((totalProfit / totalQuoteAmount) * 1000) / 10 : null,
+      },
       currencyMismatchCount,
     };
   }

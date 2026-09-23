@@ -4,6 +4,7 @@ import { AnimatePresence, motion } from 'framer-motion';
 import { FiCalendar, FiChevronDown } from 'react-icons/fi';
 import { useClickOutside } from '@/hooks/useClickOutside';
 import type { DateRange } from './DateRangeControl';
+import { POPUP_SPRING } from './motionPresets';
 import styles from './MonthYearFilterPopup.module.css';
 
 export const MONTH_NAMES = [
@@ -69,10 +70,10 @@ export function MonthYearFilterPopup({
         {open && (
           <motion.div
             className={styles.panel}
-            initial={{ opacity: 0, y: -6, scale: 0.98 }}
+            initial={{ opacity: 0, y: -6, scale: 0.97 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: -6, scale: 0.98 }}
-            transition={{ duration: 0.14, ease: [0.16, 1, 0.3, 1] }}
+            transition={POPUP_SPRING}
           >
             <div className={styles.row}>
               <select

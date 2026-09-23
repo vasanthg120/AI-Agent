@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { Parser } from 'json2csv';
-import PDFDocument from 'pdfkit';
 import ExcelJS from 'exceljs';
+import { BRAND, drawHeader, drawTable, sectionHeading } from '../common/pdf/branded-pdf';
 import { FinanceDocumentDocument } from './schemas/finance-document.schema';
 
 export interface FinanceExportRow {
@@ -27,8 +27,14 @@ const STATUS_LABELS: Record<string, string> = {
   cancelled: 'Cancelled',
 };
 
+function formatRange(dateFrom?: string, dateTo?: string): string {
+  if (!dateFrom) return 'All time';
+  return dateTo && dateTo !== dateFrom ? `${dateFrom} – ${dateTo}` : dateFrom;
+}
+
 // Mirrors crm/deals-export.service.ts's structure exactly (json2csv for
-// CSV, pdfkit for PDF, exceljs for Excel) — no new export pattern needed.
+// CSV, pdfkit for PDF via the shared branded-pdf helpers, exceljs for
+// Excel) — no new export pattern needed.
 @Injectable()
 export class FinanceExportService {
   buildRows(docs: FinanceDocumentDocument[]): FinanceExportRow[] {
@@ -67,14 +73,7 @@ export class FinanceExportService {
   }
 
   writePdf(doc: PDFKit.PDFDocument, rows: FinanceExportRow[], meta: { dateFrom?: string; dateTo?: string }): void {
-    doc.fontSize(18).text('Finance Document Export', { align: 'left' });
-    const range = meta.dateFrom
-      ? meta.dateTo && meta.dateTo !== meta.dateFrom
-        ? `${meta.dateFrom} – ${meta.dateTo}`
-        : meta.dateFrom
-      : 'All time';
-    doc.fontSize(10).fillColor('#666').text(range);
-    doc.moveDown();
+    drawHeader(doc, { title: 'Finance Document Export', subtitle: formatRange(meta.dateFrom, meta.dateTo) });
 
     const byStatus: Record<string, FinanceExportRow[]> = { pending: [], overdue: [], partially_paid: [], paid: [], cancelled: [] };
     for (const r of rows) byStatus[r.paymentStatus]?.push(r);
@@ -83,17 +82,21 @@ export class FinanceExportService {
       const group = byStatus[status];
       if (group.length === 0) continue;
       const value = group.reduce((sum, r) => sum + r.paymentAmount, 0);
-      doc.moveDown(0.5).fillColor('#000').fontSize(13).text(`${STATUS_LABELS[status]} (${group.length}) — ${value.toLocaleString()}`);
-      doc.moveDown(0.2);
-      for (const r of group) {
-        doc.fontSize(10).fillColor('#000').text(`• ${r.vendorName} — ${r.paymentAmount.toLocaleString()} ${r.currency}`);
-        const meta2 = [r.invoiceNumber, r.department, r.dueDate].filter(Boolean).join(' · ');
-        if (meta2) doc.fontSize(8).fillColor('#666').text(`  ${meta2}`);
-      }
+      sectionHeading(doc, `${STATUS_LABELS[status]} (${group.length}) — ${value.toLocaleString()}`);
+      drawTable(doc, {
+        columns: [
+          { label: 'Vendor', width: 'auto', align: 'left', value: (r) => r.vendorName },
+          { label: 'Invoice #', width: 80, align: 'left', value: (r) => r.invoiceNumber || '—' },
+          { label: 'Amount', width: 85, align: 'right', value: (r) => `${r.paymentAmount.toLocaleString()} ${r.currency}` },
+          { label: 'Due Date', width: 70, align: 'left', value: (r) => r.dueDate || '—' },
+          { label: 'Department', width: 90, align: 'left', value: (r) => r.department || '—' },
+        ],
+        rows: group,
+      });
     }
 
     if (rows.length === 0) {
-      doc.fontSize(11).fillColor('#666').text('No finance documents match the current filters.');
+      doc.fontSize(11).fillColor(BRAND.muted).text('No finance documents match the current filters.');
     }
   }
 

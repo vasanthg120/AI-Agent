@@ -1,6 +1,6 @@
 import { Controller, Get, Query, Res, UseGuards } from '@nestjs/common';
 import { Response } from 'express';
-import PDFDocument from 'pdfkit';
+import { createBrandedDocument, finalizePagedDocument } from '../common/pdf/branded-pdf';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
@@ -74,9 +74,9 @@ export class RoyaltyReportController {
       'Content-Type': 'application/pdf',
       'Content-Disposition': `attachment; filename="royalty-report-${filenameSuffix}.pdf"`,
     });
-    const doc = new PDFDocument();
+    const doc = createBrandedDocument();
     doc.pipe(res);
-    this.royaltyReportExportService.writePdf(doc, rows, { dateFrom: query.dateFrom, dateTo: query.dateTo });
-    doc.end();
+    this.royaltyReportExportService.writePdf(doc, rows, { dateFrom: query.dateFrom, dateTo: query.dateTo }, report);
+    finalizePagedDocument(doc);
   }
 }

@@ -35,6 +35,19 @@ export class VendorProfitabilityController {
     return this.vendorProfitabilityService.getOverview(user.organizationId, start, end, { vendorId: query.vendorId });
   }
 
+  // Per-transaction view (one row per linked Customer Quote <-> Vendor
+  // Invoice pair, via FinanceDocument.quoteId) — distinct from overview()
+  // above, which aggregates by dealId and silently drops any invoice linked
+  // to a quote with no Deal. This is what the Vendor Profitability dashboard
+  // tab actually renders; see vendor-profitability.service.ts's own comment
+  // on VendorProfitabilityTransactionRow for why quoteId is the right key.
+  @Get('transactions')
+  @Roles('owner', 'admin')
+  transactions(@CurrentUser() user: JwtPayload, @Query() query: VendorProfitabilityQueryDto) {
+    const { start, end } = resolveBiDateRange(query);
+    return this.vendorProfitabilityService.getTransactions(user.organizationId, start, end, { vendorId: query.vendorId });
+  }
+
   // Section 10 — click a row to see the complete deal (vendor documents,
   // customer quotes, PDF references, AI summary) with no date restriction of
   // its own, since the deal was already selected from the filtered overview.

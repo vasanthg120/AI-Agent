@@ -4,6 +4,7 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import Decimal from 'decimal.js';
 import { BillingSettings, BillingSettingsDocument } from './schemas/billing-settings.schema';
+import { PaymentProviderKey } from './providers/payment-provider.interface';
 
 /**
  * The single place `customer_price = provider_cost / (1 - target_margin)`
@@ -116,5 +117,25 @@ export class PricingService {
   usdToCurrency(amountUsd: number, rateOverride?: number): number {
     const rate = rateOverride ?? this.config.get<number>('billing.usdToCurrencyRate') ?? 83;
     return new Decimal(amountUsd).times(rate).toDecimalPlaces(2, Decimal.ROUND_HALF_UP).toNumber();
+  }
+
+  /** What a payment gateway actually needs to receive to charge successfully
+   * — Razorpay's Indian merchant accounts settle in INR only, so a plan or
+   * credit package an admin priced in USD must be converted before
+   * PaymentProviderAdapter.createCheckoutOrder/chargeSavedMethod ever sees
+   * it (previously every Razorpay call site forwarded the raw USD amount/
+   * currency straight through, unconverted — this is the one place that
+   * conversion now happens, mirroring the same usdToCurrency() call
+   * AutoPayService already makes correctly for recharges). Every other
+   * combination (already INR, or a non-Razorpay gateway) passes through
+   * completely unchanged — this never affects Stripe/Cashfree or an
+   * already-INR price. The returned amount is what must be stored as the
+   * PaymentRecord's own amount/currency too, since that field means "what
+   * was actually charged at the gateway", not "what the customer was quoted". */
+  resolveGatewayAmount(amount: number, currency: string, providerKey: PaymentProviderKey): { amount: number; currency: string } {
+    if (providerKey === 'razorpay' && currency.toUpperCase() === 'USD') {
+      return { amount: this.usdToCurrency(amount), currency: 'INR' };
+    }
+    return { amount, currency };
   }
 }

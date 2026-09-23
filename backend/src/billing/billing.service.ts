@@ -64,6 +64,12 @@ export interface InitiatePurchaseResult {
   simulated: boolean;
   creditedImmediately: boolean;
   wallet?: WalletSummary;
+  // The amount/currency actually charged at the gateway — see
+  // PricingService.resolveGatewayAmount; differs from the package's own
+  // price/currency only when a conversion happened (e.g. a USD package
+  // charged in INR via Razorpay).
+  gatewayAmount: number;
+  gatewayCurrency: string;
 }
 
 /**
@@ -239,7 +245,12 @@ export class BillingService {
       creditsGranted = creditsGranted + couponBonusCredits;
     }
 
-    const order = await this.paymentProvider.createCheckoutOrder(organizationId, amount, pkg.currency, pkg.key);
+    // What the gateway actually needs to charge in — converts a USD-priced
+    // package to INR for Razorpay (see PricingService.resolveGatewayAmount's
+    // own comment); a no-op for every other currency/provider combination.
+    const gateway = this.pricing.resolveGatewayAmount(amount, pkg.currency, this.paymentProvider.providerKey);
+
+    const order = await this.paymentProvider.createCheckoutOrder(organizationId, gateway.amount, gateway.currency, pkg.key);
 
     const record = await this.paymentRecordModel.create({
       organizationId,
@@ -251,8 +262,10 @@ export class BillingService {
       couponDiscountAmount: couponId ? couponDiscountAmount : undefined,
       couponBonusCredits: couponId ? couponBonusCredits : undefined,
       gatewayOrderId: order.orderId,
-      amount,
-      currency: pkg.currency,
+      // The real gateway-charged amount/currency, not the package's own
+      // display price — this is what invoices/refunds must reconcile against.
+      amount: gateway.amount,
+      currency: gateway.currency,
       creditsGranted,
       status: order.simulated ? 'captured' : 'created',
       simulated: order.simulated,
@@ -265,6 +278,8 @@ export class BillingService {
         checkoutParams: order.checkoutParams,
         simulated: false,
         creditedImmediately: false,
+        gatewayAmount: gateway.amount,
+        gatewayCurrency: gateway.currency,
       };
     }
 
@@ -283,6 +298,8 @@ export class BillingService {
       simulated: true,
       creditedImmediately: true,
       wallet: await this.getWalletSummary(organizationId),
+      gatewayAmount: gateway.amount,
+      gatewayCurrency: gateway.currency,
     };
   }
 

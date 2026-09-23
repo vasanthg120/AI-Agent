@@ -109,7 +109,13 @@ export class CallCopilotUploadService {
     });
 
     try {
-      await this.reservations.reserve(organizationId, userId, creditRequestId, session._id.toString());
+      // resolveTenantKey(), not organizationId directly — billing is scoped
+      // per-user by default (see ReservationService.resolveTenantKey's own
+      // comment); a purchased plan's credits land in the wallet keyed by
+      // userId, not organizationId, so reserving against organizationId
+      // directly always misses a real balance and throws Insufficient
+      // Balance regardless of what was actually purchased.
+      await this.reservations.reserve(this.reservations.resolveTenantKey(organizationId, userId), userId, creditRequestId, session._id.toString());
     } catch (err) {
       // The session was already created (and its audio already safely in
       // GridFS) above — a failed reservation must still mark it 'error'

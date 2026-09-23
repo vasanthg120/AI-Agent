@@ -4,6 +4,7 @@ import { createPortal } from 'react-dom';
 import { AnimatePresence, motion } from 'framer-motion';
 import clsx from 'clsx';
 import { useClickOutside } from '@/hooks/useClickOutside';
+import { POPUP_SPRING } from './motionPresets';
 import styles from './Dropdown.module.css';
 
 export interface DropdownItem {
@@ -98,10 +99,10 @@ export function Dropdown({ trigger, items, align = 'left', placement = 'bottom',
           : [align === 'right' ? styles.alignRight : styles.alignLeft, placement === 'top' && styles.placementTop],
       )}
       style={usePortal && portalPos ? portalPos : undefined}
-      initial={{ opacity: 0, y: yOffset, scale: 0.98 }}
+      initial={{ opacity: 0, y: yOffset, scale: 0.97 }}
       animate={{ opacity: 1, y: 0, scale: 1 }}
       exit={{ opacity: 0, y: yOffset, scale: 0.98 }}
-      transition={{ duration: 0.14, ease: [0.16, 1, 0.3, 1] }}
+      transition={POPUP_SPRING}
     >
       {items.map((item) => (
         <div key={item.id}>

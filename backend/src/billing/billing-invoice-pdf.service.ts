@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { BRAND, drawHeader, drawTable, sectionHeading } from '../common/pdf/branded-pdf';
 import { BillingInvoiceDocument } from './schemas/billing-invoice.schema';
 import { InvoiceTemplateDocument } from './schemas/invoice-template.schema';
 
@@ -6,62 +7,56 @@ function money(amount: number, currencyCode: string): string {
   return `${currencyCode} ${amount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
-// Mirrors royalty/royalty-report-export.service.ts's writePdf shape exactly
-// (same pdfkit call style: fontSize/fillColor/text chains against a caller-
-// supplied PDFKit.PDFDocument, no return value — the controller owns
-// piping/headers/doc.end()). template is optional — a null template just
-// means the built-in defaults (accent color, show-tax-breakdown, show-logo)
-// apply, so PDF generation never hard-fails on a missing/inactive template.
+// template is optional — a null template just means the built-in defaults
+// (accent color, show-tax-breakdown, show-logo) apply, so PDF generation
+// never hard-fails on a missing/inactive template. Rendering goes through
+// the shared branded-pdf helpers (see backend/src/common/pdf/branded-pdf.ts)
+// — the controller still owns piping/headers/finalizing the document.
 @Injectable()
 export class BillingInvoicePdfService {
   writePdf(doc: PDFKit.PDFDocument, invoice: BillingInvoiceDocument, template: InvoiceTemplateDocument | null): void {
-    const accent = template?.accentColorHex || '#4F46E5';
+    const accent = template?.accentColorHex || BRAND.accent;
     const showTax = template?.showTaxBreakdown ?? true;
     const showLogo = template?.showLogo ?? true;
 
-    doc.fontSize(20).fillColor(accent).text(invoice.billingSnapshot.companyName);
-    doc.fontSize(9).fillColor('#666');
-    if (invoice.billingSnapshot.companyAddress) doc.text(invoice.billingSnapshot.companyAddress);
-    if (invoice.billingSnapshot.companyEmail) doc.text(invoice.billingSnapshot.companyEmail);
-    if (invoice.billingSnapshot.companyTaxId) doc.text(`Tax ID: ${invoice.billingSnapshot.companyTaxId}`);
-    doc.moveDown();
+    const subtitle = [
+      invoice.billingSnapshot.companyAddress,
+      invoice.billingSnapshot.companyEmail,
+      invoice.billingSnapshot.companyTaxId ? `Tax ID: ${invoice.billingSnapshot.companyTaxId}` : undefined,
+    ]
+      .filter(Boolean)
+      .join('\n');
 
-    // Logo embedding is a fast-follow: pdfkit's doc.image() needs a local
-    // buffer/file path, not an arbitrary remote URL — wiring this up
-    // properly needs BillingSettings.companyLogoUrl to be backed by an
-    // actual uploaded/fetchable asset first, not just a string field.
-    void showLogo;
+    drawHeader(doc, { title: invoice.billingSnapshot.companyName, subtitle: subtitle || undefined, accentHex: accent, showLogo });
 
-    doc.fontSize(16).fillColor('#000').text(`Invoice ${invoice.invoiceNumber}`);
-    doc.fontSize(9).fillColor('#666').text(`Issued: ${invoice.issuedAt.toISOString().slice(0, 10)}`);
+    doc.font('Helvetica-Bold').fontSize(14).fillColor(BRAND.ink).text(`Invoice ${invoice.invoiceNumber}`);
+    doc.font('Helvetica').fontSize(9).fillColor(BRAND.muted).text(`Issued: ${invoice.issuedAt.toISOString().slice(0, 10)}`);
     doc.text(`Status: ${invoice.status.toUpperCase()}`);
     doc.moveDown();
 
-    doc.fontSize(11).fillColor('#000').text('Items');
-    doc.moveDown(0.3);
-    for (const item of invoice.items) {
-      doc
-        .fontSize(10)
-        .fillColor('#000')
-        .text(item.description, { continued: true, width: 320 })
-        .fillColor('#333')
-        .text(`  ${money(item.amount, invoice.currencyCode)}`);
-    }
-    doc.moveDown();
+    sectionHeading(doc, 'Items');
+    drawTable(doc, {
+      accentHex: accent,
+      columns: [
+        { label: 'Description', width: 'auto', align: 'left', value: (item) => item.description },
+        { label: 'Amount', width: 110, align: 'right', value: (item) => money(item.amount, invoice.currencyCode) },
+      ],
+      rows: invoice.items,
+    });
 
-    doc.fontSize(10).fillColor('#000').text(`Subtotal: ${money(invoice.subtotal, invoice.currencyCode)}`);
+    doc.font('Helvetica').fontSize(10).fillColor(BRAND.ink).text(`Subtotal: ${money(invoice.subtotal, invoice.currencyCode)}`, { align: 'right' });
     if (invoice.discountAmount > 0) {
-      doc.fillColor('#0a7a3c').text(`Discount: -${money(invoice.discountAmount, invoice.currencyCode)}`);
+      doc.fillColor('#0a7a3c').text(`Discount: -${money(invoice.discountAmount, invoice.currencyCode)}`, { align: 'right' });
     }
     if (showTax && invoice.taxAmount > 0) {
-      doc.fillColor('#000').text(`Tax: ${money(invoice.taxAmount, invoice.currencyCode)}`);
+      doc.fillColor(BRAND.ink).text(`Tax: ${money(invoice.taxAmount, invoice.currencyCode)}`, { align: 'right' });
     }
     doc.moveDown(0.3);
-    doc.fontSize(13).fillColor(accent).text(`Total: ${money(invoice.total, invoice.currencyCode)}`);
+    doc.font('Helvetica-Bold').fontSize(13).fillColor(accent).text(`Total: ${money(invoice.total, invoice.currencyCode)}`, { align: 'right' });
 
     if (invoice.billingSnapshot.footerText || invoice.billingSnapshot.termsText) {
       doc.moveDown();
-      doc.fontSize(8).fillColor('#999');
+      doc.font('Helvetica').fontSize(8).fillColor(BRAND.muted);
       if (invoice.billingSnapshot.footerText) doc.text(invoice.billingSnapshot.footerText);
       if (invoice.billingSnapshot.termsText) doc.text(invoice.billingSnapshot.termsText);
     }

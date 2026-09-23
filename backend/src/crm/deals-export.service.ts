@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { Parser } from 'json2csv';
-import PDFDocument from 'pdfkit';
 import ExcelJS from 'exceljs';
+import { BRAND, drawHeader, drawTable, sectionHeading } from '../common/pdf/branded-pdf';
 import { DealDocument } from './schemas/deal.schema';
 
 export interface DealExportRow {
@@ -63,14 +63,12 @@ export class DealsExportService {
   }
 
   writePdf(doc: PDFKit.PDFDocument, rows: DealExportRow[], meta: { dateFrom?: string; dateTo?: string }): void {
-    doc.fontSize(18).text('Deal Export', { align: 'left' });
     const range = meta.dateFrom
       ? meta.dateTo && meta.dateTo !== meta.dateFrom
         ? `${meta.dateFrom} – ${meta.dateTo}`
         : meta.dateFrom
       : 'All time';
-    doc.fontSize(10).fillColor('#666').text(range);
-    doc.moveDown();
+    drawHeader(doc, { title: 'Deal Export', subtitle: range });
 
     const byStatus: Record<string, DealExportRow[]> = { won: [], lost: [], open: [] };
     for (const r of rows) byStatus[r.dealStatus]?.push(r);
@@ -79,17 +77,21 @@ export class DealsExportService {
       const group = byStatus[status];
       if (group.length === 0) continue;
       const value = group.reduce((sum, r) => sum + r.monetaryValue, 0);
-      doc.moveDown(0.5).fillColor('#000').fontSize(13).text(`${STATUS_LABELS[status]} (${group.length}) — ${value.toLocaleString()}`);
-      doc.moveDown(0.2);
-      for (const r of group) {
-        doc.fontSize(10).fillColor('#000').text(`• ${r.name} — ${r.monetaryValue.toLocaleString()}`);
-        const meta2 = [r.ownerName, r.storeName, r.expectedClosingDate].filter(Boolean).join(' · ');
-        if (meta2) doc.fontSize(8).fillColor('#666').text(`  ${meta2}`);
-      }
+      sectionHeading(doc, `${STATUS_LABELS[status]} (${group.length}) — ${value.toLocaleString()}`);
+      drawTable(doc, {
+        columns: [
+          { label: 'Name', width: 'auto', align: 'left', value: (r) => r.name },
+          { label: 'Value', width: 90, align: 'right', value: (r) => r.monetaryValue.toLocaleString() },
+          { label: 'Owner', width: 100, align: 'left', value: (r) => r.ownerName },
+          { label: 'Store', width: 100, align: 'left', value: (r) => r.storeName },
+          { label: 'Closing Date', width: 80, align: 'left', value: (r) => r.expectedClosingDate ?? '—' },
+        ],
+        rows: group,
+      });
     }
 
     if (rows.length === 0) {
-      doc.fontSize(11).fillColor('#666').text('No deals match the current filters.');
+      doc.fontSize(11).fillColor(BRAND.muted).text('No deals match the current filters.');
     }
   }
 

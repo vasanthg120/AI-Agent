@@ -49,7 +49,7 @@ export declare class ChatService {
         toolsUsed: string[];
         suggestions: string[];
     }>;
-    generateSystemConversation(userId: string, organizationId: string, agentId: string, promptText: string, title: string): Promise<{
+    createSystemConversationRecord(userId: string, organizationId: string, agentId: string, title: string, promptText: string, replyText: string): Promise<{
         conversationId: string;
         reply: string;
         toolsUsed: string[];

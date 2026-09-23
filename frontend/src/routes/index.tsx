@@ -44,6 +44,7 @@ const EmailIntelligencePage = lazy(() =>
 const FinancePage = lazy(() => import('@/features/finance/FinancePage').then((m) => ({ default: m.FinancePage })));
 const ReportingPage = lazy(() => import('@/features/reporting/ReportingPage').then((m) => ({ default: m.ReportingPage })));
 const TodoEodPage = lazy(() => import('@/features/todo-eod/TodoEodPage').then((m) => ({ default: m.TodoEodPage })));
+const EodPage = lazy(() => import('@/features/todo-eod/EodPage').then((m) => ({ default: m.EodPage })));
 const ChatPage = lazy(() => import('@/features/chat/ChatPage').then((m) => ({ default: m.ChatPage })));
 const ChatHistoryPage = lazy(() => import('@/features/chat/ChatHistoryPage').then((m) => ({ default: m.ChatHistoryPage })));
 const IntegrationsPage = lazy(() =>
@@ -155,6 +156,7 @@ export function AppRoutes() {
               <Route path={ROUTES.reporting} element={<ReportingPage />} />
             </Route>
             <Route path={ROUTES.todoEod} element={<TodoEodPage />} />
+            <Route path={ROUTES.eod} element={<EodPage />} />
             <Route path={ROUTES.chat} element={<ChatPage />} />
             <Route path={`${ROUTES.chat}/:conversationId`} element={<ChatPage />} />
             <Route path={ROUTES.chatHistory} element={<ChatHistoryPage />} />

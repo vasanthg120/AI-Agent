@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
+import { queryClient } from '@/config/queryClient';
 import { authService } from '@/services/authService';
 import { twoFactorService } from '@/services/twoFactorService';
 import { extractErrorMessage } from '@/utils/errors';
@@ -57,6 +58,13 @@ export const useAuthStore = create<AuthState>()(
             set({ isLoading: false, error: null });
             return { requiresTwoFactor: true, challengeToken: result.challengeToken };
           }
+          // Wipes any query cache left over from a previous identity in this
+          // same tab (a prior session, or a fetch that landed just before a
+          // 401 auto-logout) — without this, a stale (possibly another
+          // user's) cached response for the same query key (e.g. Board's
+          // ['tasks', {dateFrom: today, ...}], identical shape for every
+          // user) could render before this session's own fetch ever runs.
+          queryClient.clear();
           set({ ...applySession(result.session), isLoading: false });
           return { requiresTwoFactor: false };
         } catch (error) {
@@ -69,6 +77,7 @@ export const useAuthStore = create<AuthState>()(
         set({ isLoading: true, error: null });
         try {
           const session = await authService.register(payload);
+          queryClient.clear();
           set({ ...applySession(session), isLoading: false });
         } catch (error) {
           set({ isLoading: false, error: extractErrorMessage(error) });
@@ -84,6 +93,7 @@ export const useAuthStore = create<AuthState>()(
         set({ isLoading: true, error: null });
         try {
           const user = await authService.fetchCurrentUser(token);
+          queryClient.clear();
           set({ user, accessToken: token, isAuthenticated: true, isLoading: false, error: null });
         } catch (error) {
           set({ isLoading: false, error: extractErrorMessage(error) });
@@ -96,6 +106,7 @@ export const useAuthStore = create<AuthState>()(
         try {
           const { accessToken } = await twoFactorService.verifyLoginChallenge(challengeToken, code);
           const user = await authService.fetchCurrentUser(accessToken);
+          queryClient.clear();
           set({ user, accessToken, isAuthenticated: true, isLoading: false, error: null });
         } catch (error) {
           set({ isLoading: false, error: extractErrorMessage(error) });
@@ -107,6 +118,7 @@ export const useAuthStore = create<AuthState>()(
         // Best-effort server-side revoke (see authService.logout's own
         // comment) — local state is always cleared regardless of outcome.
         await authService.logout();
+        queryClient.clear();
         set({ user: null, accessToken: null, isAuthenticated: false });
       },
 

@@ -8,6 +8,7 @@ import { PAYMENT_PROVIDER, PaymentProviderAdapter } from './providers/payment-pr
 import { WalletService } from './wallet.service';
 import { addBillingCycle, RecurringBillingCycle } from './billing-cycle.util';
 import { BillingInvoiceService } from './billing-invoice.service';
+import { PricingService } from './pricing.service';
 import { BillingPlanPrice, BillingPlanPriceDocument } from './schemas/billing-plan-price.schema';
 import { BillingSubscriptionEvent, BillingSubscriptionEventDocument } from './schemas/billing-subscription-event.schema';
 import { BillingSubscription, BillingSubscriptionDocument } from './schemas/billing-subscription.schema';
@@ -43,6 +44,7 @@ export class SubscriptionRenewalService {
     private encryption: EncryptionService,
     private invoices: BillingInvoiceService,
     private config: ConfigService,
+    private pricing: PricingService,
   ) {}
 
   @Cron(CronExpression.EVERY_HOUR)
@@ -91,6 +93,11 @@ export class SubscriptionRenewalService {
       return;
     }
 
+    // What the gateway actually needs to charge in — converts a USD-priced
+    // plan to INR for Razorpay (see PricingService.resolveGatewayAmount's
+    // own comment); a no-op for every other currency/provider combination.
+    const gateway = this.pricing.resolveGatewayAmount(price.amount, price.currencyCode, this.paymentProvider.providerKey);
+
     const wallet = await this.wallet.getOrCreateWallet(subscription.organizationId);
     const record = await this.paymentRecordModel.create({
       organizationId: subscription.organizationId,
@@ -101,8 +108,10 @@ export class SubscriptionRenewalService {
       subscriptionPriceId: subscription.planPriceId,
       subscriptionId: subscription._id.toString(),
       gatewayOrderId: `sub_renewal_${subscription._id.toString()}_${Date.now()}`,
-      amount: price.amount,
-      currency: price.currencyCode,
+      // The real gateway-charged amount/currency, not the plan's own display
+      // price — matches checkout()'s identical convention.
+      amount: gateway.amount,
+      currency: gateway.currency,
       creditsGranted: price.creditsGranted,
       status: 'created',
     });
@@ -111,8 +120,8 @@ export class SubscriptionRenewalService {
       subscription.organizationId,
       method.gatewayCustomerId,
       this.encryption.decrypt(method.gatewayTokenIdEncrypted),
-      price.amount,
-      price.currencyCode,
+      gateway.amount,
+      gateway.currency,
     );
 
     if (!charge.success) {

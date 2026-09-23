@@ -12,7 +12,7 @@ export declare class TasksController {
     list(query: ListTasksQueryDto, user: JwtPayload): Promise<{
         tasks: import("./tasks.service").TaskOut[];
     }>;
-    calendar(month: string, mine: string | undefined, user: JwtPayload): Promise<{
+    calendar(month: string, mine: string | undefined, reportType: string | undefined, user: JwtPayload): Promise<{
         month: string;
         days: {
             reportCount: number;
@@ -21,13 +21,9 @@ export declare class TasksController {
             date: string;
         }[];
     }>;
-    recommendations(user: JwtPayload): Promise<{
-        recommendations: (import("./tasks.service").TaskRecommendation & {
-            task: import("./tasks.service").TaskOut;
-        })[];
-        overallNote: string;
-    }>;
+    eodSummary(date: string | undefined, user: JwtPayload): Promise<import("./tasks.service").EodSummary>;
     export(query: ExportTasksQueryDto, user: JwtPayload, res: Response): Promise<void>;
+    eodExport(date: string | undefined, format: 'csv' | 'pdf' | undefined, user: JwtPayload, res: Response): Promise<void>;
     updateStatus(id: string, dto: UpdateTaskStatusDto, user: JwtPayload): Promise<{
         id: string;
         status: "done" | "todo" | "in_progress";

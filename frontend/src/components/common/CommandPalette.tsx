@@ -6,6 +6,7 @@ import clsx from 'clsx';
 import { FiSearch, FiPlus, FiUser, FiHelpCircle, FiMessageCircle } from 'react-icons/fi';
 import type { IconType } from 'react-icons';
 import { Input } from '@/components/ui';
+import { BACKDROP_FADE, SURFACE_SPRING } from '@/components/ui/motionPresets';
 import { useUiStore } from '@/stores/uiStore';
 import { useAuthStore } from '@/stores/authStore';
 import { useChatStore } from '@/stores/chatStore';
@@ -125,7 +126,7 @@ export function CommandPalette() {
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
-          transition={{ duration: 0.15 }}
+          transition={BACKDROP_FADE}
           onClick={() => setOpen(false)}
         >
           <motion.div
@@ -133,10 +134,10 @@ export function CommandPalette() {
             aria-modal="true"
             aria-label="Quick actions"
             className={styles.palette}
-            initial={{ opacity: 0, scale: 0.97, y: -8 }}
+            initial={{ opacity: 0, scale: 0.96, y: -12 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.97, y: -8 }}
-            transition={{ duration: 0.15, ease: [0.16, 1, 0.3, 1] }}
+            transition={SURFACE_SPRING}
             onClick={(e) => e.stopPropagation()}
           >
             <div className={styles.searchRow}>

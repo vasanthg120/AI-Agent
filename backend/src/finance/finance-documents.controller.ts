@@ -15,7 +15,7 @@ import {
   UseInterceptors,
 } from '@nestjs/common';
 import { Response } from 'express';
-import PDFDocument from 'pdfkit';
+import { createBrandedDocument, finalizePagedDocument } from '../common/pdf/branded-pdf';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
@@ -89,10 +89,10 @@ export class FinanceDocumentsController {
       'Content-Type': 'application/pdf',
       'Content-Disposition': `attachment; filename="finance-${filenameDate}.pdf"`,
     });
-    const doc = new PDFDocument();
+    const doc = createBrandedDocument();
     doc.pipe(res);
     this.financeExportService.writePdf(doc, rows, query);
-    doc.end();
+    finalizePagedDocument(doc);
   }
 
   // Static segment, must be registered before ':id' — same rule as

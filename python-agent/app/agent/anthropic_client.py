@@ -750,68 +750,6 @@ def extract_report_structure(prose_reply: str, report_type: str) -> dict:
     raise RuntimeError(f"Report structuring failed after retry: {last_error}")
 
 
-RECOMMEND_TOOL = {
-    "name": "recommend_next_actions",
-    "description": "Return a ranked shortlist of which open tasks to focus on right now, with a one-line rationale for each.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "recommendations": {
-                "type": "array",
-                "description": "Top 3-5 tasks to focus on next, most important first.",
-                "items": {
-                    "type": "object",
-                    "properties": {
-                        "taskId": {"type": "string"},
-                        "rationale": {"type": "string", "description": "One sentence: why this, why now."},
-                    },
-                    "required": ["taskId", "rationale"],
-                },
-            },
-            "overallNote": {"type": "string", "description": "One sentence framing the shortlist as a whole."},
-        },
-        "required": ["recommendations", "overallNote"],
-    },
-}
-
-RECOMMEND_SYSTEM_PROMPT = """You are triaging a list of open tasks (each with an id, title, \
-priority, and whether it's overdue) to tell someone exactly what to work on next. Pick the \
-3-5 tasks that most deserve immediate attention — weigh overdue urgent/high items heaviest, \
-then urgent/high items generally, then anything blocking other work. Give each a one-sentence, \
-concrete rationale (not a restatement of its priority label). Never invent a taskId that isn't \
-in the input. If the input has no tasks, return an empty recommendations array and an \
-overallNote saying there's nothing open. Always call recommend_next_actions exactly once."""
-
-
-def recommend_next_actions(tasks: list[dict]) -> dict:
-    """One-shot forced-tool-choice ranking pass — same pattern as
-    extract_report_structure, operating on today's open tasks instead of a
-    report reply. Retries once before surfacing an error.
-    """
-    api_key = _resolve_api_key()
-    if not api_key:
-        raise RuntimeError("No Anthropic API key configured")
-
-    last_error: Exception | None = None
-    for _ in range(2):
-        try:
-            response = _client(api_key).messages.create(
-                model=settings.anthropic_model,
-                max_tokens=1024,
-                system=RECOMMEND_SYSTEM_PROMPT,
-                tools=[RECOMMEND_TOOL],
-                tool_choice={"type": "tool", "name": "recommend_next_actions"},
-                messages=[{"role": "user", "content": f"Open tasks:\n\n{json.dumps(tasks)[:20000]}"}],
-            )
-            block = next((b for b in response.content if b.type == "tool_use"), None)
-            if block is None:
-                raise ValueError("Model did not return a tool_use block")
-            return block.input
-        except Exception as exc:  # noqa: BLE001 - deliberately broad, retried once then surfaced
-            last_error = exc
-    raise RuntimeError(f"Task recommendation failed after retry: {last_error}")
-
-
 PLAN_TOOL = {
     "name": "plan_execution",
     "description": (
@@ -1346,7 +1284,7 @@ def analyze_customer_activity(
     payload: dict, *, organization_id: str | None = None, user_id: str = "", request_id: str = ""
 ) -> dict:
     """One-shot forced-tool-choice triage pass — same pattern as
-    extract_report_structure/recommend_next_actions, operating on today's
+    extract_report_structure, operating on today's
     deterministically-gathered CRM+email activity (see
     backend/src/crm/customer-activity.service.ts). Retries once before
     surfacing an error.

@@ -6,6 +6,7 @@ import { EncryptionService } from '../common/encryption/encryption.service';
 import { BillingInvoiceService } from './billing-invoice.service';
 import { BillingSubscriptionsService } from './billing-subscriptions.service';
 import { CouponsService } from './coupons.service';
+import { PricingService } from './pricing.service';
 import {
   ChargeResult,
   ConfirmPaymentResult,
@@ -145,10 +146,15 @@ describe('Subscriptions (real Mongo)', () => {
         SubscriptionRenewalService,
         CouponsService,
         BillingInvoiceService,
-        // WalletService/EncryptionService are the real classes — only the
-        // gateway and config are stubbed, same split billing-integration.spec.ts uses.
+        // WalletService/EncryptionService/PricingService are the real
+        // classes — only the gateway and config are stubbed, same split
+        // billing-integration.spec.ts uses. PricingService is a dependency
+        // of both services above (resolveGatewayAmount, for the Razorpay
+        // USD->INR conversion at checkout/renewal) — BillingSettings is
+        // already registered as a Mongoose feature above for it.
         WalletService,
         EncryptionService,
+        PricingService,
         { provide: PAYMENT_PROVIDER, useValue: new FakePaymentProvider() },
         { provide: ConfigService, useValue: { get: (key: string) => configValues[key] } },
       ],
@@ -283,6 +289,28 @@ describe('Subscriptions (real Mongo)', () => {
       await expect(
         subscriptionsService.checkout(org, 'user-1', { planId: plan._id.toString(), priceId: price._id.toString() }),
       ).rejects.toThrow();
+    });
+
+    // The exact bug report this fixes: a USD-priced plan reached Razorpay
+    // (an INR-only gateway for this deployment) completely unconverted.
+    // FakePaymentProvider.providerKey is 'razorpay', so
+    // PricingService.resolveGatewayAmount's conversion branch is exercised
+    // for real here, at the default 83 USD->INR rate (configValues above
+    // sets no override) — 99 * 83 = 8217, matching the request's own worked
+    // example (scaled: 100000/70000 -> 30000 there is the same
+    // quote-minus-invoice shape as this 99->8217 conversion here).
+    it('converts a USD-priced plan to INR before charging Razorpay, and stores the converted amount', async () => {
+      const { plan, price } = await createPlanWithPrice({ key: `${TEST_PREFIX}-usd`, currencyCode: 'USD', amount: 99, creditsGranted: 10000 });
+      const org = `${TEST_PREFIX}-org-usd`;
+
+      const result = await subscriptionsService.checkout(org, 'user-1', { planId: plan._id.toString(), priceId: price._id.toString() });
+
+      expect(result.gatewayCurrency).toBe('INR');
+      expect(result.gatewayAmount).toBe(8217);
+
+      const record = await paymentRecordModel.findOne({ organizationId: org }).exec();
+      expect(record?.currency).toBe('INR');
+      expect(record?.amount).toBe(8217);
     });
   });
 

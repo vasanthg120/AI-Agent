@@ -2,6 +2,7 @@ import { BadRequestException, Inject, Injectable, NotFoundException } from '@nes
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { PAYMENT_PROVIDER, PaymentProviderAdapter } from './providers/payment-provider.interface';
+import { PricingService } from './pricing.service';
 import { WalletService } from './wallet.service';
 import { addBillingCycle, RecurringBillingCycle } from './billing-cycle.util';
 import { BillingInvoiceService } from './billing-invoice.service';
@@ -63,6 +64,13 @@ export interface InitiateSubscriptionCheckoutResult {
   simulated: boolean;
   activatedImmediately: boolean;
   subscription?: SubscriptionSummary;
+  // The amount/currency actually charged at the gateway — differs from the
+  // plan price's own amount/currencyCode only when PricingService.resolveGatewayAmount
+  // converted it (e.g. a USD-priced plan charged in INR via Razorpay). Lets
+  // the frontend show the real charged figure before payment, not just the
+  // display price.
+  gatewayAmount: number;
+  gatewayCurrency: string;
 }
 
 /**
@@ -87,6 +95,7 @@ export class BillingSubscriptionsService {
     private wallet: WalletService,
     private coupons: CouponsService,
     private invoices: BillingInvoiceService,
+    private pricing: PricingService,
   ) {}
 
   /** Public catalog — active + isPublic plans only, with their currently
@@ -219,10 +228,15 @@ export class BillingSubscriptionsService {
       creditsGranted = creditsGranted + couponBonusCredits;
     }
 
+    // What the gateway actually needs to charge in — converts a USD-priced
+    // plan to INR for Razorpay (see PricingService.resolveGatewayAmount's
+    // own comment); a no-op for every other currency/provider combination.
+    const gateway = this.pricing.resolveGatewayAmount(amount, price.currencyCode, this.paymentProvider.providerKey);
+
     const order = await this.paymentProvider.createCheckoutOrder(
       organizationId,
-      amount,
-      price.currencyCode,
+      gateway.amount,
+      gateway.currency,
       `plan_${plan.key}_${price.billingCycle}`,
     );
 
@@ -238,8 +252,10 @@ export class BillingSubscriptionsService {
       couponDiscountAmount: couponId ? couponDiscountAmount : undefined,
       couponBonusCredits: couponId ? couponBonusCredits : undefined,
       gatewayOrderId: order.orderId,
-      amount,
-      currency: price.currencyCode,
+      // The real gateway-charged amount/currency, not the plan's own display
+      // price — this is what invoices/refunds must reconcile against.
+      amount: gateway.amount,
+      currency: gateway.currency,
       creditsGranted,
       status: order.simulated ? 'captured' : 'created',
       simulated: order.simulated,
@@ -252,6 +268,8 @@ export class BillingSubscriptionsService {
         checkoutParams: order.checkoutParams,
         simulated: false,
         activatedImmediately: false,
+        gatewayAmount: gateway.amount,
+        gatewayCurrency: gateway.currency,
       };
     }
 
@@ -263,6 +281,8 @@ export class BillingSubscriptionsService {
       simulated: true,
       activatedImmediately: true,
       subscription: await this.toSummary(subscription),
+      gatewayAmount: gateway.amount,
+      gatewayCurrency: gateway.currency,
     };
   }
 

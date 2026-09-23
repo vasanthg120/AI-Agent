@@ -1,6 +1,7 @@
 import axios from 'axios';
 import toast from 'react-hot-toast';
 import { env } from '@/config/env';
+import { queryClient } from '@/config/queryClient';
 import { useAuthStore } from '@/stores/authStore';
 
 export const axiosClient = axios.create({ baseURL: env.apiUrl });
@@ -32,6 +33,12 @@ axiosClient.interceptors.response.use(
     const wasAuthenticated = useAuthStore.getState().isAuthenticated;
     if (axios.isAxiosError(error) && error.response?.status === 401 && wasAuthenticated) {
       useAuthStore.setState({ user: null, accessToken: null, isAuthenticated: false });
+      // This path bypasses authStore's own logout() entirely (direct
+      // setState above) — its cache-clear must be repeated here, or the
+      // next login in this same tab could still see this session's cached
+      // query results for a query key with no session discriminator (see
+      // authStore.ts's own comment on this).
+      queryClient.clear();
       toast.error('Your session has expired — please sign in again.');
     }
     return Promise.reject(error);

@@ -514,6 +514,100 @@
   gap: var(--space-2);
 }
 
+/* Plan comparison row — current plan alongside one upgrade suggestion
+   (PlanPriceCard, shared with PricingPage.tsx). Stretched to equal height so
+   neither card looks like an afterthought next to the other. */
+.planRow {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: var(--space-4);
+  align-items: stretch;
+}
+
+.viewAllPlansLink {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  align-self: flex-start;
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--color-accent, var(--brand-accent-primary));
+  font-size: var(--text-sm);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.viewAllPlansLink:hover {
+  color: var(--color-accent-hover);
+}
+
+/* Billing History — invoice rows, same bordered-card-row language as
+   .paymentMethodCard above. */
+.invoiceList {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.invoiceRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+  padding: var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-surface);
+}
+
+.invoiceMain {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.invoiceIconBadge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  flex-shrink: 0;
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--color-accent, var(--brand-accent-primary)) 12%, transparent);
+  color: var(--color-accent, var(--brand-accent-primary));
+}
+
+.invoiceText {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.invoiceNumber {
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.invoiceMeta {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-shrink: 0;
+}
+
+.invoiceAmount {
+  font-size: var(--text-sm);
+  font-weight: 700;
+  color: var(--color-text-primary);
+  font-variant-numeric: tabular-nums;
+}
+
 /* ---------- responsive ---------- */
 @media (max-width: 640px) {
   .page {
@@ -562,5 +656,19 @@
   .transactionTable th,
   .transactionTable td {
     padding: var(--space-2);
+  }
+
+  .planRow {
+    grid-template-columns: 1fr;
+  }
+
+  .invoiceRow {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .invoiceMeta {
+    width: 100%;
+    justify-content: space-between;
   }
 }

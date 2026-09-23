@@ -9,6 +9,8 @@ import { ChatService } from '../chat/chat.service';
 import { ReservationService } from '../billing/reservation.service';
 import { GamificationService } from '../gamification/gamification.service';
 import { TimelineService } from '../timeline/timeline.service';
+import { Account, AccountSchema } from '../crm/schemas/account.schema';
+import { Contact, ContactSchema } from '../crm/schemas/contact.schema';
 import { Deal, DealDocument, DealSchema } from '../crm/schemas/deal.schema';
 import { Quote, QuoteDocument, QuoteSchema } from '../crm/schemas/quote.schema';
 import { EmailIntelligenceItem, EmailIntelligenceItemDocument, EmailIntelligenceItemSchema } from '../email-intelligence/schemas/email-intelligence-item.schema';
@@ -55,6 +57,10 @@ describe('DashboardService.recordDailyReport — task attribution (real Mongo)',
           { name: Deal.name, schema: DealSchema },
           { name: Quote.name, schema: QuoteSchema },
           { name: EmailIntelligenceItem.name, schema: EmailIntelligenceItemSchema },
+          // TasksService.getEodSummary()'s dependencies — not exercised by
+          // these tests, just required for the module to compile.
+          { name: Contact.name, schema: ContactSchema },
+          { name: Account.name, schema: AccountSchema },
         ]),
       ],
       providers: [
@@ -67,6 +73,13 @@ describe('DashboardService.recordDailyReport — task attribution (real Mongo)',
           provide: ChatService,
           useValue: {
             listAgents: async () => [{ id: AGENT_ID, name: 'Store Manager', avatarColor: '#000' }],
+            // recordDailyReport() now creates the audit-trail user's Chat
+            // History conversation itself (zero-LLM-cost, from the crew's
+            // own reply) rather than requiring the caller to have already
+            // run a separate generateSystemConversation() call — these
+            // tests only care about task attribution, so a fixed fake id is
+            // enough.
+            createSystemConversationRecord: async () => ({ conversationId: 'fake-conversation-id', reply: 'fake reply', toolsUsed: [], suggestions: [] }),
           },
         },
         {
@@ -125,14 +138,15 @@ describe('DashboardService.recordDailyReport — task attribution (real Mongo)',
       agentId: AGENT_ID,
       reportType: 'morning',
       date,
-      conversationId: 'fake-conversation',
+      promptText: 'fake prompt',
+      title: 'fake title',
       userId: OWNER_USER_ID,
       userIds: [OWNER_USER_ID, OTHER_USER_ID],
     });
 
-    expect(saved.tasks).toHaveLength(2);
-    const attributed = saved.tasks.find((t) => t.title === 'Follow up on the deal');
-    const unattributed = saved.tasks.find((t) => t.title === 'Generic reminder');
+    expect(saved.report.tasks).toHaveLength(2);
+    const attributed = saved.report.tasks.find((t) => t.title === 'Follow up on the deal');
+    const unattributed = saved.report.tasks.find((t) => t.title === 'Generic reminder');
     expect(attributed?.assignedUserId).toBe(OWNER_USER_ID);
     expect(unattributed?.assignedUserId).toBeUndefined();
 
@@ -204,11 +218,12 @@ describe('DashboardService.recordDailyReport — task attribution (real Mongo)',
       agentId: AGENT_ID,
       reportType: 'morning',
       date,
-      conversationId: 'fake-conversation-3',
+      promptText: 'fake prompt',
+      title: 'fake title',
       userId: OWNER_USER_ID,
     });
 
-    expect(saved.tasks[0].assignedUserId).toBe(OTHER_USER_ID);
+    expect(saved.report.tasks[0].assignedUserId).toBe(OTHER_USER_ID);
   });
 
   it('never leaks another organization\'s tasks regardless of the mine filter', async () => {
@@ -223,7 +238,8 @@ describe('DashboardService.recordDailyReport — task attribution (real Mongo)',
       agentId: AGENT_ID,
       reportType: 'morning',
       date,
-      conversationId: 'fake-conversation-b',
+      promptText: 'fake prompt',
+      title: 'fake title',
       userId: OWNER_USER_ID, // same user id, different org — must not matter
     });
 
@@ -247,7 +263,8 @@ describe('DashboardService.recordDailyReport — task attribution (real Mongo)',
         agentId: AGENT_ID,
         reportType: 'eod',
         date: '2099-01-02',
-        conversationId: 'fake-conversation-2',
+        promptText: 'fake prompt',
+        title: 'fake title',
         userId: OWNER_USER_ID,
       }),
     ).rejects.toThrow('python-agent unreachable');

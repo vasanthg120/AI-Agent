@@ -61,14 +61,25 @@ export class DashboardService {
    * trip to /reports/generate replaces what used to be two calls (a plain
    * chat turn via generateSystemConversation, then a separate
    * /reports/structure call on its reply) — the crew produces its own reply
-   * and structures it server-side in one request. */
+   * and structures it server-side in one request.
+   *
+   * Also creates the audit-trail user's own Chat History conversation from
+   * THIS crew reply directly (chatService.createSystemConversationRecord,
+   * zero extra LLM cost) rather than requiring the caller to have already
+   * run a separate, real generateSystemConversation() call beforehand —
+   * that used to mean a second, independent live-agent call whose reply
+   * was silently discarded in favor of this one. Returns the reply text too
+   * so the caller (store-settings.service.ts's runForStore) can copy the
+   * SAME content into every other roster user's own Chat History, at zero
+   * additional LLM cost, instead of calling the agent again per user. */
   async recordDailyReport(input: {
     organizationId: string;
     storeId: string;
     agentId: string;
     reportType: 'morning' | 'eod';
     date: string;
-    conversationId: string;
+    promptText: string;
+    title: string;
     userId: string;
     wasMissed?: boolean;
     // Optional — the full store roster, forwarded to python-agent only so it
@@ -76,7 +87,7 @@ export class DashboardService {
     // context (see crew_reports.py's _fetch_meetings_context). Omitted is
     // identical to pre-existing behavior (no calendar section).
     userIds?: string[];
-  }) {
+  }): Promise<{ report: DailyReportDocument; replyText: string }> {
     // Billed like business-knowledge-chat.service.ts's ask() — reserve() is
     // a hard stop before the crew's LLM calls run. This is invoked once per
     // store by StoreSettingsService.runForStore's cron loop, which already
@@ -109,7 +120,19 @@ export class DashboardService {
 
     const tasks = await Promise.all(data.tasks.map((task) => this.attributeTask(task, input.organizationId)));
 
-    return this.reportModel
+    // Zero-LLM-cost — reuses the crew's own reply text rather than making a
+    // second, independent (and previously wasted) live-agent call just to
+    // populate this one audit-trail conversation.
+    const { conversationId } = await this.chatService.createSystemConversationRecord(
+      input.userId,
+      input.organizationId,
+      input.agentId,
+      input.title,
+      input.promptText,
+      data.reply,
+    );
+
+    const report = await this.reportModel
       .findOneAndUpdate(
         {
           organizationId: input.organizationId,
@@ -121,13 +144,15 @@ export class DashboardService {
         {
           tasks,
           summary: data.summary,
-          sourceConversationId: input.conversationId,
+          sourceConversationId: conversationId,
           sourceUserId: input.userId,
           wasMissed: input.wasMissed ?? false,
         },
         { upsert: true, new: true },
       )
       .exec();
+
+    return { report, replyText: data.reply };
   }
 
   /** Best-effort, deterministic per-task attribution (never AI-trusted): if

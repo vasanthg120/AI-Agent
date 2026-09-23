@@ -16,6 +16,7 @@ export const ROUTES = {
   finance: '/finance',
   reporting: '/reporting',
   todoEod: '/todo-eod',
+  eod: '/eod',
   chat: '/chat',
   chatConversation: (id: string) => `/chat/${id}`,
   chatHistory: '/history',

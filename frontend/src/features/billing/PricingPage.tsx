@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
 import toast from 'react-hot-toast';
-import { FiCheck, FiHelpCircle } from 'react-icons/fi';
-import { Badge, Button, Card, SectionCard, Spinner, Tabs } from '@/components/ui';
+import { FiHelpCircle } from 'react-icons/fi';
+import { Badge, Card, SectionCard, Spinner, Tabs } from '@/components/ui';
 import { billingService } from '@/services/billingService';
 import type { BillingCycle, BillingPageConfig, PaymentMethod, PlanPrice, PublicPlan, SubscriptionSummary } from '@/services/billingService';
 import { extractErrorMessage } from '@/utils/errors';
-import { formatCurrency } from '@/utils/currency';
+import { PlanPriceCard } from './components/PlanPriceCard';
 import { SubscriptionCheckoutModal } from './components/SubscriptionCheckoutModal';
 import { useBillingTheme } from './useBillingTheme';
 import styles from './PricingPage.module.css';
@@ -131,53 +131,15 @@ export function PricingPage() {
             // "Switch Plan" instead of the generic first-subscribe copy.
             const isSwitch = Boolean(subscription) && !isCurrentPlan;
             return (
-              <Card
+              <PlanPriceCard
                 key={plan.id}
-                className={styles.planCard}
-                style={plan.planColor ? ({ '--plan-accent': plan.planColor } as React.CSSProperties) : undefined}
-              >
-                {plan.badgeText && (
-                  <Badge variant={plan.recommended ? 'success' : 'neutral'} className={styles.planBadge}>
-                    {plan.badgeText}
-                  </Badge>
-                )}
-                <div className={styles.planName}>{plan.name}</div>
-                {plan.shortDescription && <div className={styles.planDescription}>{plan.shortDescription}</div>}
-
-                {price ? (
-                  <>
-                    <div className={styles.planPrice}>
-                      <span className={styles.planPriceAmount}>{formatCurrency(price.amount, price.currencyCode)}</span>
-                      <span className={styles.planPriceCycle}>/ {CYCLE_LABELS[price.billingCycle]}</span>
-                    </div>
-                    <div className={styles.muted}>{price.creditsGranted.toLocaleString()} Haive Credits included</div>
-                  </>
-                ) : (
-                  <div className={styles.planPrice}>
-                    <span className={styles.muted}>Pricing coming soon</span>
-                  </div>
-                )}
-
-                {plan.features.filter((f) => f.enabled).length > 0 && (
-                  <ul className={styles.featureList}>
-                    {plan.features
-                      .filter((f) => f.enabled)
-                      .map((f) => (
-                        <li key={f.featureKey}>
-                          <FiCheck /> {f.valueOverride ?? f.name ?? f.featureKey}
-                        </li>
-                      ))}
-                  </ul>
-                )}
-
-                <Button
-                  className={styles.planCta}
-                  disabled={!price || isCurrentPlan}
-                  onClick={() => price && setCheckoutTarget({ plan, price })}
-                >
-                  {isCurrentPlan ? 'Current Plan' : isSwitch ? 'Switch Plan' : (pageConfig?.ctaButtonText ?? 'Get Started')}
-                </Button>
-              </Card>
+                plan={plan}
+                price={price}
+                cycleLabel={price ? CYCLE_LABELS[price.billingCycle] : ''}
+                ctaLabel={isCurrentPlan ? 'Current Plan' : isSwitch ? 'Switch Plan' : (pageConfig?.ctaButtonText ?? 'Get Started')}
+                ctaDisabled={isCurrentPlan}
+                onSelect={() => price && setCheckoutTarget({ plan, price })}
+              />
             );
           })}
         </div>

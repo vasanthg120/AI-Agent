@@ -37,8 +37,10 @@ import { ChatService } from './chat.service';
   ],
   controllers: [ChatController],
   providers: [ChatService, ChatGateway, RedisCacheService],
-  // StoreSettingsModule calls ChatService.generateSystemConversation() for
-  // the scheduled morning to-do / EOD report job. ChatGateway is exported so
+  // StoreSettingsModule (via DashboardService.recordDailyReport) calls
+  // ChatService.createSystemConversationRecord() to give every roster user a
+  // copy of the scheduled morning to-do / EOD report in their own Chat
+  // History, without a live agent call per user. ChatGateway is exported so
   // NotificationsModule can push live socket events through the same
   // per-user-room connections chat already uses (see ChatGateway.emitToUser).
   exports: [ChatService, ChatGateway],

@@ -20,14 +20,19 @@ the CRM/Outlook lookup as a plain Python call sidesteps that broken path
 entirely while fetching the same context the old single-agent flow did.
 """
 
+import requests
+
 from app.agent.anthropic_client import _resolve_api_key
 from app.agent.personas import STORE_MANAGER_PROMPT
 from app.config import settings
 from app.memory import outlook_store
 from app.observability.tracing import traced_llm_call
+from app.service_token import mint_service_token
 from app.tools import business_search_tool, calendar_tool
 from app.tools.registry import execute_tool
 from crewai import Agent, Crew, LLM, Process, Task
+
+_ACTIVITY_TIMEOUT_SECONDS = 10
 
 REPORT_PROMPTS = {
     "morning": (
@@ -95,6 +100,51 @@ def _fetch_meetings_context(user_ids: list[str]) -> str:
     return "\n\nUpcoming Outlook calendar events for staff at this store:\n" + "\n".join(lines)
 
 
+def _fetch_recent_activity_context(user_ids: list[str], organization_id: str | None) -> str:
+    """Real, timestamp-grounded "what actually happened today" per staff
+    member — GET /tasks/eod (backend/src/dashboard/tasks.service.ts's
+    getEodSummary, real DB aggregates, never LLM-narrated), called once per
+    roster user with a per-user service token (same mint_service_token
+    bridge app.billing.client already uses). Deliberately separate from
+    _fetch_research_context above: that's a semantic (vector) search over
+    all-time synced CRM/Outlook data, with no recency awareness at all — an
+    enquiry from weeks ago can score as highly as one from an hour ago. This
+    gives the prioritizer/writer a small, real, today-only count per person
+    to weigh alongside that broader semantic context, without touching the
+    shared search tool (business_search_tool.py) live chat also depends on.
+    Best-effort per user, same as _fetch_meetings_context: one user's
+    failure never takes the whole report down."""
+    if not organization_id:
+        return ""
+    lines: list[str] = []
+    for user_id in user_ids:
+        try:
+            token = mint_service_token(user_id, organization_id)
+            response = requests.get(
+                f"{settings.backend_url}/tasks/eod",
+                headers={"Authorization": f"Bearer {token}"},
+                timeout=_ACTIVITY_TIMEOUT_SECONDS,
+            )
+            response.raise_for_status()
+            data = response.json()
+        except Exception:
+            continue
+        email = data.get("email", {})
+        crm = data.get("crm", {})
+        parts = [
+            f"{email.get('received', 0)} email(s) received",
+            f"{email.get('responded', 0)} responded",
+            f"{crm.get('dealsCreated', 0)} deal(s) created",
+            f"{crm.get('dealsUpdated', 0)} deal(s) updated",
+            f"{crm.get('quotesCreated', 0)} quote(s) created",
+            f"{crm.get('quotesUpdated', 0)} quote(s) updated",
+        ]
+        lines.append(f"- User {user_id}: " + ", ".join(parts))
+    if not lines:
+        return ""
+    return "\n\nReal activity counts for today so far (from the app's own records, not search):\n" + "\n".join(lines)
+
+
 def _make_llm() -> LLM:
     api_key = _resolve_api_key()
     if not api_key:
@@ -127,15 +177,18 @@ def run_report_crew(
     attribution isn't exposed by this CrewAI version) and is billed as one
     combined "scheduled_report" execution rather than two separate ones.
 
-    user_ids (the full store roster, optional/best-effort) is used only to
-    pull each connected user's Outlook calendar as extra context — never
-    passed to search_business_context, and never required (defaults to no
-    calendar section at all, matching pre-existing behavior)."""
+    user_ids (the full store roster, optional/best-effort) is used to pull
+    each connected user's Outlook calendar and each user's real today-only
+    activity counts (see _fetch_meetings_context/_fetch_recent_activity_context)
+    as extra context — never passed to search_business_context, and never
+    required (defaults to no calendar/activity section at all, matching
+    pre-existing behavior)."""
     if report_type not in REPORT_PROMPTS:
         raise ValueError(f"Unknown report_type: {report_type}")
 
     research_context = _fetch_research_context(report_type, organization_id)
     research_context += _fetch_meetings_context(user_ids or [])
+    research_context += _fetch_recent_activity_context(user_ids or [], organization_id)
     llm = _make_llm()
 
     prioritizer = Agent(

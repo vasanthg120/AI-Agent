@@ -114,6 +114,11 @@ export interface InitiatePurchaseResult {
   simulated: boolean;
   creditedImmediately: boolean;
   wallet?: WalletSummary;
+  // The amount/currency actually charged at the gateway — differs from the
+  // package's own display price only when converted (e.g. a USD package
+  // charged in INR via Razorpay). See PricingService.resolveGatewayAmount.
+  gatewayAmount: number;
+  gatewayCurrency: string;
 }
 
 export interface AutoPaySettingsUpdate {
@@ -192,6 +197,11 @@ export interface SubscriptionCheckoutResult {
   simulated: boolean;
   activatedImmediately: boolean;
   subscription?: SubscriptionSummary;
+  // The amount/currency actually charged at the gateway — differs from the
+  // plan price's own display amount only when converted (e.g. a USD plan
+  // charged in INR via Razorpay). See PricingService.resolveGatewayAmount.
+  gatewayAmount: number;
+  gatewayCurrency: string;
 }
 
 // --- Phase 4: Invoices ---
@@ -380,6 +390,23 @@ export const billingService = {
   async listInvoices(limit?: number): Promise<BillingInvoiceSummary[]> {
     const { data } = await axiosClient.get<BillingInvoiceSummary[]>('/billing/invoices', { params: { limit } });
     return data;
+  },
+
+  // Triggers a real file download (not just opening a tab) — the backend
+  // already sets Content-Disposition: attachment with the invoice's own
+  // filename (see billing.controller.ts's downloadInvoicePdf), so the <a
+  // download> attribute here just needs a matching filename for browsers
+  // that ignore the header on a blob: URL.
+  async downloadInvoicePdf(id: string, invoiceNumber: string): Promise<void> {
+    const response = await axiosClient.get(`/billing/invoices/${id}/pdf`, { responseType: 'blob' });
+    const url = URL.createObjectURL(response.data as Blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `${invoiceNumber}.pdf`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
   },
 
   // --- Phase 5: Billing theme + public pricing page config ---

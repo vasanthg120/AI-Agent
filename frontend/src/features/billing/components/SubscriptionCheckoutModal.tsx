@@ -79,6 +79,14 @@ export function SubscriptionCheckoutModal({ open, onClose, plan, price, paymentM
         return;
       }
 
+      // Surfaced before the Razorpay widget opens whenever the displayed
+      // price was converted (e.g. a USD plan charged in INR) — the amount
+      // shown here is the exact figure Razorpay is about to charge, never a
+      // separately-computed estimate.
+      if (order.gatewayCurrency !== price.currencyCode) {
+        toast(`Charged as ${formatCurrency(order.gatewayAmount, order.gatewayCurrency)} via Razorpay`, { icon: '💱' });
+      }
+
       const loaded = await loadRazorpayScript();
       if (!loaded || !window.Razorpay) {
         toast.error("Couldn't load the payment checkout. Please try again.");

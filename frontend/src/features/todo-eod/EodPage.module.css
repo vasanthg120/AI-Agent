@@ -27,15 +27,7 @@
   gap: var(--space-3);
 }
 
-.boardFilterRow {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-3);
-  flex-wrap: wrap;
-}
-
-.boardDateNav {
+.dateNav {
   display: flex;
   align-items: center;
   gap: var(--space-2);
@@ -45,28 +37,56 @@
   border: 1px solid var(--color-border);
 }
 
-.boardDateLabel {
+.dateLabel {
   font-size: var(--text-sm);
   font-weight: 600;
   color: var(--color-text-primary);
   min-width: 180px;
 }
 
-.calendarLayout {
+.narrative {
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+  line-height: 1.6;
+  white-space: pre-wrap;
+}
+
+.statGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: var(--space-3);
+}
+
+.columns {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: var(--space-4);
+  align-items: start;
+}
+
+.detailRow {
   display: flex;
-  gap: var(--space-6);
-  align-items: flex-start;
-  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-2) 0;
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
 }
 
-.calendarPanel {
-  /* Card chrome now comes from the SectionCard wrapping MonthCalendar. */
-  flex: 0 0 320px;
+.detailRow + .detailRow {
+  border-top: 1px solid var(--color-border);
 }
 
-.selectedDateTasks {
-  flex: 1;
-  min-width: 280px;
+.detailValue {
+  font-weight: 700;
+  color: var(--color-text-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+.taskList {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
 }
 
 .taskRow {
@@ -81,9 +101,30 @@
   font-size: var(--text-sm);
 }
 
+.taskRowBadges {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
 .emptyState {
   font-size: var(--text-sm);
   color: var(--color-text-muted);
   padding: var(--space-4);
 }
 
+/* ---------- responsive ---------- */
+@media (max-width: 640px) {
+  .page {
+    padding: var(--space-4);
+    gap: var(--space-4);
+  }
+
+  .statGrid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .columns {
+    grid-template-columns: 1fr;
+  }
+}

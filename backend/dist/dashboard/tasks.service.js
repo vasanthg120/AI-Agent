@@ -13,32 +13,40 @@ var __param = (this && this.__param) || function (paramIndex, decorator) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.TasksService = void 0;
-const axios_1 = require("@nestjs/axios");
 const common_1 = require("@nestjs/common");
-const config_1 = require("@nestjs/config");
-const jwt_1 = require("@nestjs/jwt");
 const mongoose_1 = require("@nestjs/mongoose");
-const rxjs_1 = require("rxjs");
 const mongoose_2 = require("mongoose");
 const chat_service_1 = require("../chat/chat.service");
 const gamification_service_1 = require("../gamification/gamification.service");
 const timeline_service_1 = require("../timeline/timeline.service");
+const account_schema_1 = require("../crm/schemas/account.schema");
+const contact_schema_1 = require("../crm/schemas/contact.schema");
+const deal_schema_1 = require("../crm/schemas/deal.schema");
+const quote_schema_1 = require("../crm/schemas/quote.schema");
+const email_intelligence_item_schema_1 = require("../email-intelligence/schemas/email-intelligence-item.schema");
+const email_intelligence_service_1 = require("../email-intelligence/email-intelligence.service");
 const agent_scope_util_1 = require("./agent-scope.util");
 const task_visibility_util_1 = require("./task-visibility.util");
 const daily_report_schema_1 = require("./schemas/daily-report.schema");
 function todayStamp() {
     return new Date().toISOString().slice(0, 10);
 }
+function dayRange(date) {
+    const start = new Date(`${date}T00:00:00.000Z`);
+    const end = new Date(start.getTime() + 24 * 60 * 60 * 1000);
+    return { start, end };
+}
 let TasksService = class TasksService {
-    constructor(reportModel, chatService, http, config, jwt, gamificationService, timelineService) {
+    constructor(reportModel, dealModel, quoteModel, contactModel, accountModel, emailModel, chatService, gamificationService, timelineService) {
         this.reportModel = reportModel;
+        this.dealModel = dealModel;
+        this.quoteModel = quoteModel;
+        this.contactModel = contactModel;
+        this.accountModel = accountModel;
+        this.emailModel = emailModel;
         this.chatService = chatService;
-        this.http = http;
-        this.config = config;
-        this.jwt = jwt;
         this.gamificationService = gamificationService;
         this.timelineService = timelineService;
-        this.agentUrl = this.config.get('pythonAgentUrl') ?? 'http://localhost:8000';
     }
     async list(query, caller) {
         const allowedAgentIds = await (0, agent_scope_util_1.resolveAllowedAgentIds)(this.chatService, caller);
@@ -67,10 +75,15 @@ let TasksService = class TasksService {
         })));
         return { tasks };
     }
-    async calendarSummary(month, caller, mine = true) {
+    async calendarSummary(month, caller, mine = true, reportType) {
         const allowedAgentIds = await (0, agent_scope_util_1.resolveAllowedAgentIds)(this.chatService, caller);
         const reports = await this.reportModel
-            .find({ organizationId: caller.organizationId, agentId: { $in: allowedAgentIds }, date: { $regex: `^${month}` } })
+            .find({
+            organizationId: caller.organizationId,
+            agentId: { $in: allowedAgentIds },
+            date: { $regex: `^${month}` },
+            ...(reportType ? { reportType } : {}),
+        })
             .lean()
             .exec();
         const byDate = new Map();
@@ -84,19 +97,45 @@ let TasksService = class TasksService {
         }
         return { month, days: [...byDate.entries()].map(([date, v]) => ({ date, ...v })) };
     }
-    async getRecommendations(caller) {
-        const { tasks } = await this.list({}, caller);
-        const openTasks = tasks.filter((t) => t.status !== 'done');
-        if (openTasks.length === 0) {
-            return { recommendations: [], overallNote: 'Nothing open right now.' };
-        }
-        const userJwt = this.jwt.sign({ sub: caller.sub }, { expiresIn: '5m' });
-        const { data } = await (0, rxjs_1.firstValueFrom)(this.http.post(`${this.agentUrl}/tasks/recommend`, { tasks: openTasks.map((t) => ({ id: t.id, title: t.title, priority: t.priority, isOverdue: t.isOverdue, category: t.category })) }, { headers: { Authorization: `Bearer ${userJwt}` } }));
-        const byId = new Map(openTasks.map((t) => [t.id, t]));
-        const recommendations = data.recommendations
-            .filter((r) => byId.has(r.taskId))
-            .map((r) => ({ ...r, task: byId.get(r.taskId) }));
-        return { recommendations, overallNote: data.overallNote };
+    async getEodSummary(caller, requestedDate) {
+        const date = requestedDate && /^\d{4}-\d{2}-\d{2}$/.test(requestedDate) ? requestedDate : todayStamp();
+        const { start, end } = dayRange(date);
+        const { organizationId, sub: userId } = caller;
+        const [{ tasks }, emailReceived, emailSent, emailResponded, emailPending, dealsCreated, dealsUpdated, quotesCreated, quotesUpdated, newContacts, newAccounts, eodReport] = await Promise.all([
+            this.list({ dateFrom: date, dateTo: date }, caller),
+            this.emailModel.countDocuments({ organizationId, userId, intent: { $in: email_intelligence_service_1.RELEVANT_EMAIL_INTENTS }, receivedAt: { $gte: start, $lt: end } }).exec(),
+            this.emailModel.countDocuments({ organizationId, userId, intent: { $in: email_intelligence_service_1.RELEVANT_EMAIL_INTENTS }, sentAt: { $gte: start, $lt: end } }).exec(),
+            this.emailModel
+                .countDocuments({
+                organizationId,
+                userId,
+                intent: { $in: email_intelligence_service_1.RELEVANT_EMAIL_INTENTS },
+                $or: [{ sentAt: { $gte: start, $lt: end } }, { externalReplyDetectedAt: { $gte: start, $lt: end } }],
+            })
+                .exec(),
+            this.emailModel
+                .countDocuments({ organizationId, userId, intent: { $in: email_intelligence_service_1.RELEVANT_EMAIL_INTENTS }, status: 'pending', externalReplyDetectedAt: { $exists: false } })
+                .exec(),
+            this.dealModel.countDocuments({ organizationId, ownerId: userId, createdAt: { $gte: start, $lt: end } }).exec(),
+            this.dealModel.countDocuments({ organizationId, ownerId: userId, updatedAt: { $gte: start, $lt: end } }).exec(),
+            this.quoteModel.countDocuments({ organizationId, ownerUserId: userId, createdAt: { $gte: start, $lt: end } }).exec(),
+            this.quoteModel.countDocuments({ organizationId, ownerUserId: userId, updatedAt: { $gte: start, $lt: end } }).exec(),
+            this.contactModel.countDocuments({ organizationId, createdAt: { $gte: start, $lt: end } }).exec(),
+            this.accountModel.countDocuments({ organizationId, createdAt: { $gte: start, $lt: end } }).exec(),
+            this.reportModel.findOne({ organizationId, reportType: 'eod', date }).sort({ updatedAt: -1 }).lean().exec(),
+        ]);
+        return {
+            date,
+            tasksCompleted: tasks.filter((t) => t.status === 'done'),
+            tasksPending: tasks.filter((t) => t.status !== 'done'),
+            email: { received: emailReceived, sent: emailSent, responded: emailResponded, pending: emailPending },
+            crm: { dealsCreated, dealsUpdated, quotesCreated, quotesUpdated },
+            newContactsAcrossOrg: newContacts,
+            newAccountsAcrossOrg: newAccounts,
+            narrativeSummary: eodReport?.summary || null,
+            reportExists: !!eodReport,
+            reportGeneratedAt: eodReport?.updatedAt ?? null,
+        };
     }
     async updateStatus(taskId, status, caller) {
         if (!mongoose_2.Types.ObjectId.isValid(taskId)) {
@@ -139,11 +178,18 @@ exports.TasksService = TasksService;
 exports.TasksService = TasksService = __decorate([
     (0, common_1.Injectable)(),
     __param(0, (0, mongoose_1.InjectModel)(daily_report_schema_1.DailyReport.name)),
+    __param(1, (0, mongoose_1.InjectModel)(deal_schema_1.Deal.name)),
+    __param(2, (0, mongoose_1.InjectModel)(quote_schema_1.Quote.name)),
+    __param(3, (0, mongoose_1.InjectModel)(contact_schema_1.Contact.name)),
+    __param(4, (0, mongoose_1.InjectModel)(account_schema_1.Account.name)),
+    __param(5, (0, mongoose_1.InjectModel)(email_intelligence_item_schema_1.EmailIntelligenceItem.name)),
     __metadata("design:paramtypes", [mongoose_2.Model,
+        mongoose_2.Model,
+        mongoose_2.Model,
+        mongoose_2.Model,
+        mongoose_2.Model,
+        mongoose_2.Model,
         chat_service_1.ChatService,
-        axios_1.HttpService,
-        config_1.ConfigService,
-        jwt_1.JwtService,
         gamification_service_1.GamificationService,
         timeline_service_1.TimelineService])
 ], TasksService);

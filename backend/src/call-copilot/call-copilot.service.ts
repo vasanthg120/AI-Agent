@@ -172,7 +172,13 @@ export class CallCopilotService {
     // starting; a genuine insufficient-balance 402 is the one case worth
     // surfacing to the caller before any recording begins.
     try {
-      await this.reservations.reserve(organizationId, userId, creditRequestId, session._id.toString());
+      // resolveTenantKey(), not organizationId directly — billing is scoped
+      // per-user by default (see ReservationService.resolveTenantKey's own
+      // comment); a purchased plan's credits land in the wallet keyed by
+      // userId, not organizationId, so reserving against organizationId
+      // directly always misses a real balance and hits Insufficient Balance
+      // regardless of what was actually purchased.
+      await this.reservations.reserve(this.reservations.resolveTenantKey(organizationId, userId), userId, creditRequestId, session._id.toString());
     } catch (err) {
       this.logger.warn(`Call copilot billing reserve failed (proceeding): ${(err as Error).message}`);
     }
