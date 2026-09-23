@@ -108,6 +108,12 @@
   border-radius: var(--radius-full);
 }
 
+.assistantTriggerIcon {
+  width: 18px;
+  height: 18px;
+  object-fit: contain;
+}
+
 @media (max-width: 640px) {
   .quickActionsShortcut,
   .quickActionsLabel,

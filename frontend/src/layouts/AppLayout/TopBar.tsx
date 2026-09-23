@@ -22,6 +22,8 @@ export function TopBar({ onMenuClick }: TopBarProps) {
   const rightPanelOpen = useUiStore((state) => state.rightPanelOpen);
   const toggleRightPanel = useUiStore((state) => state.toggleRightPanel);
   const setCommandPaletteOpen = useUiStore((state) => state.setCommandPaletteOpen);
+  const assistantPanelOpen = useUiStore((state) => state.assistantPanelOpen);
+  const toggleAssistantPanel = useUiStore((state) => state.toggleAssistantPanel);
   const unreadCount = useNotificationsStore((state) => state.unreadCount());
   const user = useAuthStore((state) => state.user);
 
@@ -73,6 +75,19 @@ export function TopBar({ onMenuClick }: TopBarProps) {
             label={rightPanelOpen ? 'Hide details panel' : 'Show details panel'}
             active={rightPanelOpen}
             onClick={toggleRightPanel}
+          />
+        )}
+
+        {/* Hidden on the full Chat page itself — that page already IS the
+            complete Agentic Chat experience this panel is a compact,
+            workspace-wide shortcut to (see AppLayout.tsx's matching
+            auto-close effect). */}
+        {!isChatRoute && (
+          <IconButton
+            icon={<img src="/haive-logo.png" alt="" className={styles.assistantTriggerIcon} />}
+            label={assistantPanelOpen ? 'Close AI Assistant' : 'Open AI Assistant'}
+            active={assistantPanelOpen}
+            onClick={toggleAssistantPanel}
           />
         )}
 
