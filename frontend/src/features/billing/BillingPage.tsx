@@ -226,7 +226,6 @@ export function BillingPage() {
               autoRechargePolicy={wallet.autoRechargePolicy}
               paymentMethods={paymentMethods}
               onChanged={loadAll}
-              onRequirePurchase={() => navigate(ROUTES.addCredits)}
             />
           </SectionCard>
         </div>
