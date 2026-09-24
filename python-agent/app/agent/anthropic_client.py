@@ -517,6 +517,8 @@ def _run_forced_tool_extraction(
                 )
                 usage["input_tokens"] = response.usage.input_tokens
                 usage["output_tokens"] = response.usage.output_tokens
+                usage["cache_creation_input_tokens"] = getattr(response.usage, "cache_creation_input_tokens", 0) or 0
+                usage["cache_read_input_tokens"] = getattr(response.usage, "cache_read_input_tokens", 0) or 0
                 block = next((b for b in response.content if b.type == "tool_use"), None)
                 if block is None:
                     raise ValueError("Model did not return a tool_use block")
@@ -858,6 +860,8 @@ def classify_request(
         )
         usage["input_tokens"] = response.usage.input_tokens
         usage["output_tokens"] = response.usage.output_tokens
+        usage["cache_creation_input_tokens"] = getattr(response.usage, "cache_creation_input_tokens", 0) or 0
+        usage["cache_read_input_tokens"] = getattr(response.usage, "cache_read_input_tokens", 0) or 0
     block = next((b for b in response.content if b.type == "tool_use"), None)
     if block is None:
         raise ValueError("Planner did not return a tool_use block")
@@ -928,6 +932,8 @@ def critique_response(
         )
         usage["input_tokens"] = response.usage.input_tokens
         usage["output_tokens"] = response.usage.output_tokens
+        usage["cache_creation_input_tokens"] = getattr(response.usage, "cache_creation_input_tokens", 0) or 0
+        usage["cache_read_input_tokens"] = getattr(response.usage, "cache_read_input_tokens", 0) or 0
     block = next((b for b in response.content if b.type == "tool_use"), None)
     if block is None:
         raise ValueError("Critique did not return a tool_use block")
@@ -1003,6 +1009,8 @@ def suggest_follow_ups(
         )
         usage["input_tokens"] = response.usage.input_tokens
         usage["output_tokens"] = response.usage.output_tokens
+        usage["cache_creation_input_tokens"] = getattr(response.usage, "cache_creation_input_tokens", 0) or 0
+        usage["cache_read_input_tokens"] = getattr(response.usage, "cache_read_input_tokens", 0) or 0
     block = next((b for b in response.content if b.type == "tool_use"), None)
     if block is None:
         raise ValueError("suggest_follow_ups did not return a tool_use block")
@@ -1067,6 +1075,8 @@ def answer_business_question(
         )
         usage["input_tokens"] = response.usage.input_tokens
         usage["output_tokens"] = response.usage.output_tokens
+        usage["cache_creation_input_tokens"] = getattr(response.usage, "cache_creation_input_tokens", 0) or 0
+        usage["cache_read_input_tokens"] = getattr(response.usage, "cache_read_input_tokens", 0) or 0
     block = next((b for b in response.content if b.type == "text"), None)
     if block is None:
         raise ValueError("Business advisor call did not return a text block")
@@ -1171,6 +1181,8 @@ def call(
                         stream.close()
                         usage["input_tokens"] = 0
                         usage["output_tokens"] = 0
+                        usage["cache_creation_input_tokens"] = 0
+                        usage["cache_read_input_tokens"] = 0
                         return [
                             {
                                 "type": "message",
@@ -1182,6 +1194,8 @@ def call(
                     response = stream.get_final_message()
                 usage["input_tokens"] = response.usage.input_tokens
                 usage["output_tokens"] = response.usage.output_tokens
+                usage["cache_creation_input_tokens"] = getattr(response.usage, "cache_creation_input_tokens", 0) or 0
+                usage["cache_read_input_tokens"] = getattr(response.usage, "cache_read_input_tokens", 0) or 0
                 break
             except Exception as exc:
                 if not emitted_any and attempt < _MAX_CALL_ATTEMPTS - 1 and _is_retryable(exc):
@@ -1324,6 +1338,8 @@ def analyze_customer_activity(
                 )
                 usage["input_tokens"] = response.usage.input_tokens
                 usage["output_tokens"] = response.usage.output_tokens
+                usage["cache_creation_input_tokens"] = getattr(response.usage, "cache_creation_input_tokens", 0) or 0
+                usage["cache_read_input_tokens"] = getattr(response.usage, "cache_read_input_tokens", 0) or 0
                 block = next((b for b in response.content if b.type == "tool_use"), None)
                 if block is None:
                     raise ValueError("Model did not return a tool_use block")
@@ -1431,6 +1447,8 @@ def analyze_finance_activity(
                 )
                 usage["input_tokens"] = response.usage.input_tokens
                 usage["output_tokens"] = response.usage.output_tokens
+                usage["cache_creation_input_tokens"] = getattr(response.usage, "cache_creation_input_tokens", 0) or 0
+                usage["cache_read_input_tokens"] = getattr(response.usage, "cache_read_input_tokens", 0) or 0
                 block = next((b for b in response.content if b.type == "tool_use"), None)
                 if block is None:
                     raise ValueError("Model did not return a tool_use block")

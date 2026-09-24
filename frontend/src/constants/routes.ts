@@ -75,6 +75,7 @@ export const ADMIN_ROUTES = {
   refunds: '/Admin-haive/refunds',
   invoices: '/Admin-haive/invoices',
   analytics: '/Admin-haive/analytics',
+  aiUsage: '/Admin-haive/ai-usage',
   adminUsers: '/Admin-haive/admin-users',
   auditLogs: '/Admin-haive/audit-logs',
   settings: '/Admin-haive/settings',

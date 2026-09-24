@@ -23,6 +23,7 @@ const AdminSubscriptionsPage = lazy(() => import('./subscriptions/AdminSubscript
 const AdminRefundsPage = lazy(() => import('./refunds/AdminRefundsPage').then((m) => ({ default: m.AdminRefundsPage })));
 const AdminInvoicesPage = lazy(() => import('./invoices/AdminInvoicesPage').then((m) => ({ default: m.AdminInvoicesPage })));
 const AdminAnalyticsPage = lazy(() => import('./AdminAnalyticsPage').then((m) => ({ default: m.AdminAnalyticsPage })));
+const AdminAiUsagePage = lazy(() => import('./AdminAiUsagePage').then((m) => ({ default: m.AdminAiUsagePage })));
 const AdminPaymentSettingsPage = lazy(() => import('./AdminPaymentSettingsPage').then((m) => ({ default: m.AdminPaymentSettingsPage })));
 const AdminUsersManagementPage = lazy(() => import('./AdminUsersManagementPage').then((m) => ({ default: m.AdminUsersManagementPage })));
 const AdminSettingsPage = lazy(() => import('./AdminSettingsPage').then((m) => ({ default: m.AdminSettingsPage })));
@@ -64,6 +65,7 @@ export function AdminRoutes() {
             <Route path="refunds" element={<AdminRefundsPage />} />
             <Route path="invoices" element={<AdminInvoicesPage />} />
             <Route path="analytics" element={<AdminAnalyticsPage />} />
+            <Route path="ai-usage" element={<AdminAiUsagePage />} />
             <Route path="admin-users" element={<AdminUsersManagementPage />} />
             <Route path="settings" element={<AdminSettingsPage />} />
           </Route>

@@ -42,6 +42,18 @@ export class IntegrationCredential {
   // "just hit baseUrl itself".
   @Prop()
   healthCheckPath?: string;
+
+  // Admin-configured spend budget for this credential (currently only set
+  // for the 'anthropic' platform credential, from the AI Usage admin page).
+  // This is Haive's own tracking target, NOT an authoritative balance from
+  // the provider — the Anthropic API for a plain API key exposes no account
+  // balance, so "remaining" is always budgetUsd minus Haive's own recorded
+  // spend (see ai-usage-admin.service.ts), never claimed as provider truth.
+  @Prop({ type: Number })
+  budgetUsd?: number;
+
+  @Prop({ enum: ['monthly', 'total'], default: 'monthly' })
+  budgetPeriod?: 'monthly' | 'total';
 }
 
 export const IntegrationCredentialSchema = SchemaFactory.createForClass(IntegrationCredential);

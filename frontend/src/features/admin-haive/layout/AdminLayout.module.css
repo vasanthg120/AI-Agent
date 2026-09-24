@@ -7,8 +7,11 @@
   --admin-accent-soft: rgba(91, 141, 239, 0.14);
   --admin-accent-hover: #4a78d6;
 
+  position: relative;
   display: flex;
-  min-height: 100vh;
+  height: 100vh;
+  width: 100%;
+  overflow: hidden;
   background: var(--color-bg-app);
   color: var(--color-text-primary);
   font-family: var(--font-sans);
@@ -30,12 +33,14 @@
   --color-border-strong: var(--sidebar-border-strong);
 
   width: 252px;
+  height: 100%;
   flex-shrink: 0;
   background: var(--sidebar-bg);
   border-right: 1px solid var(--sidebar-border-strong);
   display: flex;
   flex-direction: column;
   padding: var(--space-5) var(--space-3) var(--space-5);
+  overflow: hidden;
 }
 
 .brand {
@@ -80,6 +85,8 @@
   display: flex;
   flex-direction: column;
   gap: var(--space-4);
+  flex: 1;
+  min-height: 0;
   overflow-y: auto;
 }
 
@@ -209,6 +216,7 @@
 
 .content {
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
   padding: var(--space-6);
 }

@@ -3,6 +3,7 @@ import {
   FiActivity,
   FiBarChart2,
   FiCheckSquare,
+  FiCpu,
   FiCreditCard,
   FiFileText,
   FiGift,
@@ -37,6 +38,7 @@ export interface AdminNavItem {
 export const ADMIN_NAV_ITEMS: AdminNavItem[] = [
   { id: 'dashboard', label: 'Dashboard', path: ADMIN_ROUTES.dashboard, icon: FiGrid, section: 'Overview' },
   { id: 'analytics', label: 'Analytics', path: ADMIN_ROUTES.analytics, icon: FiBarChart2, section: 'Overview' },
+  { id: 'ai-usage', label: 'AI Usage', path: ADMIN_ROUTES.aiUsage, icon: FiCpu, section: 'Overview' },
 
   { id: 'organizations', label: 'Organizations', path: ADMIN_ROUTES.organizations, icon: FiUsers, section: 'Customers' },
 

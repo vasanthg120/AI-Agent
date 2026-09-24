@@ -31,6 +31,8 @@ def record_llm_execution(
     success: bool,
     error: str | None,
     request_id: str = "",
+    cache_creation_input_tokens: int = 0,
+    cache_read_input_tokens: int = 0,
 ) -> None:
     now = datetime.now(timezone.utc)
     get_db().agent_executions.insert_one(
@@ -51,6 +53,13 @@ def record_llm_execution(
             "model": model,
             "inputTokens": input_tokens,
             "outputTokens": output_tokens,
+            # Cache tokens are reported separately by Anthropic and are NOT
+            # already included in inputTokens — see cost.py's docstring.
+            # totalTokens intentionally excludes them too (matches Anthropic's
+            # own "input + output" definition of billable-turn size); they're
+            # kept as their own fields for the Admin token-usage breakdown.
+            "cacheCreationInputTokens": cache_creation_input_tokens,
+            "cacheReadInputTokens": cache_read_input_tokens,
             "totalTokens": input_tokens + output_tokens,
             "costUsd": cost_usd,
             "currency": "USD",
