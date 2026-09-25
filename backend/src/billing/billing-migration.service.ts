@@ -81,31 +81,58 @@ export class BillingMigrationService {
   /** Read-only — computes what would happen for one organization, never
    * writes. Wallets already archived by a prior run (organizationId
    * rewritten to `migrated:<id>`) or already renamed onto the real org id
-   * are never matched here, which is what makes a re-run a no-op. */
+   * are never matched here, which is what makes a re-run a no-op.
+   *
+   * Also checks for a wallet that ALREADY sits at the real organizationId —
+   * found live: admin-reporting code paths (billing-admin.service.ts's
+   * organization detail/list views) call WalletService.getOrCreateWallet
+   * directly with the real org id, which silently creates an empty
+   * org-keyed wallet as a side effect of an admin just VIEWING that
+   * organization, well before this migration ever runs. A plain 'rename'
+   * of the real (user-keyed) wallet onto that same id then collides with
+   * Wallet.organizationId's unique index (confirmed: E11000 duplicate key).
+   * Whenever such a wallet exists, this now folds it into the merge instead
+   * of assuming a bare rename is safe. */
   private async planForOrganization(organizationId: string): Promise<OrganizationMigrationPlan> {
     const users = await this.userModel.find({ organizationId }).exec();
     const userIds = users.map((u) => u._id.toString());
     if (userIds.length === 0) return { organizationId, action: 'none', sourceWallets: [] };
 
-    const wallets = await this.walletModel.find({ organizationId: { $in: userIds } }).exec();
-    if (wallets.length === 0) return { organizationId, action: 'none', sourceWallets: [] };
+    const [userKeyedWallets, existingOrgWallet] = await Promise.all([
+      this.walletModel.find({ organizationId: { $in: userIds } }).exec(),
+      this.walletModel.findOne({ organizationId }).exec(),
+    ]);
+    if (userKeyedWallets.length === 0) return { organizationId, action: 'none', sourceWallets: [] };
 
-    const sourceWallets: WalletMergeSourceSummary[] = wallets.map((w) => ({
+    const userKeyedSummaries: WalletMergeSourceSummary[] = userKeyedWallets.map((w) => ({
       walletId: w._id.toString(),
       originalKey: w.organizationId,
       balanceCredits: w.balanceCredits,
       reservedCredits: w.reservedCredits,
     }));
 
-    if (wallets.length === 1) {
-      return { organizationId, action: 'rename', sourceWallets, targetWalletId: wallets[0]._id.toString() };
+    if (!existingOrgWallet && userKeyedWallets.length === 1) {
+      return { organizationId, action: 'rename', sourceWallets: userKeyedSummaries, targetWalletId: userKeyedWallets[0]._id.toString() };
     }
 
-    // Merge target: the 'owner'-role user's wallet if one exists, else the
-    // oldest wallet by creation time.
+    const sourceWallets = existingOrgWallet
+      ? [
+          {
+            walletId: existingOrgWallet._id.toString(),
+            originalKey: existingOrgWallet.organizationId,
+            balanceCredits: existingOrgWallet.balanceCredits,
+            reservedCredits: existingOrgWallet.reservedCredits,
+          },
+          ...userKeyedSummaries,
+        ]
+      : userKeyedSummaries;
+
+    // Merge target preference: a wallet already correctly keyed by the real
+    // org id (avoids an unnecessary rename-then-merge), else the
+    // 'owner'-role user's wallet, else the oldest wallet by creation time.
     const ownerUser = users.find((u) => u.roles?.includes('owner'));
-    const ownerWallet = ownerUser ? wallets.find((w) => w.organizationId === ownerUser._id.toString()) : undefined;
-    const target = ownerWallet ?? [...wallets].sort((a, b) => this.createdAt(a).getTime() - this.createdAt(b).getTime())[0];
+    const ownerWallet = ownerUser ? userKeyedWallets.find((w) => w.organizationId === ownerUser._id.toString()) : undefined;
+    const target = existingOrgWallet ?? ownerWallet ?? [...userKeyedWallets].sort((a, b) => this.createdAt(a).getTime() - this.createdAt(b).getTime())[0];
 
     return {
       organizationId,

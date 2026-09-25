@@ -48,9 +48,15 @@ let ChatController = class ChatController {
         return { status: 'ok' };
     }
     sendMessage(user, req, dto) {
+        this.assertAiAccessAllowed(user);
         const bearerToken = (req.headers.authorization ?? '').replace(/^Bearer\s+/i, '');
         const agentId = dto.agentId ?? (user.roles.includes('agent_user') ? user.assignedAgentId : undefined);
         return this.chatService.sendMessage(user.sub, user.organizationId, bearerToken, dto.message, dto.conversationId, agentId);
+    }
+    assertAiAccessAllowed(user) {
+        if (user.aiAccessEnabled === false) {
+            throw new common_1.ForbiddenException('AI access has been disabled for your account by an administrator.');
+        }
     }
 };
 exports.ChatController = ChatController;

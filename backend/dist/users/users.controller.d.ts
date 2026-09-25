@@ -16,6 +16,7 @@ export declare class UsersController {
         department: string | undefined;
         active: boolean;
         voiceAccessEnabled: boolean;
+        aiAccessEnabled: boolean;
     } | null>;
     list(caller: JwtPayload): Promise<{
         id: string;
@@ -28,6 +29,7 @@ export declare class UsersController {
         department: string | undefined;
         active: boolean;
         voiceAccessEnabled: boolean;
+        aiAccessEnabled: boolean;
     }[]>;
     create(caller: JwtPayload, dto: CreateUserDto): Promise<{
         user: {
@@ -41,6 +43,7 @@ export declare class UsersController {
             department: string | undefined;
             active: boolean;
             voiceAccessEnabled: boolean;
+            aiAccessEnabled: boolean;
         };
         tempPassword: string;
     }>;
@@ -55,6 +58,7 @@ export declare class UsersController {
         department: string | undefined;
         active: boolean;
         voiceAccessEnabled: boolean;
+        aiAccessEnabled: boolean;
     }>;
     remove(caller: JwtPayload, id: string): Promise<void>;
 }

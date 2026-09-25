@@ -1,6 +1,7 @@
-import { Controller, Get, Param, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, Query, UseGuards } from '@nestjs/common';
 import { AdminJwtAuthGuard } from '../common/guards/admin-jwt-auth.guard';
 import { BillingAdminService } from './billing-admin.service';
+import { SetOrganizationStatusDto } from './dto/set-organization-status.dto';
 
 // Haive-internal only — gated by a fully separate admin credential (see
 // AdminJwtAuthGuard/AdminAccount), never reachable by a customer login no
@@ -51,6 +52,14 @@ export class BillingAdminController {
   @Get('organizations/:id/users')
   organizationUsers(@Param('id') id: string) {
     return this.adminService.listOrganizationUsers(id);
+  }
+
+  // Actually flips Organization.status — see BillingAdminService.
+  // setOrganizationStatus's own comment for why this was previously
+  // read-only scaffolding with no write path anywhere in the app.
+  @Post('organizations/:id/status')
+  setOrganizationStatus(@Param('id') id: string, @Body() dto: SetOrganizationStatusDto) {
+    return this.adminService.setOrganizationStatus(id, dto.status);
   }
 
   @Get('subscription-metrics')

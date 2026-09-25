@@ -24,7 +24,14 @@ export function AdminRangeControl({ days, onChange }: { days: number; onChange: 
   };
                                                              
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)' }}>
+    // minWidth: 0 + maxWidth: 100% — without this, this div (a flex item
+    // wherever it's placed, e.g. AdminDashboardPage's .topRow) refuses to
+    // shrink below the Tabs row's natural content width, the same flexbox
+    // "min-width:auto" trap Tabs.module.css's own .list now guards against.
+    // Confirmed live: on a narrow admin page this let the tab row render
+    // ~35px wider than its own container with the last tab unreachable —
+    // fixing only the Tabs component itself wasn't enough one level up.
+    <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)', minWidth: 0, maxWidth: '100%' }}>
       <Tabs items={PRESETS.map((p) => ({ id: p.id, label: p.label }))} activeId={activeId} onChange={handlePreset} />
       {activeId === 'custom' && (
         <input

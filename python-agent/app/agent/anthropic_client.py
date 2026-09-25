@@ -1869,7 +1869,7 @@ VENDOR_CUSTOMER_COMPARE_TOOL = {
                         "dealId": {"type": "string"},
                         "reason": {"type": "string"},
                     },
-                    "required": ["dealId", "reason"],
+                    "required": ["dealId", "reason"], 
                     "additionalProperties": False,
                 },
             },

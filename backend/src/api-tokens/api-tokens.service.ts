@@ -3,6 +3,7 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { JwtPayload } from '../auth/jwt-payload.interface';
+import { OrganizationsService } from '../organizations/organizations.service';
 import { UsersService } from '../users/users.service';
 import { ApiToken, ApiTokenDocument } from './schemas/api-token.schema';
 
@@ -30,6 +31,7 @@ export class ApiTokensService {
   constructor(
     @InjectModel(ApiToken.name) private apiTokenModel: Model<ApiTokenDocument>,
     private usersService: UsersService,
+    private organizationsService: OrganizationsService,
   ) {}
 
   async create(
@@ -94,6 +96,11 @@ export class ApiTokensService {
     const user = await this.usersService.findById(doc.userId);
     if (!user || user.active === false) return null;
 
+    // Same organization-suspension gate as JwtStrategy.validate() — a PAT is
+    // still a normal user's credential, so a suspended org must block it too.
+    const org = await this.organizationsService.findOrgById(user.organizationId);
+    if (org?.status === 'suspended') return null;
+
     void this.touchLastUsedIfStale(doc._id.toString(), doc.lastUsedAt);
 
     return {
@@ -105,6 +112,7 @@ export class ApiTokensService {
       assignedAgentId: user.assignedAgentId,
       department: user.department,
       voiceAccessEnabled: user.voiceAccessEnabled,
+      aiAccessEnabled: user.aiAccessEnabled,
       // No jti — API tokens aren't sessions, there's nothing to look up in
       // User.sessions for them. authMethod is what RequireSessionAuthGuard
       // reads to block this credential from security-management routes.

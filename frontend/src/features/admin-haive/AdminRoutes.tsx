@@ -11,16 +11,9 @@ const AdminOrganizationsPage = lazy(() => import('./organizations/AdminOrganizat
 const AdminOrganizationDetailPage = lazy(() =>
   import('./organizations/AdminOrganizationDetailPage').then((m) => ({ default: m.AdminOrganizationDetailPage })),
 );
-const AdminLedgerPage = lazy(() => import('./ledger/AdminLedgerPage').then((m) => ({ default: m.AdminLedgerPage })));
 const AdminPaymentsPage = lazy(() => import('./payments/AdminPaymentsPage').then((m) => ({ default: m.AdminPaymentsPage })));
 const AdminPlansPage = lazy(() => import('./catalog/AdminPlansPage').then((m) => ({ default: m.AdminPlansPage })));
-const AdminCreditPackagesPage = lazy(() => import('./catalog/AdminCreditPackagesPage').then((m) => ({ default: m.AdminCreditPackagesPage })));
-const AdminFeaturesPage = lazy(() => import('./catalog/AdminFeaturesPage').then((m) => ({ default: m.AdminFeaturesPage })));
-const AdminEntitlementsPage = lazy(() => import('./catalog/AdminEntitlementsPage').then((m) => ({ default: m.AdminEntitlementsPage })));
-const AdminPricesPage = lazy(() => import('./catalog/AdminPricesPage').then((m) => ({ default: m.AdminPricesPage })));
-const AdminCouponsPage = lazy(() => import('./catalog/AdminCouponsPage').then((m) => ({ default: m.AdminCouponsPage })));
 const AdminSubscriptionsPage = lazy(() => import('./subscriptions/AdminSubscriptionsPage').then((m) => ({ default: m.AdminSubscriptionsPage })));
-const AdminRefundsPage = lazy(() => import('./refunds/AdminRefundsPage').then((m) => ({ default: m.AdminRefundsPage })));
 const AdminInvoicesPage = lazy(() => import('./invoices/AdminInvoicesPage').then((m) => ({ default: m.AdminInvoicesPage })));
 const AdminAnalyticsPage = lazy(() => import('./AdminAnalyticsPage').then((m) => ({ default: m.AdminAnalyticsPage })));
 const AdminAiUsagePage = lazy(() => import('./AdminAiUsagePage').then((m) => ({ default: m.AdminAiUsagePage })));
@@ -38,6 +31,16 @@ function Fallback() {
 
 // Self-contained subtree — mounted once at /Admin-haive/* in the top-level
 // routes/index.tsx, entirely outside AppLayout/ProtectedRoute.
+//
+// Features, Entitlements, Prices & Currencies, Coupons, Refunds, and Credit
+// Ledger routes were removed here per an explicit request to drop these
+// admin surfaces (see adminNav.ts's own comment) — their page components
+// (catalog/AdminFeaturesPage.tsx, catalog/AdminEntitlementsPage.tsx,
+// catalog/AdminPricesPage.tsx, catalog/AdminCouponsPage.tsx,
+// refunds/AdminRefundsPage.tsx, ledger/AdminLedgerPage.tsx) and every backend
+// controller/service/schema behind them are untouched; visiting one of these
+// URLs directly now just falls through to the catch-all redirect below,
+// exactly like any other unknown /Admin-haive/* path.
 export function AdminRoutes() {
   return (
     <Suspense fallback={<Fallback />}>
@@ -48,21 +51,20 @@ export function AdminRoutes() {
 
         <Route element={<AdminProtectedRoute />}>
           <Route element={<AdminLayout />}>
-            <Route index element={<Navigate to={ADMIN_ROUTES.dashboard.replace(ADMIN_ROUTES.root, '')} replace />} />
+            {/* Relative "dashboard" (matching the sibling route's own path
+                below), NOT ADMIN_ROUTES.dashboard.replace(root, '') — that
+                leaves a leading slash ("/dashboard"), which <Navigate>
+                treats as an ABSOLUTE path to the customer app's /dashboard
+                route, not /Admin-haive/dashboard. Found live: this exact
+                mistake was also on the catch-all route below. */}
+            <Route index element={<Navigate to="dashboard" replace />} />
             <Route path="dashboard" element={<AdminDashboardPage />} />
             <Route path="organizations" element={<AdminOrganizationsPage />} />
             <Route path="organizations/:organizationId" element={<AdminOrganizationDetailPage />} />
             <Route path="plans" element={<AdminPlansPage />} />
-            <Route path="packages" element={<AdminCreditPackagesPage />} />
-            <Route path="features" element={<AdminFeaturesPage />} />
-            <Route path="entitlements" element={<AdminEntitlementsPage />} />
-            <Route path="prices" element={<AdminPricesPage />} />
             <Route path="subscriptions" element={<AdminSubscriptionsPage />} />
             <Route path="payments" element={<AdminPaymentsPage />} />
             <Route path="payment-settings" element={<AdminPaymentSettingsPage />} />
-            <Route path="ledger" element={<AdminLedgerPage />} />
-            <Route path="coupons" element={<AdminCouponsPage />} />
-            <Route path="refunds" element={<AdminRefundsPage />} />
             <Route path="invoices" element={<AdminInvoicesPage />} />
             <Route path="analytics" element={<AdminAnalyticsPage />} />
             <Route path="ai-usage" element={<AdminAiUsagePage />} />
@@ -71,7 +73,16 @@ export function AdminRoutes() {
           </Route>
         </Route>
 
-        <Route path="*" element={<Navigate to={ADMIN_ROUTES.dashboard.replace(ADMIN_ROUTES.root, '')} replace />} />
+        {/* Must be an ABSOLUTE path (ADMIN_ROUTES.dashboard, already
+            "/Admin-haive/dashboard"), not a relative "dashboard" — a
+            catch-all's matched path IS the unmatched segment (e.g.
+            "features"), so a relative target here resolves by appending
+            ("/Admin-haive/features/dashboard"), which then itself falls
+            through to this same catch-all again: an infinite redirect loop,
+            confirmed live before this fix. The index route above is
+            different — it matches its parent exactly with no extra
+            segment, so relative "dashboard" there correctly replaces it. */}
+        <Route path="*" element={<Navigate to={ADMIN_ROUTES.dashboard} replace />} />
       </Routes>
     </Suspense>
   );

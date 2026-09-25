@@ -2,6 +2,7 @@ import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PassportStrategy } from '@nestjs/passport';
 import { ExtractJwt, Strategy } from 'passport-jwt';
+import { OrganizationsService } from '../../organizations/organizations.service';
 import { UsersService } from '../../users/users.service';
 import { JwtPayload } from '../jwt-payload.interface';
 
@@ -10,6 +11,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
   constructor(
     config: ConfigService,
     private usersService: UsersService,
+    private organizationsService: OrganizationsService,
   ) {
     const secret = config.get<string>('jwt.secret');
     if (!secret) {
@@ -69,6 +71,18 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     if (!payload.jti || !user.sessions.some((s) => s.jti === payload.jti)) {
       throw new UnauthorizedException();
     }
+    // Organization-level kill switch — previously modeled on the schema
+    // (Organization.status) but never actually enforced anywhere (confirmed
+    // by a full search: nothing wrote 'suspended' and nothing checked it).
+    // Checked here, the one place every normal customer request already
+    // passes through, so a suspended org is blocked everywhere at once
+    // rather than needing a guard added to each controller individually.
+    // Platform admins are on a completely separate AdminJwtStrategy/
+    // AdminAccount that never reaches this class, so they're never affected.
+    const org = await this.organizationsService.findOrgById(user.organizationId);
+    if (org?.status === 'suspended') {
+      throw new UnauthorizedException();
+    }
     void this.usersService.touchSessionIfStale(user._id.toString(), payload.jti);
     return {
       sub: user._id.toString(),
@@ -79,6 +93,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       assignedAgentId: user.assignedAgentId,
       department: user.department,
       voiceAccessEnabled: user.voiceAccessEnabled,
+      aiAccessEnabled: user.aiAccessEnabled,
       jti: payload.jti,
       authMethod: 'session',
     };

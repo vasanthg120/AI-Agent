@@ -111,6 +111,7 @@ let UsersService = class UsersService {
             department: dto.department,
             active: true,
             voiceAccessEnabled: dto.voiceAccessEnabled ?? true,
+            aiAccessEnabled: dto.aiAccessEnabled ?? true,
         });
         return { user: this.toPublic(user), tempPassword };
     }
@@ -132,6 +133,8 @@ let UsersService = class UsersService {
             update.department = dto.department;
         if (dto.voiceAccessEnabled !== undefined)
             update.voiceAccessEnabled = dto.voiceAccessEnabled;
+        if (dto.aiAccessEnabled !== undefined)
+            update.aiAccessEnabled = dto.aiAccessEnabled;
         const updated = await this.userModel.findOneAndUpdate({ _id: id, organizationId }, update, { new: true }).exec();
         if (!updated)
             throw new common_1.NotFoundException('User not found');
@@ -161,6 +164,7 @@ let UsersService = class UsersService {
             department: user.department,
             active: user.active,
             voiceAccessEnabled: user.voiceAccessEnabled,
+            aiAccessEnabled: user.aiAccessEnabled,
         };
     }
     setVerifyOtp(userId, otpHash, expiresAt) {

@@ -233,7 +233,12 @@ export function AdminAiUsagePage() {
           <h1 className={shared.pageTitle}>AI Usage</h1>
           <p className={shared.pageSubtitle}>Anthropic Claude API token, cost, and budget monitoring across every organization.</p>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)' }}>
+        {/* flexWrap + minWidth:0 — without both, this row (and the Tabs
+            inside AdminRangeControl) refuses to shrink below its natural
+            content width on a narrow screen and clips instead of wrapping/
+            scrolling in place (see Tabs.module.css's own comment on the
+            same flexbox min-width:auto trap). */}
+        <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 'var(--space-3)', minWidth: 0, maxWidth: '100%' }}>
           <AdminRangeControl days={days} onChange={setDays} />
           <Button variant="secondary" size="sm" leftIcon={<FiRefreshCw />} loading={refreshing} onClick={handleRefresh}>
             Refresh

@@ -14,9 +14,10 @@ const common_1 = require("@nestjs/common");
 const config_1 = require("@nestjs/config");
 const passport_1 = require("@nestjs/passport");
 const passport_jwt_1 = require("passport-jwt");
+const organizations_service_1 = require("../../organizations/organizations.service");
 const users_service_1 = require("../../users/users.service");
 let JwtStrategy = class JwtStrategy extends (0, passport_1.PassportStrategy)(passport_jwt_1.Strategy) {
-    constructor(config, usersService) {
+    constructor(config, usersService, organizationsService) {
         const secret = config.get('jwt.secret');
         if (!secret) {
             throw new Error('JWT_SECRET is not set');
@@ -27,6 +28,7 @@ let JwtStrategy = class JwtStrategy extends (0, passport_1.PassportStrategy)(pas
             secretOrKey: secret,
         });
         this.usersService = usersService;
+        this.organizationsService = organizationsService;
     }
     async validate(payload) {
         if (!payload?.sub) {
@@ -45,6 +47,10 @@ let JwtStrategy = class JwtStrategy extends (0, passport_1.PassportStrategy)(pas
         if (!payload.jti || !user.sessions.some((s) => s.jti === payload.jti)) {
             throw new common_1.UnauthorizedException();
         }
+        const org = await this.organizationsService.findOrgById(user.organizationId);
+        if (org?.status === 'suspended') {
+            throw new common_1.UnauthorizedException();
+        }
         void this.usersService.touchSessionIfStale(user._id.toString(), payload.jti);
         return {
             sub: user._id.toString(),
@@ -55,6 +61,7 @@ let JwtStrategy = class JwtStrategy extends (0, passport_1.PassportStrategy)(pas
             assignedAgentId: user.assignedAgentId,
             department: user.department,
             voiceAccessEnabled: user.voiceAccessEnabled,
+            aiAccessEnabled: user.aiAccessEnabled,
             jti: payload.jti,
             authMethod: 'session',
         };
@@ -64,6 +71,7 @@ exports.JwtStrategy = JwtStrategy;
 exports.JwtStrategy = JwtStrategy = __decorate([
     (0, common_1.Injectable)(),
     __metadata("design:paramtypes", [config_1.ConfigService,
-        users_service_1.UsersService])
+        users_service_1.UsersService,
+        organizations_service_1.OrganizationsService])
 ], JwtStrategy);
 //# sourceMappingURL=jwt.strategy.js.map

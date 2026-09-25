@@ -15,6 +15,12 @@ export interface JwtPayload {
   // requiring re-login. Optional because older special-purpose tokens
   // (2FA challenge, OAuth state) never carry it.
   voiceAccessEnabled?: boolean;
+  // The organization-purchased-credits on/off switch for this employee (see
+  // ChatController.assertAiAccessAllowed) — same refresh/trust rules as
+  // voiceAccessEnabled above: re-read from the live User document on every
+  // request, never trusted from the token itself, optional because older
+  // special-purpose tokens never carry it.
+  aiAccessEnabled?: boolean;
   // Present on real session-backed access tokens (see AuthService.issueSessionToken)
   // — matched against User.sessions in JwtStrategy.validate() so a revoked
   // session is rejected on its very next request. Absent on API-token-authenticated
