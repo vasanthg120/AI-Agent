@@ -33,4 +33,14 @@ export class BillingAdminGatewaysController {
   deactivate(@Param('provider') provider: PaymentProviderKey, @Param('mode') mode: 'live' | 'test') {
     return this.gatewaysService.setActive(provider, mode, false);
   }
+
+  // A real connectivity check against the gateway's own API (order
+  // list/balance/order-fetch — read-only, never mutates anything) — distinct
+  // from GET's `configured` flag, which only reflects DB/decryption status.
+  // See BillingAdminGatewaysService.testConnection's own comment for why
+  // this never reuses the checkout-path provider singletons.
+  @Post(':provider/:mode/test')
+  test(@Param('provider') provider: PaymentProviderKey, @Param('mode') mode: 'live' | 'test') {
+    return this.gatewaysService.testConnection(provider, mode);
+  }
 }

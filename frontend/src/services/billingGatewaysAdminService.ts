@@ -31,4 +31,12 @@ export const billingGatewaysAdminService = {
     const { data } = await adminAxiosClient.post<GatewayConfigStatus>(`/billing/admin/gateways/${provider}/${mode}/${active ? 'activate' : 'deactivate'}`);
     return data;
   },
+
+  // A real connectivity check against the gateway's own API (order
+  // list/balance/order-fetch), not just a re-read of saved-credential status
+  // — see billing-admin-gateways.service.ts's testConnection.
+  async test(provider: GatewayProvider, mode: GatewayMode): Promise<{ success: boolean; provider: GatewayProvider; mode: GatewayMode; message: string }> {
+    const { data } = await adminAxiosClient.post(`/billing/admin/gateways/${provider}/${mode}/test`);
+    return data;
+  },
 };

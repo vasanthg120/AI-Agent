@@ -9,7 +9,6 @@ export interface CurrentPlanCardProps {
   wallet: WalletSummary;
   subscription: SubscriptionSummary | null;
   onUpgrade: () => void;
-  onAddCredits: () => void;
 }
 
 // The simplified "at a glance" plan summary — deliberately shows only what a
@@ -19,7 +18,7 @@ export interface CurrentPlanCardProps {
 // fabricating a "Free" plan the admin may never have created. Low-balance/
 // exhausted banners live on WalletBalanceCard (the page's hero) instead of
 // here, so the two don't both render the same warning.
-export function CurrentPlanCard({ wallet, subscription, onUpgrade, onAddCredits }: CurrentPlanCardProps) {
+export function CurrentPlanCard({ wallet, subscription, onUpgrade }: CurrentPlanCardProps) {
   const price = subscription?.price;
   const granted = price?.creditsGranted ?? 0;
   const progressPct = granted > 0 ? Math.max(0, Math.min(100, (wallet.availableCredits / granted) * 100)) : 0;
@@ -71,9 +70,6 @@ export function CurrentPlanCard({ wallet, subscription, onUpgrade, onAddCredits 
 
       <div className={styles.currentPlanActions}>
         <Button onClick={onUpgrade}>{subscription ? 'Upgrade Plan' : 'View Plans'}</Button>
-        <Button variant="secondary" onClick={onAddCredits}>
-          Add Credits
-        </Button>
       </div>
     </Card>
   );

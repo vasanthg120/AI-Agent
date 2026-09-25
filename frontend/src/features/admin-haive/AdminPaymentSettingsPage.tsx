@@ -104,23 +104,18 @@ export function AdminPaymentSettingsPage() {
     }
   };
 
-  // A lightweight status re-check, not a live API call to the gateway itself
-  // — re-fetches this provider/mode's configured/active status and reports
-  // it. A real connectivity ping (e.g. Razorpay's orders.all/Stripe's
-  // balance.retrieve) would mean new per-gateway backend methods; scoped out
-  // of this pass as a separate follow-up.
+  // A real connectivity check against the gateway's own API — the backend
+  // builds a throwaway client from THIS (provider, mode)'s saved credentials
+  // and makes one read-only call (Razorpay orders.all/Stripe balance.retrieve/
+  // Cashfree order-fetch), so it always tests the environment currently
+  // selected here, never whichever mode the checkout process booted with.
   const testConnection = async (provider: GatewayProvider, mode: GatewayMode) => {
     const formKey = `${provider}:${mode}`;
     setTestingKey(formKey);
     try {
-      const list = await billingGatewaysAdminService.list();
-      setGateways(list);
-      const status = list.find((g) => g.provider === provider && g.mode === mode);
-      if (status?.configured) {
-        toast.success(`${GATEWAY_META[provider].label} (${mode}) is configured${status.isActive ? ' and active' : ''}.`);
-      } else {
-        toast.error(`${GATEWAY_META[provider].label} (${mode}) has no credentials saved yet.`);
-      }
+      const result = await billingGatewaysAdminService.test(provider, mode);
+      if (result.success) toast.success(`${GATEWAY_META[provider].label} (${mode}): ${result.message}`);
+      else toast.error(`${GATEWAY_META[provider].label} (${mode}): ${result.message}`);
     } catch (error) {
       toast.error(extractErrorMessage(error));
     } finally {
@@ -242,7 +237,7 @@ export function AdminPaymentSettingsPage() {
                 );
               })}
             </div>
-            <p className={styles.fieldHint}>Which gateway new checkouts route through. Only this provider&apos;s credentials are shown below.</p>
+            <p className={styles.fieldHint}>Which gateway new checkouts route through by default. Every enabled gateway below can still be configured and tested.</p>
           </div>
 
           <div>
@@ -318,7 +313,7 @@ export function AdminPaymentSettingsPage() {
       </SectionCard>
 
       <div className={styles.gatewayList}>
-        {PROVIDERS.filter((provider) => provider === (settings.defaultPaymentProvider ?? 'razorpay')).map((provider) => {
+        {PROVIDERS.filter((provider) => enabledGateways.includes(provider)).map((provider) => {
           const meta = GATEWAY_META[provider];
           const mode = activeMode[provider];
           const status = statusFor(provider, mode);

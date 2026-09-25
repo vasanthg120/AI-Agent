@@ -29,6 +29,13 @@
   padding: var(--space-6) 0;
 }
 
+.heroEyebrow {
+  font-size: var(--text-sm);
+  font-weight: 700;
+  font-style: italic;
+  color: var(--billing-accent-color, var(--color-accent));
+}
+
 .heroHeadline {
   font-size: var(--text-3xl);
   font-weight: 800;
@@ -44,22 +51,44 @@
   align-self: center;
 }
 
-.subscribedBanner {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: var(--space-3);
-  padding: var(--space-3) var(--space-4);
-  border-radius: var(--radius-md);
-  background: var(--color-bg-surface);
-  border: 1px solid var(--color-border);
-  font-size: var(--text-sm);
-  color: var(--color-text-secondary);
-}
-
 .cycleToggle {
   display: flex;
   justify-content: center;
+}
+
+/* Restyles the shared Tabs component (still used as-is everywhere else in
+   the app) into a rounded switch for just this page — targeted by ARIA
+   role/state, not by Tabs.module.css's own hashed class names, so nothing
+   here reaches into or depends on that file's internals. The active option
+   gets a solid filled pill instead of Tabs' default underline; its own
+   animated indicator span is hidden so the two never fight visually. */
+.cycleToggle :global([role='tablist']) {
+  display: inline-flex;
+  gap: 2px;
+  padding: 4px;
+  border-radius: var(--radius-full);
+  background: var(--color-bg-surface-elevated);
+  border: 1px solid var(--color-border);
+}
+
+.cycleToggle :global([role='tab']) {
+  position: relative;
+  padding: 8px 22px;
+  border-radius: var(--radius-full);
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--color-text-muted);
+  background: transparent;
+  transition: color var(--duration-fast) var(--ease-out), background var(--duration-fast) var(--ease-out);
+}
+
+.cycleToggle :global([role='tab'][aria-selected='true']) {
+  color: #ffffff;
+  background: var(--billing-accent-color, var(--gradient-accent, var(--color-accent)));
+}
+
+.cycleToggle :global([role='tab'] > span:last-child) {
+  display: none;
 }
 
 .planGrid {
@@ -70,14 +99,56 @@
 }
 
 .planCard {
+  position: relative;
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
-  border-top: 3px solid var(--plan-accent, var(--billing-accent-color, var(--color-accent)));
+  padding: var(--space-6);
+  border-radius: var(--radius-xl, 20px);
+  border: 1px solid var(--color-border);
+  background: var(--color-bg-surface);
+  transition: transform var(--duration-normal) var(--ease-out), box-shadow var(--duration-normal) var(--ease-out);
+}
+
+/* The one highlighted plan (plan.recommended, admin-set in AdminPlansPage.tsx
+   — not a hardcoded "middle card") — solid accent background, everything on
+   it flips to a light/white treatment for contrast, and it sits slightly
+   above its siblings the way the reference design's featured card does. */
+.planCardFeatured {
+  background: var(--plan-accent, var(--gradient-accent, var(--billing-accent-color, var(--color-accent))));
+  border-color: transparent;
+  box-shadow: var(--shadow-lg);
+  transform: translateY(-6px);
+  z-index: 1;
 }
 
 .planBadge {
   align-self: flex-start;
+}
+
+.planHeader {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.planIconCircle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: var(--color-bg-surface-elevated);
+  border: 1px solid var(--color-border);
+  font-size: var(--text-md);
+}
+
+.planCardFeatured .planIconCircle {
+  background: #ffffff;
+  border-color: transparent;
+  color: var(--billing-accent-color, var(--color-accent));
 }
 
 .planName {
@@ -86,16 +157,24 @@
   color: var(--color-text-primary);
 }
 
+.planCardFeatured .planName {
+  color: #ffffff;
+}
+
 .planDescription {
   font-size: var(--text-sm);
   color: var(--color-text-muted);
-  min-height: 2.6em;
+}
+
+.planCardFeatured .planDescription {
+  color: rgba(255, 255, 255, 0.85);
 }
 
 .planPrice {
   display: flex;
   align-items: baseline;
   gap: var(--space-1);
+  margin-top: var(--space-2);
 }
 
 .planPriceAmount {
@@ -104,9 +183,37 @@
   color: var(--billing-accent-color, var(--color-text-primary));
 }
 
+.planCardFeatured .planPriceAmount {
+  color: #ffffff;
+}
+
 .planPriceCycle {
   font-size: var(--text-sm);
   color: var(--color-text-muted);
+}
+
+.planCardFeatured .planPriceCycle {
+  color: rgba(255, 255, 255, 0.75);
+}
+
+.planPriceCaption {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+}
+
+.planCardFeatured .planPriceCaption {
+  color: rgba(255, 255, 255, 0.75);
+}
+
+.benefitsLabel {
+  font-size: var(--text-sm);
+  font-weight: 700;
+  color: var(--color-text-primary);
+  margin-top: var(--space-2);
+}
+
+.planCardFeatured .benefitsLabel {
+  color: #ffffff;
 }
 
 .featureList {
@@ -127,14 +234,40 @@
   color: var(--color-text-secondary);
 }
 
-.featureList li svg {
-  color: var(--color-success);
+.planCardFeatured .featureList li {
+  color: rgba(255, 255, 255, 0.92);
+}
+
+.featureCheck {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
   flex-shrink: 0;
+  border-radius: 50%;
+  background: var(--billing-accent-color, var(--color-accent));
+  color: #ffffff;
+}
+
+.planCardFeatured .featureCheck {
+  background: rgba(255, 255, 255, 0.25);
 }
 
 .planCta {
-  margin-top: auto;
+  margin-top: var(--space-2);
   width: 100%;
+  border-radius: var(--radius-full);
+}
+
+.planCtaArrow {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.2);
 }
 
 .emptyState {
@@ -171,18 +304,73 @@
   color: var(--color-text-muted);
 }
 
-/* ---------- responsive ---------- */
+/* ---------- responsive ----------
+   Three tiers, matching this app's own established mobile-shell breakpoint
+   (900px, see AppLayout.tsx/Sidebar.module.css) for tablet, plus a phone
+   tier at 640px: desktop shows every plan in one row, tablet settles to a
+   clean 2-column grid (a 3rd/5th plan simply wraps to its own centered row),
+   phone stacks to a single column. */
+@media (max-width: 900px) {
+  .page {
+    padding: var(--space-5);
+    gap: var(--space-6);
+  }
+
+  .planGrid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  /* The featured card's lift only reads correctly against side-by-side
+     siblings on one row — once it can end up alone on its own row (2-col
+     wrap) or stacked (1-col below), the vertical offset just looks like
+     misalignment rather than emphasis. */
+  .planCardFeatured {
+    transform: none;
+  }
+}
+
 @media (max-width: 640px) {
   .page {
     padding: var(--space-4);
-    gap: var(--space-6);
+    gap: var(--space-5);
+  }
+
+  .hero {
+    padding: var(--space-4) 0;
   }
 
   .heroHeadline {
     font-size: var(--text-2xl);
   }
 
+  .heroSubtext {
+    font-size: var(--text-md);
+  }
+
   .planGrid {
     grid-template-columns: 1fr;
+  }
+
+  .planCard {
+    padding: var(--space-4);
+  }
+
+  .planPriceAmount {
+    font-size: 1.6rem;
+  }
+
+  .cycleToggle :global([role='tab']) {
+    padding: 8px 16px;
+  }
+}
+
+@media (max-width: 380px) {
+  .heroHeadline {
+    font-size: var(--text-xl);
+  }
+
+  .cycleToggle :global([role='tab']) {
+    padding: 7px 12px;
+    font-size: var(--text-xs);
   }
 }

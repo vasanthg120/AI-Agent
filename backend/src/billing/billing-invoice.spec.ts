@@ -3,6 +3,7 @@ import { getModelToken, MongooseModule } from '@nestjs/mongoose';
 import { Test } from '@nestjs/testing';
 import { Connection, Model } from 'mongoose';
 import PDFDocument from 'pdfkit';
+import { BillingAdminGatewaysService } from './billing-admin-gateways.service';
 import { BillingAdminInvoicesService } from './billing-admin-invoices.service';
 import { BillingAdminSettingsService } from './billing-admin-settings.service';
 import { BillingAdminTemplatesService } from './billing-admin-templates.service';
@@ -11,6 +12,7 @@ import { BillingInvoiceService } from './billing-invoice.service';
 import { BillingService } from './billing.service';
 import { CouponsService } from './coupons.service';
 import { PricingService } from './pricing.service';
+import { EncryptionService } from '../common/encryption/encryption.service';
 import {
   ChargeResult,
   ConfirmPaymentResult,
@@ -21,6 +23,7 @@ import {
   RefundResult,
   SaveMethodResult,
 } from './providers/payment-provider.interface';
+import { BillingGatewayConfig, BillingGatewayConfigSchema } from './schemas/billing-gateway-config.schema';
 import { BillingInvoiceCounter, BillingInvoiceCounterDocument, BillingInvoiceCounterSchema } from './schemas/billing-invoice-counter.schema';
 import { BillingInvoice, BillingInvoiceDocument, BillingInvoiceSchema } from './schemas/billing-invoice.schema';
 import { BillingPlan, BillingPlanSchema } from './schemas/billing-plan.schema';
@@ -126,6 +129,7 @@ describe('Invoices (real Mongo)', () => {
           { name: BillingInvoiceCounter.name, schema: BillingInvoiceCounterSchema },
           { name: BillingSettings.name, schema: BillingSettingsSchema },
           { name: InvoiceTemplate.name, schema: InvoiceTemplateSchema },
+          { name: BillingGatewayConfig.name, schema: BillingGatewayConfigSchema },
         ]),
       ],
       providers: [
@@ -136,6 +140,8 @@ describe('Invoices (real Mongo)', () => {
         BillingAdminInvoicesService,
         BillingAdminTemplatesService,
         BillingAdminSettingsService,
+        BillingAdminGatewaysService,
+        EncryptionService,
         WalletService,
         PricingService,
         { provide: PAYMENT_PROVIDER, useValue: new FakePaymentProvider() },
