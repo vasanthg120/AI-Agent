@@ -149,7 +149,9 @@ export function CustomerPicker({ value, onChange, disabled }: CustomerPickerProp
                 <Spinner size={14} /> Searching…
               </div>
             )}
-            {!loading && results.length === 0 && <div className={styles.rowMuted}>No deals match &ldquo;{query.trim()}&rdquo;.</div>}
+            {!loading && results.length === 0 && (
+              <div className={styles.rowMuted}>No deals match &ldquo;{query.trim()}&rdquo;.</div>
+            )}
             {!loading &&
               results.map((deal, index) => (
                 <button

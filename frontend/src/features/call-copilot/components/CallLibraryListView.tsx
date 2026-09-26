@@ -85,26 +85,43 @@ export function CallLibraryListView({ onStartCall }: { onStartCall?: () => void 
   const [openingId, setOpeningId] = useState<string | null>(null);
 
   useEffect(() => {
-    callCopilotService.getStats().then(setStats).catch(() => setStats(null));
+    callCopilotService
+      .getStats()
+      .then(setStats)
+      .catch(() => setStats(null));
   }, []);
 
+  const searching = query.trim() !== '';
+
   useEffect(() => {
-    const timer = setTimeout(() => {
-      setLoading(true);
-      callCopilotService
-        .searchSessions({ q: query || undefined, dateFrom: dateRange.dateFrom, dateTo: dateRange.dateTo, page, pageSize: PAGE_SIZE })
-        .then((result) => {
-          setItems(result.items);
-          setTotal(result.total);
-          setMode(result.mode);
-        })
-        .catch(() => {
-          setItems([]);
-          setTotal(0);
-        })
-        .finally(() => setLoading(false));
-    }, query ? SEARCH_DEBOUNCE_MS : 0);
+    const timer = setTimeout(
+      () => {
+        setLoading(true);
+        callCopilotService
+          .searchSessions({
+            q: searching ? query.trim() : undefined,
+            // Searching by words looks across every call — the server's text search doesn't take a date range —
+            // so the dates only apply when browsing (see the dimmed date control below).
+            ...(searching ? {} : toQueryRange(dateRange)),
+            page,
+            pageSize: PAGE_SIZE,
+          })
+          .then((result) => {
+            setItems(result.items);
+            setTotal(result.total);
+            setMode(result.mode);
+          })
+          .catch(() => {
+            setItems([]);
+            setTotal(0);
+          })
+          .finally(() => setLoading(false));
+      },
+      searching ? SEARCH_DEBOUNCE_MS : 0,
+    );
     return () => clearTimeout(timer);
+    // `searching` is derived from `query`, which is already a dependency.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [query, dateRange, page]);
 
   // The dialog opens once the call has loaded — not before, when it would show
@@ -134,8 +151,16 @@ export function CallLibraryListView({ onStartCall }: { onStartCall?: () => void 
     ? { title: 'No calls match your search', text: 'Try a different word.', reset: 'Clear search' }
     : hasDates
       ? isTodayRange(dateRange)
-        ? { title: 'No calls today yet', text: 'Calls you record, make or upload today show up here.', reset: 'Show all calls' }
-        : { title: 'No calls in this date range', text: 'Try a wider range, or look at everything.', reset: 'Show all calls' }
+        ? {
+            title: 'No calls today yet',
+            text: 'Calls you record, make or upload today show up here.',
+            reset: 'Show all calls',
+          }
+        : {
+            title: 'No calls in this date range',
+            text: 'Try a wider range, or look at everything.',
+            reset: 'Show all calls',
+          }
       : {
           title: 'Your Call Library is empty',
           text: 'Every call you record, make or upload shows up here with a summary and AI coaching.',
@@ -167,7 +192,7 @@ export function CallLibraryListView({ onStartCall }: { onStartCall?: () => void 
               <button
                 type="button"
                 className={styles.clear}
-                aria-label="Clear search"
+                aria-label="Clear the search box"
                 onClick={() => {
                   setQuery('');
                   setPage(1);
@@ -208,23 +233,31 @@ export function CallLibraryListView({ onStartCall }: { onStartCall?: () => void 
           <span className={styles.emptyIcon} aria-hidden>
             <FiInbox />
           </span>
-          <h3 className={styles.emptyTitle}>{filtered ? 'No calls match your filters' : 'Your Call Library is empty'}</h3>
-          <p className={styles.emptyText}>
-            {filtered
-              ? 'Try a different word, or widen the date range.'
-              : 'Every call you record, make or upload shows up here with a summary and AI coaching.'}
-          </p>
-          {filtered ? (
-            <Button type="button" variant="secondary" onClick={clearFilters}>
-              Clear filters
-            </Button>
-          ) : (
-            onStartCall && (
+          <h3 className={styles.emptyTitle}>{empty.title}</h3>
+          <p className={styles.emptyText}>{empty.text}</p>
+          <div className={styles.emptyActions}>
+            {empty.reset && (
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={
+                  searching
+                    ? () => {
+                        setQuery('');
+                        setPage(1);
+                      }
+                    : showAllCalls
+                }
+              >
+                {empty.reset}
+              </Button>
+            )}
+            {!searching && onStartCall && (
               <Button type="button" leftIcon={<FiMic />} onClick={onStartCall}>
                 Start a call
               </Button>
-            )
-          )}
+            )}
+          </div>
         </motion.div>
       ) : (
         <motion.ul
@@ -235,7 +268,12 @@ export function CallLibraryListView({ onStartCall }: { onStartCall?: () => void 
           animate="show"
         >
           {items.map((item) => (
-            <CallRow key={item._id} item={item} opening={openingId === item._id} onOpen={() => void openSession(item._id)} />
+            <CallRow
+              key={item._id}
+              item={item}
+              opening={openingId === item._id}
+              onOpen={() => void openSession(item._id)}
+            />
           ))}
         </motion.ul>
       )}
@@ -319,7 +357,11 @@ function CallRow({ item, opening, onOpen }: { item: CallSessionSummary; opening:
             <span className={styles.metaText}>{formatCallDate(item.createdAt)}</span>
             {outcome && <span className={clsx(styles.chip, styles[`chip_${outcome.tone}`])}>{outcome.label}</span>}
             {item.sentiment && <SentimentIndicator sentiment={item.sentiment} />}
-            {state && <span className={clsx(styles.chip, state === 'Failed' ? styles.chip_danger : styles.chip_info)}>{state}</span>}
+            {state && (
+              <span className={clsx(styles.chip, state === 'Failed' ? styles.chip_danger : styles.chip_info)}>
+                {state}
+              </span>
+            )}
           </span>
         </span>
 
@@ -327,7 +369,10 @@ function CallRow({ item, opening, onOpen }: { item: CallSessionSummary; opening:
           {opening ? (
             <Spinner size={18} />
           ) : coached ? (
-            <span className={styles.score} title={notScored ? 'Not scored — no sales conversation' : `Coach score ${item.overallScore} out of 10`}>
+            <span
+              className={styles.score}
+              title={notScored ? 'Not scored — no sales conversation' : `Coach score ${item.overallScore} out of 10`}
+            >
               <ScoreRing value={item.overallScore ?? 0} size={46} strokeWidth={5} showOutOf={false} muted={notScored} />
             </span>
           ) : (

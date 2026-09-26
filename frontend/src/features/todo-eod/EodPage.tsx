@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
-import { AnimatePresence, motion } from 'framer-motion';
+import { motion } from 'framer-motion';
 import {
   FiBriefcase,
   FiCalendar,
@@ -102,8 +102,8 @@ function TaskList({ tasks, showOverdue }: { tasks: TodoTask[]; showOverdue?: boo
         <motion.div
           key={task.id}
           className={styles.taskRow}
-          initial={{ opacity: 0, x: -8 }}
-          animate={{ opacity: 1, x: 0 }}
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
           transition={{ duration: 0.25, delay: Math.min(i, 10) * 0.03 }}
         >
           <span>{task.title}</span>
@@ -200,148 +200,145 @@ export function EodPage() {
         }
       />
 
-      <AnimatePresence mode="wait" initial={false}>
-        <motion.div
-          key={view === 'calendar' ? 'calendar' : `report-${eodDate}`}
-          className={styles.viewArea}
-          initial={{ opacity: 0, y: 10 }}
-          animate={{ opacity: 1, y: 0 }}
-          exit={{ opacity: 0, y: -6 }}
-          transition={{ duration: 0.22, ease: EASE }}
-        >
-          {view === 'calendar' ? (
-            <SectionCard title="Pick a day" icon={FiCalendar}>
-              <p className={styles.calendarHint}>Days with a dot have an EOD report. Click one to open it.</p>
-              <div className={styles.calendarWrap}>
-                <MonthCalendar
-                  month={month}
-                  days={calendarData?.days ?? []}
-                  selectedDate={eodDate}
-                  onSelectDate={handleSelectDate}
-                  onMonthChange={setMonth}
-                />
-              </div>
-            </SectionCard>
-          ) : (
-            <>
-              <div className={styles.stepperRow}>
-                <DateStepper date={eodDate} onChange={setEodDate} />
-              </div>
+      <motion.div
+        key={view === 'calendar' ? 'calendar' : `report-${eodDate}`}
+        className={styles.viewArea}
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        transition={{ duration: 0.22, ease: EASE }}
+      >
+        {view === 'calendar' ? (
+          <SectionCard title="Pick a day" icon={FiCalendar}>
+            <p className={styles.calendarHint}>Days with a dot have an EOD report. Click one to open it.</p>
+            <div className={styles.calendarWrap}>
+              <MonthCalendar
+                month={month}
+                days={calendarData?.days ?? []}
+                selectedDate={eodDate}
+                onSelectDate={handleSelectDate}
+                onMonthChange={setMonth}
+              />
+            </div>
+          </SectionCard>
+        ) : (
+          <>
+            <div className={styles.stepperRow}>
+              <DateStepper date={eodDate} onChange={setEodDate} />
+            </div>
 
-              {isLoading || !data ? (
-                <div className={styles.loading}>
-                  <Skeleton height={150} />
-                  <div className={styles.statGrid}>
-                    {[0, 1, 2, 3].map((i) => (
-                      <Skeleton key={i} height={96} />
-                    ))}
-                  </div>
-                  <Skeleton height={220} />
+            {isLoading || !data ? (
+              <div className={styles.loading}>
+                <Skeleton height={150} />
+                <div className={styles.statGrid}>
+                  {[0, 1, 2, 3].map((i) => (
+                    <Skeleton key={i} height={96} />
+                  ))}
                 </div>
-              ) : !data.reportExists ? (
-                <SectionCard title="Summary" icon={FiFileText}>
-                  <GenerateReportEmptyState
-                    reportType="eod"
-                    title={isToday ? "Today's EOD report hasn't been generated yet" : 'No EOD report for this day'}
-                    description={
-                      isToday
-                        ? 'It runs automatically near closing time. An admin can generate it now instead of waiting.'
-                        : "This day doesn't have a generated EOD report."
-                    }
-                    showAction={isToday}
-                    onGenerated={handleGenerated}
+                <Skeleton height={220} />
+              </div>
+            ) : !data.reportExists ? (
+              <SectionCard title="Summary" icon={FiFileText}>
+                <GenerateReportEmptyState
+                  reportType="eod"
+                  title={isToday ? "Today's EOD report hasn't been generated yet" : 'No EOD report for this day'}
+                  description={
+                    isToday
+                      ? 'It runs automatically near closing time. An admin can generate it now instead of waiting.'
+                      : "This day doesn't have a generated EOD report."
+                  }
+                  showAction={isToday}
+                  onGenerated={handleGenerated}
+                />
+              </SectionCard>
+            ) : (
+              <>
+                <div className={styles.hero}>
+                  <CompletionRing done={data.tasksCompleted.length} total={totalTasks} />
+                  <div className={styles.heroText}>
+                    <span className={styles.heroTitle}>
+                      {data.tasksCompleted.length} of {totalTasks} tasks completed
+                    </span>
+                    <span className={styles.heroSub}>
+                      {responseRate !== null
+                        ? `${responseRate}% of incoming emails got a reply`
+                        : 'No incoming email this day'}
+                      {data.reportGeneratedAt && ` · Report generated ${dayjs(data.reportGeneratedAt).format('h:mm A')}`}
+                    </span>
+                  </div>
+                </div>
+
+                {data.narrativeSummary && (
+                  <div className={styles.aiSummary}>
+                    <span className={styles.aiBadge}>
+                      <FiStar /> AI summary
+                    </span>
+                    <p className={styles.narrative}>{data.narrativeSummary}</p>
+                  </div>
+                )}
+
+                <div className={styles.statGrid}>
+                  <StatTile icon={FiCheckCircle} value={data.tasksCompleted.length} label="Tasks completed" />
+                  <StatTile icon={FiClock} value={data.tasksPending.length} label="Tasks pending" />
+                  <StatTile icon={FiMail} value={data.email.received} label="Emails received" />
+                  <StatTile icon={FiMail} value={data.email.responded} label="Emails responded" />
+                  <StatTile icon={FiBriefcase} value={data.crm.dealsCreated + data.crm.quotesCreated} label="New CRM records" />
+                  <StatTile
+                    icon={FiUserPlus}
+                    value={data.newContactsAcrossOrg + data.newAccountsAcrossOrg}
+                    label="New contacts/accounts (org-wide)"
                   />
-                </SectionCard>
-              ) : (
-                <>
-                  <div className={styles.hero}>
-                    <CompletionRing done={data.tasksCompleted.length} total={totalTasks} />
-                    <div className={styles.heroText}>
-                      <span className={styles.heroTitle}>
-                        {data.tasksCompleted.length} of {totalTasks} tasks completed
+                </div>
+
+                <div className={styles.columns}>
+                  <SectionCard title="Email activity" icon={FiMail}>
+                    <div className={styles.meters}>
+                      <MeterRow label="Received" value={data.email.received} max={Math.max(1, data.email.received, data.email.sent)} />
+                      <MeterRow label="Sent" value={data.email.sent} max={Math.max(1, data.email.received, data.email.sent)} />
+                      <MeterRow label="Responded to" value={data.email.responded} max={Math.max(1, data.email.received)} />
+                      <MeterRow label="Still pending" value={data.email.pending} max={Math.max(1, data.email.received)} />
+                    </div>
+                  </SectionCard>
+
+                  <SectionCard title="CRM activity" icon={FiBriefcase}>
+                    <div className={styles.meters}>
+                      <MeterRow label="Deals created" value={data.crm.dealsCreated} max={crmMax} />
+                      <MeterRow label="Deals updated" value={data.crm.dealsUpdated} max={crmMax} />
+                      <MeterRow label="Quotes created" value={data.crm.quotesCreated} max={crmMax} />
+                      <MeterRow label="Quotes updated" value={data.crm.quotesUpdated} max={crmMax} />
+                    </div>
+                    <div className={styles.orgNote}>
+                      <span>
+                        New contacts (org-wide) <strong>{data.newContactsAcrossOrg}</strong>
                       </span>
-                      <span className={styles.heroSub}>
-                        {responseRate !== null
-                          ? `${responseRate}% of incoming emails got a reply`
-                          : 'No incoming email this day'}
-                        {data.reportGeneratedAt && ` · Report generated ${dayjs(data.reportGeneratedAt).format('h:mm A')}`}
+                      <span>
+                        New accounts (org-wide) <strong>{data.newAccountsAcrossOrg}</strong>
                       </span>
                     </div>
-                  </div>
+                  </SectionCard>
+                </div>
 
-                  {data.narrativeSummary && (
-                    <div className={styles.aiSummary}>
-                      <span className={styles.aiBadge}>
-                        <FiStar /> AI summary
-                      </span>
-                      <p className={styles.narrative}>{data.narrativeSummary}</p>
-                    </div>
-                  )}
+                <div className={styles.columns}>
+                  <SectionCard title="Tasks completed" icon={FiCheckCircle}>
+                    {data.tasksCompleted.length === 0 ? (
+                      <EmptyState compact icon={FiCheckCircle} title="Nothing completed on this day" />
+                    ) : (
+                      <TaskList tasks={data.tasksCompleted} />
+                    )}
+                  </SectionCard>
 
-                  <div className={styles.statGrid}>
-                    <StatTile icon={FiCheckCircle} value={data.tasksCompleted.length} label="Tasks completed" />
-                    <StatTile icon={FiClock} value={data.tasksPending.length} label="Tasks pending" />
-                    <StatTile icon={FiMail} value={data.email.received} label="Emails received" />
-                    <StatTile icon={FiMail} value={data.email.responded} label="Emails responded" />
-                    <StatTile icon={FiBriefcase} value={data.crm.dealsCreated + data.crm.quotesCreated} label="New CRM records" />
-                    <StatTile
-                      icon={FiUserPlus}
-                      value={data.newContactsAcrossOrg + data.newAccountsAcrossOrg}
-                      label="New contacts/accounts (org-wide)"
-                    />
-                  </div>
-
-                  <div className={styles.columns}>
-                    <SectionCard title="Email activity" icon={FiMail}>
-                      <div className={styles.meters}>
-                        <MeterRow label="Received" value={data.email.received} max={Math.max(1, data.email.received, data.email.sent)} />
-                        <MeterRow label="Sent" value={data.email.sent} max={Math.max(1, data.email.received, data.email.sent)} />
-                        <MeterRow label="Responded to" value={data.email.responded} max={Math.max(1, data.email.received)} />
-                        <MeterRow label="Still pending" value={data.email.pending} max={Math.max(1, data.email.received)} />
-                      </div>
-                    </SectionCard>
-
-                    <SectionCard title="CRM activity" icon={FiBriefcase}>
-                      <div className={styles.meters}>
-                        <MeterRow label="Deals created" value={data.crm.dealsCreated} max={crmMax} />
-                        <MeterRow label="Deals updated" value={data.crm.dealsUpdated} max={crmMax} />
-                        <MeterRow label="Quotes created" value={data.crm.quotesCreated} max={crmMax} />
-                        <MeterRow label="Quotes updated" value={data.crm.quotesUpdated} max={crmMax} />
-                      </div>
-                      <div className={styles.orgNote}>
-                        <span>
-                          New contacts (org-wide) <strong>{data.newContactsAcrossOrg}</strong>
-                        </span>
-                        <span>
-                          New accounts (org-wide) <strong>{data.newAccountsAcrossOrg}</strong>
-                        </span>
-                      </div>
-                    </SectionCard>
-                  </div>
-
-                  <div className={styles.columns}>
-                    <SectionCard title="Tasks completed" icon={FiCheckCircle}>
-                      {data.tasksCompleted.length === 0 ? (
-                        <EmptyState compact icon={FiCheckCircle} title="Nothing completed on this day" />
-                      ) : (
-                        <TaskList tasks={data.tasksCompleted} />
-                      )}
-                    </SectionCard>
-
-                    <SectionCard title="Pending — needs attention" icon={FiClock}>
-                      {data.tasksPending.length === 0 ? (
-                        <EmptyState compact icon={FiClock} title="Nothing left pending" description="Every task was wrapped up." />
-                      ) : (
-                        <TaskList tasks={data.tasksPending} showOverdue />
-                      )}
-                    </SectionCard>
-                  </div>
-                </>
-              )}
-            </>
-          )}
-        </motion.div>
-      </AnimatePresence>
+                  <SectionCard title="Pending — needs attention" icon={FiClock}>
+                    {data.tasksPending.length === 0 ? (
+                      <EmptyState compact icon={FiClock} title="Nothing left pending" description="Every task was wrapped up." />
+                    ) : (
+                      <TaskList tasks={data.tasksPending} showOverdue />
+                    )}
+                  </SectionCard>
+                </div>
+              </>
+            )}
+          </>
+        )}
+      </motion.div>
     </div>
   );
 }

@@ -185,8 +185,6 @@
 .leaderRow:focus-visible {
   outline: none;
   border-color: color-mix(in srgb, var(--color-accent) 40%, var(--color-border));
-  box-shadow: var(--shadow-md);
-  transform: translateX(2px);
 }
 
 .leaderTrack {

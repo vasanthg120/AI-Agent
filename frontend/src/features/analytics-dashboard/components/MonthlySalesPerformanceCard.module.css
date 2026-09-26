@@ -184,7 +184,7 @@
 
 .progressAchieved,
 .progressForecast {
-  animation: barReveal 0.9s var(--ease-out) both;
+  animation: barReveal 0.9s var(--ease-out) backwards;
 }
 
 @media (prefers-reduced-motion: reduce) {

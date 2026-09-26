@@ -30,5 +30,8 @@ import { IntegrationResource, IntegrationResourceSchema } from './schemas/integr
   ],
   controllers: [IntegrationsController, ResourcesController, AdminIntegrationsController],
   providers: [IntegrationsService, IntegrationResourcesService, DynamicExecutorService],
+  // PlivoModule keeps its Auth ID/Token here, encrypted like every other
+  // per-organization credential, rather than inventing a second store.
+  exports: [IntegrationsService],
 })
 export class IntegrationsModule {}

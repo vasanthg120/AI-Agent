@@ -154,7 +154,9 @@ export function CallSummaryModal({
           </div>
         )}
 
-        {tabs.length > 1 && <PillTabs ariaLabel="Call summary sections" items={tabs} activeId={activeTab} onChange={setTab} size="sm" />}
+        {tabs.length > 1 && (
+          <PillTabs ariaLabel="Call summary sections" items={tabs} activeId={activeTab} onChange={setTab} size="sm" />
+        )}
 
         <AnimatePresence mode="wait" initial={false}>
           <motion.div
@@ -177,7 +179,12 @@ export function CallSummaryModal({
             )}
 
             {activeTab === 'transcript' && (
-              <TranscriptTab transcript={transcript} segments={segments} sessionId={sessionId} isUpload={source === 'upload'} />
+              <TranscriptTab
+                transcript={transcript}
+                segments={segments}
+                sessionId={sessionId}
+                isUpload={source === 'upload'}
+              />
             )}
           </motion.div>
         </AnimatePresence>
@@ -239,7 +246,17 @@ function OverviewTab({ result }: { result: CallSummaryResult }) {
   );
 }
 
-function InfoList({ tone, icon, title, items }: { tone: 'info' | 'warning'; icon: ReactNode; title: string; items: string[] }) {
+function InfoList({
+  tone,
+  icon,
+  title,
+  items,
+}: {
+  tone: 'info' | 'warning';
+  icon: ReactNode;
+  title: string;
+  items: string[];
+}) {
   if (items.length === 0) return null;
   return (
     <section className={clsx(styles.infoCard, styles[tone])}>
@@ -303,7 +320,9 @@ async function copyText(text: string, message: string) {
 function FollowUpRow({ action }: { action: CallFollowUpAction }) {
   return (
     <motion.li className={styles.followUpRow} variants={ROW_IN}>
-      <span className={clsx(styles.priority, styles[`priority_${action.priority}`])}>{PRIORITY_LABEL[action.priority]}</span>
+      <span className={clsx(styles.priority, styles[`priority_${action.priority}`])}>
+        {PRIORITY_LABEL[action.priority]}
+      </span>
       <span className={styles.followUpText}>{action.text}</span>
       <button
         type="button"
@@ -355,9 +374,15 @@ function escapeRegExp(text: string): string {
 function highlight(text: string, query: string): ReactNode {
   const needle = query.trim();
   if (!needle) return text;
-  return text
-    .split(new RegExp(`(${escapeRegExp(needle)})`, 'gi'))
-    .map((part, i) => (part.toLowerCase() === needle.toLowerCase() ? <mark key={i} className={styles.mark}>{part}</mark> : part));
+  return text.split(new RegExp(`(${escapeRegExp(needle)})`, 'gi')).map((part, i) =>
+    part.toLowerCase() === needle.toLowerCase() ? (
+      <mark key={i} className={styles.mark}>
+        {part}
+      </mark>
+    ) : (
+      part
+    ),
+  );
 }
 
 function TranscriptTab({
@@ -440,7 +465,9 @@ function TranscriptTab({
           ))}
         </motion.div>
       ) : (
-        <p className={styles.paragraph}>{transcript ? highlight(transcript, query) : 'No transcript was captured for this call.'}</p>
+        <p className={styles.paragraph}>
+          {transcript ? highlight(transcript, query) : 'No transcript was captured for this call.'}
+        </p>
       )}
     </div>
   );

@@ -7,13 +7,12 @@
   border: 1px solid var(--color-border);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-sm);
-  transition: border-color var(--duration-slow) var(--ease-out), box-shadow var(--duration-slow) var(--ease-out);
+  transition: border-color var(--duration-slow) var(--ease-out);
 }
 
-.section:hover,
+/* Only a subtle cue for "you're editing in this card" — no hover effect. */
 .section:focus-within {
   border-color: var(--color-border-strong);
-  box-shadow: var(--shadow-md);
 }
 
 .header {

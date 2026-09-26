@@ -112,7 +112,7 @@
   font-weight: 700;
 }
 
-.bar .bar .endButton:hover:not(:disabled) {
+.bar .endButton:hover:not(:disabled) {
   background: color-mix(in srgb, var(--color-danger) 85%, var(--color-text-inverse));
 }
 

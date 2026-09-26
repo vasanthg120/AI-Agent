@@ -119,11 +119,10 @@ export function SettingsLayout() {
                 {filteredGroups.map((group) => (
                   <motion.div
                     key={group.id}
-                    layout="position"
                     className={styles.group}
-                    initial={{ opacity: 0, y: -4 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, y: -4 }}
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    exit={{ opacity: 0 }}
                     transition={{ duration: 0.18, ease: EASE }}
                   >
                     <div className={styles.groupLabel}>{group.label}</div>
@@ -171,36 +170,33 @@ export function SettingsLayout() {
 
         <div className={styles.content} ref={contentRef}>
           <div className={styles.contentInner}>
-            <AnimatePresence mode="wait" initial={false}>
-              <motion.header
-                key={activeItem?.id}
-                className={styles.pageHeader}
-                initial={{ opacity: 0, y: 8 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -4 }}
-                transition={{ duration: 0.24, ease: EASE }}
-              >
-                <div className={styles.breadcrumb}>
-                  <span>Settings</span>
-                  <FiChevronRight aria-hidden />
-                  <span>{activeGroup?.label}</span>
+            <motion.header
+              key={activeItem?.id}
+              className={styles.pageHeader}
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              transition={{ duration: 0.24, ease: EASE }}
+            >
+              <div className={styles.breadcrumb}>
+                <span>Settings</span>
+                <FiChevronRight aria-hidden />
+                <span>{activeGroup?.label}</span>
+              </div>
+              <div className={styles.headerRow}>
+                <span className={styles.headerIcon}>{activeItem?.icon}</span>
+                <div className={styles.headerText}>
+                  <h1 className={styles.headerTitle}>
+                    {activeItem?.label}
+                    {activeItem?.requireRoles && (
+                      <span className={styles.adminBadge}>
+                        <FiLock aria-hidden /> Admin
+                      </span>
+                    )}
+                  </h1>
+                  <p className={styles.headerSummary}>{activeItem?.summary}</p>
                 </div>
-                <div className={styles.headerRow}>
-                  <span className={styles.headerIcon}>{activeItem?.icon}</span>
-                  <div className={styles.headerText}>
-                    <h1 className={styles.headerTitle}>
-                      {activeItem?.label}
-                      {activeItem?.requireRoles && (
-                        <span className={styles.adminBadge}>
-                          <FiLock aria-hidden /> Admin
-                        </span>
-                      )}
-                    </h1>
-                    <p className={styles.headerSummary}>{activeItem?.summary}</p>
-                  </div>
-                </div>
-              </motion.header>
-            </AnimatePresence>
+              </div>
+            </motion.header>
 
             {/* Keyed by pathname (not tab id) so nested routes inside a tab still
                 get a fresh entrance. No exit animation: the outgoing <Outlet />
@@ -209,8 +205,8 @@ export function SettingsLayout() {
             <motion.div
               key={location.pathname}
               className={styles.body}
-              initial={{ opacity: 0, y: 12 }}
-              animate={{ opacity: 1, y: 0 }}
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
               transition={{ duration: 0.32, ease: EASE, delay: 0.04 }}
             >
               <Outlet />

@@ -3,12 +3,6 @@
   flex-direction: column;
   gap: var(--space-4);
   background: var(--color-bg-surface);
-  transition: border-color var(--duration-slow) var(--ease-out), box-shadow var(--duration-slow) var(--ease-out);
-}
-
-.sectionCard:hover {
-  border-color: var(--color-border-strong);
-  box-shadow: var(--shadow-md);
 }
 
 .header {
@@ -36,11 +30,6 @@
   background: var(--color-bg-active);
   color: var(--color-accent);
   flex-shrink: 0;
-  transition: transform var(--duration-slow) var(--ease-out);
-}
-
-.sectionCard:hover .icon {
-  transform: scale(1.08) rotate(-4deg);
 }
 
 .body {

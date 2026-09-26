@@ -54,8 +54,8 @@ export function ProductivitySection({ dateFrom, dateTo, storeId }: { dateFrom: s
             <motion.div
               key={r.userId}
               className={styles.row}
-              initial={{ opacity: 0, y: 8 }}
-              animate={{ opacity: 1, y: 0 }}
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
               transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1], delay: Math.min(i, 10) * 0.05 }}
             >
               <div className={styles.rowTop}>

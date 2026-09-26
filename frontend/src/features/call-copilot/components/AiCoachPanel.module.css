@@ -111,29 +111,6 @@
   color: var(--color-text-muted);
 }
 
-.voiceRow {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  flex-wrap: wrap;
-}
-
-.languageSelect {
-  height: 32px;
-  padding: 0 var(--space-2);
-  border-radius: var(--radius-md);
-  border: 1px solid var(--color-border-strong);
-  background: var(--color-bg-input);
-  color: var(--color-text-primary);
-  font-size: var(--text-sm);
-  font-family: inherit;
-}
-
-.voiceHint {
-  font-size: var(--text-xs);
-  color: var(--color-text-muted);
-}
-
 .voiceError {
   font-size: var(--text-xs);
   color: var(--color-danger-ink);

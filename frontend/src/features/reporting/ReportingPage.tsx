@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
-import { AnimatePresence, LayoutGroup, motion } from 'framer-motion';
+import { LayoutGroup, motion } from 'framer-motion';
 import clsx from 'clsx';
 import { FiAward, FiCalendar, FiPercent, FiPieChart, FiTrendingUp } from 'react-icons/fi';
 import { ChoiceCards, DateRangeControl, EmptyState, PageHeader, SectionCard, Skeleton, type DateRange } from '@/components/ui';
@@ -115,81 +115,78 @@ export function ReportingPage() {
         onChange={(id) => handleReportTypeChange(id)}
       />
 
-      <AnimatePresence mode="wait" initial={false}>
-        <motion.div
-          key={reportType === 'royalty' ? 'royalty' : 'aggregate'}
-          className={styles.reportArea}
-          initial={{ opacity: 0, y: 10 }}
-          animate={{ opacity: 1, y: 0 }}
-          exit={{ opacity: 0, y: -6 }}
-          transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
-        >
-          {reportType === 'royalty' ? (
-            <RoyaltyReportSection />
-          ) : (
-            <>
-              <div className={styles.filterBar}>
-                <div className={styles.filterGroup}>
-                  <span className={styles.filterLabel}>Period</span>
-                  <DateRangeControl value={range} onChange={setRange} />
-                </div>
-                <div className={styles.filterGroup}>
-                  <span className={styles.filterLabel}>Group by</span>
-                  <LayoutGroup id="report-group-by">
-                    <div className={styles.segmented} role="radiogroup" aria-label="Group by">
-                      {GROUP_OPTIONS[reportType].map((opt) => {
-                        const active = opt.value === groupBy;
-                        return (
-                          <button
-                            key={opt.value}
-                            type="button"
-                            role="radio"
-                            aria-checked={active}
-                            className={clsx(styles.segment, active && styles.segmentActive)}
-                            onClick={() => setGroupBy(opt.value)}
-                          >
-                            {active && (
-                              <motion.span
-                                layoutId="group-by-thumb"
-                                className={styles.segmentThumb}
-                                transition={{ type: 'spring', stiffness: 460, damping: 36 }}
-                              />
-                            )}
-                            <span className={styles.segmentLabel}>{opt.label}</span>
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </LayoutGroup>
-                </div>
+      <motion.div
+        key={reportType === 'royalty' ? 'royalty' : 'aggregate'}
+        className={styles.reportArea}
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
+      >
+        {reportType === 'royalty' ? (
+          <RoyaltyReportSection />
+        ) : (
+          <>
+            <div className={styles.filterBar}>
+              <div className={styles.filterGroup}>
+                <span className={styles.filterLabel}>Period</span>
+                <DateRangeControl value={range} onChange={setRange} />
               </div>
+              <div className={styles.filterGroup}>
+                <span className={styles.filterLabel}>Group by</span>
+                <LayoutGroup id="report-group-by">
+                  <div className={styles.segmented} role="radiogroup" aria-label="Group by">
+                    {GROUP_OPTIONS[reportType].map((opt) => {
+                      const active = opt.value === groupBy;
+                      return (
+                        <button
+                          key={opt.value}
+                          type="button"
+                          role="radio"
+                          aria-checked={active}
+                          className={clsx(styles.segment, active && styles.segmentActive)}
+                          onClick={() => setGroupBy(opt.value)}
+                        >
+                          {active && (
+                            <motion.span
+                              layoutId="group-by-thumb"
+                              className={styles.segmentThumb}
+                              transition={{ type: 'spring', stiffness: 460, damping: 36 }}
+                            />
+                          )}
+                          <span className={styles.segmentLabel}>{opt.label}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </LayoutGroup>
+              </div>
+            </div>
 
-              <SectionCard title="Results" icon={ReportIcon}>
-                <div className={clsx(styles.results, refreshing && styles.resultsRefreshing)}>
-                  {refreshing && <span className={styles.refreshBar} aria-label="Updating" />}
-                  {!hasRange && (
-                    <EmptyState icon={FiCalendar} title="Pick a period" description="Choose a start date and an end date to run the report." />
-                  )}
-                  {loading && (
-                    <div className={styles.loadingBlock}>
-                      <div className={styles.kpiRow}>
-                        {[0, 1, 2].map((i) => (
-                          <Skeleton key={i} height={104} />
-                        ))}
-                      </div>
-                      <Skeleton height={260} />
+            <SectionCard title="Results" icon={ReportIcon}>
+              <div className={clsx(styles.results, refreshing && styles.resultsRefreshing)}>
+                {refreshing && <span className={styles.refreshBar} aria-label="Updating" />}
+                {!hasRange && (
+                  <EmptyState icon={FiCalendar} title="Pick a period" description="Choose a start date and an end date to run the report." />
+                )}
+                {loading && (
+                  <div className={styles.loadingBlock}>
+                    <div className={styles.kpiRow}>
+                      {[0, 1, 2].map((i) => (
+                        <Skeleton key={i} height={104} />
+                      ))}
                     </div>
-                  )}
-                  {!loading && hasRange && reportType === 'sales' && salesReport && <SalesReportView report={salesReport} />}
-                  {!loading && hasRange && reportType === 'grossMargin' && grossMarginReport && (
-                    <GrossMarginReportView report={grossMarginReport} />
-                  )}
-                </div>
-              </SectionCard>
-            </>
-          )}
-        </motion.div>
-      </AnimatePresence>
+                    <Skeleton height={260} />
+                  </div>
+                )}
+                {!loading && hasRange && reportType === 'sales' && salesReport && <SalesReportView report={salesReport} />}
+                {!loading && hasRange && reportType === 'grossMargin' && grossMarginReport && (
+                  <GrossMarginReportView report={grossMarginReport} />
+                )}
+              </div>
+            </SectionCard>
+          </>
+        )}
+      </motion.div>
     </div>
   );
 }

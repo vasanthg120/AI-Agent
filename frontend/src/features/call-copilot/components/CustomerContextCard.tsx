@@ -52,8 +52,8 @@ export function CustomerContextCard({ contextBlob }: { contextBlob: string }) {
         </span>
         <p>
           <strong>No customer linked</strong>
-          Link a deal before you start and its CRM notes and documents show up here. Without one, suggestions use general
-          business knowledge only.
+          Link a deal before you start and its CRM notes and documents show up here. Without one, suggestions use
+          general business knowledge only.
         </p>
       </div>
     );
@@ -63,7 +63,12 @@ export function CustomerContextCard({ contextBlob }: { contextBlob: string }) {
     return (
       <div className={styles.rawWrap}>
         <div className={expanded ? styles.raw : `${styles.raw} ${styles.rawClamped}`}>{contextBlob}</div>
-        <button type="button" className={styles.toggle} aria-expanded={expanded} onClick={() => setExpanded((open) => !open)}>
+        <button
+          type="button"
+          className={styles.toggle}
+          aria-expanded={expanded}
+          onClick={() => setExpanded((open) => !open)}
+        >
           {expanded ? 'Show less' : 'Show more'}
           <FiChevronDown className={expanded ? styles.chevronOpen : styles.chevron} aria-hidden />
         </button>
@@ -98,7 +103,12 @@ export function CustomerContextCard({ contextBlob }: { contextBlob: string }) {
         </AnimatePresence>
       </ul>
       {hidden > 0 && (
-        <button type="button" className={styles.toggle} aria-expanded={expanded} onClick={() => setExpanded((open) => !open)}>
+        <button
+          type="button"
+          className={styles.toggle}
+          aria-expanded={expanded}
+          onClick={() => setExpanded((open) => !open)}
+        >
           {expanded ? 'Show less' : `Show ${hidden} more`}
           <FiChevronDown className={expanded ? styles.chevronOpen : styles.chevron} aria-hidden />
         </button>

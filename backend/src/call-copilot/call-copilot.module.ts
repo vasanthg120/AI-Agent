@@ -31,5 +31,8 @@ import { CallSession, CallSessionSchema } from './schemas/call-session.schema';
   ],
   controllers: [CallCopilotController],
   providers: [CallCopilotService, CallCopilotUploadService, CallCopilotGateway, GridFsService],
+  // The Plivo integration turns a recorded phone call into a session through
+  // the same upload pipeline (see PlivoModule).
+  exports: [CallCopilotUploadService],
 })
 export class CallCopilotModule {}

@@ -152,10 +152,20 @@ export function CallCopilotPage() {
               isIdle && (
                 // Not shown mid-call: leaving the page stops the recording.
                 <>
-                  <Button type="button" variant="ghost" leftIcon={<FiVolume2 />} onClick={() => navigate(ROUTES.settingsVoice)}>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    leftIcon={<FiVolume2 />}
+                    onClick={() => navigate(ROUTES.settingsVoice)}
+                  >
                     Voice &amp; Accent
                   </Button>
-                  <Button type="button" variant="secondary" leftIcon={<FiUploadCloud />} onClick={() => setUploadModalOpen(true)}>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    leftIcon={<FiUploadCloud />}
+                    onClick={() => setUploadModalOpen(true)}
+                  >
                     Upload a Recording
                   </Button>
                 </>
@@ -239,8 +249,8 @@ export function CallCopilotPage() {
 // How one screen replaces another: a short fade with a small lift, so switching
 // tabs or starting a call feels like moving between rooms, not a page reload.
 const SCREEN = {
-  initial: { opacity: 0, y: 10 },
-  animate: { opacity: 1, y: 0 },
-  exit: { opacity: 0, y: -6 },
+  initial: { opacity: 0 },
+  animate: { opacity: 1 },
+  exit: { opacity: 0 },
   transition: { duration: 0.24, ease: EASE_OUT },
 } as const;

@@ -302,10 +302,6 @@
   transition: background var(--duration-fast) var(--ease-out);
 }
 
-.table tbody tr:hover {
-  background: color-mix(in srgb, var(--color-bg-hover) 60%, transparent);
-}
-
 /* Customer column stays put while the other 11 scroll sideways. */
 .table thead th:first-child,
 .table tbody td:first-child {

@@ -73,8 +73,8 @@ export function BusinessKnowledgeDocumentListView({
                   type="button"
                   className={styles.docRow}
                   onClick={() => onSelectDocument(d)}
-                  initial={{ opacity: 0, y: 6 }}
-                  animate={{ opacity: 1, y: 0 }}
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
                   transition={{ duration: 0.25, delay: Math.min(i, 10) * 0.025 }}
                 >
                   <span className={styles.docIcon}>

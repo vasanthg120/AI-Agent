@@ -20,14 +20,17 @@ export function SentimentIndicator({ sentiment, onDark }: { sentiment: string | 
   const Icon = meta?.icon;
 
   return (
-    <span className={clsx(styles.pill, styles[meta?.tone ?? 'none'], onDark && styles.onDark)} title="Customer sentiment">
+    <span
+      className={clsx(styles.pill, styles[meta?.tone ?? 'none'], onDark && styles.onDark)}
+      title="Customer sentiment"
+    >
       <AnimatePresence mode="popLayout" initial={false}>
         <motion.span
           key={sentiment ?? 'none'}
           className={styles.inner}
-          initial={{ opacity: 0, y: 8 }}
-          animate={{ opacity: 1, y: 0 }}
-          exit={{ opacity: 0, y: -8 }}
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
           transition={SPRING_SNAPPY}
         >
           {Icon ? <Icon aria-hidden /> : <span className={styles.pending} aria-hidden />}

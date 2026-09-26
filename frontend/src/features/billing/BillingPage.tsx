@@ -184,7 +184,6 @@ export function BillingPage() {
 
       <WalletBalanceCard
         wallet={wallet}
-        onAddCredits={() => navigate(ROUTES.addCredits)}
         onEnableAutoPay={() => {
           if (!canManageBilling) {
             toast.error('Only an owner or admin can manage Auto Recharge.');
@@ -200,7 +199,6 @@ export function BillingPage() {
           wallet={wallet}
           subscription={subscription}
           onUpgrade={() => navigate(ROUTES.pricing)}
-          onAddCredits={() => navigate(ROUTES.addCredits)}
         />
         {upgradeCandidate && (
           <PlanPriceCard
@@ -267,7 +265,6 @@ export function BillingPage() {
               autoRechargePolicy={wallet.autoRechargePolicy}
               paymentMethods={paymentMethods}
               onChanged={loadAll}
-              onRequirePurchase={() => navigate(ROUTES.addCredits)}
             />
           </SectionCard>
         </div>

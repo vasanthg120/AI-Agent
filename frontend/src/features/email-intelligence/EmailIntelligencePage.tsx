@@ -118,7 +118,7 @@ export function EmailIntelligencePage() {
   });
   const items = useMemo(() => pages?.pages.flat(), [pages]);
 
-  const { data: counts } = useQuery({
+  const { data: counts, isPlaceholderData: countsStale } = useQuery({
     queryKey: [QUERY_ROOT, 'counts', filters],
     queryFn: () => emailIntelligenceService.counts(filters),
     refetchInterval: 60_000,
@@ -266,7 +266,9 @@ export function EmailIntelligencePage() {
     count: counts?.[id],
     ...VIEW_META[id],
   }));
-  const total = counts?.[view];
+  // Hidden while the counts still belong to the previous filters, so the line
+  // never pairs a fresh list with a stale total.
+  const total = countsStale ? undefined : counts?.[view];
   const filtersActive = debouncedSearch !== '' || range.dateFrom !== undefined || range.dateTo !== undefined;
   const clearFilters = () => {
     setSearch('');

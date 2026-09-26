@@ -265,7 +265,9 @@
   border-radius: var(--radius-md);
   border: 1px solid var(--color-border);
   background: var(--color-bg-surface);
-  transition: border-color var(--duration-fast) var(--ease-out), box-shadow var(--duration-fast) var(--ease-out);
+  transition:
+    border-color var(--duration-fast) var(--ease-out),
+    box-shadow var(--duration-fast) var(--ease-out);
 }
 
 .followUpRow:hover {
@@ -315,7 +317,9 @@
   color: var(--color-text-muted);
   cursor: pointer;
   opacity: 0;
-  transition: opacity var(--duration-fast) var(--ease-out), background var(--duration-fast) var(--ease-out);
+  transition:
+    opacity var(--duration-fast) var(--ease-out),
+    background var(--duration-fast) var(--ease-out);
 }
 
 .followUpRow:hover .copyButton,
@@ -390,7 +394,9 @@
   border: 1px solid var(--color-border-strong);
   background: var(--color-bg-input);
   color: var(--color-text-muted);
-  transition: border-color var(--duration-fast) var(--ease-out), box-shadow var(--duration-fast) var(--ease-out);
+  transition:
+    border-color var(--duration-fast) var(--ease-out),
+    box-shadow var(--duration-fast) var(--ease-out);
 }
 
 .search:focus-within {
@@ -432,7 +438,9 @@
   font-size: var(--text-sm);
   font-weight: 600;
   cursor: pointer;
-  transition: border-color var(--duration-fast) var(--ease-out), color var(--duration-fast) var(--ease-out);
+  transition:
+    border-color var(--duration-fast) var(--ease-out),
+    color var(--duration-fast) var(--ease-out);
 }
 
 .copyAll:hover {

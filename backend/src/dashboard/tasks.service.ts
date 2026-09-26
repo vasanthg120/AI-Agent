@@ -58,18 +58,6 @@ function dayRange(date: string): { start: Date; end: Date } {
   return { start, end };
 }
 
-// Half-open [start, end) UTC range for a given "YYYY-MM-DD" date — matches
-// todayStamp()'s own UTC convention (and DailyReport.date's UTC-bucketed
-// "YYYY-MM-DD"), so a createdAt/updatedAt/receivedAt timestamp check here
-// never disagrees with which calendar day a DailyReport itself considers
-// that date to be. Works for any date, not just today — getEodSummary
-// reuses this for the EOD calendar view's historical dates too.
-function dayRange(date: string): { start: Date; end: Date } {
-  const start = new Date(`${date}T00:00:00.000Z`);
-  const end = new Date(start.getTime() + 24 * 60 * 60 * 1000);
-  return { start, end };
-}
-
 export interface EodSummary {
   date: string;
   tasksCompleted: TaskOut[];

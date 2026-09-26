@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
-import { AnimatePresence, motion } from 'framer-motion';
+import { motion } from 'framer-motion';
 import { FiCalendar, FiCheckSquare, FiColumns, FiDownload } from 'react-icons/fi';
 import {
   Badge,
@@ -128,91 +128,88 @@ export function TodoEodPage() {
         }
       />
 
-      <AnimatePresence mode="wait" initial={false}>
-        <motion.div
-          key={view}
-          className={styles.viewArea}
-          initial={{ opacity: 0, y: 10 }}
-          animate={{ opacity: 1, y: 0 }}
-          exit={{ opacity: 0, y: -6 }}
-          transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
-        >
-          {view === 'board' ? (
-            <>
-              <div className={styles.toolbar}>
-                <DateStepper date={boardDate} onChange={setBoardDate} />
-                <div className={styles.boardFilterRow}>
-                  <Tabs
-                    items={SOURCE_TABS}
-                    activeId={sourceFilter}
-                    onChange={(id) => setSourceFilter(id as TaskSource | 'all')}
-                  />
-                  <Switch label="My tasks only" checked={mineOnly} onChange={setMineOnly} />
-                </div>
-              </div>
-              {!todayBoardIsEmpty && <DayProgress params={boardParams} />}
-              {todayBoardIsEmpty ? (
-                <Card>
-                  <GenerateReportEmptyState
-                    reportType="morning"
-                    title="Today's to-do list hasn't been generated yet"
-                    description="It runs automatically near opening time. An admin can generate it now instead of waiting."
-                    onGenerated={() => void queryClient.invalidateQueries({ queryKey: ['tasks', boardParams] })}
-                  />
-                </Card>
-              ) : (
-                <Board params={boardParams} sourceFilter={sourceFilter} />
-              )}
-            </>
-          ) : (
-            <div className={styles.calendarLayout}>
-              <div className={styles.calendarPanel}>
-                <SectionCard title="Calendar" icon={FiCalendar}>
-                  <MonthCalendar
-                    month={month}
-                    days={calendarData?.days ?? []}
-                    selectedDate={selectedDate}
-                    onSelectDate={setSelectedDate}
-                    onMonthChange={setMonth}
-                  />
-                </SectionCard>
-              </div>
-              <div className={styles.selectedDateTasks}>
-                <SectionCard
-                  title={selectedDate ? `Tasks — ${dayjs(selectedDate).format('dddd, MMM D')}` : 'Tasks'}
-                  icon={FiCheckSquare}
-                >
-                  {!selectedDate ? (
-                    <EmptyState
-                      compact
-                      icon={FiCalendar}
-                      title="Pick a day"
-                      description="Days with a dot have tasks — red means something urgent."
-                    />
-                  ) : !dateTasks || dateTasks.length === 0 ? (
-                    <EmptyState compact icon={FiCheckSquare} title="No tasks that day" />
-                  ) : (
-                    <div className={styles.taskList}>
-                      {dateTasks.map((task, i) => (
-                        <motion.div
-                          key={task.id}
-                          className={styles.taskRow}
-                          initial={{ opacity: 0, x: -8 }}
-                          animate={{ opacity: 1, x: 0 }}
-                          transition={{ duration: 0.25, delay: Math.min(i, 10) * 0.03 }}
-                        >
-                          <span className={task.status === 'done' ? styles.taskDone : undefined}>{task.title}</span>
-                          <Badge variant={PRIORITY_VARIANT[task.priority]}>{task.priority}</Badge>
-                        </motion.div>
-                      ))}
-                    </div>
-                  )}
-                </SectionCard>
+      <motion.div
+        key={view}
+        className={styles.viewArea}
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
+      >
+        {view === 'board' ? (
+          <>
+            <div className={styles.toolbar}>
+              <DateStepper date={boardDate} onChange={setBoardDate} />
+              <div className={styles.boardFilterRow}>
+                <Tabs
+                  items={SOURCE_TABS}
+                  activeId={sourceFilter}
+                  onChange={(id) => setSourceFilter(id as TaskSource | 'all')}
+                />
+                <Switch label="My tasks only" checked={mineOnly} onChange={setMineOnly} />
               </div>
             </div>
-          )}
-        </motion.div>
-      </AnimatePresence>
+            {!todayBoardIsEmpty && <DayProgress params={boardParams} />}
+            {todayBoardIsEmpty ? (
+              <Card>
+                <GenerateReportEmptyState
+                  reportType="morning"
+                  title="Today's to-do list hasn't been generated yet"
+                  description="It runs automatically near opening time. An admin can generate it now instead of waiting."
+                  onGenerated={() => void queryClient.invalidateQueries({ queryKey: ['tasks', boardParams] })}
+                />
+              </Card>
+            ) : (
+              <Board params={boardParams} sourceFilter={sourceFilter} />
+            )}
+          </>
+        ) : (
+          <div className={styles.calendarLayout}>
+            <div className={styles.calendarPanel}>
+              <SectionCard title="Calendar" icon={FiCalendar}>
+                <MonthCalendar
+                  month={month}
+                  days={calendarData?.days ?? []}
+                  selectedDate={selectedDate}
+                  onSelectDate={setSelectedDate}
+                  onMonthChange={setMonth}
+                />
+              </SectionCard>
+            </div>
+            <div className={styles.selectedDateTasks}>
+              <SectionCard
+                title={selectedDate ? `Tasks — ${dayjs(selectedDate).format('dddd, MMM D')}` : 'Tasks'}
+                icon={FiCheckSquare}
+              >
+                {!selectedDate ? (
+                  <EmptyState
+                    compact
+                    icon={FiCalendar}
+                    title="Pick a day"
+                    description="Days with a dot have tasks — red means something urgent."
+                  />
+                ) : !dateTasks || dateTasks.length === 0 ? (
+                  <EmptyState compact icon={FiCheckSquare} title="No tasks that day" />
+                ) : (
+                  <div className={styles.taskList}>
+                    {dateTasks.map((task, i) => (
+                      <motion.div
+                        key={task.id}
+                        className={styles.taskRow}
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        transition={{ duration: 0.25, delay: Math.min(i, 10) * 0.03 }}
+                      >
+                        <span className={task.status === 'done' ? styles.taskDone : undefined}>{task.title}</span>
+                        <Badge variant={PRIORITY_VARIANT[task.priority]}>{task.priority}</Badge>
+                      </motion.div>
+                    ))}
+                  </div>
+                )}
+              </SectionCard>
+            </div>
+          </div>
+        )}
+      </motion.div>
     </div>
   );
 }

@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { AnimatePresence, motion } from 'framer-motion';
+import { motion } from 'framer-motion';
 import { FiBookOpen, FiBriefcase, FiFileText } from 'react-icons/fi';
 import { PageHeader, Tabs } from '@/components/ui';
 import { useAuthStore } from '@/stores/authStore';
@@ -62,26 +62,23 @@ export function BusinessKnowledgePage() {
         <Tabs items={TAB_ITEMS} activeId={activeTab} onChange={changeTab} />
       </div>
 
-      <AnimatePresence mode="wait" initial={false}>
-        <motion.div
-          key={activeTab}
-          initial={{ opacity: 0, y: 10 }}
-          animate={{ opacity: 1, y: 0 }}
-          exit={{ opacity: 0, y: -6 }}
-          transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
-        >
-          {activeTab === 'profile' && (
-            <BusinessProfileForm
-              profile={profile}
-              isLoading={isLoading}
-              canEdit={canEdit}
-              onSaved={(saved) => queryClient.setQueryData(['business-profile'], saved)}
-            />
-          )}
+      <motion.div
+        key={activeTab}
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
+      >
+        {activeTab === 'profile' && (
+          <BusinessProfileForm
+            profile={profile}
+            isLoading={isLoading}
+            canEdit={canEdit}
+            onSaved={(saved) => queryClient.setQueryData(['business-profile'], saved)}
+          />
+        )}
 
-          {activeTab === 'documents' && <BusinessKnowledgeDocumentsSection canEdit={canEdit} />}
-        </motion.div>
-      </AnimatePresence>
+        {activeTab === 'documents' && <BusinessKnowledgeDocumentsSection canEdit={canEdit} />}
+      </motion.div>
     </div>
   );
 }

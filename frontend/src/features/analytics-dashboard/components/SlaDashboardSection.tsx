@@ -62,8 +62,8 @@ export function SlaDashboardSection({ userNames }: { userNames?: Map<string, str
                 <motion.div
                   key={p.priority}
                   className={styles.row}
-                  initial={{ opacity: 0, x: -6 }}
-                  animate={{ opacity: 1, x: 0 }}
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
                   transition={{ duration: 0.25, delay: i * 0.05 }}
                 >
                   <div className={styles.rowTop}>
@@ -94,8 +94,8 @@ export function SlaDashboardSection({ userNames }: { userNames?: Map<string, str
               <motion.div
                 key={e.assignedUserId ?? `unassigned-${i}`}
                 className={styles.row}
-                initial={{ opacity: 0, x: -6 }}
-                animate={{ opacity: 1, x: 0 }}
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
                 transition={{ duration: 0.25, delay: i * 0.05 }}
               >
                 <div className={styles.rowTop}>

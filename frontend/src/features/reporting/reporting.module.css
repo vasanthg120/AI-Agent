@@ -230,12 +230,6 @@
   opacity: 0.8;
 }
 
-.kpi:hover {
-  border-color: var(--color-border-strong);
-  box-shadow: var(--shadow-md);
-  transform: translateY(-2px);
-}
-
 .kpiIcon {
   display: inline-flex;
   align-items: center;
@@ -363,10 +357,6 @@
 
 .reportTable tbody tr {
   transition: background var(--duration-fast) var(--ease-out);
-}
-
-.reportTable tbody tr:hover {
-  background: var(--color-bg-hover);
 }
 
 .reportTable tbody tr:last-child td {

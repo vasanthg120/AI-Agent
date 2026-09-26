@@ -324,7 +324,7 @@ interface AiProviderCardConfig {
   invalidKeyMessage: string;
 }
 
-// Platform-wide AI provider credentials (Anthropic, Sarvam) — both resolved
+// Platform-wide AI provider credentials (Anthropic, Sarvam, ElevenLabs, Groq) — all resolved
 // server-side to organizationId="platform" explicitly (never an arbitrary
 // organization's own credential, never a static .env fallback — see
 // python-agent's anthropic_client.py._resolve_api_key/sarvam_client.py.
@@ -506,6 +506,22 @@ const SARVAM_CARD_CONFIG: AiProviderCardConfig = {
   invalidKeyMessage: 'That doesn’t look like a valid Sarvam AI API key.',
 };
 
+const ELEVENLABS_CARD_CONFIG: AiProviderCardConfig = {
+  provider: 'elevenlabs',
+  name: 'ElevenLabs',
+  category: 'Voice AI',
+  description:
+    'Australian, American and British English voices for Voice & Accent. Optional — the Indian English voices keep working on Sarvam AI without it.',
+  logoGlyph: 'E',
+  modalTitle: 'Connect ElevenLabs',
+  modalDescription:
+    "Paste your ElevenLabs API key. It's stored server-side and used only to speak the Australian, American and British voices — never exposed to the browser. The key needs permission to read voices and generate speech, and the account needs a matching voice for each accent and gender.",
+  placeholder: 'ElevenLabs API key',
+  connectedToastMessage: 'ElevenLabs connected — the Australian, American and British voices are now available.',
+  minKeyLength: 10,
+  invalidKeyMessage: 'That doesn’t look like a valid ElevenLabs API key.',
+};
+
 const GROQ_CARD_CONFIG: AiProviderCardConfig = {
   provider: 'groq',
   name: 'Groq',
@@ -649,6 +665,7 @@ function AiProviderTab() {
       <AiProviderCard config={ANTHROPIC_CARD_CONFIG} />
       <AnthropicUsageSummaryCard />
       <AiProviderCard config={SARVAM_CARD_CONFIG} />
+      <AiProviderCard config={ELEVENLABS_CARD_CONFIG} />
       <AiProviderCard config={GROQ_CARD_CONFIG} />
     </div>
   );

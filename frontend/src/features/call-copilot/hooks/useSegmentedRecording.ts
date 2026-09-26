@@ -8,7 +8,13 @@ import { useCallback, useRef, useState } from 'react';
 // different enough lifecycle that sharing code would mean threading a mode
 // flag through the existing, already-shipped voice modal for no real gain,
 // against a hard "don't touch working features" requirement.
-const MIME_TYPE_CANDIDATES = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4', 'audio/ogg;codecs=opus', 'audio/ogg'];
+const MIME_TYPE_CANDIDATES = [
+  'audio/webm;codecs=opus',
+  'audio/webm',
+  'audio/mp4',
+  'audio/ogg;codecs=opus',
+  'audio/ogg',
+];
 
 function pickSupportedMimeType(): string {
   if (typeof MediaRecorder === 'undefined') return '';
@@ -91,7 +97,11 @@ export function useSegmentedRecording(onSegment: (blob: Blob, sequence: number) 
   // closure, since the setError() call doesn't flush into that same closure.
   const start = useCallback(async (): Promise<MicErrorReason | null> => {
     setError(null);
-    if (typeof navigator === 'undefined' || !navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') {
+    if (
+      typeof navigator === 'undefined' ||
+      !navigator.mediaDevices?.getUserMedia ||
+      typeof MediaRecorder === 'undefined'
+    ) {
       setError('unsupported');
       return 'unsupported';
     }

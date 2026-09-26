@@ -334,8 +334,8 @@ export function VendorProfitabilitySection({ dateFrom, dateTo }: { dateFrom: str
       {aiResult && (
         <motion.div
           className={biStyles.aiSummaryCard}
-          initial={{ opacity: 0, y: 12 }}
-          animate={{ opacity: 1, y: 0 }}
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
           transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
         >
           <span className={biStyles.aiInsightLabel}>

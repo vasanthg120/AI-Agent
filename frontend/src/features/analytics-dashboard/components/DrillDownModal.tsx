@@ -151,8 +151,8 @@ export function DrillDownModal({
               </>
             );
             const motionProps = {
-              initial: { opacity: 0, y: 6 },
-              animate: { opacity: 1, y: 0 },
+              initial: { opacity: 0 },
+              animate: { opacity: 1 },
               transition: { duration: 0.22, delay: Math.min(i, 12) * 0.025 },
             };
             return onRowClick ? (

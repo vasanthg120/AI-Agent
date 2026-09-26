@@ -156,10 +156,6 @@
   transition: background var(--duration-normal) var(--ease-out);
 }
 
-.row:hover {
-  background: color-mix(in srgb, var(--color-bg-hover) 60%, transparent);
-}
-
 .overall strong {
   font-weight: 700;
 }
@@ -188,7 +184,7 @@
 }
 
 .bucketFill {
-  animation: barReveal 0.9s var(--ease-out) both;
+  animation: barReveal 0.9s var(--ease-out) backwards;
 }
 
 @media (prefers-reduced-motion: reduce) {

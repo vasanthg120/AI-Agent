@@ -82,6 +82,9 @@ export const PROVIDER_RULES: Record<string, ProviderRule> = {
   anthropic: { label: 'Anthropic', allowedAuthTypes: ['apiKey'] },
   sarvam: { label: 'Sarvam AI', allowedAuthTypes: ['apiKey'] },
   elevenlabs: { label: 'ElevenLabs', allowedAuthTypes: ['apiKey'] },
+  // Plivo authenticates with HTTP Basic (Auth ID : Auth Token). Connected from
+  // Settings -> Calling, which verifies the pair before saving it.
+  plivo: { label: 'Plivo', allowedAuthTypes: ['basic'] },
   groq: { label: 'Groq', allowedAuthTypes: ['apiKey'] },
   openai: { label: 'OpenAI', allowedAuthTypes: ['apiKey'] },
   stripe: { label: 'Stripe', allowedAuthTypes: ['apiKey'] },

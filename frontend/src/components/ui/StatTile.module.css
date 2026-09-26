@@ -7,9 +7,6 @@
     background var(--duration-normal) var(--ease-out), transform var(--duration-normal) var(--ease-out);
 }
 
-.tile:hover {
-  border-color: var(--color-border-strong);
-}
 
 .tileActive,
 .tileActive:hover {

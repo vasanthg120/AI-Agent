@@ -142,6 +142,30 @@ export class UsersService {
     if (!deleted) throw new NotFoundException('User not found');
   }
 
+  async updateOwnProfile(userId: string, dto: UpdateProfileDto) {
+    const update: Record<string, unknown> = {};
+    if (dto.name !== undefined) {
+      const name = dto.name.trim();
+      if (!name) throw new BadRequestException('Name cannot be empty');
+      update.name = name;
+    }
+    if (dto.phone !== undefined) update['preferences.phone'] = dto.phone.trim();
+    if (dto.timezone !== undefined) {
+      try {
+        // Throws RangeError for anything that isn't a real IANA zone.
+        new Intl.DateTimeFormat('en-US', { timeZone: dto.timezone });
+      } catch {
+        throw new BadRequestException('timezone must be a valid IANA time zone, e.g. Asia/Kolkata');
+      }
+      update['preferences.timezone'] = dto.timezone;
+    }
+    if (dto.language !== undefined) update['preferences.language'] = dto.language;
+
+    const updated = await this.userModel.findByIdAndUpdate(userId, { $set: update }, { new: true }).exec();
+    if (!updated) throw new NotFoundException('User not found');
+    return this.toPublic(updated);
+  }
+
   private async assertNotOwner(id: string, organizationId: string): Promise<void> {
     const target = await this.userModel.findOne({ _id: id, organizationId }).select({ roles: 1 }).exec();
     if (target?.roles.includes('owner')) {
@@ -162,6 +186,12 @@ export class UsersService {
       active: user.active,
       voiceAccessEnabled: user.voiceAccessEnabled,
       aiAccessEnabled: user.aiAccessEnabled,
+      // Self-editable profile fields (see updateOwnProfile) live in the
+      // free-form preferences object rather than as top-level schema fields.
+      phone: typeof user.preferences?.phone === 'string' ? user.preferences.phone : undefined,
+      timezone: typeof user.preferences?.timezone === 'string' ? user.preferences.timezone : undefined,
+      language: typeof user.preferences?.language === 'string' ? user.preferences.language : undefined,
+      createdAt: (user as unknown as { createdAt?: Date }).createdAt,
     };
   }
 

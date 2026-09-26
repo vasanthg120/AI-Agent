@@ -67,8 +67,8 @@ export function PendingConversationsCard({ dateFrom, dateTo, storeId }: PendingC
                 type="button"
                 className={styles.item}
                 onClick={() => navigate(`${ROUTES.emailIntelligence}?openEmailId=${item._id}`)}
-                initial={{ opacity: 0, x: -8 }}
-                animate={{ opacity: 1, x: 0 }}
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
                 transition={{ duration: 0.25, delay: i * 0.05 }}
               >
                 <span className={styles.iconBadge}>

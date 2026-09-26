@@ -349,8 +349,8 @@ export function ChatHistoryPage() {
             <motion.div
               key={selected.id}
               className={styles.detailInner}
-              initial={{ opacity: 0, x: 12 }}
-              animate={{ opacity: 1, x: 0 }}
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
               transition={{ duration: 0.25, ease: [0.16, 1, 0.3, 1] }}
             >
               <div className={styles.detailHeader}>

@@ -11,7 +11,7 @@ import type { CredentialStatus } from './integrationsService';
 // authenticate the customer-facing routes with. The backend always resolves
 // these to organizationId="platform" server-side — the frontend never sends
 // or controls that scope.
-export type AiProvider = 'anthropic' | 'sarvam' | 'groq';
+export type AiProvider = 'anthropic' | 'sarvam' | 'elevenlabs' | 'groq';
 
 export const adminIntegrationsService = {
   async connect(provider: AiProvider, apiKey: string): Promise<CredentialStatus> {

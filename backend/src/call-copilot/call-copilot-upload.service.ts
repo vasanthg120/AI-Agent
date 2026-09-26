@@ -89,8 +89,21 @@ export class CallCopilotUploadService {
       // happens afterward (including a thrown error below).
       await fs.unlink(file.path).catch(() => undefined);
     }
+    return this.startSessionFromRecording(organizationId, userId, buffer, file.originalname, dto);
+  }
 
-    const audioFileId = await this.gridFs.upload(AUDIO_BUCKET, file.originalname, buffer, {
+  /** The same pipeline for a recording that arrives as bytes rather than a
+   * browser upload — e.g. a phone call recorded by Plivo and fetched by the
+   * Plivo webhook. Everything past reading the file is identical: GridFS copy,
+   * strict credit reservation, background transcription, summary, AI Coach. */
+  async startSessionFromRecording(
+    organizationId: string,
+    userId: string,
+    buffer: Buffer,
+    filename: string,
+    dto: UploadCallRecordingDto,
+  ): Promise<CallSessionDocument> {
+    const audioFileId = await this.gridFs.upload(AUDIO_BUCKET, filename, buffer, {
       organizationId,
       uploadedBy: userId,
     });
@@ -104,7 +117,7 @@ export class CallCopilotUploadService {
       status: 'processing',
       source: 'upload',
       originalRecordingFileId: audioFileId,
-      originalFilename: file.originalname,
+      originalFilename: filename,
       creditRequestId,
     });
 

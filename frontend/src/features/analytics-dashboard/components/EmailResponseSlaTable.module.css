@@ -102,10 +102,6 @@
   transition: background var(--duration-fast) var(--ease-out);
 }
 
-.table tbody tr:hover {
-  background: color-mix(in srgb, var(--color-bg-hover) 60%, transparent);
-}
-
 .nameWrap {
   display: inline-flex;
   align-items: center;
@@ -161,7 +157,7 @@
 }
 
 .missedFill {
-  animation: barReveal 0.9s var(--ease-out) both;
+  animation: barReveal 0.9s var(--ease-out) backwards;
 }
 
 @media (prefers-reduced-motion: reduce) {

@@ -420,9 +420,7 @@
   }
 
   .nav {
-    position: sticky;
-    top: 0;
-    z-index: 2;
+    position: static;
     width: 100%;
     gap: var(--space-3);
     padding: var(--space-4) var(--space-4) var(--space-3);
@@ -434,8 +432,9 @@
     overflow: visible;
   }
 
+  /* The top bar already says "Settings". */
   .navHeader {
-    padding: 0;
+    display: none;
   }
 
   .subtitle,

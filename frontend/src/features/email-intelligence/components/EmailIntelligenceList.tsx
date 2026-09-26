@@ -96,8 +96,8 @@ export function EmailIntelligenceList({
             tabIndex={0}
             onClick={() => onSelect(item)}
             onKeyDown={(event) => activate(event, item)}
-            initial={{ opacity: 0, y: 8 }}
-            animate={{ opacity: 1, y: 0 }}
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
             // Only the first page staggers; rows added by "Load more" appear promptly.
             transition={{ duration: 0.28, ease: [0.16, 1, 0.3, 1], delay: i < 25 ? Math.min(i, 12) * 0.025 : 0 }}
           >

@@ -37,7 +37,11 @@
   padding: var(--space-5);
   border-radius: var(--radius-lg);
   border: 1px solid color-mix(in srgb, var(--tone) 38%, transparent);
-  background: linear-gradient(135deg, var(--tone-soft), color-mix(in srgb, var(--tone-soft) 20%, var(--color-bg-surface)));
+  background: linear-gradient(
+    135deg,
+    var(--tone-soft),
+    color-mix(in srgb, var(--tone-soft) 20%, var(--color-bg-surface))
+  );
   box-shadow: 0 8px 24px color-mix(in srgb, var(--tone) 12%, transparent);
 }
 
@@ -123,7 +127,9 @@
   background: transparent;
   color: var(--color-text-muted);
   cursor: pointer;
-  transition: background var(--duration-fast) var(--ease-out), color var(--duration-fast) var(--ease-out);
+  transition:
+    background var(--duration-fast) var(--ease-out),
+    color var(--duration-fast) var(--ease-out);
 }
 
 .copy:hover {

@@ -122,8 +122,8 @@ export function ActionQueueCard({ dateFrom, dateTo, storeId, newEnquiryCount, on
               type="button"
               className={styles.item}
               onClick={item.onSelect}
-              initial={{ opacity: 0, x: -8 }}
-              animate={{ opacity: 1, x: 0 }}
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
               transition={{ duration: 0.28, ease: [0.16, 1, 0.3, 1], delay: 0.1 + i * 0.07 }}
             >
               <span className={styles.iconBadge}>

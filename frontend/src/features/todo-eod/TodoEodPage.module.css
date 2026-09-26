@@ -65,11 +65,6 @@
   transition: border-color var(--duration-normal) var(--ease-out), box-shadow var(--duration-normal) var(--ease-out);
 }
 
-.taskRow:hover {
-  border-color: var(--color-border-strong);
-  box-shadow: var(--shadow-sm);
-}
-
 .taskDone {
   color: var(--color-text-muted);
   text-decoration: line-through;

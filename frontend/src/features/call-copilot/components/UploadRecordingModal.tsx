@@ -138,8 +138,8 @@ export function UploadRecordingModal({ open, onClose, onProcessed }: UploadRecor
       <Modal open={open && phase !== 'done'} onClose={handleClose} title="Upload a Recording" maxWidth={560}>
         <div className={styles.body}>
           <p className={styles.lead}>
-            Upload a finished call — a Zoom export, a voice memo, a recorded phone call. HaiVE transcribes it, picks out the
-            signals and writes the summary, just like a live call.
+            Upload a finished call — a Zoom export, a voice memo, a recorded phone call. HaiVE transcribes it, picks out
+            the signals and writes the summary, just like a live call.
           </p>
 
           <CustomerPicker value={customer} onChange={setCustomer} disabled={busy} />
@@ -252,7 +252,9 @@ export function UploadRecordingModal({ open, onClose, onProcessed }: UploadRecor
                   >
                     <FiUploadCloud />
                   </motion.span>
-                  <span className={styles.dropTitle}>{dragging ? 'Drop it here' : 'Drag a recording here, or click to choose'}</span>
+                  <span className={styles.dropTitle}>
+                    {dragging ? 'Drop it here' : 'Drag a recording here, or click to choose'}
+                  </span>
                   <span className={styles.dropHint}>MP3, WAV, M4A, OGG, WebM or MP4 audio</span>
                 </button>
               </motion.div>

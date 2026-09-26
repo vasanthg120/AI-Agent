@@ -3,7 +3,11 @@
   overflow-y: auto;
   padding: var(--space-6);
   background:
-    radial-gradient(900px 320px at 100% -80px, color-mix(in srgb, var(--brand-accent-primary) 9%, transparent), transparent 70%),
+    radial-gradient(
+      900px 320px at 100% -80px,
+      color-mix(in srgb, var(--brand-accent-primary) 9%, transparent),
+      transparent 70%
+    ),
     var(--color-bg-app);
 }
 

@@ -1,17 +1,34 @@
 import { useEffect, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import clsx from 'clsx';
-import { FiCheck, FiChevronDown, FiCopy, FiCornerUpRight, FiHelpCircle, FiMessageCircle, FiShield, FiZap } from 'react-icons/fi';
+import {
+  FiCheck,
+  FiChevronDown,
+  FiCopy,
+  FiCornerUpRight,
+  FiHelpCircle,
+  FiMessageCircle,
+  FiShield,
+  FiZap,
+} from 'react-icons/fi';
 import type { CallRecommendation } from '@/services/callCopilotService';
 import { EASE_OUT, ROW_IN, SPRING_SOFT } from '../motion';
 import styles from './RecommendationsPanel.module.css';
 
 type Tone = 'accent' | 'info' | 'danger' | 'success';
 
-const TYPE_META: Record<CallRecommendation['type'], { label: string; hint: string; icon: typeof FiMessageCircle; tone: Tone }> = {
+const TYPE_META: Record<
+  CallRecommendation['type'],
+  { label: string; hint: string; icon: typeof FiMessageCircle; tone: Tone }
+> = {
   say: { label: 'Say this', hint: 'Something worth saying now', icon: FiMessageCircle, tone: 'accent' },
   ask: { label: 'Ask this', hint: 'A question worth asking', icon: FiHelpCircle, tone: 'info' },
-  handle_objection: { label: 'Handle the objection', hint: 'How to respond to pushback', icon: FiShield, tone: 'danger' },
+  handle_objection: {
+    label: 'Handle the objection',
+    hint: 'How to respond to pushback',
+    icon: FiShield,
+    tone: 'danger',
+  },
   next_action: { label: 'Next step', hint: 'What to do to move it forward', icon: FiCornerUpRight, tone: 'success' },
 };
 
@@ -81,9 +98,9 @@ export function RecommendationsPanel({ recommendations }: { recommendations: Cal
         <motion.article
           key={`${recommendations.length}-${latest.text}`}
           className={clsx(styles.hero, styles[meta.tone])}
-          initial={{ opacity: 0, y: 14, scale: 0.985 }}
-          animate={{ opacity: 1, y: 0, scale: 1 }}
-          exit={{ opacity: 0, y: -10 }}
+          initial={{ opacity: 0, scale: 0.985 }}
+          animate={{ opacity: 1, scale: 1 }}
+          exit={{ opacity: 0 }}
           transition={{ duration: 0.34, ease: EASE_OUT }}
         >
           <span className={styles.heroIcon} aria-hidden>

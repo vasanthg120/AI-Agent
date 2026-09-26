@@ -179,9 +179,9 @@ export function BusinessProfileForm({
         {canEdit && dirty && (
           <motion.div
             className={styles.saveBar}
-            initial={{ opacity: 0, y: 24 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: 24 }}
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
             transition={{ type: 'spring', stiffness: 420, damping: 34 }}
           >
             <span className={styles.saveBarText}>

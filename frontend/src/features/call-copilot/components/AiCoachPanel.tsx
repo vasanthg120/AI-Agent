@@ -70,21 +70,6 @@ function readStoredCoachLanguage(): string {
   return 'en';
 }
 
-const COACH_LANGUAGE_STORAGE_KEY = 'haive-ai-coach-voice-language';
-
-// The coach's spoken language is its own remembered choice (not the language
-// the call itself was transcribed in) — a sales rep may run a Tamil call but
-// want the feedback in English, or the reverse. Defaults to English.
-function readStoredCoachLanguage(): string {
-  try {
-    const stored = localStorage.getItem(COACH_LANGUAGE_STORAGE_KEY);
-    if (stored && VOICE_LANGUAGES.some((l) => l.code === stored)) return stored;
-  } catch {
-    // localStorage can throw in a locked-down browser context — fall back silently.
-  }
-  return 'en';
-}
-
 function formatElapsed(occurredAt: string | undefined, createdAt: string | undefined): string | null {
   if (!occurredAt || !createdAt) return null;
   const seconds = Math.max(0, Math.round((new Date(occurredAt).getTime() - new Date(createdAt).getTime()) / 1000));

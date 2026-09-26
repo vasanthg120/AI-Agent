@@ -5,6 +5,17 @@ export default () => ({
   mongoUri: process.env.MONGO_URI ?? 'mongodb://localhost:27017/agent',
   pythonAgentUrl: process.env.PYTHON_AGENT_URL ?? 'http://localhost:8000',
   redisUrl: process.env.REDIS_URL ?? 'redis://localhost:6379/0',
+  // Plivo call recording. `publicBaseUrl` is the address Plivo can reach this
+  // backend on from the internet (e.g. an ngrok/cloudflared URL in development,
+  // the real API domain in production) — with no trailing slash. Plivo signs
+  // each webhook against the exact URL it called, so this must match what was
+  // given to Plivo; while it is unset every Plivo webhook is refused.
+  plivo: {
+    publicBaseUrl: (process.env.PLIVO_PUBLIC_BASE_URL ?? '').trim().replace(/\/+$/, ''),
+    apiBaseUrl: (process.env.PLIVO_API_BASE_URL ?? 'https://api.plivo.com').trim().replace(/\/+$/, ''),
+    // Prepended to a bare national number (10 digits) typed without one.
+    defaultCountryCode: process.env.PLIVO_DEFAULT_COUNTRY_CODE ?? '91',
+  },
   jwt: {
     secret: process.env.JWT_SECRET,
     expiresIn: process.env.JWT_EXPIRES_IN ?? '1d',

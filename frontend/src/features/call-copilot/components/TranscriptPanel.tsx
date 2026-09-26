@@ -63,7 +63,11 @@ export function TranscriptPanel({ transcript, isRecording }: { transcript: strin
               <i />
               <i />
             </span>
-            <p>{isRecording ? 'Listening… the transcript appears here every few seconds.' : 'The transcript will appear here once the call starts.'}</p>
+            <p>
+              {isRecording
+                ? 'Listening… the transcript appears here every few seconds.'
+                : 'The transcript will appear here once the call starts.'}
+            </p>
           </div>
         )}
       </div>
@@ -73,9 +77,9 @@ export function TranscriptPanel({ transcript, isRecording }: { transcript: strin
           <motion.button
             type="button"
             className={styles.jump}
-            initial={{ opacity: 0, y: 8, scale: 0.94 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: 8, scale: 0.94 }}
+            initial={{ opacity: 0, scale: 0.94 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.94 }}
             transition={SPRING_SNAPPY}
             onClick={() => {
               setFollowing(true);

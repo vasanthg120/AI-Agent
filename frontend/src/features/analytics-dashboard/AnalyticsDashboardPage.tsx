@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
-import { AnimatePresence, motion } from 'framer-motion';
+import { motion } from 'framer-motion';
 import clsx from 'clsx';
 import { FiAward, FiGrid, FiLayers, FiMail, FiPieChart, FiTarget, FiTruck, FiUsers } from 'react-icons/fi';
 import { Avatar, EmptyState, SectionCard, Skeleton, Tabs } from '@/components/ui';
@@ -221,18 +221,15 @@ export function AnalyticsDashboardPage() {
 
       <div className={styles.tabBar}>
         <Tabs items={visibleTabs} activeId={activeTab} onChange={setActiveTab} />
-        <AnimatePresence mode="wait" initial={false}>
-          <motion.p
-            key={activeTab}
-            className={styles.tabIntro}
-            initial={{ opacity: 0, y: 4 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -4 }}
-            transition={{ duration: 0.18 }}
-          >
-            {TAB_INTRO[activeTab]} <span className={styles.tabHint}>{CLICK_HINT}</span>
-          </motion.p>
-        </AnimatePresence>
+        <motion.p
+          key={activeTab}
+          className={styles.tabIntro}
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ duration: 0.18 }}
+        >
+          {TAB_INTRO[activeTab]} <span className={styles.tabHint}>{CLICK_HINT}</span>
+        </motion.p>
       </div>
 
       {isLoading || !data ? (
@@ -251,222 +248,219 @@ export function AnalyticsDashboardPage() {
         <>
           <AiBriefingCard insights={data.insights} dataUpdatedAt={dataUpdatedAt} onAction={setActiveTab} />
 
-          <AnimatePresence mode="wait" initial={false}>
-            <motion.div
-              key={activeTab}
-              className={styles.tabContent}
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -6 }}
-              transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
-            >
-              {activeTab === 'overview' && (
-                <div className={styles.tabContent}>
-                  <SectionCard title="Key Business Overview" icon={FiTarget} glass>
-                    <p className={styles.sectionNote}>Sales targets are set per calendar month — this section reflects the month selected above.</p>
-                    <div className={styles.statsGrid}>
-                      <MonthlySalesPerformanceCard
-                        achieved={data.revenue.achieved}
-                        targetAmount={data.revenue.targetAmount}
-                        achievementPct={data.revenue.achievementPct}
-                        remaining={data.revenue.remaining}
-                        predictedMonthEnd={data.revenue.predictedMonthEnd}
-                        revenueTrend={data.revenueTrend}
-                        dateFrom={dateFrom}
-                        dateTo={dateTo}
-                        onClick={() =>
-                          setDrillDown({
-                            kind: 'deals',
-                            title: 'Won Deals (Revenue)',
-                            dealStatus: ['won'],
-                            // Total Revenue itself is summed by expectedClosingDate
-                            // (SalesAnalyticsService.getAchievement), not createdAt —
-                            // match that field here so the list reconciles with the
-                            // figure that was clicked, instead of showing a
-                            // createdAt-scoped set that can span unrelated months.
-                            dateField: 'expectedClosingDate',
-                          })
-                        }
-                      />
-                      <KeyStatsGrid
-                        deals={data.deals}
-                        businessHealthScore={data.revenue.businessHealthScore}
-                        revenueTrend={data.revenueTrend}
-                        dateFrom={dateFrom}
-                        dateTo={dateTo}
-                        storeId={canOverrideStore ? storeId : undefined}
-                        onDealsClick={() => setDrillDown({ kind: 'deals', title: 'Won Deals', dealStatus: ['won'], dateField: 'expectedClosingDate' })}
-                      />
-                    </div>
-                  </SectionCard>
-
-                  <div className={styles.twoColumn}>
-                    <RevenueMomentumCard dateFrom={dateFrom} dateTo={dateTo} storeId={canOverrideStore ? storeId : undefined} />
-                    <ActionQueueCard
+          <motion.div
+            key={activeTab}
+            className={styles.tabContent}
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
+          >
+            {activeTab === 'overview' && (
+              <div className={styles.tabContent}>
+                <SectionCard title="Key Business Overview" icon={FiTarget} glass>
+                  <p className={styles.sectionNote}>Sales targets are set per calendar month — this section reflects the month selected above.</p>
+                  <div className={styles.statsGrid}>
+                    <MonthlySalesPerformanceCard
+                      achieved={data.revenue.achieved}
+                      targetAmount={data.revenue.targetAmount}
+                      achievementPct={data.revenue.achievementPct}
+                      remaining={data.revenue.remaining}
+                      predictedMonthEnd={data.revenue.predictedMonthEnd}
+                      revenueTrend={data.revenueTrend}
+                      dateFrom={dateFrom}
+                      dateTo={dateTo}
+                      onClick={() =>
+                        setDrillDown({
+                          kind: 'deals',
+                          title: 'Won Deals (Revenue)',
+                          dealStatus: ['won'],
+                          // Total Revenue itself is summed by expectedClosingDate
+                          // (SalesAnalyticsService.getAchievement), not createdAt —
+                          // match that field here so the list reconciles with the
+                          // figure that was clicked, instead of showing a
+                          // createdAt-scoped set that can span unrelated months.
+                          dateField: 'expectedClosingDate',
+                        })
+                      }
+                    />
+                    <KeyStatsGrid
+                      deals={data.deals}
+                      businessHealthScore={data.revenue.businessHealthScore}
+                      revenueTrend={data.revenueTrend}
                       dateFrom={dateFrom}
                       dateTo={dateTo}
                       storeId={canOverrideStore ? storeId : undefined}
-                      newEnquiryCount={data.emailActivity.newEnquiryCount}
-                      // The dedicated "AI Follow-Ups" tab was removed — this
-                      // queue item still surfaces the org's most-overdue
-                      // follow-up (ActionQueueCard's own data/logic is
-                      // untouched). It used to land back on Overview (the tab
-                      // it was clicked from, so it looked dead); the AI Email
-                      // Inbox's own Follow-ups section is where they live now.
-                      onOpenFollowUps={() => navigate(ROUTES.emailIntelligence)}
-                      onOpenPipeline={() => setActiveTab('pipeline')}
-                      onOpenCustomers={() => setActiveTab('customers')}
+                      onDealsClick={() => setDrillDown({ kind: 'deals', title: 'Won Deals', dealStatus: ['won'], dateField: 'expectedClosingDate' })}
                     />
                   </div>
+                </SectionCard>
 
-                  <DealsNeedingDecisionTable
+                <div className={styles.twoColumn}>
+                  <RevenueMomentumCard dateFrom={dateFrom} dateTo={dateTo} storeId={canOverrideStore ? storeId : undefined} />
+                  <ActionQueueCard
                     dateFrom={dateFrom}
                     dateTo={dateTo}
                     storeId={canOverrideStore ? storeId : undefined}
-                    ownerNames={ownerNames}
+                    newEnquiryCount={data.emailActivity.newEnquiryCount}
+                    // The dedicated "AI Follow-Ups" tab was removed — this
+                    // queue item still surfaces the org's most-overdue
+                    // follow-up (ActionQueueCard's own data/logic is
+                    // untouched). It used to land back on Overview (the tab
+                    // it was clicked from, so it looked dead); the AI Email
+                    // Inbox's own Follow-ups section is where they live now.
+                    onOpenFollowUps={() => navigate(ROUTES.emailIntelligence)}
+                    onOpenPipeline={() => setActiveTab('pipeline')}
+                    onOpenCustomers={() => setActiveTab('customers')}
                   />
                 </div>
-              )}
 
-              {activeTab === 'pipeline' && (
-                <div className={styles.tabContent}>
-                  <PipelineHealthCard deals={data.deals} dateFrom={dateFrom} dateTo={dateTo} storeId={canOverrideStore ? storeId : undefined} />
+                <DealsNeedingDecisionTable
+                  dateFrom={dateFrom}
+                  dateTo={dateTo}
+                  storeId={canOverrideStore ? storeId : undefined}
+                  ownerNames={ownerNames}
+                />
+              </div>
+            )}
 
-                  <div className={styles.twoColumn}>
-                    <DealFunnelCard deals={data.deals} dateFrom={dateFrom} dateTo={dateTo} storeId={canOverrideStore ? storeId : undefined} />
-                    <DealStatusDistributionCard deals={data.deals} dateFrom={dateFrom} dateTo={dateTo} storeId={canOverrideStore ? storeId : undefined} />
-                  </div>
+            {activeTab === 'pipeline' && (
+              <div className={styles.tabContent}>
+                <PipelineHealthCard deals={data.deals} dateFrom={dateFrom} dateTo={dateTo} storeId={canOverrideStore ? storeId : undefined} />
 
-                  <div className={styles.twoColumn}>
-                    <SectionCard title="Deals: Won / Lost / Pipeline" icon={FiPieChart} glass>
-                      <DealSplitDonut
-                        totalLabel="deals in this range"
-                        segments={[
-                          { key: 'won', label: 'Won', value: data.deals.wonCount, color: 'var(--color-success)' },
-                          { key: 'lost', label: 'Lost', value: data.deals.lostCount, color: 'var(--color-danger)' },
-                          { key: 'open', label: 'Pipeline', value: data.deals.openCount, color: 'var(--brand-accent-primary)' },
-                        ]}
-                        onSelectSegment={(key) =>
+                <div className={styles.twoColumn}>
+                  <DealFunnelCard deals={data.deals} dateFrom={dateFrom} dateTo={dateTo} storeId={canOverrideStore ? storeId : undefined} />
+                  <DealStatusDistributionCard deals={data.deals} dateFrom={dateFrom} dateTo={dateTo} storeId={canOverrideStore ? storeId : undefined} />
+                </div>
+
+                <div className={styles.twoColumn}>
+                  <SectionCard title="Deals: Won / Lost / Pipeline" icon={FiPieChart} glass>
+                    <DealSplitDonut
+                      totalLabel="deals in this range"
+                      segments={[
+                        { key: 'won', label: 'Won', value: data.deals.wonCount, color: 'var(--color-success)' },
+                        { key: 'lost', label: 'Lost', value: data.deals.lostCount, color: 'var(--color-danger)' },
+                        { key: 'open', label: 'Pipeline', value: data.deals.openCount, color: 'var(--brand-accent-primary)' },
+                      ]}
+                      onSelectSegment={(key) =>
+                        setDrillDown({
+                          kind: 'deals',
+                          title: key === 'won' ? 'Won Deals' : key === 'lost' ? 'Lost Deals' : 'Open Pipeline',
+                          dealStatus: [key as 'won' | 'lost' | 'open'],
+                          // Same fix as the Won vs Lost Revenue chart above —
+                          // this donut's own won/lost/open counts are now
+                          // expectedClosingDate-scoped, so the drill-down must
+                          // match or it shows every deal instead of this
+                          // period's.
+                          dateField: 'expectedClosingDate',
+                        })
+                      }
+                    />
+                  </SectionCard>
+
+                  <SectionCard title="Quotes: Accepted / Not Accepted" icon={FiPieChart} glass>
+                    <DealSplitDonut
+                      totalLabel="quotes in this range"
+                      segments={[
+                        { key: 'accepted', label: 'Accepted', value: data.quotes.acceptedCount, color: 'var(--color-success)' },
+                        { key: 'not-accepted', label: 'Not Accepted', value: data.quotes.notAcceptedCount, color: 'var(--brand-accent-primary)' },
+                      ]}
+                      onSelectSegment={(key) =>
+                        setDrillDown({
+                          kind: 'quotes',
+                          title: key === 'accepted' ? 'Accepted Quotes' : 'Quotes Not Yet Accepted',
+                          clientApprovalStatus: key === 'accepted' ? 'approved' : 'not-approved',
+                        })
+                      }
+                    />
+                  </SectionCard>
+                </div>
+              </div>
+            )}
+
+            {activeTab === 'team' && (
+              <div className={styles.tabContent}>
+                <TeamPerformanceSummaryCards data={data} dateFrom={dateFrom} dateTo={dateTo} storeId={canOverrideStore ? storeId : undefined} />
+
+                <SectionCard title="Employee Leaderboard" icon={FiUsers} glass>
+                  {data.employeeLeaderboard.length === 0 ? (
+                    <EmptyState compact icon={FiUsers} title="No sales team members in scope for this period" />
+                  ) : (
+                    data.employeeLeaderboard.map((r, i) => (
+                      <motion.div
+                        key={r.userId}
+                        className={clsx(styles.listItem, styles.leaderRow)}
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        transition={{ duration: 0.25, delay: Math.min(i, 10) * 0.035 }}
+                        role="button"
+                        tabIndex={0}
+                        onClick={() =>
                           setDrillDown({
                             kind: 'deals',
-                            title: key === 'won' ? 'Won Deals' : key === 'lost' ? 'Lost Deals' : 'Open Pipeline',
-                            dealStatus: [key as 'won' | 'lost' | 'open'],
-                            // Same fix as the Won vs Lost Revenue chart above —
-                            // this donut's own won/lost/open counts are now
-                            // expectedClosingDate-scoped, so the drill-down must
-                            // match or it shows every deal instead of this
-                            // period's.
+                            title: `${r.userName}'s Won Deals`,
+                            dealStatus: ['won'],
+                            ownerId: [r.userId],
+                            // Leaderboard revenue is now expectedClosingDate-
+                            // scoped too (same getConsultantPerformance call,
+                            // fed the fixed dealMatch) — same fix as the two
+                            // drill-downs above, for the same reason.
                             dateField: 'expectedClosingDate',
                           })
                         }
-                      />
-                    </SectionCard>
-
-                    <SectionCard title="Quotes: Accepted / Not Accepted" icon={FiPieChart} glass>
-                      <DealSplitDonut
-                        totalLabel="quotes in this range"
-                        segments={[
-                          { key: 'accepted', label: 'Accepted', value: data.quotes.acceptedCount, color: 'var(--color-success)' },
-                          { key: 'not-accepted', label: 'Not Accepted', value: data.quotes.notAcceptedCount, color: 'var(--brand-accent-primary)' },
-                        ]}
-                        onSelectSegment={(key) =>
+                        onKeyDown={(e) => {
+                          if (e.key !== 'Enter' && e.key !== ' ') return;
+                          e.preventDefault();
                           setDrillDown({
-                            kind: 'quotes',
-                            title: key === 'accepted' ? 'Accepted Quotes' : 'Quotes Not Yet Accepted',
-                            clientApprovalStatus: key === 'accepted' ? 'approved' : 'not-approved',
-                          })
-                        }
-                      />
-                    </SectionCard>
-                  </div>
-                </div>
-              )}
-
-              {activeTab === 'team' && (
-                <div className={styles.tabContent}>
-                  <TeamPerformanceSummaryCards data={data} dateFrom={dateFrom} dateTo={dateTo} storeId={canOverrideStore ? storeId : undefined} />
-
-                  <SectionCard title="Employee Leaderboard" icon={FiUsers} glass>
-                    {data.employeeLeaderboard.length === 0 ? (
-                      <EmptyState compact icon={FiUsers} title="No sales team members in scope for this period" />
-                    ) : (
-                      data.employeeLeaderboard.map((r, i) => (
-                        <motion.div
-                          key={r.userId}
-                          className={clsx(styles.listItem, styles.leaderRow)}
-                          initial={{ opacity: 0, x: -8 }}
-                          animate={{ opacity: 1, x: 0 }}
-                          transition={{ duration: 0.25, delay: Math.min(i, 10) * 0.035 }}
-                          role="button"
-                          tabIndex={0}
-                          onClick={() =>
-                            setDrillDown({
-                              kind: 'deals',
-                              title: `${r.userName}'s Won Deals`,
-                              dealStatus: ['won'],
-                              ownerId: [r.userId],
-                              // Leaderboard revenue is now expectedClosingDate-
-                              // scoped too (same getConsultantPerformance call,
-                              // fed the fixed dealMatch) — same fix as the two
-                              // drill-downs above, for the same reason.
-                              dateField: 'expectedClosingDate',
-                            })
-                          }
-                          onKeyDown={(e) => {
-                            if (e.key !== 'Enter' && e.key !== ' ') return;
-                            e.preventDefault();
-                            setDrillDown({
-                              kind: 'deals',
-                              title: `${r.userName}'s Won Deals`,
-                              dealStatus: ['won'],
-                              ownerId: [r.userId],
-                              dateField: 'expectedClosingDate',
-                            });
-                          }}
-                        >
-                          <span className={clsx(styles.rankBadge, i < 3 && r.revenue > 0 && styles[`rankBadge${i + 1}`])}>
-                            {i < 3 && r.revenue > 0 ? <FiAward /> : i + 1}
-                          </span>
-                          <Avatar name={r.userName} size="sm" />
-                          <div className={styles.listItemMain} style={{ flex: 1 }}>
-                            <span className={styles.listItemTitle}>{r.userName}</span>
-                            <div className={styles.leaderTrack}>
-                              <motion.div
-                                className={styles.leaderFill}
-                                initial={{ width: 0 }}
-                                animate={{ width: `${(r.revenue / Math.max(1, data.employeeLeaderboard[0]?.revenue ?? 1)) * 100}%` }}
-                                transition={{ duration: 0.8, ease: [0.16, 1, 0.3, 1], delay: 0.1 + Math.min(i, 10) * 0.035 }}
-                              />
-                            </div>
-                            <span className={styles.listItemMeta}>
-                              {r.wonCount} deal{r.wonCount === 1 ? '' : 's'} won
-                            </span>
+                            kind: 'deals',
+                            title: `${r.userName}'s Won Deals`,
+                            dealStatus: ['won'],
+                            ownerId: [r.userId],
+                            dateField: 'expectedClosingDate',
+                          });
+                        }}
+                      >
+                        <span className={clsx(styles.rankBadge, i < 3 && r.revenue > 0 && styles[`rankBadge${i + 1}`])}>
+                          {i < 3 && r.revenue > 0 ? <FiAward /> : i + 1}
+                        </span>
+                        <Avatar name={r.userName} size="sm" />
+                        <div className={styles.listItemMain} style={{ flex: 1 }}>
+                          <span className={styles.listItemTitle}>{r.userName}</span>
+                          <div className={styles.leaderTrack}>
+                            <motion.div
+                              className={styles.leaderFill}
+                              initial={{ width: 0 }}
+                              animate={{ width: `${(r.revenue / Math.max(1, data.employeeLeaderboard[0]?.revenue ?? 1)) * 100}%` }}
+                              transition={{ duration: 0.8, ease: [0.16, 1, 0.3, 1], delay: 0.1 + Math.min(i, 10) * 0.035 }}
+                            />
                           </div>
-                          <strong className={styles.leaderValue}>{money(r.revenue)}</strong>
-                        </motion.div>
-                      ))
-                    )}
-                  </SectionCard>
+                          <span className={styles.listItemMeta}>
+                            {r.wonCount} deal{r.wonCount === 1 ? '' : 's'} won
+                          </span>
+                        </div>
+                        <strong className={styles.leaderValue}>{money(r.revenue)}</strong>
+                      </motion.div>
+                    ))
+                  )}
+                </SectionCard>
 
-                  {/* Work Completion & Productivity — a strict superset of the
-                      old "Sales Work Breakdown" table (deals AND emails AND
-                      quotes per employee, not deals alone), so that table was
-                      retired rather than kept alongside a now-redundant view. */}
-                  <ProductivitySection dateFrom={dateFrom} dateTo={dateTo} storeId={canOverrideStore ? storeId : undefined} />
+                {/* Work Completion & Productivity — a strict superset of the
+                    old "Sales Work Breakdown" table (deals AND emails AND
+                    quotes per employee, not deals alone), so that table was
+                    retired rather than kept alongside a now-redundant view. */}
+                <ProductivitySection dateFrom={dateFrom} dateTo={dateTo} storeId={canOverrideStore ? storeId : undefined} />
 
-                  <EmailResponseSlaTable dateFrom={dateFrom} dateTo={dateTo} storeId={canOverrideStore ? storeId : undefined} />
+                <EmailResponseSlaTable dateFrom={dateFrom} dateTo={dateTo} storeId={canOverrideStore ? storeId : undefined} />
 
-                  <SlaDashboardSection userNames={ownerNames} />
-                </div>
-              )}
+                <SlaDashboardSection userNames={ownerNames} />
+              </div>
+            )}
 
-              {activeTab === 'customers' && (
-                <CustomersAndEmailSection dateFrom={dateFrom} dateTo={dateTo} storeId={canOverrideStore ? storeId : undefined} />
-              )}
+            {activeTab === 'customers' && (
+              <CustomersAndEmailSection dateFrom={dateFrom} dateTo={dateTo} storeId={canOverrideStore ? storeId : undefined} />
+            )}
 
-              {activeTab === 'bi-vendor' && <VendorProfitabilitySection dateFrom={dateFrom} dateTo={dateTo} />}
-            </motion.div>
-          </AnimatePresence>
+            {activeTab === 'bi-vendor' && <VendorProfitabilitySection dateFrom={dateFrom} dateTo={dateTo} />}
+          </motion.div>
         </>
       )}
 
