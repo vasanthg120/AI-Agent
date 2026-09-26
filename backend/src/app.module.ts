@@ -40,6 +40,7 @@ import { EncryptionModule } from './common/encryption/encryption.module';
 import { SessionsModule } from './sessions/sessions.module';
 import { ApiTokensModule } from './api-tokens/api-tokens.module';
 import { BillingModule } from './billing/billing.module';
+import { AiUsageModule } from './ai-usage/ai-usage.module';
 import { HealthController } from './health/health.controller';
 
 @Module({
@@ -89,6 +90,7 @@ import { HealthController } from './health/health.controller';
     VendorsModule,
     BusinessIntelligenceModule,
     BillingModule,
+    AiUsageModule,
     // Registers a global audit-logging interceptor (see AuditModule) in
     // addition to its own admin-only GET /audit-logs viewer.
     AuditModule,

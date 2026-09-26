@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { FiShield } from 'react-icons/fi';
 import toast from 'react-hot-toast';
 import { Button, CopyableText, Input, Modal, Skeleton, Switch } from '@/components/ui';
 import { twoFactorService, type TwoFactorSetup, type TwoFactorStatus } from '@/services/twoFactorService';
@@ -112,7 +113,11 @@ export function TwoFactorSection() {
 
   if (loading) {
     return (
-      <SettingsSection title="Two-Factor Authentication" description="Add an extra layer of security to your account.">
+      <SettingsSection
+        icon={<FiShield />}
+        title="Two-Factor Authentication"
+        description="Add an extra layer of security to your account."
+      >
         <Skeleton height={20} />
       </SettingsSection>
     );
@@ -120,7 +125,11 @@ export function TwoFactorSection() {
 
   return (
     <>
-      <SettingsSection title="Two-Factor Authentication" description="Add an extra layer of security to your account.">
+      <SettingsSection
+        icon={<FiShield />}
+        title="Two-Factor Authentication"
+        description="Add an extra layer of security to your account."
+      >
         <Switch
           checked={status?.enabled ?? false}
           onChange={(checked) => {

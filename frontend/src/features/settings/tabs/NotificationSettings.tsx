@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { FiBell } from 'react-icons/fi';
 import toast from 'react-hot-toast';
 import { Skeleton, Switch, Tooltip } from '@/components/ui';
 import { notificationsService, type NotificationPreferences } from '@/services/notificationsService';
@@ -63,7 +64,11 @@ export function NotificationSettings() {
 
   if (loading) {
     return (
-      <SettingsSection title="Channels" description="Choose where you'd like to receive notifications.">
+      <SettingsSection
+        icon={<FiBell />}
+        title="Channels"
+        description="Choose where you'd like to receive notifications."
+      >
         <Skeleton height={20} />
         <Skeleton height={20} />
         <Skeleton height={20} />
@@ -73,7 +78,11 @@ export function NotificationSettings() {
 
   if (loadError || !prefs) {
     return (
-      <SettingsSection title="Channels" description="Choose where you'd like to receive notifications.">
+      <SettingsSection
+        icon={<FiBell />}
+        title="Channels"
+        description="Choose where you'd like to receive notifications."
+      >
         <p>{loadError ?? 'Could not load notification preferences.'}</p>
       </SettingsSection>
     );
@@ -122,7 +131,7 @@ export function NotificationSettings() {
   );
 
   return (
-    <SettingsSection title="Channels" description="Choose where you'd like to receive notifications.">
+    <SettingsSection icon={<FiBell />} title="Channels" description="Choose where you'd like to receive notifications.">
       {prefs.orgPolicy.pushEnabled ? (
         desktopSwitch
       ) : (

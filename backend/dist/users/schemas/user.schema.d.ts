@@ -34,6 +34,7 @@ export declare class User {
     department?: string;
     active: boolean;
     voiceAccessEnabled: boolean;
+    aiAccessEnabled: boolean;
     preferences: Record<string, unknown>;
     emailVerified: boolean;
     verifyOtpHash?: string;

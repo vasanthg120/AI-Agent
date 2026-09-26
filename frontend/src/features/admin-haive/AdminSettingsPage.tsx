@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import toast from 'react-hot-toast';
-import { FiKey, FiPlus } from 'react-icons/fi';
+import { FiKey, FiPlus, FiRefreshCw } from 'react-icons/fi';
 import { Badge, Button, Card, Input, Modal, SectionCard, Skeleton, Switch, Tabs } from '@/components/ui';
 import { billingSettingsAdminService, type BillingSettings } from '@/services/billingSettingsAdminService';
 import { billingCatalogAdminService, type AdminTaxRate } from '@/services/billingCatalogAdminService';
@@ -11,8 +12,11 @@ import {
   type CreateProviderPricingPayload,
   type ProviderPricingRow,
 } from '@/services/billingProviderPricingAdminService';
+import { aiUsageAdminService, type AnthropicUsageSummary } from '@/services/aiUsageAdminService';
 import { extractErrorMessage } from '@/utils/errors';
 import { formatFullDate } from '@/utils/date';
+import { formatNumber } from '@/utils/format';
+import { ADMIN_ROUTES } from '@/constants/routes';
 // Same card visual the Anthropic integration used on /settings/integrations
 // before it moved here — reused verbatim (not copied) so the design stays
 // pixel-identical and never drifts from Gmail/Outlook's still-current cards
@@ -516,10 +520,134 @@ const GROQ_CARD_CONFIG: AiProviderCardConfig = {
   invalidKeyMessage: 'That doesn’t look like a valid Groq API key.',
 };
 
+const money = (n: number | null | undefined) => (n == null ? '—' : `$${n.toFixed(2)}`);
+
+// Detailed token/cost/budget panel shown ONLY under the Anthropic card —
+// Sarvam/Groq have no comparable usage-tracking backend (see
+// backend/src/ai-usage/ai-usage-admin.service.ts, which is Anthropic-only),
+// so this is deliberately its own component rather than a change to the
+// generic AiProviderCard shared by all three providers.
+function AnthropicUsageSummaryCard() {
+  const [summary, setSummary] = useState<AnthropicUsageSummary | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+
+  const load = () => {
+    aiUsageAdminService
+      .getSummary(30)
+      .then(setSummary)
+      .catch((error) => toast.error(extractErrorMessage(error)))
+      .finally(() => setLoading(false));
+  };
+
+  useEffect(load, []);
+
+  const refresh = async () => {
+    setRefreshing(true);
+    try {
+      const s = await aiUsageAdminService.refresh(30);
+      setSummary(s);
+    } catch (error) {
+      toast.error(extractErrorMessage(error));
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
+  if (loading) return <Skeleton height={220} width={360} />;
+  if (!summary?.connected) return null;
+
+  const pct = summary.usage.percentage != null ? Math.min(summary.usage.percentage, 100) : null;
+
+  return (
+    <Card style={{ maxWidth: 360, display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <span style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
+          Last synced: {summary.sync.lastSyncedAt ? formatFullDate(summary.sync.lastSyncedAt) : 'never'}
+        </span>
+        <Button size="sm" variant="ghost" leftIcon={<FiRefreshCw size={12} />} loading={refreshing} onClick={refresh}>
+          Refresh
+        </Button>
+      </div>
+
+      <div>
+        <div style={{ fontSize: 'var(--text-xs)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em', color: 'var(--color-text-muted)', marginBottom: 8 }}>
+          Usage Summary
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 'var(--space-2)', fontSize: 'var(--text-sm)' }}>
+          <div>
+            <div style={{ fontWeight: 700 }}>{summary.budget ? money(summary.budget.amount) : '—'}</div>
+            <div style={{ color: 'var(--color-text-muted)', fontSize: 'var(--text-xs)' }}>Budget</div>
+          </div>
+          <div>
+            <div style={{ fontWeight: 700 }}>{money(summary.usage.cost)}</div>
+            <div style={{ color: 'var(--color-text-muted)', fontSize: 'var(--text-xs)' }}>Consumed</div>
+          </div>
+          <div>
+            <div style={{ fontWeight: 700 }}>{summary.usage.remaining != null ? money(summary.usage.remaining) : '—'}</div>
+            <div style={{ color: 'var(--color-text-muted)', fontSize: 'var(--text-xs)' }}>Remaining</div>
+          </div>
+        </div>
+        {pct != null && (
+          <div style={{ marginTop: 10 }}>
+            <div style={{ height: 6, borderRadius: 'var(--radius-full)', background: 'var(--color-bg-surface-elevated)', overflow: 'hidden' }}>
+              <div style={{ height: '100%', width: `${pct}%`, background: 'var(--gradient-accent)' }} />
+            </div>
+            <div style={{ marginTop: 4, fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>{summary.usage.percentage}% used</div>
+          </div>
+        )}
+      </div>
+
+      <div>
+        <div style={{ fontSize: 'var(--text-xs)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em', color: 'var(--color-text-muted)', marginBottom: 8 }}>
+          Token Usage
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 'var(--space-2)', fontSize: 'var(--text-sm)' }}>
+          <div>
+            <div style={{ fontWeight: 700 }}>{formatNumber(summary.tokens.input)}</div>
+            <div style={{ color: 'var(--color-text-muted)', fontSize: 'var(--text-xs)' }}>Input Tokens</div>
+          </div>
+          <div>
+            <div style={{ fontWeight: 700 }}>{formatNumber(summary.tokens.output)}</div>
+            <div style={{ color: 'var(--color-text-muted)', fontSize: 'var(--text-xs)' }}>Output Tokens</div>
+          </div>
+          <div>
+            <div style={{ fontWeight: 700 }}>{formatNumber(summary.tokens.cacheRead)}</div>
+            <div style={{ color: 'var(--color-text-muted)', fontSize: 'var(--text-xs)' }}>Cache Read</div>
+          </div>
+          <div>
+            <div style={{ fontWeight: 700 }}>{formatNumber(summary.tokens.cacheCreation)}</div>
+            <div style={{ color: 'var(--color-text-muted)', fontSize: 'var(--text-xs)' }}>Cache Creation</div>
+          </div>
+        </div>
+      </div>
+
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div>
+          <div style={{ fontWeight: 700 }}>{summary.requests.total.toLocaleString()} requests</div>
+          <div style={{ color: 'var(--color-text-muted)', fontSize: 'var(--text-xs)' }}>
+            {summary.requests.successful.toLocaleString()} successful · {summary.requests.failed.toLocaleString()} failed
+          </div>
+        </div>
+        <Link to={ADMIN_ROUTES.aiUsage}>
+          <Button size="sm" variant="secondary">
+            View full usage →
+          </Button>
+        </Link>
+      </div>
+
+      {!summary.sync.providerReconciliationAvailable && (
+        <p style={{ margin: 0, fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>Provider-level reconciliation unavailable for this API credential.</p>
+      )}
+    </Card>
+  );
+}
+
 function AiProviderTab() {
   return (
     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--space-4)' }}>
       <AiProviderCard config={ANTHROPIC_CARD_CONFIG} />
+      <AnthropicUsageSummaryCard />
       <AiProviderCard config={SARVAM_CARD_CONFIG} />
       <AiProviderCard config={GROQ_CARD_CONFIG} />
     </div>

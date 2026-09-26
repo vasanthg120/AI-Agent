@@ -8,6 +8,8 @@ export declare class IntegrationCredential {
     authType?: 'apiKey' | 'apiKeyBaseUrl' | 'bearer' | 'basic' | 'customHeaders';
     credentialsEncrypted?: string;
     healthCheckPath?: string;
+    budgetUsd?: number;
+    budgetPeriod?: 'monthly' | 'total';
 }
 export declare const IntegrationCredentialSchema: import("mongoose").Schema<IntegrationCredential, import("mongoose").Model<IntegrationCredential, any, any, any, Document<unknown, any, IntegrationCredential, any, {}> & IntegrationCredential & {
     _id: Types.ObjectId;

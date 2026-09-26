@@ -1,22 +1,81 @@
 import { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import {
   FiActivity,
   FiAlertCircle,
   FiArchive,
   FiCheckCircle,
+  FiCpu,
   FiCreditCard,
   FiDollarSign,
   FiRefreshCw,
   FiRepeat,
   FiUsers,
 } from 'react-icons/fi';
-import { SectionCard, Skeleton, StatTile } from '@/components/ui';
+import { Button, SectionCard, Skeleton, StatTile } from '@/components/ui';
 import { billingAdminService, type AdminAnalytics, type AdminDashboard } from '@/services/billingAdminService';
+import { aiUsageAdminService, type AnthropicUsageSummary } from '@/services/aiUsageAdminService';
 import { extractErrorMessage } from '@/utils/errors';
+import { formatNumber } from '@/utils/format';
+import { ADMIN_ROUTES } from '@/constants/routes';
 import { AdminRangeControl } from './AdminRangeControl';
 import { AdminLineChart } from './components/AdminLineChart';
 import styles from './AdminDashboardPage.module.css';
+
+// Compact summary only — the full breakdown (charts, model/org tables,
+// request history) lives on its own page (AdminAiUsagePage.tsx) per the
+// "don't overload the dashboard" guidance. Fetches independently of the
+// billing dashboard's own days window so a billing-endpoint failure never
+// blanks this card, and vice versa.
+function AiProviderUsageCard({ days }: { days: number }) {
+  const [summary, setSummary] = useState<AnthropicUsageSummary | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    setLoading(true);
+    aiUsageAdminService
+      .getSummary(days)
+      .then(setSummary)
+      .catch(() => setSummary(null))
+      .finally(() => setLoading(false));
+  }, [days]);
+
+  return (
+    <SectionCard glass title="AI Provider Usage" icon={FiCpu} action={<Link to={ADMIN_ROUTES.aiUsage}><Button variant="ghost" size="sm">View Usage →</Button></Link>}>
+      {loading ? (
+        <Skeleton height={72} />
+      ) : !summary?.connected ? (
+        <p className={styles.subtitle} style={{ margin: 0 }}>
+          Anthropic is not connected yet.
+        </p>
+      ) : (
+        <div className={styles.aiUsageRow}>
+          <div>
+            <div className={styles.aiUsageValue}>{summary.budget ? `$${summary.budget.amount.toFixed(2)}` : '—'}</div>
+            <div className={styles.aiUsageLabel}>Budget</div>
+          </div>
+          <div>
+            <div className={styles.aiUsageValue}>${summary.usage.cost.toFixed(2)}</div>
+            <div className={styles.aiUsageLabel}>Used</div>
+          </div>
+          <div>
+            <div className={styles.aiUsageValue}>{summary.usage.remaining != null ? `$${summary.usage.remaining.toFixed(2)}` : '—'}</div>
+            <div className={styles.aiUsageLabel}>Remaining</div>
+          </div>
+          <div>
+            <div className={styles.aiUsageValue}>{formatNumber(summary.tokens.total)}</div>
+            <div className={styles.aiUsageLabel}>Tokens</div>
+          </div>
+          <div>
+            <div className={styles.aiUsageValue}>{summary.requests.total.toLocaleString()}</div>
+            <div className={styles.aiUsageLabel}>Requests</div>
+          </div>
+        </div>
+      )}
+    </SectionCard>
+  );
+}
 
 export function AdminDashboardPage() {
   const [days, setDays] = useState(30);
@@ -79,6 +138,8 @@ export function AdminDashboardPage() {
           />
         </div>
       )}
+
+      <AiProviderUsageCard days={days} />
 
       <div className={styles.chartsGrid}>
         <SectionCard glass title="Revenue Over Time" icon={FiDollarSign}>

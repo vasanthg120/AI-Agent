@@ -133,6 +133,17 @@ export class User {
   @Prop({ default: true })
   voiceAccessEnabled: boolean;
 
+  // The organization purchased the AI credits; this is the per-employee
+  // on/off switch an owner/admin uses to control who may actually spend
+  // them (see ChatController.assertAiAccessAllowed) — same shape as
+  // voiceAccessEnabled above, and enforced the same way: checked
+  // server-side BEFORE any reservation/LLM call, never left to the
+  // frontend hiding a button. Mongoose applies this default at hydration
+  // time for any document predating this field, so every existing user
+  // reads back as enabled with no migration needed.
+  @Prop({ default: true })
+  aiAccessEnabled: boolean;
+
   @Prop({ type: Object, default: {} })
   preferences: Record<string, unknown>;
 

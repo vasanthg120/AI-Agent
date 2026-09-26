@@ -1,0 +1,69 @@
+.ring {
+  position: relative;
+  flex: none;
+  --ring-color: var(--color-accent);
+  --ring-ink: var(--color-text-primary);
+}
+
+.success {
+  --ring-color: var(--color-success);
+  --ring-ink: var(--color-success-ink);
+}
+
+.warning {
+  --ring-color: var(--color-warning);
+  --ring-ink: var(--color-warning-ink);
+}
+
+.danger {
+  --ring-color: var(--color-danger);
+  --ring-ink: var(--color-danger-ink);
+}
+
+.muted {
+  --ring-color: var(--color-text-muted);
+  --ring-ink: var(--color-text-muted);
+}
+
+/* Starts at 12 o'clock instead of 3. */
+.svg {
+  display: block;
+  transform: rotate(-90deg);
+}
+
+.track {
+  stroke: color-mix(in srgb, var(--brand-bg-primary) 8%, transparent);
+}
+
+.arc {
+  stroke: var(--ring-color);
+  filter: drop-shadow(0 2px 6px color-mix(in srgb, var(--ring-color) 40%, transparent));
+}
+
+.muted .arc {
+  filter: none;
+  opacity: 0.5;
+}
+
+.center {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+}
+
+.value {
+  font-weight: 700;
+  color: var(--ring-ink);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+}
+
+.outOf {
+  margin-top: 4px;
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+}

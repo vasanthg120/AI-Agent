@@ -415,6 +415,20 @@ export class BillingAdminService {
     };
   }
 
+  /** Organization.status existed on the schema with no write path anywhere
+   * in the app (confirmed by a full backend search) and no enforcement
+   * beyond a read-only badge on this same admin page — JwtStrategy.validate()
+   * now blocks a suspended org's own users at the one choke point every
+   * customer request already passes through; this is the platform-admin
+   * action that actually flips the switch. Never reachable by a customer —
+   * this whole controller is AdminJwtAuthGuard-gated, a completely separate
+   * credential from any organization's own owner/admin. */
+  async setOrganizationStatus(organizationId: string, status: 'active' | 'suspended') {
+    const org = await this.orgModel.findByIdAndUpdate(organizationId, { status }, { new: true }).exec();
+    if (!org) throw new NotFoundException('Organization not found.');
+    return { organizationId, status: org.status };
+  }
+
   /** Users/tab on the organization detail page — same projection
    * UsersService.toPublic applies (never passwordHash/OTP fields), just
    * queryable for any org id rather than only the caller's own. */

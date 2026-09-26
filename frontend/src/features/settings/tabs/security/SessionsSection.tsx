@@ -64,7 +64,7 @@ export function SessionsSection() {
 
   return (
     <>
-      <SettingsSection
+      <SettingsSection icon={<FiMonitor />}
         title="Active Sessions"
         description="Devices currently signed in to your account."
         footer={

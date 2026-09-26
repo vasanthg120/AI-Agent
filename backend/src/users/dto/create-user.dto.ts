@@ -34,4 +34,10 @@ export class CreateUserDto {
   @IsOptional()
   @IsBoolean()
   voiceAccessEnabled?: boolean;
+
+  // Optional at creation — schema defaults to true (AI enabled) when
+  // omitted. See update-user.dto.ts's identical field for what this gates.
+  @IsOptional()
+  @IsBoolean()
+  aiAccessEnabled?: boolean;
 }

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { FiShoppingBag, FiTarget, FiUsers } from 'react-icons/fi';
 import toast from 'react-hot-toast';
 import { Button, Input } from '@/components/ui';
 import { extractErrorMessage } from '@/utils/errors';
@@ -101,7 +102,7 @@ export function SalesTargetsSettings() {
 
   return (
     <>
-      <SettingsSection
+      <SettingsSection icon={<FiTarget />}
         title="Sales Targets"
         description="Set the monthly sales target (in ₹) for each store and each consultant. Dashboards compute achievement % and forecasts against these."
       >
@@ -121,7 +122,11 @@ export function SalesTargetsSettings() {
         </SettingsSection>
       ) : (
         <>
-          <SettingsSection title="Store Targets" description="Target per store for this month.">
+          <SettingsSection
+            icon={<FiShoppingBag />}
+            title="Store Targets"
+            description="Target per store for this month."
+          >
             {stores.length === 0 ? (
               <p>No stores yet.</p>
             ) : (
@@ -155,7 +160,7 @@ export function SalesTargetsSettings() {
             )}
           </SettingsSection>
 
-          <SettingsSection
+          <SettingsSection icon={<FiUsers />}
             title="Employee Targets"
             description="Target per consultant for this month — this drives their personal dashboard."
           >

@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { FiPercent, FiRotateCcw } from 'react-icons/fi';
 import toast from 'react-hot-toast';
 import { Badge, Button, Input, Switch } from '@/components/ui';
 import { extractErrorMessage } from '@/utils/errors';
@@ -160,7 +161,7 @@ export function RoyaltyRulesSettings() {
 
   return (
     <>
-      <SettingsSection
+      <SettingsSection icon={<FiPercent />}
         title="Current Royalty Rule"
         description={
           current
@@ -307,7 +308,11 @@ export function RoyaltyRulesSettings() {
         </SettingsField>
       </SettingsSection>
 
-      <SettingsSection title="Version History" description="Every royalty rule version ever saved, most recent first.">
+      <SettingsSection
+        icon={<FiRotateCcw />}
+        title="Version History"
+        description="Every royalty rule version ever saved, most recent first."
+      >
         {history.length === 0 ? (
           <div className={styles.emptyState}>No versions saved yet.</div>
         ) : (

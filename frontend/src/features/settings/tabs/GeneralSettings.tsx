@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import toast from 'react-hot-toast';
-import { FiClock, FiCheck } from 'react-icons/fi';
+import { FiCheck, FiClock } from 'react-icons/fi';
 import { Button, Input } from '@/components/ui';
 import { storeSettingsService } from '@/services/storeSettingsService';
 import { SettingsField, SettingsSection } from '../components/SettingsSection';
@@ -69,7 +69,7 @@ export function GeneralSettings() {
 
   return (
     <>
-      <SettingsSection
+      <SettingsSection icon={<FiClock />}
         title="Store Timing"
         description="Sets when the store opens and closes. HaiVE AI uses this to automatically post a to-do list before opening and an end-of-day report at closing, grounded in your CRM and Outlook data."
         footer={

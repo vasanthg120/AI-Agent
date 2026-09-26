@@ -53,6 +53,7 @@ export declare class UsersService {
             department: string | undefined;
             active: boolean;
             voiceAccessEnabled: boolean;
+            aiAccessEnabled: boolean;
         };
         tempPassword: string;
     }>;
@@ -67,6 +68,7 @@ export declare class UsersService {
         department: string | undefined;
         active: boolean;
         voiceAccessEnabled: boolean;
+        aiAccessEnabled: boolean;
     }>;
     deleteByAdmin(id: string, organizationId: string): Promise<void>;
     private assertNotOwner;
@@ -81,6 +83,7 @@ export declare class UsersService {
         department: string | undefined;
         active: boolean;
         voiceAccessEnabled: boolean;
+        aiAccessEnabled: boolean;
     };
     setVerifyOtp(userId: string, otpHash: string, expiresAt: Date): Promise<(import("mongoose").Document<unknown, {}, UserDocument, {}, {}> & User & import("mongoose").Document<import("mongoose").Types.ObjectId, any, any, Record<string, any>, {}> & Required<{
         _id: import("mongoose").Types.ObjectId;
