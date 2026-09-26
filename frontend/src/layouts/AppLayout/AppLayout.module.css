@@ -19,6 +19,10 @@
 .content {
   flex: 1;
   overflow-y: auto;
+  /* Never scroll sideways at page level: wide things (tables, chip rows)
+     scroll inside their own wrappers, and a stray 1px overflow otherwise
+     flashed a horizontal scrollbar across the whole page. */
+  overflow-x: hidden;
   min-height: 0;
 }
 
@@ -36,9 +40,61 @@
     z-index: calc(var(--z-sidebar) + 1);
   }
 
-  .assistantPanelMobile {
-    position: fixed;
-    inset: 0 0 0 auto;
-    z-index: calc(var(--z-sidebar) + 1);
+}
+
+/* PageTransition's wrapper. height (not min-height) so pages that size
+   themselves with height: 100% — Chat, Call Copilot — still resolve it;
+   taller pages simply overflow it and .content scrolls as before. */
+.page {
+  height: 100%;
+}
+
+/* Same guard for pages that are their own scroll container. "clip" (not
+   "hidden") so pages that aren't scroll containers stay that way and their
+   position: sticky bars keep sticking to .content. */
+.page > :first-child {
+  overflow-x: clip;
+}
+
+/* Staggered entrance for every page: each top-level block of the page
+   (header, filters, cards…) rises in a beat after the one above it, so a
+   page assembles itself top-down instead of appearing all at once. Pure
+   CSS so no page has to opt in; it also plays for blocks that appear later
+   (a loaded section replacing its skeleton). fill-mode "both" ends on
+   opacity 1 / transform none, which leaves no stacking context behind. */
+.page > :first-child > * {
+  animation: pageRise 0.5s var(--ease-out) both;
+}
+
+.page > :first-child > :nth-child(2) {
+  animation-delay: 50ms;
+}
+.page > :first-child > :nth-child(3) {
+  animation-delay: 100ms;
+}
+.page > :first-child > :nth-child(4) {
+  animation-delay: 150ms;
+}
+.page > :first-child > :nth-child(5) {
+  animation-delay: 200ms;
+}
+.page > :first-child > :nth-child(n + 6) {
+  animation-delay: 240ms;
+}
+
+@keyframes pageRise {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .page > :first-child > * {
+    animation: none;
   }
 }

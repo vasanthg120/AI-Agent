@@ -104,8 +104,62 @@ export interface EmailIntelligenceItem {
   // cross-reference during sync) — never through this app's own send flow,
   // which is what sentAt above means instead. See EmailIntelligenceSyncService.
   externalReplyDetectedAt?: string;
+  // Set when a LATER reply in the same conversation answered this message.
+  threadRespondedAt?: string;
+  conversationId?: string;
+  // Derived by the backend (never stored, never guessed here) from the fields
+  // above — see backend/src/email-intelligence/email-response-state.ts. THE
+  // answer to "does this still need a reply": `status` above is only the
+  // AI-draft approval lifecycle, so an email answered directly in Outlook is
+  // still status:'pending' but is 'responded' here.
+  responseStatus: EmailResponseStatus;
+  respondedAt?: string;
+  respondedVia?: EmailRespondedVia;
   createdAt: string;
   updatedAt: string;
+}
+
+export type EmailResponseStatus = 'needs_response' | 'responded' | 'resolved';
+export type EmailRespondedVia = 'app' | 'outlook' | 'thread';
+
+export type EmailInboxCounts = Record<EmailResponseStatus, number>;
+
+export interface EmailListParams {
+  // The inbox question: still needs a reply / already answered / nothing to do.
+  view?: EmailResponseStatus;
+  // The AI-draft approval lifecycle, for callers that mean exactly that.
+  status?: 'pending' | 'approved' | 'rejected';
+  dateFrom?: string;
+  dateTo?: string;
+  intents?: string[];
+  search?: string;
+  sort?: 'urgency' | 'newest' | 'oldest';
+  limit?: number;
+  skip?: number;
+}
+
+// The stored messages of one conversation, oldest first, each with its own
+// derived response state.
+export interface EmailThread {
+  conversationId: string | null;
+  messages: Pick<
+    EmailIntelligenceItem,
+    | '_id'
+    | 'subject'
+    | 'fromAddress'
+    | 'receivedAt'
+    | 'bodyPreview'
+    | 'isRead'
+    | 'intent'
+    | 'priority'
+    | 'status'
+    | 'shouldDraft'
+    | 'aiStatus'
+    | 'sendError'
+    | 'responseStatus'
+    | 'respondedAt'
+    | 'respondedVia'
+  >[];
 }
 
 // Phase 14e — a small, dedicated follow-up reminder, created automatically
@@ -186,6 +240,22 @@ export interface ProviderHealthStatus {
   lastError: string | null;
 }
 
+// Empty filters are left off the wire entirely (the backend reads "absent" as
+// "no filter"); the date range's dateFrom/dateTo become the API's from/to.
+function toQueryParams(params: EmailListParams): Record<string, string | number> {
+  const query: Record<string, string | number> = {};
+  if (params.view) query.view = params.view;
+  if (params.status) query.status = params.status;
+  if (params.dateFrom) query.from = params.dateFrom;
+  if (params.dateTo) query.to = params.dateTo;
+  if (params.intents?.length) query.intents = params.intents.join(',');
+  if (params.search?.trim()) query.search = params.search.trim();
+  if (params.sort) query.sort = params.sort;
+  if (params.limit !== undefined) query.limit = params.limit;
+  if (params.skip !== undefined) query.skip = params.skip;
+  return query;
+}
+
 export const emailIntelligenceService = {
   // The only way this feature ever spends an LLM call outside of an explicit
   // approve/reject/regenerate/send action — nothing runs automatically in
@@ -218,13 +288,20 @@ export const emailIntelligenceService = {
     return data;
   },
 
-  async list(
-    status?: 'pending' | 'approved' | 'rejected',
-    range?: { from?: string; to?: string },
-  ): Promise<EmailIntelligenceItem[]> {
-    const { data } = await axiosClient.get<EmailIntelligenceItem[]>('/email-intelligence', {
-      params: { ...(status ? { status } : {}), ...(range?.from ? { from: range.from } : {}), ...(range?.to ? { to: range.to } : {}) },
-    });
+  async list(params: EmailListParams = {}): Promise<EmailIntelligenceItem[]> {
+    const { data } = await axiosClient.get<EmailIntelligenceItem[]>('/email-intelligence', { params: toQueryParams(params) });
+    return data;
+  },
+
+  // The tab badges — same filters as list(), so a count always equals the rows
+  // behind it.
+  async counts(params: Pick<EmailListParams, 'dateFrom' | 'dateTo' | 'intents' | 'search'> = {}): Promise<EmailInboxCounts> {
+    const { data } = await axiosClient.get<EmailInboxCounts>('/email-intelligence/counts', { params: toQueryParams(params) });
+    return data;
+  },
+
+  async getThread(id: string): Promise<EmailThread> {
+    const { data } = await axiosClient.get<EmailThread>(`/email-intelligence/${id}/thread`);
     return data;
   },
 

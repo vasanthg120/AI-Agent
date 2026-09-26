@@ -157,7 +157,7 @@ export class HomeDashboardService {
     }
 
     const [pending, followUps] = await Promise.all([
-      this.emailIntelligenceService.list(userId, 'pending'),
+      this.emailIntelligenceService.list(userId, { view: 'needs_response' }),
       this.emailIntelligenceService.listFollowUps(userId),
     ]);
 

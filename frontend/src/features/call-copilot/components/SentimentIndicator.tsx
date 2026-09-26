@@ -1,22 +1,39 @@
+import { AnimatePresence, motion } from 'framer-motion';
+import clsx from 'clsx';
 import { FiFrown, FiMeh, FiSmile } from 'react-icons/fi';
-import { Badge } from '@/components/ui';
-import type { BadgeVariant } from '@/components/ui';
+import { SPRING_SNAPPY } from '../motion';
+import styles from './SentimentIndicator.module.css';
 
-const SENTIMENT_CONFIG: Record<string, { variant: BadgeVariant; icon: typeof FiSmile; label: string }> = {
-  positive: { variant: 'success', icon: FiSmile, label: 'Positive' },
-  neutral: { variant: 'neutral', icon: FiMeh, label: 'Neutral' },
-  negative: { variant: 'danger', icon: FiFrown, label: 'Negative' },
-  mixed: { variant: 'warning', icon: FiMeh, label: 'Mixed' },
+type Tone = 'success' | 'neutral' | 'danger' | 'warning';
+
+export const SENTIMENT_META: Record<string, { icon: typeof FiSmile; label: string; tone: Tone }> = {
+  positive: { icon: FiSmile, label: 'Positive', tone: 'success' },
+  neutral: { icon: FiMeh, label: 'Neutral', tone: 'neutral' },
+  negative: { icon: FiFrown, label: 'Negative', tone: 'danger' },
+  mixed: { icon: FiMeh, label: 'Mixed', tone: 'warning' },
 };
 
-export function SentimentIndicator({ sentiment }: { sentiment: string | null }) {
-  const config = sentiment ? SENTIMENT_CONFIG[sentiment] : undefined;
-  if (!config) return <Badge variant="neutral">Sentiment: —</Badge>;
-  const Icon = config.icon;
+// How the customer is coming across right now. When it changes the old reading
+// slides out and the new one in, so a shift in mood is noticed, not just re-rendered.
+export function SentimentIndicator({ sentiment, onDark }: { sentiment: string | null; onDark?: boolean }) {
+  const meta = sentiment ? SENTIMENT_META[sentiment] : undefined;
+  const Icon = meta?.icon;
+
   return (
-    <Badge variant={config.variant}>
-      <Icon size={12} style={{ marginRight: 4 }} />
-      {config.label}
-    </Badge>
+    <span className={clsx(styles.pill, styles[meta?.tone ?? 'none'], onDark && styles.onDark)} title="Customer sentiment">
+      <AnimatePresence mode="popLayout" initial={false}>
+        <motion.span
+          key={sentiment ?? 'none'}
+          className={styles.inner}
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={{ opacity: 0, y: -8 }}
+          transition={SPRING_SNAPPY}
+        >
+          {Icon ? <Icon aria-hidden /> : <span className={styles.pending} aria-hidden />}
+          {meta ? meta.label : 'Reading the mood…'}
+        </motion.span>
+      </AnimatePresence>
+    </span>
   );
 }

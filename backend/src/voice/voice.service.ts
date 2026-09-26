@@ -11,6 +11,32 @@ export interface TranscribeResult {
   languageCode: string;
 }
 
+export interface SynthesisRequest {
+  text: string;
+  languageCode: string;
+  provider: string;
+  voiceRef: Record<string, string>;
+  personality?: string;
+}
+
+export interface SynthesisResult {
+  audio: Buffer;
+  contentType: string;
+}
+
+export interface AvailabilityQuery {
+  voiceId: string;
+  provider: string;
+  voiceRef: Record<string, string>;
+}
+
+export interface VoiceAvailabilityResult {
+  available: boolean;
+  reason: string | null;
+}
+
+const AVAILABILITY_TIMEOUT_MS = 8_000;
+
 // Pure pass-through to python-agent's /voice/* routes (which own the actual
 // Sarvam AI call) — mirrors finance-documents.service.ts's callExtraction
 // idiom exactly: a short-lived (5m) service JWT as the bridge credential,
@@ -53,17 +79,41 @@ export class VoiceService {
     }
   }
 
-  async speak(organizationId: string, userId: string, text: string, languageCode: string, speaker?: string): Promise<Buffer> {
+  /** One text-to-speech call with the provider, voice and personality already
+   * decided — this bridge never chooses a voice (VoiceSpeechService does, from
+   * the caller's Voice & Accent configuration). Returns the provider's own
+   * content type: Sarvam speaks WAV, ElevenLabs MP3. */
+  async synthesize(organizationId: string, userId: string, request: SynthesisRequest): Promise<SynthesisResult> {
     const token = this.bridgeToken(userId, organizationId);
     try {
+      const response = await firstValueFrom(
+        this.http.post(`${this.pythonAgentUrl}/voice/speak`, request, {
+          headers: { Authorization: `Bearer ${token}` },
+          responseType: 'arraybuffer',
+        }),
+      );
+      const contentType = String(response.headers['content-type'] ?? 'audio/wav').split(';')[0].trim();
+      return { audio: Buffer.from(response.data as ArrayBuffer), contentType };
+    } catch (err) {
+      throw this.toHttpError(err);
+    }
+  }
+
+  /** Which of these voices can be spoken right now (provider connected and the
+   * voice exists there). Costs nothing — python-agent makes no synthesis call.
+   * Short timeout: this backs the settings page, which must not hang because a
+   * provider is slow (the caller fails open on any error). */
+  async checkAvailability(voices: AvailabilityQuery[]): Promise<Record<string, VoiceAvailabilityResult>> {
+    const token = this.bridgeToken('voice-config', 'platform');
+    try {
       const { data } = await firstValueFrom(
-        this.http.post(
-          `${this.pythonAgentUrl}/voice/speak`,
-          { text, languageCode, speaker },
-          { headers: { Authorization: `Bearer ${token}` }, responseType: 'arraybuffer' },
+        this.http.post<{ voices: Record<string, VoiceAvailabilityResult> }>(
+          `${this.pythonAgentUrl}/voice/availability`,
+          { voices },
+          { headers: { Authorization: `Bearer ${token}` }, timeout: AVAILABILITY_TIMEOUT_MS },
         ),
       );
-      return Buffer.from(data as ArrayBuffer);
+      return data.voices;
     } catch (err) {
       throw this.toHttpError(err);
     }

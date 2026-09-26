@@ -195,6 +195,27 @@ export class CallCopilotUploadService {
       keyTakeaways: ended.keyTakeaways,
       followUpActions: ended.followUpActions,
     });
+
+    // AI Sales Coach — same fire-and-forget-then-emit shape as
+    // call-copilot.gateway.ts's onEnd handler for a live call; not awaited
+    // before processUpload returns so it never adds latency to the upload
+    // pipeline's own already-async completion.
+    void this.callCopilotService
+      .generateCoaching(ended, fullText)
+      .then((coached) => {
+        emit('call:coaching', {
+          overallScore: coached.overallScore,
+          categoryScores: coached.categoryScores,
+          whatWentWell: coached.whatWentWell,
+          whatToImprove: coached.whatToImprove,
+          whatWouldHaveDoneDifferently: coached.whatWouldHaveDoneDifferently,
+          nextCallFocus: coached.nextCallFocus,
+          keyMoments: coached.keyMoments,
+          coachingSummary: coached.coachingSummary,
+          voiceScript: coached.voiceScript,
+        });
+      })
+      .catch((err: Error) => this.logger.warn(`Call copilot coaching emit failed for session ${sessionId}: ${err.message}`));
   }
 
   private async createTranscribeJob(session: CallSessionDocument, audioBuffer: Buffer, languageCode: string): Promise<string> {

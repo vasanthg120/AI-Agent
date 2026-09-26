@@ -107,6 +107,12 @@
 .chevron {
   flex-shrink: 0;
   color: var(--color-text-muted);
+  transition: transform var(--duration-normal) var(--ease-out), color var(--duration-normal) var(--ease-out);
+}
+
+.item:hover .chevron {
+  transform: translateX(3px);
+  color: var(--color-accent);
 }
 
 .empty {

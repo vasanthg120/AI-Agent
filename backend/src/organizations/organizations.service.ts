@@ -1,7 +1,7 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
-import { Organization, OrganizationDocument } from './schemas/organization.schema';
+import { Organization, OrganizationDocument, OrganizationVoiceSettings } from './schemas/organization.schema';
 import { Store, StoreDocument } from './schemas/store.schema';
 
 @Injectable()
@@ -111,6 +111,39 @@ export class OrganizationsService {
     if (patch.emailEnabled !== undefined) update['notificationPolicy.emailEnabled'] = patch.emailEnabled;
     if (patch.pushEnabled !== undefined) update['notificationPolicy.pushEnabled'] = patch.pushEnabled;
     return this.orgModel.findByIdAndUpdate(organizationId, update, { new: true }).exec();
+  }
+
+  // --- Voice & Accent (persistence only — the rules live in
+  // voice/voice-config.service.ts) ---
+
+  async getVoiceSettings(organizationId: string): Promise<OrganizationVoiceSettings> {
+    const org = await this.orgModel.findById(organizationId).select({ voiceSettings: 1 }).lean().exec();
+    return org?.voiceSettings ?? {};
+  }
+
+  /** `null` clears a field back to "not set"; `undefined` leaves it alone —
+   * same distinction the caller's PUT body makes. Every write stamps who
+   * changed it and when, for the settings page's "last changed by" line. */
+  async updateVoiceSettings(
+    organizationId: string,
+    patch: { defaultVoiceId?: string | null; defaultPersonality?: string | null; allowUserOverride?: boolean },
+    updatedBy: string,
+  ): Promise<OrganizationVoiceSettings> {
+    const set: Record<string, unknown> = { 'voiceSettings.updatedBy': updatedBy, 'voiceSettings.updatedAt': new Date() };
+    const unset: Record<string, ''> = {};
+    for (const key of ['defaultVoiceId', 'defaultPersonality'] as const) {
+      const value = patch[key];
+      if (value === null) unset[`voiceSettings.${key}`] = '';
+      else if (value !== undefined) set[`voiceSettings.${key}`] = value;
+    }
+    if (patch.allowUserOverride !== undefined) set['voiceSettings.allowUserOverride'] = patch.allowUserOverride;
+
+    const org = await this.orgModel
+      .findByIdAndUpdate(organizationId, { $set: set, ...(Object.keys(unset).length ? { $unset: unset } : {}) }, { new: true })
+      .select({ voiceSettings: 1 })
+      .lean()
+      .exec();
+    return org?.voiceSettings ?? {};
   }
 
   private async uniqueSlug(name: string): Promise<string> {

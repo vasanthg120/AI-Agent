@@ -5,6 +5,9 @@ export interface NavItem {
   label: string;
   path: string;
   icon: IconType;
+  // One-line plain-language explanation of the page, shown in the sidebar's
+  // hover card and next to the page title in the TopBar.
+  hint?: string;
   badge?: number;
   // Only agent_user ever populates this — admin/legacy user roles always see everything.
   hideForRoles?: string[];

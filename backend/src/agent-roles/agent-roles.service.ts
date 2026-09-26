@@ -17,11 +17,6 @@ interface RoleGenerateResult {
   name: string;
   department: string;
   description: string;
-  goals: string[];
-  responsibilities: string[];
-  dailyTasks: string[];
-  weeklyTasks: string[];
-  kpis: { name: string; description: string }[];
   systemPrompt: string;
 }
 
@@ -32,11 +27,6 @@ interface RoleGenerateFromDescriptionResult {
   name: string;
   department: string;
   description: string;
-  goals: string[];
-  responsibilities: string[];
-  dailyTasks: string[];
-  weeklyTasks: string[];
-  kpis: { name: string; description: string }[];
   systemPrompt: string;
 }
 
@@ -97,11 +87,6 @@ export class AgentRolesService {
       name: data.name,
       department: data.department,
       description: data.description,
-      goals: data.goals,
-      responsibilities: data.responsibilities,
-      dailyTasks: data.dailyTasks,
-      weeklyTasks: data.weeklyTasks,
-      kpis: data.kpis,
       systemPrompt: data.systemPrompt,
       sourceDocumentName: data.sourceDocumentName,
       sourceDocumentId: data.documentId,
@@ -131,11 +116,6 @@ export class AgentRolesService {
       name: data.name,
       department: data.department,
       description: data.description,
-      goals: data.goals,
-      responsibilities: data.responsibilities,
-      dailyTasks: data.dailyTasks,
-      weeklyTasks: data.weeklyTasks,
-      kpis: data.kpis,
       systemPrompt: data.systemPrompt,
       status: 'draft',
       avatarColor,
@@ -156,11 +136,6 @@ export class AgentRolesService {
       name: dto.name,
       department: dto.department ?? '',
       description: dto.description ?? '',
-      goals: dto.goals ?? [],
-      responsibilities: dto.responsibilities ?? [],
-      dailyTasks: dto.dailyTasks ?? [],
-      weeklyTasks: dto.weeklyTasks ?? [],
-      kpis: dto.kpis ?? [],
       systemPrompt: dto.systemPrompt,
       assignedDepartments: dto.assignedDepartments ?? [],
       assignedUserIds: dto.assignedUserIds ?? [],

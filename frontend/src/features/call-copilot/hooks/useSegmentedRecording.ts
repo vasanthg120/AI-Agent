@@ -33,6 +33,9 @@ export type MicErrorReason = 'unsupported' | 'permission-denied' | 'no-device' |
 
 export interface UseSegmentedRecordingResult {
   isRecording: boolean;
+  // The live microphone stream while recording — only for showing a level meter;
+  // capture itself never goes through it.
+  stream: MediaStream | null;
   error: MicErrorReason | null;
   start: () => Promise<MicErrorReason | null>;
   stop: () => void;
@@ -45,6 +48,7 @@ export interface UseSegmentedRecordingResult {
  * the underlying MediaStream, so there's no repeated permission prompt. */
 export function useSegmentedRecording(onSegment: (blob: Blob, sequence: number) => void): UseSegmentedRecordingResult {
   const [isRecording, setIsRecording] = useState(false);
+  const [stream, setStream] = useState<MediaStream | null>(null);
   const [error, setError] = useState<MicErrorReason | null>(null);
 
   const streamRef = useRef<MediaStream | null>(null);
@@ -97,6 +101,7 @@ export function useSegmentedRecording(onSegment: (blob: Blob, sequence: number) 
       stoppingRef.current = false;
       sequenceRef.current = 0;
       armSegment(stream);
+      setStream(stream);
       setIsRecording(true);
       return null;
     } catch (err) {
@@ -118,10 +123,11 @@ export function useSegmentedRecording(onSegment: (blob: Blob, sequence: number) 
     if (recorderRef.current && recorderRef.current.state !== 'inactive') recorderRef.current.stop();
     streamRef.current?.getTracks().forEach((t) => t.stop());
     streamRef.current = null;
+    setStream(null);
     setIsRecording(false);
   }, []);
 
-  return { isRecording, error, start, stop };
+  return { isRecording, stream, error, start, stop };
 }
 
 export function micErrorMessage(reason: MicErrorReason): string {

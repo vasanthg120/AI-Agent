@@ -1,7 +1,9 @@
 import { useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Tabs } from '@/components/ui';
+import { AnimatePresence, motion } from 'framer-motion';
+import { FiBookOpen, FiBriefcase, FiFileText } from 'react-icons/fi';
+import { PageHeader, Tabs } from '@/components/ui';
 import { useAuthStore } from '@/stores/authStore';
 import { hasRole } from '@/utils/roles';
 import { businessProfileService } from '@/services/businessProfileService';
@@ -20,8 +22,8 @@ import styles from './business-knowledge.module.css';
 // business_knowledge_document Qdrant points org-scoped — see
 // python-agent/app/tools/business_search_tool.py), not a dedicated advisor here.
 const TAB_ITEMS = [
-  { id: 'profile', label: 'Business Profile' },
-  { id: 'documents', label: 'Documents' },
+  { id: 'profile', label: 'Business Profile', icon: <FiBriefcase /> },
+  { id: 'documents', label: 'Documents', icon: <FiFileText /> },
 ];
 const TAB_IDS = TAB_ITEMS.map((t) => t.id);
 
@@ -50,29 +52,36 @@ export function BusinessKnowledgePage() {
 
   return (
     <div className={styles.page}>
-      <div className={styles.headerRow}>
-        <div>
-          <div className={styles.pageTitle}>Business Knowledge</div>
-          <div className={styles.pageSubtitle}>
-            The AI's permanent business brain — every chat persona can draw on what's saved here.
-          </div>
-        </div>
-      </div>
+      <PageHeader
+        icon={FiBookOpen}
+        title="Business Knowledge"
+        subtitle="The AI's permanent business brain — everything saved here, every AI assistant in your organization can use."
+      />
 
       <div className={styles.tabBar}>
         <Tabs items={TAB_ITEMS} activeId={activeTab} onChange={changeTab} />
       </div>
 
-      {activeTab === 'profile' && (
-        <BusinessProfileForm
-          profile={profile}
-          isLoading={isLoading}
-          canEdit={canEdit}
-          onSaved={(saved) => queryClient.setQueryData(['business-profile'], saved)}
-        />
-      )}
+      <AnimatePresence mode="wait" initial={false}>
+        <motion.div
+          key={activeTab}
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={{ opacity: 0, y: -6 }}
+          transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
+        >
+          {activeTab === 'profile' && (
+            <BusinessProfileForm
+              profile={profile}
+              isLoading={isLoading}
+              canEdit={canEdit}
+              onSaved={(saved) => queryClient.setQueryData(['business-profile'], saved)}
+            />
+          )}
 
-      {activeTab === 'documents' && <BusinessKnowledgeDocumentsSection canEdit={canEdit} />}
+          {activeTab === 'documents' && <BusinessKnowledgeDocumentsSection canEdit={canEdit} />}
+        </motion.div>
+      </AnimatePresence>
     </div>
   );
 }

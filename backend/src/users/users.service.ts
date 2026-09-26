@@ -7,7 +7,15 @@ import { AgentRole, AgentRoleDocument } from '../agent-roles/schemas/agent-role.
 import { CHAT_AGENTS } from '../chat/agents';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
-import { PushSubscriptionEntry, SessionEntry, TwoFactorBackupCode, User, UserDocument } from './schemas/user.schema';
+import { UpdateProfileDto } from './dto/update-profile.dto';
+import {
+  PushSubscriptionEntry,
+  SessionEntry,
+  TwoFactorBackupCode,
+  User,
+  UserDocument,
+  UserVoicePreferences,
+} from './schemas/user.schema';
 
 const SALT_ROUNDS = 12;
 // A person has a handful of devices/browsers, not an unbounded stream —
@@ -265,6 +273,35 @@ export class UsersService {
     if (patch.mobilePush !== undefined) update['notificationPreferences.mobilePush'] = patch.mobilePush;
     if (patch.email !== undefined) update['notificationPreferences.email'] = patch.email;
     return this.userModel.findByIdAndUpdate(userId, update, { new: true }).exec();
+  }
+
+  // --- Voice & Accent preference (persistence only — the rules live in
+  // voice/voice-config.service.ts) ---
+
+  async getVoicePreferences(userId: string): Promise<UserVoicePreferences> {
+    const user = await this.userModel.findById(userId).select({ voicePreferences: 1 }).lean().exec();
+    return user?.voicePreferences ?? {};
+  }
+
+  /** `null` clears a field; `undefined` leaves it alone. */
+  async updateVoicePreferences(
+    userId: string,
+    patch: { voiceId?: string | null; personality?: string | null },
+  ): Promise<UserVoicePreferences> {
+    const set: Record<string, string> = {};
+    const unset: Record<string, ''> = {};
+    for (const key of ['voiceId', 'personality'] as const) {
+      const value = patch[key];
+      if (value === null) unset[`voicePreferences.${key}`] = '';
+      else if (value !== undefined) set[`voicePreferences.${key}`] = value;
+    }
+    const update: Record<string, unknown> = {};
+    if (Object.keys(set).length) update.$set = set;
+    if (Object.keys(unset).length) update.$unset = unset;
+    if (!Object.keys(update).length) return this.getVoicePreferences(userId);
+
+    const user = await this.userModel.findByIdAndUpdate(userId, update, { new: true }).select({ voicePreferences: 1 }).lean().exec();
+    return user?.voicePreferences ?? {};
   }
 
   // --- Two-factor authentication ---

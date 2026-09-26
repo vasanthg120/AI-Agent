@@ -71,7 +71,7 @@ export function AiFollowupSummarySection() {
 
   const { data: pendingEmails } = useQuery({
     queryKey: ['dash-followups-pending-emails'],
-    queryFn: () => emailIntelligenceService.list('pending'),
+    queryFn: () => emailIntelligenceService.list({ view: 'needs_response' }),
     staleTime: 30_000,
   });
 

@@ -96,6 +96,14 @@ class Settings:
     sarvam_stt_model: str = os.environ.get("SARVAM_STT_MODEL", "saaras:v3")
     sarvam_tts_model: str = os.environ.get("SARVAM_TTS_MODEL", "bulbul:v3")
 
+    # Voice & Accent — ElevenLabs supplies the Australian/American/British
+    # English voices Sarvam can't (see app/integrations/tts/elevenlabs.py).
+    # Same platform-wide, MongoDB-only credential rule as Sarvam above
+    # (provider "elevenlabs", organizationId="platform") — no key here.
+    # multilingual_v2 is ElevenLabs' current default and the model that honors
+    # the style/stability personality presets.
+    elevenlabs_tts_model: str = os.environ.get("ELEVENLABS_TTS_MODEL", "eleven_multilingual_v2")
+
     # --- Response-completeness / truncation controls ---
     # Was a hardcoded 1024 in anthropic_client.call() — the main planner/
     # chat-reply function, used for every ordinary turn. 1024 tokens

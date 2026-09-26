@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import type { ReactNode } from 'react';
 import toast from 'react-hot-toast';
 import { useNavigate } from 'react-router-dom';
 import {
@@ -145,6 +146,7 @@ export function BillingPage() {
 
       <WalletBalanceCard
         wallet={wallet}
+        onAddCredits={() => navigate(ROUTES.addCredits)}
         onEnableAutoPay={() => {
           if (!canManageBilling) {
             toast.error('Only an owner or admin can manage Auto Recharge.');
@@ -156,7 +158,12 @@ export function BillingPage() {
       />
 
       <div className={styles.planRow}>
-        <CurrentPlanCard wallet={wallet} subscription={subscription} onUpgrade={() => navigate(ROUTES.pricing)} />
+        <CurrentPlanCard
+          wallet={wallet}
+          subscription={subscription}
+          onUpgrade={() => navigate(ROUTES.pricing)}
+          onAddCredits={() => navigate(ROUTES.addCredits)}
+        />
         {upgradeCandidate && (
           <PlanPriceCard
             plan={upgradeCandidate}
@@ -220,6 +227,7 @@ export function BillingPage() {
               autoRechargePolicy={wallet.autoRechargePolicy}
               paymentMethods={paymentMethods}
               onChanged={loadAll}
+              onRequirePurchase={() => navigate(ROUTES.addCredits)}
             />
           </SectionCard>
         </div>

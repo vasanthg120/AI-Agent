@@ -3,7 +3,7 @@ import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-quer
 import toast from 'react-hot-toast';
 import { FiAlertTriangle, FiCornerUpLeft, FiMail, FiRefreshCw, FiSend, FiUserPlus } from 'react-icons/fi';
 import type { IconType } from 'react-icons';
-import { Button, Card, Skeleton } from '@/components/ui';
+import { AnimatedNumber, Button, Card, Skeleton } from '@/components/ui';
 import { useAuthStore } from '@/stores/authStore';
 import { hasRole } from '@/utils/roles';
 import { dayjs } from '@/utils/date';

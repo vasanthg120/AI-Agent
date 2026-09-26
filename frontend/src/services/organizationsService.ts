@@ -15,7 +15,17 @@ export interface NotificationPolicy {
   pushEnabled: boolean;
 }
 
+export interface Organization {
+  _id: string;
+  name: string;
+}
+
 export const organizationsService = {
+  async getMine(): Promise<Organization> {
+    const { data } = await axiosClient.get<Organization>('/organizations/me');
+    return data;
+  },
+
   async listStores(): Promise<Store[]> {
     const { data } = await axiosClient.get<Store[]>('/organizations/stores');
     return data;

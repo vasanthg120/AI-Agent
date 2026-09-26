@@ -24,6 +24,12 @@ const CRM_PROVIDERS = new Set(['crm', 'prospectconnect']);
 
 const PROVIDER_SLUG = /^[a-z0-9][a-z0-9_-]{0,63}$/i;
 
+// The platform-wide AI provider credentials Platform Admin manages (see
+// AdminIntegrationsController) — the only providers python-agent's
+// /admin/providers/:provider/verify route accepts.
+export const PLATFORM_PROVIDERS = ['anthropic', 'sarvam', 'elevenlabs', 'groq'] as const;
+export type PlatformProvider = (typeof PLATFORM_PROVIDERS)[number];
+
 export interface IntegrationStatus {
   connected: boolean;
   authType?: AuthType;
@@ -168,7 +174,7 @@ export class IntegrationsService {
    * /admin/providers/{provider}/verify route (it owns the actual API key,
    * this service never sees it decrypted here). Never throws on a bad/
    * expired key — that's a normal {ok:false} result, not a 500. */
-  async verifyPlatformProvider(provider: 'anthropic' | 'sarvam' | 'groq'): Promise<{ ok: boolean; message: string }> {
+  async verifyPlatformProvider(provider: PlatformProvider): Promise<{ ok: boolean; message: string }> {
     const token = this.jwt.sign({ sub: 'platform-admin' }, { expiresIn: '5m' });
     try {
       const { data } = await firstValueFrom(

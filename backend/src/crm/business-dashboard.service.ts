@@ -15,6 +15,7 @@ import {
   EmailIntelligenceItemDocument,
 } from '../email-intelligence/schemas/email-intelligence-item.schema';
 import { RELEVANT_EMAIL_INTENTS } from '../email-intelligence/email-intelligence.service';
+import { needsResponseMatch } from '../email-intelligence/email-response-state';
 import { Deal, DealDocument } from './schemas/deal.schema';
 import { SalesAnalyticsService } from './sales-analytics.service';
 
@@ -405,7 +406,10 @@ export class BusinessDashboardService {
             $match: {
               organizationId,
               ...relevantIntent,
-              status: 'pending',
+              // Missed = a reply is owed and nobody has given one, anywhere —
+              // the shared definition (this query used to check only the draft's
+              // approval status, so a reply typed into Outlook still counted).
+              ...needsResponseMatch(),
               receivedAt: { $gte: start, $lt: end, $lte: missedCutoff },
             },
           },

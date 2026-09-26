@@ -16,7 +16,7 @@ import {
   FiAlertTriangle,
 } from 'react-icons/fi';
 import { Button, Card, Dropdown, Input, Modal, StatTile } from '@/components/ui';
-import { useChatStore, type ConversationFilter } from '@/stores/chatStore';
+import { useChatStore } from '@/stores/chatStore';
 import { ROUTES } from '@/constants/routes';
 import { formatRelativeTime, getConversationGroup, CONVERSATION_GROUP_LABELS, type ConversationGroupKey } from '@/utils/date';
 import type { ChatMessage, Conversation } from '@/types';

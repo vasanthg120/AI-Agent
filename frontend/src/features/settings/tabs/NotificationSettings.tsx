@@ -64,7 +64,7 @@ export function NotificationSettings() {
 
   if (loading) {
     return (
-      <SettingsSection
+      <SettingsSection icon={<FiBell />}
         icon={<FiBell />}
         title="Channels"
         description="Choose where you'd like to receive notifications."
@@ -78,7 +78,7 @@ export function NotificationSettings() {
 
   if (loadError || !prefs) {
     return (
-      <SettingsSection
+      <SettingsSection icon={<FiBell />}
         icon={<FiBell />}
         title="Channels"
         description="Choose where you'd like to receive notifications."

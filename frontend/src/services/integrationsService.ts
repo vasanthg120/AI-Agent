@@ -279,6 +279,15 @@ export const integrationsService = {
     return data;
   },
 
+  // Gmail mirrors Outlook's status shape closely (no `canSend` — Gmail send
+  // isn't gated the same way) — backend route already existed
+  // (backend/src/gmail/gmail.controller.ts's status route), just wasn't
+  // wrapped on the frontend yet.
+  async getGmailStatus(): Promise<{ connected: boolean; email?: string; needsReauth?: boolean }> {
+    const { data } = await axiosClient.get<{ connected: boolean; email?: string; needsReauth?: boolean }>('/gmail/status');
+    return data;
+  },
+
   async getOutlookConnectUrl(): Promise<string> {
     const { data } = await axiosClient.get<{ url: string }>('/outlook/connect-url');
     return data.url;

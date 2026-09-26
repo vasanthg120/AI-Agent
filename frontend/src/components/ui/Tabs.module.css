@@ -17,25 +17,51 @@
 
 .tab {
   position: relative;
+  isolation: isolate;
   display: flex;
   align-items: center;
   gap: var(--space-2);
   padding: var(--space-3) var(--space-4);
   background: transparent;
   border: none;
+  border-radius: var(--radius-md) var(--radius-md) 0 0;
   color: var(--color-text-muted);
   font-size: var(--text-sm);
   font-weight: 600;
   cursor: pointer;
   white-space: nowrap;
+  transition: color var(--duration-normal) var(--ease-out);
 }
 
 .tab:hover {
   color: var(--color-text-primary);
 }
 
+.tab:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: -2px;
+}
+
 .tabActive {
   color: var(--color-accent);
+}
+
+.icon {
+  display: inline-flex;
+  transition: transform var(--duration-slow) var(--ease-out);
+}
+
+.tab:hover .icon {
+  transform: scale(1.12);
+}
+
+/* Soft tint behind the active tab; glides with the underline. */
+.activeBg {
+  position: absolute;
+  inset: 4px 0 0;
+  z-index: -1;
+  border-radius: var(--radius-md) var(--radius-md) 0 0;
+  background: linear-gradient(180deg, transparent 0%, var(--color-bg-hover) 100%);
 }
 
 .indicator {
@@ -66,6 +92,13 @@
 
 .vertical .tab {
   justify-content: flex-start;
+  border-radius: var(--radius-md) 0 0 var(--radius-md);
+}
+
+.vertical .activeBg {
+  inset: 0;
+  border-radius: var(--radius-md) 0 0 var(--radius-md);
+  background: linear-gradient(90deg, transparent 0%, var(--color-bg-hover) 100%);
 }
 
 .vertical .indicator {

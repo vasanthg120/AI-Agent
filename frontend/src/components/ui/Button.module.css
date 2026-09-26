@@ -9,13 +9,21 @@
   font-weight: 600;
   white-space: nowrap;
   cursor: pointer;
-  transition: background-color var(--duration-fast) var(--ease-out), border-color var(--duration-fast) var(--ease-out),
-    transform var(--duration-fast) var(--ease-out), opacity var(--duration-fast) var(--ease-out);
+  transition: background-color var(--duration-normal) var(--ease-out), border-color var(--duration-normal) var(--ease-out),
+    color var(--duration-normal) var(--ease-out), box-shadow var(--duration-normal) var(--ease-out),
+    transform var(--duration-fast) var(--ease-out), opacity var(--duration-fast) var(--ease-out),
+    filter var(--duration-normal) var(--ease-out);
   user-select: none;
 }
 
+/* A small "press" that springs back — tactile without moving the layout. */
 .button:active:not(:disabled) {
-  transform: translateY(1px);
+  transform: scale(0.97);
+}
+
+.button:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--color-accent-muted);
 }
 
 .button:disabled {
@@ -50,6 +58,7 @@
 }
 .primary:hover:not(:disabled) {
   filter: brightness(1.08);
+  box-shadow: 0 6px 18px rgba(217, 111, 31, 0.28);
 }
 
 .secondary {

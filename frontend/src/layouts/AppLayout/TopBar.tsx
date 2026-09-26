@@ -1,6 +1,7 @@
 import { useMemo } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import clsx from 'clsx';
+import { AnimatePresence, motion } from 'framer-motion';
 import { FiBell, FiSidebar, FiMenu, FiCommand, FiChevronRight } from 'react-icons/fi';
 import { IconButton, Avatar } from '@/components/ui';
 import { useUiStore } from '@/stores/uiStore';
@@ -31,14 +32,14 @@ export function TopBar({ onMenuClick }: TopBarProps) {
   // Two-level breadcrumb: the owning nav group's label (Workspace/
   // Operations), then the page title — falls back to a bare title for
   // routes that aren't in NAV_GROUPS (Chat, Profile, Settings, Help).
-  const breadcrumb = useMemo(() => {
+  const breadcrumb = useMemo((): { group: string | null; title: string; hint?: string } => {
     if (location.pathname.startsWith(ROUTES.chat)) return { group: null, title: 'Chat' };
     if (location.pathname.startsWith(ROUTES.profile)) return { group: null, title: 'Profile' };
     if (location.pathname.startsWith(ROUTES.settings)) return { group: null, title: 'Settings' };
     if (location.pathname.startsWith(ROUTES.help)) return { group: null, title: 'Help & Support' };
     for (const group of NAV_GROUPS) {
       const match = group.items.find((item) => location.pathname.startsWith(item.path));
-      if (match) return { group: group.label ?? null, title: match.label };
+      if (match) return { group: group.label ?? null, title: match.label, hint: match.hint };
     }
     return { group: null, title: 'HaiVE AI' };
   }, [location.pathname]);
@@ -56,7 +57,19 @@ export function TopBar({ onMenuClick }: TopBarProps) {
               <FiChevronRight className={styles.breadcrumbSeparator} />
             </>
           )}
-          <span className={styles.breadcrumbTitle}>{breadcrumb.title}</span>
+          <AnimatePresence mode="wait" initial={false}>
+            <motion.span
+              key={breadcrumb.title}
+              className={styles.breadcrumbCurrent}
+              initial={{ opacity: 0, y: 6 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -6 }}
+              transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
+            >
+              <span className={styles.breadcrumbTitle}>{breadcrumb.title}</span>
+              {breadcrumb.hint && <span className={styles.breadcrumbHint}>{breadcrumb.hint}</span>}
+            </motion.span>
+          </AnimatePresence>
         </span>
       </div>
       <div className={styles.right}>

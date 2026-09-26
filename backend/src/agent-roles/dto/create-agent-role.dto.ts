@@ -1,12 +1,7 @@
-import { Type } from 'class-transformer';
-import { IsArray, IsIn, IsOptional, IsString, ValidateNested } from 'class-validator';
+import { IsArray, IsIn, IsOptional, IsString } from 'class-validator';
+import { ROLE_CATEGORIES, RoleCategory } from '../schemas/agent-role.schema';
 
-class AgentRoleKpiDto {
-  @IsString() name: string;
-  @IsString() description: string;
-}
-
-// Agent Builder Phase 1 — Manual and Template creation both post here
+// Agent Builder redesign — Manual and Template creation both post here
 // (Template just pre-fills these fields client-side from a constant, no
 // server-side concept of "template" exists). No file, no AI call — the
 // admin writes everything directly, matching Describe/Documents' own
@@ -16,19 +11,8 @@ class AgentRoleKpiDto {
 export class CreateAgentRoleDto {
   @IsString() name: string;
 
-  @IsOptional() @IsString() department?: string;
+  @IsOptional() @IsIn(ROLE_CATEGORIES) department?: RoleCategory;
   @IsOptional() @IsString() description?: string;
-
-  @IsOptional() @IsArray() @IsString({ each: true }) goals?: string[];
-  @IsOptional() @IsArray() @IsString({ each: true }) responsibilities?: string[];
-  @IsOptional() @IsArray() @IsString({ each: true }) dailyTasks?: string[];
-  @IsOptional() @IsArray() @IsString({ each: true }) weeklyTasks?: string[];
-
-  @IsOptional()
-  @IsArray()
-  @ValidateNested({ each: true })
-  @Type(() => AgentRoleKpiDto)
-  kpis?: AgentRoleKpiDto[];
 
   @IsString() systemPrompt: string;
 

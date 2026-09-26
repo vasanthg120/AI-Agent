@@ -11,6 +11,11 @@ import { correlateSingleEmail, EmailCorrelationContext } from '../crm/customer-g
 import { EmailSlaService } from '../email-sla/email-sla.service';
 import { periodToDateRange } from '../common/period.util';
 import { classifyEmailDeterministically } from './email-preclassification.util';
+import {
+  EmailResponseStatus,
+  needsResponseMatch,
+  responseStatusMatch,
+} from './email-response-state';
 import { CustomerActivityService, TodaysEmail } from '../crm/customer-activity.service';
 import { QuotesService } from '../crm/quotes.service';
 import { JwtPayload } from '../auth/jwt-payload.interface';
@@ -25,6 +30,10 @@ import { EmailIntelligenceItem, EmailIntelligenceItemDocument } from './schemas/
 
 const DUPLICATE_KEY_ERROR = 11000;
 const EMAIL_HISTORY_LIMIT = 50;
+const SEVERITY_ORDER = ['low', 'medium', 'high', 'urgent'];
+const LIST_DEFAULT_LIMIT = 100;
+const LIST_MAX_LIMIT = 200;
+const SEARCH_MAX_LENGTH = 100;
 const RECENT_SENTIMENT_WINDOW_DAYS = 30;
 const FOLLOW_UP_DEFAULT_DAYS = 3;
 
@@ -54,6 +63,26 @@ const RELEVANT_INTENT_LABELS: Record<string, string> = {
 };
 
 type RelationshipView = Awaited<ReturnType<CustomerActivityService['getRelationshipView']>>;
+
+// One page of the inbox. `status` is the AI-draft approval lifecycle
+// (pending/approved/rejected) for callers that mean exactly that; `view` is the
+// question the inbox is actually about — does this still need an answer — and
+// is defined once in email-response-state.ts.
+export interface ListEmailsQuery {
+  status?: 'pending' | 'approved' | 'rejected';
+  view?: EmailResponseStatus;
+  from?: string;
+  to?: string;
+  intents?: string[];
+  search?: string;
+  sort?: 'urgency' | 'newest' | 'oldest';
+  limit?: number;
+  skip?: number;
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
 
 // The narrow subset computeRiskScore actually reads — widened (Business
 // Intelligence's AI Follow-Up Summary, section 6) so the same heuristic can
@@ -124,32 +153,95 @@ export class EmailIntelligenceService {
   // back to fetch Sent Items for this user, i.e. the oldest still-open
   // question we need an answer for. null means nothing to check, so the
   // caller can skip the Sent Items fetch entirely rather than pointlessly
-  // hitting Graph.
+  // hitting Graph. "Open" is the shared needs-a-reply definition, so an
+  // approved draft that hasn't gone out (or whose send failed) is checked too —
+  // the user may well have answered it in Outlook instead.
   async getEarliestPendingReceivedAt(userId: string): Promise<Date | null> {
     const oldest = await this.itemModel
-      .findOne({ userId, status: 'pending', conversationId: { $exists: true, $ne: '' }, externalReplyDetectedAt: { $exists: false } })
+      .findOne({ userId, conversationId: { $exists: true, $ne: '' }, ...needsResponseMatch() })
       .sort({ receivedAt: 1 })
       .select('receivedAt')
       .exec();
     return oldest?.receivedAt ?? null;
   }
 
-  // Applies detected replies in bulk. The filter (not just the lookup that
-  // built `repliesByConversationId`) re-enforces status:'pending' +
-  // externalReplyDetectedAt unset + receivedAt before the reply — so this
-  // stays correct even if something else updated the item between the
-  // lookup and this write (e.g. the user approved/sent it through the app
-  // in the meantime, which should win, not get overwritten).
-  async markExternalReplies(userId: string, repliesByConversationId: Map<string, Date>): Promise<number> {
-    if (repliesByConversationId.size === 0) return 0;
+  // Keeps the stored read/unread flag in step with the mailbox for messages
+  // already ingested (it is otherwise captured once and goes stale). Touches
+  // ONLY isRead — read state has no bearing on whether an email was answered,
+  // so opening, reading or marking-unread can never move it between the
+  // Needs Response / Responded / Resolved views. Only rows whose flag differs
+  // are written.
+  async refreshReadState(userId: string, emails: { id: string; isRead: boolean }[]): Promise<number> {
+    if (emails.length === 0) return 0;
     const result = await this.itemModel.bulkWrite(
-      [...repliesByConversationId.entries()].map(([conversationId, sentAt]) => ({
+      emails.map((email) => ({
+        updateOne: {
+          filter: { userId, externalMessageId: email.id, isRead: { $ne: email.isRead } },
+          update: { $set: { isRead: email.isRead } },
+        },
+      })),
+      { ordered: false },
+    );
+    return result.modifiedCount ?? 0;
+  }
+
+  // Applies replies found in Outlook's Sent Items — the latest outbound message
+  // time per conversation. Every still-open message in that conversation
+  // received BEFORE the reply is answered by it (see coverThreads).
+  async markExternalReplies(userId: string, repliesByConversationId: Map<string, Date>): Promise<number> {
+    return this.coverThreads(userId, repliesByConversationId, 'outlook');
+  }
+
+  // A reply sent at T answers every still-open message in its conversation that
+  // arrived before T — not just the one it was addressed to — so an older
+  // message can never linger as pending, or resurface as "missed", once the
+  // thread has been answered. A message that arrives AFTER T is a new question
+  // and is left alone to be judged on its own. 'app' is a reply sent through
+  // this app's Send (threadRespondedAt; the replied-to message itself carries
+  // sentAt); 'outlook' is one found in Sent Items (externalReplyDetectedAt).
+  //
+  // The write re-enforces the open filter (not just the lookup), so this stays
+  // correct if something else answered or rejected a message in between — that
+  // outcome wins rather than being overwritten. Each newly-answered message also
+  // closes its SLA record, so an answered email can't later breach and spawn a
+  // follow-up reminder. Returns how many messages were newly marked.
+  private async coverThreads(userId: string, replies: Map<string, Date>, via: 'app' | 'outlook'): Promise<number> {
+    if (replies.size === 0) return 0;
+    const field = via === 'app' ? 'threadRespondedAt' : 'externalReplyDetectedAt';
+
+    const candidates = await this.itemModel
+      .find({ userId, conversationId: { $in: [...replies.keys()] }, ...needsResponseMatch() })
+      .select('_id organizationId conversationId receivedAt')
+      .lean()
+      .exec();
+
+    const openByConversation = new Map<string, typeof candidates>();
+    for (const candidate of candidates) {
+      const conversationId = candidate.conversationId ?? '';
+      const repliedAt = replies.get(conversationId);
+      if (!repliedAt || candidate.receivedAt >= repliedAt) continue;
+      openByConversation.set(conversationId, [...(openByConversation.get(conversationId) ?? []), candidate]);
+    }
+    if (openByConversation.size === 0) return 0;
+
+    const result = await this.itemModel.bulkWrite(
+      [...openByConversation.entries()].map(([conversationId, rows]) => ({
         updateMany: {
-          filter: { userId, conversationId, status: 'pending', externalReplyDetectedAt: { $exists: false }, receivedAt: { $lt: sentAt } },
-          update: { $set: { externalReplyDetectedAt: sentAt } },
+          filter: { _id: { $in: rows.map((r) => r._id) }, ...needsResponseMatch() },
+          update: { $set: { [field]: replies.get(conversationId)! } },
         },
       })),
     );
+
+    for (const [conversationId, rows] of openByConversation) {
+      for (const row of rows) {
+        this.emailSla
+          .recordFirstResponse(row.organizationId, row._id.toString(), replies.get(conversationId)!)
+          .catch((err) =>
+            this.logger.error(`SLA first-response recording failed for ${row._id.toString()}: ${(err as Error).message}`),
+          );
+      }
+    }
     return result.modifiedCount ?? 0;
   }
 
@@ -633,13 +725,12 @@ export class EmailIntelligenceService {
         organizationId,
         ...userFilter,
         ...relevantFilter,
-        status: 'pending',
-        // The real fix: an item can only ever be genuinely missed if nobody
-        // replied to it at all — including directly in Outlook. Without
-        // this exclusion, an email the salesperson already answered outside
-        // this app stayed 'pending' forever and got counted as missed the
-        // moment it crossed 24h, even though nothing was actually overdue.
-        externalReplyDetectedAt: { $exists: false },
+        // Missed = a reply is owed, nobody has given one (in this app, in
+        // Outlook, or later in the thread), and it's been more than 24h. The
+        // shared needs-response definition — not `status`, which only tracks
+        // the AI draft's approval — so an answered email can't be counted
+        // missed, and one whose approved draft never actually went out still is.
+        ...needsResponseMatch(),
         receivedAt: { $gte: start, $lt: end, $lte: missedCutoff },
       };
     }
@@ -832,13 +923,12 @@ export class EmailIntelligenceService {
       intent: { $in: RELEVANT_EMAIL_INTENTS },
       receivedAt: { $gte: start, $lt: end },
     };
-    // Same externalReplyDetectedAt exclusion as buildActivityKindMatch's
-    // 'missed' branch — an item replied to directly in Outlook is done, not
-    // still pending, even though its own status field never leaves 'pending'.
+    // The same needs-response definition as buildActivityKindMatch's 'missed'
+    // branch, just still inside the 24h window — an item answered anywhere is
+    // done, whatever its approval status says.
     const pendingMatch = {
       ...assignedMatch,
-      status: 'pending',
-      externalReplyDetectedAt: { $exists: false },
+      ...needsResponseMatch(),
       receivedAt: { $gte: start, $lt: end, $gt: missedCutoff },
     };
     // "Completed" = handled at all, whether the reply went out through this
@@ -849,7 +939,11 @@ export class EmailIntelligenceService {
       organizationId,
       ...rosterFilter,
       intent: { $in: RELEVANT_EMAIL_INTENTS },
-      $or: [{ sentAt: { $gte: start, $lt: end } }, { externalReplyDetectedAt: { $gte: start, $lt: end } }],
+      $or: [
+        { sentAt: { $gte: start, $lt: end } },
+        { externalReplyDetectedAt: { $gte: start, $lt: end } },
+        { threadRespondedAt: { $gte: start, $lt: end } },
+      ],
     };
     const overdueMatch = this.buildActivityKindMatch(organizationId, 'missed', start, end, rosterFilter);
 
@@ -917,22 +1011,103 @@ export class EmailIntelligenceService {
     }
   }
 
-  list(userId: string, status?: 'pending' | 'approved' | 'rejected', from?: string, to?: string) {
-    const query: Record<string, unknown> = { userId, ...(status ? { status } : {}) };
-    // receivedAt is a real Date field (unlike TimelineEvent.occurredAt's
-    // plain string) — `to` must be pushed to the end of that calendar day,
-    // otherwise a date-only value (e.g. "2026-08-05" from DateRangeControl)
-    // means midnight and silently excludes that entire day's own emails.
-    if (from || to) {
-      query.receivedAt = {
-        ...(from ? { $gte: new Date(from) } : {}),
-        // Explicit 'Z' (UTC) end-of-day — `.setHours()` mutates in the
-        // server process's local timezone, which drifts hours off this
-        // boundary on any server not running in UTC.
-        ...(to ? { $lte: new Date(`${to}T23:59:59.999Z`) } : {}),
-      };
+  // One filter for list() and counts(), so a tab's badge can never disagree with
+  // the rows under it. Combined with $and because the response-state matches
+  // carry their own $and/$or.
+  private buildListMatch(userId: string, q: ListEmailsQuery): Record<string, unknown> {
+    const clauses: Record<string, unknown>[] = [{ userId }];
+    if (q.status) clauses.push({ status: q.status });
+    if (q.view) clauses.push(responseStatusMatch(q.view));
+    if (q.intents?.length) clauses.push({ intent: { $in: q.intents } });
+    // receivedAt is a real Date field (unlike TimelineEvent.occurredAt's plain
+    // string) — `to` must be pushed to the end of that calendar day, otherwise
+    // a date-only value (e.g. "2026-08-05" from DateRangeControl) means
+    // midnight and silently excludes that entire day's own emails. Explicit 'Z'
+    // (UTC) end-of-day — `.setHours()` mutates in the server process's local
+    // timezone, which drifts hours off this boundary on any server not in UTC.
+    if (q.from || q.to) {
+      clauses.push({
+        receivedAt: {
+          ...(q.from ? { $gte: new Date(q.from) } : {}),
+          ...(q.to ? { $lte: new Date(`${q.to}T23:59:59.999Z`) } : {}),
+        },
+      });
     }
-    return this.itemModel.find(query).sort({ receivedAt: -1 }).limit(100).exec();
+    const search = q.search?.trim().slice(0, SEARCH_MAX_LENGTH);
+    if (search) {
+      const rx = new RegExp(escapeRegExp(search), 'i');
+      clauses.push({ $or: [{ subject: rx }, { fromAddress: rx }, { matchedBusinessName: rx }, { bodyPreview: rx }] });
+    }
+    return { $and: clauses };
+  }
+
+  async list(userId: string, q: ListEmailsQuery = {}): Promise<EmailIntelligenceItemDocument[]> {
+    const match = this.buildListMatch(userId, q);
+    const limit = Math.min(Math.max(q.limit ?? LIST_DEFAULT_LIMIT, 1), LIST_MAX_LIMIT);
+    const skip = Math.max(q.skip ?? 0, 0);
+    const sort = q.sort ?? 'newest';
+
+    if (sort === 'urgency') {
+      // What needs answering soonest first: urgency (time pressure) over
+      // priority (importance), newest breaking ties. Done in Mongo so paging
+      // through the queue keeps one consistent order — sorting the fetched page
+      // in the browser (the old behavior) reorders differently per page.
+      const rows = await this.itemModel
+        .aggregate<EmailIntelligenceItem>([
+          { $match: match },
+          {
+            $addFields: {
+              _urgencyRank: { $indexOfArray: [SEVERITY_ORDER, '$urgency'] },
+              _priorityRank: { $indexOfArray: [SEVERITY_ORDER, '$priority'] },
+            },
+          },
+          { $sort: { _urgencyRank: -1, _priorityRank: -1, receivedAt: -1, _id: -1 } },
+          { $skip: skip },
+          { $limit: limit },
+          { $project: { _urgencyRank: 0, _priorityRank: 0 } },
+        ])
+        .exec();
+      // hydrate() so the derived response-state virtuals come along, as they do
+      // for a normal find().
+      return rows.map((row) => this.itemModel.hydrate(row) as unknown as EmailIntelligenceItemDocument);
+    }
+
+    const direction = sort === 'oldest' ? 1 : -1;
+    return this.itemModel.find(match).sort({ receivedAt: direction, _id: direction }).skip(skip).limit(limit).exec();
+  }
+
+  // The three tab badges, under the same date/type/search filters as the list.
+  async counts(
+    userId: string,
+    q: Pick<ListEmailsQuery, 'from' | 'to' | 'intents' | 'search'> = {},
+  ): Promise<Record<EmailResponseStatus, number>> {
+    const views: EmailResponseStatus[] = ['needs_response', 'responded', 'resolved'];
+    const totals = await Promise.all(
+      views.map((view) => this.itemModel.countDocuments(this.buildListMatch(userId, { ...q, view })).exec()),
+    );
+    return { needs_response: totals[0], responded: totals[1], resolved: totals[2] };
+  }
+
+  // The stored messages of one conversation, oldest first — each with its own
+  // derived response state — so the detail view can show what was asked and
+  // what has been answered. Only messages this mailbox has analysed are here
+  // (the full thread lives in Outlook); an item with no conversation id is its
+  // own one-message thread.
+  async thread(
+    userId: string,
+    id: string,
+  ): Promise<{ conversationId: string | null; messages: EmailIntelligenceItemDocument[] }> {
+    const item = await this.getOne(userId, id);
+    const filter = item.conversationId ? { userId, conversationId: item.conversationId } : { _id: item._id };
+    const messages = await this.itemModel
+      .find(filter)
+      .sort({ receivedAt: 1, _id: 1 })
+      .limit(100)
+      .select(
+        'subject fromAddress receivedAt bodyPreview isRead intent priority status shouldDraft expectedNextAction aiStatus sendError sentAt externalReplyDetectedAt threadRespondedAt',
+      )
+      .exec();
+    return { conversationId: item.conversationId ?? null, messages };
   }
 
   async getOne(userId: string, id: string): Promise<EmailIntelligenceItemDocument> {
@@ -960,6 +1135,14 @@ export class EmailIntelligenceService {
     const item = await this.getOne(userId, id);
     if (item.status !== 'approved') throw new BadRequestException('Item must be approved before it can be sent');
     if (item.sentAt) throw new BadRequestException('This item has already been sent');
+    // Answered some other way since the draft was approved (typed into Outlook,
+    // or covered by a later reply in the thread) — sending it now would be a
+    // duplicate reply to the customer.
+    if (item.externalReplyDetectedAt || item.threadRespondedAt) {
+      throw new BadRequestException(
+        'This email has already been replied to — sending this draft as well would duplicate the reply.',
+      );
+    }
     if (!item.finalDraftReply) throw new BadRequestException('No draft text to send');
 
     const token = this.jwt.sign({ sub: userId }, { expiresIn: '5m' });
@@ -981,6 +1164,17 @@ export class EmailIntelligenceService {
     item.sentAt = new Date();
     item.sendError = undefined;
     await item.save();
+
+    // The reply answers the whole conversation so far, not just the message it
+    // was addressed to: resolve the older open messages in the thread now, so
+    // they leave the pending views immediately instead of at the next sync.
+    // Best-effort — the email is already sent, and the next sync's Sent Items
+    // check would find this reply and cover the thread anyway.
+    if (item.conversationId) {
+      await this.coverThreads(userId, new Map([[item.conversationId, item.sentAt]]), 'app').catch((err) =>
+        this.logger.error(`Thread resolution failed for ${item._id.toString()}: ${(err as Error).message}`),
+      );
+    }
 
     // Phase 14e — best-effort enrichment on top of an already-completed
     // action, never a transaction: a failure here must not roll back the

@@ -3,12 +3,14 @@ import { Document, Types } from 'mongoose';
 
 export type AgentRoleDocument = AgentRole & Document<Types.ObjectId>;
 
-@Schema({ _id: false })
-export class AgentRoleKpi {
-  @Prop({ required: true }) name: string;
-  @Prop({ required: true }) description: string;
-}
-const AgentRoleKpiSchema = SchemaFactory.createForClass(AgentRoleKpi);
+// Agent Builder redesign — the fixed Role Category options `department`
+// below is constrained to (frontend-facing label "Role Category"). Drives
+// progressive disclosure (suggested tools/knowledge) in the creation wizard;
+// 'custom' means no preset applies. Kept as a plain string column (not a
+// Mongo enum) so a future category can be added without a migration —
+// validated at the DTO layer instead (@IsIn(ROLE_CATEGORIES)).
+export const ROLE_CATEGORIES = ['sales', 'finance', 'hr', 'support', 'marketing', 'operations', 'custom'] as const;
+export type RoleCategory = (typeof ROLE_CATEGORIES)[number];
 
 // Dynamically-generated AI personas (Dynamic Role Generator). NestJS owns all
 // writes to this collection; python-agent reads it directly (read-only) to
@@ -30,19 +32,12 @@ export class AgentRole {
   slug: string;
 
   @Prop({ required: true }) name: string;
+  // Role Category (see ROLE_CATEGORIES above) — was a free-text "Department"
+  // label with no runtime effect; now drives the creation wizard's
+  // suggested tools/knowledge. Stored value is one of ROLE_CATEGORIES,
+  // validated at the DTO layer, not here.
   @Prop({ default: '' }) department: string;
   @Prop({ default: '' }) description: string;
-
-  // Agent Builder Phase 1 — outcome-shaped ("what success means"), distinct
-  // from responsibilities/dailyTasks/weeklyTasks below (which are task-
-  // shaped) and from kpis (measurement, not yet computed against anything).
-  // Empty default keeps every pre-Phase-1 role valid with no migration.
-  @Prop({ type: [String], default: [] }) goals: string[];
-
-  @Prop({ type: [String], default: [] }) responsibilities: string[];
-  @Prop({ type: [String], default: [] }) dailyTasks: string[];
-  @Prop({ type: [String], default: [] }) weeklyTasks: string[];
-  @Prop({ type: [AgentRoleKpiSchema], default: [] }) kpis: AgentRoleKpi[];
 
   @Prop({ required: true }) systemPrompt: string;
 

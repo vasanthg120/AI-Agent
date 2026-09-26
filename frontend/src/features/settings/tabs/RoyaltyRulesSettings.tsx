@@ -308,7 +308,7 @@ export function RoyaltyRulesSettings() {
         </SettingsField>
       </SettingsSection>
 
-      <SettingsSection
+      <SettingsSection icon={<FiRotateCcw />}
         icon={<FiRotateCcw />}
         title="Version History"
         description="Every royalty rule version ever saved, most recent first."
@@ -316,36 +316,38 @@ export function RoyaltyRulesSettings() {
         {history.length === 0 ? (
           <div className={styles.emptyState}>No versions saved yet.</div>
         ) : (
-          <table className={styles.historyTable}>
-            <thead>
-              <tr>
-                <th>Effective</th>
-                <th>Royalty %</th>
-                <th>Cap</th>
-                <th>Status</th>
-                <th>Saved</th>
-              </tr>
-            </thead>
-            <tbody>
-              {history.map((rule) => (
-                <tr key={rule._id}>
-                  <td>{dayjs(rule.effectiveDate).format('MMM D, YYYY')}</td>
-                  <td>{rule.royaltyPercentage}%</td>
-                  <td>{CAP_TYPE_LABEL[rule.capType]}</td>
-                  <td>
-                    {rule._id === current?._id ? (
-                      <Badge variant="success">Current</Badge>
-                    ) : dayjs(rule.effectiveDate).isAfter(dayjs()) ? (
-                      <Badge variant="info">Upcoming</Badge>
-                    ) : (
-                      <Badge variant="neutral">Superseded</Badge>
-                    )}
-                  </td>
-                  <td>{dayjs(rule.createdAt).format('MMM D, YYYY')}</td>
+          <div className={styles.tableScroll}>
+            <table className={styles.historyTable}>
+              <thead>
+                <tr>
+                  <th>Effective</th>
+                  <th>Royalty %</th>
+                  <th>Cap</th>
+                  <th>Status</th>
+                  <th>Saved</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {history.map((rule) => (
+                  <tr key={rule._id}>
+                    <td>{dayjs(rule.effectiveDate).format('MMM D, YYYY')}</td>
+                    <td>{rule.royaltyPercentage}%</td>
+                    <td>{CAP_TYPE_LABEL[rule.capType]}</td>
+                    <td>
+                      {rule._id === current?._id ? (
+                        <Badge variant="success">Current</Badge>
+                      ) : dayjs(rule.effectiveDate).isAfter(dayjs()) ? (
+                        <Badge variant="info">Upcoming</Badge>
+                      ) : (
+                        <Badge variant="neutral">Superseded</Badge>
+                      )}
+                    </td>
+                    <td>{dayjs(rule.createdAt).format('MMM D, YYYY')}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
       </SettingsSection>
     </>

@@ -79,20 +79,85 @@
 }
 
 .navGroupLabel {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: calc(100% - 2 * var(--space-1));
+  margin: 0 var(--space-1);
   padding: var(--space-2) var(--space-3) var(--space-1);
-  font-size: var(--text-xs);
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  font-size: 11px;
   font-weight: 700;
   text-transform: uppercase;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.08em;
   color: var(--sidebar-text-muted);
+  cursor: pointer;
+  text-align: left;
+  transition: color var(--duration-fast) var(--ease-out);
+}
+
+.navGroupLabel:hover {
+  color: var(--sidebar-text);
+}
+
+.navGroupLabel:focus-visible {
+  outline: 2px solid var(--brand-accent-primary);
+  outline-offset: 1px;
+}
+
+.navGroupCount {
+  padding: 0 6px;
+  border-radius: var(--radius-full);
+  background: var(--sidebar-border-strong);
+  font-size: 10px;
+  letter-spacing: 0;
+  line-height: 16px;
+  color: var(--sidebar-text-secondary);
+}
+
+.navGroupChevron {
+  margin-left: auto;
+  font-size: 13px;
+  opacity: 0;
+  transition: transform var(--duration-normal) var(--ease-out), opacity var(--duration-fast) var(--ease-out);
+}
+
+.navGroupLabel:hover .navGroupChevron,
+.navGroupLabel:focus-visible .navGroupChevron,
+.navGroupChevronFolded {
+  opacity: 1;
+}
+
+.navGroupChevronFolded {
+  transform: rotate(-90deg);
+}
+
+.navGroupDivider {
+  height: 1px;
+  margin: var(--space-1) var(--space-4) var(--space-2);
+  background: var(--sidebar-border-strong);
+}
+
+.navGroup:first-child .navGroupDivider {
+  display: none;
+}
+
+.navGroupItems {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  overflow: hidden;
 }
 
 .navItem {
   position: relative;
+  isolation: isolate;
   display: flex;
   align-items: center;
   gap: var(--space-3);
-  padding: var(--space-2) var(--space-3);
+  padding: 6px var(--space-2);
   margin: 0 var(--space-1);
   border-radius: var(--radius-md);
   color: var(--sidebar-text-secondary);
@@ -100,40 +165,162 @@
   font-size: var(--text-sm);
   font-weight: 500;
   white-space: nowrap;
-  transition: background var(--duration-fast) var(--ease-out), color var(--duration-fast) var(--ease-out);
+  transition: background var(--duration-normal) var(--ease-out), color var(--duration-normal) var(--ease-out);
 }
 
 .collapsed .navItem {
   justify-content: center;
-  padding: var(--space-2);
+  padding: 6px;
   margin: 0 var(--space-2);
 }
 
 .navItem:hover {
-  background: var(--sidebar-hover-bg);
+  background: rgba(225, 222, 212, 0.05);
   color: var(--sidebar-text);
 }
 
-/* Subtle left accent bar + soft tint active-state treatment. */
-.navItemActive {
-  background: var(--sidebar-active-bg);
-  color: var(--sidebar-active-text);
+.navItem:focus-visible {
+  outline: 2px solid var(--brand-accent-primary);
+  outline-offset: 1px;
 }
 
-.navItemActive::before {
+.navItemActive,
+.navItemActive:hover {
+  background: transparent;
+  color: var(--sidebar-text);
+  font-weight: 600;
+}
+
+/* The active highlight — a single element shared across items via
+   framer-motion's layoutId, so it glides to whichever page you open. */
+.navPill {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: var(--radius-md);
+  background: linear-gradient(90deg, rgba(237, 126, 44, 0.2) 0%, rgba(237, 126, 44, 0.07) 100%);
+  box-shadow: inset 0 0 0 1px rgba(237, 126, 44, 0.22);
+}
+
+.navPill::before {
   content: '';
   position: absolute;
-  left: 2px;
-  top: 20%;
-  bottom: 20%;
+  left: -1px;
+  top: 22%;
+  bottom: 22%;
   width: 3px;
   border-radius: var(--radius-full);
   background: var(--brand-accent-primary);
+  box-shadow: 0 0 10px rgba(237, 126, 44, 0.7);
+}
+
+.collapsed .navPill::before {
+  display: none;
+}
+
+.navIconTile {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 9px;
+  background: rgba(225, 222, 212, 0.05);
+  transition: background var(--duration-normal) var(--ease-out), color var(--duration-normal) var(--ease-out),
+    transform var(--duration-slow) var(--ease-out), box-shadow var(--duration-normal) var(--ease-out);
+}
+
+.navItem:hover .navIconTile {
+  transform: scale(1.07);
+  color: var(--brand-accent-primary);
+  background: rgba(237, 126, 44, 0.1);
+}
+
+.navItemActive .navIconTile,
+.navItemActive:hover .navIconTile {
+  background: var(--gradient-accent);
+  color: var(--color-text-inverse);
+  box-shadow: 0 4px 14px rgba(237, 126, 44, 0.35);
 }
 
 .navIcon {
-  font-size: 17px;
+  font-size: 16px;
   flex-shrink: 0;
+}
+
+.navLabel {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.navBadge {
+  min-width: 18px;
+  padding: 0 5px;
+  border-radius: var(--radius-full);
+  background: var(--brand-accent-primary);
+  color: var(--color-text-inverse);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 18px;
+  text-align: center;
+}
+
+.collapsed .navBadge {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+}
+
+/* Hover card — portaled into <body>, so it can't rely on the dark token
+   overrides on .sidebar above; it reads the --sidebar-* tokens directly. */
+.hoverCard {
+  position: fixed;
+  z-index: var(--z-dropdown);
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  max-width: 280px;
+  padding: var(--space-2) var(--space-3) var(--space-2) var(--space-2);
+  border-radius: var(--radius-md);
+  background: var(--sidebar-surface-elevated);
+  border: 1px solid var(--sidebar-border-strong);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35);
+  pointer-events: none;
+}
+
+.hoverCardIcon {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 9px;
+  background: rgba(237, 126, 44, 0.16);
+  color: var(--brand-accent-primary);
+  font-size: 16px;
+}
+
+.hoverCardText {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.hoverCardTitle {
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--sidebar-text);
+}
+
+.hoverCardHint {
+  font-size: var(--text-xs);
+  line-height: 1.4;
+  color: var(--sidebar-text-secondary);
 }
 
 .footer {
@@ -166,9 +353,11 @@
   border: 1px solid var(--sidebar-border);
   cursor: pointer;
   text-align: left;
+  transition: background var(--duration-normal) var(--ease-out), border-color var(--duration-normal) var(--ease-out);
 }
 
 .userRow:hover {
+  border-color: var(--sidebar-border-strong);
   background: var(--sidebar-hover-bg);
 }
 
@@ -214,6 +403,7 @@
   font-weight: 500;
   cursor: pointer;
   text-align: left;
+  transition: background var(--duration-normal) var(--ease-out), color var(--duration-normal) var(--ease-out);
 }
 
 .collapsed .helpRow {

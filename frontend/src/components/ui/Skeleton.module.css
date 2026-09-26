@@ -1,7 +1,12 @@
 .skeleton {
+  /* A <span> — without this, width/height were ignored anywhere outside a flex/grid parent. */
+  display: block;
+  flex-shrink: 0;
   position: relative;
   overflow: hidden;
-  background: var(--color-bg-surface-elevated);
+  /* Was --color-bg-surface-elevated — pure white on this white app, so
+     only the moving shimmer was visible, not the placeholder shape. */
+  background: color-mix(in srgb, var(--color-text-primary) 6%, transparent);
   border-radius: var(--radius-sm);
 }
 
@@ -9,8 +14,8 @@
   content: '';
   position: absolute;
   inset: 0;
-  background: linear-gradient(90deg, transparent, var(--color-bg-hover), transparent);
-  animation: shimmer 1.6s infinite;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.65), transparent);
+  animation: shimmer 1.4s var(--ease-out) infinite;
 }
 
 .text {
@@ -28,5 +33,11 @@
   }
   to {
     transform: translateX(100%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .skeleton::after {
+    animation: none;
   }
 }

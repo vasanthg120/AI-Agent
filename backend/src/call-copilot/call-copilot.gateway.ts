@@ -186,6 +186,34 @@ export class CallCopilotGateway implements OnGatewayConnection, OnGatewayDisconn
         keyTakeaways: ended.keyTakeaways,
         followUpActions: ended.followUpActions,
       });
+
+      // AI Sales Coach — fire-and-forget, deliberately not awaited before the
+      // handler returns, so it can never add latency to the "End Call"
+      // response above (matches CallCopilotService.endSession's own
+      // fire-and-forget Qdrant indexing). Emitted via the per-user room
+      // (emitToUser), not `client`, since this resolves after the handler
+      // returns and the originating socket may have moved on by then.
+      const fullTranscript = ended.transcript.map((s) => s.text).filter(Boolean).join(' ');
+      void this.callCopilotService
+        .generateCoaching(ended, fullTranscript)
+        .then((coached) => {
+          // session.userId, not client.data.user — this resolves after the
+          // handler returns, and the session document is the unambiguous
+          // source of truth for who it belongs to either way.
+          this.emitToUser(coached.userId, 'call:coaching', {
+            sessionId: coached._id.toString(),
+            overallScore: coached.overallScore,
+            categoryScores: coached.categoryScores,
+            whatWentWell: coached.whatWentWell,
+            whatToImprove: coached.whatToImprove,
+            whatWouldHaveDoneDifferently: coached.whatWouldHaveDoneDifferently,
+            nextCallFocus: coached.nextCallFocus,
+            keyMoments: coached.keyMoments,
+            coachingSummary: coached.coachingSummary,
+            voiceScript: coached.voiceScript,
+          });
+        })
+        .catch((err: Error) => this.logger.warn(`Call copilot coaching emit failed for session ${ended._id}: ${err.message}`));
     } catch (err) {
       this.logger.error(`call:end failed for session ${session._id}: ${(err as Error).message}`);
       client.emit('call:error', { message: 'Could not finalize the call summary, but your recording was saved.' });

@@ -1,5 +1,5 @@
 import { HttpService } from '@nestjs/axios';
-import { Injectable, Logger } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { InjectModel } from '@nestjs/mongoose';
@@ -10,6 +10,7 @@ import FormData from 'form-data';
 import { GridFsService } from '../common/gridfs/gridfs.service';
 import { ReservationService } from '../billing/reservation.service';
 import { CallSession, CallSessionDocument } from './schemas/call-session.schema';
+import { sessionRangeEnd, sessionRangeStart } from './session-date-range';
 
 const AUDIO_BUCKET = 'call_recordings';
 
@@ -97,8 +98,8 @@ export class CallCopilotService {
     if (options.dealId) match.dealId = options.dealId;
     if (options.dateFrom || options.dateTo) {
       const range: Record<string, Date> = {};
-      if (options.dateFrom) range.$gte = new Date(options.dateFrom);
-      if (options.dateTo) range.$lte = new Date(options.dateTo);
+      if (options.dateFrom) range.$gte = sessionRangeStart(options.dateFrom);
+      if (options.dateTo) range.$lte = sessionRangeEnd(options.dateTo);
       match.createdAt = range;
     }
 
@@ -446,6 +447,117 @@ export class CallCopilotService {
         { headers: { Authorization: `Bearer ${token}` } },
       ),
     );
+  }
+
+  /** AI Sales Coach — best-effort, never throws (callers fire this without
+   * awaiting before responding to the client, exactly like indexSession
+   * above, so it can never add latency to "End Call" or an upload finishing).
+   * Public (unlike indexSession) because both call-copilot.gateway.ts (live
+   * calls) and call-copilot-upload.service.ts (uploads) call this directly
+   * after their own existing summarize step, then emit 'call:coaching'
+   * themselves once it resolves — this service is deliberately NOT given a
+   * reference to the gateway, since call-copilot.gateway.ts already imports
+   * CallCopilotService and the reverse import would be circular. Also the
+   * target of the on-demand POST sessions/:id/coach route, for a call that
+   * ended before this feature existed. */
+  async generateCoaching(session: CallSessionDocument, fullTranscript: string): Promise<CallSessionDocument> {
+    if (!fullTranscript.trim()) return session;
+
+    try {
+      const token = this.bridgeToken(session.userId, session.organizationId);
+      const summaryText = [session.headline, ...session.summaryPoints, ...session.keyTakeaways].filter(Boolean).join('\n');
+      const { data } = await firstValueFrom(
+        this.http.post<{
+          categoryScores: { category: string; score: number; rationale: string }[];
+          whatWentWell: string[];
+          whatToImprove: string[];
+          whatWouldHaveDoneDifferently: string[];
+          nextCallFocus: string[];
+          keyMoments: { momentType: string; text: string; recommendation: string; relatedEventText: string }[];
+          coachingSummary: string;
+          voiceScript: string;
+        }>(
+          `${this.pythonAgentUrl}/call-copilot/coach`,
+          {
+            sessionId: session._id.toString(),
+            contextBlob: session.contextBlob ?? '',
+            fullTranscript,
+            detectedEvents: session.events.map((e) => e.text),
+            summary: summaryText,
+          },
+          { headers: { Authorization: `Bearer ${token}` } },
+        ),
+      );
+
+      session.categoryScores = data.categoryScores as never;
+      session.overallScore = data.categoryScores.length
+        ? Math.round((data.categoryScores.reduce((sum, c) => sum + c.score, 0) / data.categoryScores.length) * 10) / 10
+        : undefined;
+      session.whatWentWell = data.whatWentWell;
+      session.whatToImprove = data.whatToImprove;
+      session.whatWouldHaveDoneDifferently = data.whatWouldHaveDoneDifferently;
+      session.nextCallFocus = data.nextCallFocus;
+      // Match each moment back to a real detected-event timestamp by exact
+      // text — the LLM never sees or invents a timestamp itself, only which
+      // already-detected signal (if any) a moment corresponds to.
+      session.keyMoments = data.keyMoments.map((m) => {
+        const matchedEvent = session.events.find((e) => e.text === m.relatedEventText);
+        return {
+          momentType: m.momentType,
+          text: m.text,
+          recommendation: m.recommendation,
+          occurredAt: matchedEvent?.detectedAt,
+        };
+      }) as never;
+      session.coachingSummary = data.coachingSummary;
+      session.voiceScript = data.voiceScript;
+      session.voiceScripts = [];
+      session.coachingGeneratedAt = new Date();
+      await session.save();
+    } catch (err) {
+      this.logger.warn(`Call copilot coaching failed for session ${session._id}: ${(err as Error).message}`);
+    }
+    return session;
+  }
+
+  /** The AI Coach's spoken script in the language the user picked. English is
+   * the script generateCoaching already produced; any other language is that
+   * coaching rewritten natively (not machine-translated word for word) by
+   * python-agent's /call-copilot/voice-script, then cached on the session per
+   * language so replaying or re-selecting it costs nothing. The caller then
+   * speaks it through the existing /voice/speak with the same languageCode. */
+  async getVoiceScript(session: CallSessionDocument, languageCode: string): Promise<string> {
+    if (!session.voiceScript || session.overallScore === undefined) {
+      throw new BadRequestException('This call has no coaching report yet — generate one first.');
+    }
+    if (languageCode === 'en') return session.voiceScript;
+
+    const cached = session.voiceScripts.find((v) => v.languageCode === languageCode);
+    if (cached) return cached.script;
+
+    const token = this.bridgeToken(session.userId, session.organizationId);
+    const { data } = await firstValueFrom(
+      this.http.post<{ languageCode: string; voiceScript: string }>(
+        `${this.pythonAgentUrl}/call-copilot/voice-script`,
+        {
+          sessionId: session._id.toString(),
+          languageCode,
+          overallScore: session.overallScore,
+          categoryScores: session.categoryScores,
+          whatWentWell: session.whatWentWell,
+          whatToImprove: session.whatToImprove,
+          whatWouldHaveDoneDifferently: session.whatWouldHaveDoneDifferently,
+          nextCallFocus: session.nextCallFocus,
+          coachingSummary: session.coachingSummary ?? '',
+          voiceScript: session.voiceScript,
+        },
+        { headers: { Authorization: `Bearer ${token}` } },
+      ),
+    );
+
+    session.voiceScripts.push({ languageCode, script: data.voiceScript });
+    await session.save();
+    return data.voiceScript;
   }
 
   /** A session that errors out (client disconnect mid-call, an unhandled

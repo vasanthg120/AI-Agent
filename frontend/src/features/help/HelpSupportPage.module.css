@@ -20,7 +20,7 @@
 
 .grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr));
   gap: var(--space-4);
 }
 
@@ -52,4 +52,11 @@
   display: flex;
   align-items: flex-start;
   gap: var(--space-3);
+}
+
+/* Phones: less edge padding so content gets the width. */
+@media (max-width: 640px) {
+  .page {
+    padding: var(--space-4);
+  }
 }

@@ -30,6 +30,58 @@ export interface CallFollowUpAction {
 
 export type CallOutcome = 'moving_forward' | 'needs_follow_up' | 'objection_raised' | 'no_decision' | 'lost' | 'not_applicable';
 
+export type CallScoreCategory =
+  | 'opening_rapport'
+  | 'discovery_listening'
+  | 'value_communication'
+  | 'objection_handling'
+  | 'engagement_confidence'
+  | 'closing_followup';
+
+export interface CallCategoryScore {
+  category: CallScoreCategory;
+  score: number;
+  rationale: string;
+}
+
+export type CallMomentType = 'great_moment' | 'missed_opportunity' | 'buying_signal' | 'risk_signal';
+
+export interface CallKeyMoment {
+  momentType: CallMomentType;
+  text: string;
+  recommendation: string;
+  // Only set when the coaching model tied this moment to a specific detected
+  // signal — undefined for a moment that isn't anchored to one instant.
+  occurredAt?: string;
+}
+
+// AI Sales Coach — generated once, after the summary above (see
+// CallCopilotService.generateCoaching, NestJS), fire-and-forget so it always
+// arrives after (never blocking) call:summary. Flat fields (not nested)
+// because that's exactly how they sit on the CallSession document and the
+// call:coaching socket payload — CallSessionDetail below picks these up
+// directly rather than reshaping the wire response. Absent/empty on any
+// session that hasn't been coached yet — old calls show a "Generate Coaching
+// Report" button instead (callCopilotService.generateCoaching below).
+export interface CoachingReport {
+  overallScore?: number;
+  categoryScores: CallCategoryScore[];
+  whatWentWell: string[];
+  whatToImprove: string[];
+  whatWouldHaveDoneDifferently: string[];
+  nextCallFocus: string[];
+  keyMoments: CallKeyMoment[];
+  coachingSummary?: string;
+  voiceScript?: string;
+}
+
+// A session is loaded with every coaching field optional (older and still-
+// processing sessions have none). The backend writes a report's fields
+// together, so once overallScore is there the rest are too.
+export function hasCoachingReport(session: Partial<CoachingReport>): session is CoachingReport {
+  return session.overallScore !== undefined;
+}
+
 export interface CallSummaryResult {
   // Legacy paragraph — only ever populated on a session ended before the
   // structured summary shipped. New sessions leave this empty; render the
@@ -44,7 +96,7 @@ export interface CallSummaryResult {
   followUpActions: CallFollowUpAction[];
 }
 
-export interface CallSessionDetail extends CallSummaryResult {
+export interface CallSessionDetail extends CallSummaryResult, Partial<CoachingReport> {
   _id: string;
   organizationId: string;
   userId: string;
@@ -108,6 +160,10 @@ export interface CallCopilotCallbacks {
   onTranscript: (sequence: number, text: string) => void;
   onAnalysis: (result: { sentiment?: string; events: CallEvent[]; recommendations: CallRecommendation[] }) => void;
   onSummary: (result: CallSummaryResult) => void;
+  // Optional and separate from onSummary — arrives a few seconds later
+  // (fire-and-forget on the server, see call-copilot.gateway.ts's onEnd),
+  // never blocks or delays the existing summary callback above.
+  onCoaching?: (result: CoachingReport) => void;
   onWarning: (message: string) => void;
   onError: (error: Error) => void;
 }
@@ -150,6 +206,9 @@ function subscribeToSession(
   const onSummary = (payload: SessionScopedPayload & CallSummaryResult) => {
     if (matches(payload)) callbacks.onSummary(payload);
   };
+  const onCoaching = (payload: SessionScopedPayload & CoachingReport) => {
+    if (matches(payload)) callbacks.onCoaching?.(payload);
+  };
   const onWarning = (payload: SessionScopedPayload & { message: string }) => {
     if (matches(payload)) callbacks.onWarning(payload.message);
   };
@@ -165,6 +224,7 @@ function subscribeToSession(
   socket.on('call:transcript', onTranscript);
   socket.on('call:analysis', onAnalysis);
   socket.on('call:summary', onSummary);
+  socket.on('call:coaching', onCoaching);
   socket.on('call:warning', onWarning);
   socket.on('call:error', onErrorEvent);
 
@@ -173,6 +233,7 @@ function subscribeToSession(
     socket.off('call:transcript', onTranscript);
     socket.off('call:analysis', onAnalysis);
     socket.off('call:summary', onSummary);
+    socket.off('call:coaching', onCoaching);
     socket.off('call:warning', onWarning);
     socket.off('call:error', onErrorEvent);
   };
@@ -197,6 +258,25 @@ export const callCopilotService = {
   async getSession(sessionId: string): Promise<CallSessionDetail> {
     const { data } = await axiosClient.get<CallSessionDetail>(`/call-copilot/sessions/${sessionId}`);
     return data;
+  },
+
+  // On-demand "Generate Coaching Report" for a call that ended before this
+  // feature existed (no coaching fields yet) — new calls get this
+  // automatically a few seconds after ending, via onCoaching above instead.
+  async generateCoaching(sessionId: string): Promise<CoachingReport> {
+    const { data } = await axiosClient.post<CoachingReport>(`/call-copilot/sessions/${sessionId}/coach`);
+    return data;
+  },
+
+  // The AI Coach's spoken script rewritten natively in the chosen language
+  // (cached server-side per language) — the caller then speaks the returned
+  // text via voiceService.speak(script, languageCode).
+  async getVoiceScript(sessionId: string, languageCode: string): Promise<string> {
+    const { data } = await axiosClient.post<{ languageCode: string; voiceScript: string }>(
+      `/call-copilot/sessions/${sessionId}/voice-script`,
+      { languageCode },
+    );
+    return data.voiceScript;
   },
 
   // Deliberately NOT a plain URL string for an <audio src="..."> to hit

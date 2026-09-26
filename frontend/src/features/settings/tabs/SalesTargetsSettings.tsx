@@ -122,7 +122,7 @@ export function SalesTargetsSettings() {
         </SettingsSection>
       ) : (
         <>
-          <SettingsSection
+          <SettingsSection icon={<FiShoppingBag />}
             icon={<FiShoppingBag />}
             title="Store Targets"
             description="Target per store for this month."

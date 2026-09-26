@@ -1,5 +1,5 @@
 .page {
-  padding: var(--space-6);
+  padding: var(--space-6) var(--space-8) var(--space-10);
   overflow-y: auto;
   height: 100%;
   display: flex;
@@ -7,31 +7,24 @@
   gap: var(--space-5);
 }
 
-.headerRow {
+.viewArea {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.toolbar {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: var(--space-4);
-  flex-wrap: wrap;
-}
-
-.pageTitle {
-  font-size: var(--text-xl);
-  font-weight: 700;
-  color: var(--color-text-primary);
-}
-
-.headerActions {
-  display: flex;
-  align-items: center;
   gap: var(--space-3);
+  flex-wrap: wrap;
 }
 
 .boardFilterRow {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: var(--space-3);
+  gap: var(--space-4);
   flex-wrap: wrap;
 }
 
@@ -39,29 +32,56 @@
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  padding: var(--space-3) var(--space-4);
-  border-radius: var(--radius-md);
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-lg);
   background: var(--color-bg-surface);
   border: 1px solid var(--color-border);
+  box-shadow: var(--shadow-sm);
+}
+
+/* Fixed-size window the date label slides through. */
+.dateWindow {
+  position: relative;
+  overflow: hidden;
+  width: 200px;
+  height: 40px;
+}
+
+.dateStack {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+
+.boardDateRelative {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--color-accent);
 }
 
 .boardDateLabel {
   font-size: var(--text-sm);
   font-weight: 600;
   color: var(--color-text-primary);
-  min-width: 180px;
+  white-space: nowrap;
 }
 
 .calendarLayout {
   display: flex;
-  gap: var(--space-6);
+  gap: var(--space-5);
   align-items: flex-start;
   flex-wrap: wrap;
 }
 
 .calendarPanel {
   /* Card chrome now comes from the SectionCard wrapping MonthCalendar. */
-  flex: 0 0 320px;
+  flex: 0 0 340px;
+  max-width: 100%;
 }
 
 .selectedDateTasks {
@@ -69,21 +89,41 @@
   min-width: 280px;
 }
 
+.taskList {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
 .taskRow {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: var(--space-3);
-  padding: var(--space-3);
+  padding: var(--space-3) var(--space-4);
   border-radius: var(--radius-md);
   background: var(--color-bg-surface);
   border: 1px solid var(--color-border);
   font-size: var(--text-sm);
+  transition: border-color var(--duration-normal) var(--ease-out), box-shadow var(--duration-normal) var(--ease-out);
 }
 
-.emptyState {
-  font-size: var(--text-sm);
+.taskRow:hover {
+  border-color: var(--color-border-strong);
+  box-shadow: var(--shadow-sm);
+}
+
+.taskDone {
   color: var(--color-text-muted);
-  padding: var(--space-4);
+  text-decoration: line-through;
 }
 
+@media (max-width: 640px) {
+  .page {
+    padding: var(--space-4);
+  }
+
+  .dateWindow {
+    width: 160px;
+  }
+}

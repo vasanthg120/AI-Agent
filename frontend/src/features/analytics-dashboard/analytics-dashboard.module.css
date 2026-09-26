@@ -55,9 +55,7 @@
 
 .tabBar {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-3);
+  flex-direction: column;
   margin-bottom: var(--space-1);
 }
 
@@ -69,20 +67,20 @@
 
 .statsGrid {
   display: grid;
-  grid-template-columns: 1.6fr 1fr;
+  grid-template-columns: 1.6fr minmax(0, 1fr);
   gap: var(--space-3);
   align-items: stretch;
 }
 
 @media (max-width: 900px) {
   .statsGrid {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 
 .twoColumn {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(300px, 100%), 1fr));
   gap: var(--space-4);
 }
 
@@ -92,16 +90,13 @@
     gap: var(--space-5);
   }
 
-  /* minmax(300px, 1fr) can't shrink below 300px, so on a phone narrower
+  /* minmax(min(300px, 100%), 1fr) can't shrink below 300px, so on a phone narrower
      than ~330px (300px + page padding) it forces the whole page to scroll
      horizontally — collapse to a single column instead. */
   .twoColumn {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
   }
 
-  .tabBar {
-    flex-wrap: wrap;
-  }
 }
 
 .listItem {

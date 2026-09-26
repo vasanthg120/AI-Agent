@@ -1,5 +1,5 @@
 """Platform-admin "Test Connection" for the centrally-controlled AI
-providers (Anthropic, Sarvam, Groq) — distinct from the plain "Connected"
+providers (Anthropic, Sarvam, ElevenLabs, Groq) — distinct from the plain "Connected"
 badge on Admin Settings, which only checks whether a credential row exists
 in MongoDB (see backend/src/integrations/integrations.service.ts's status()).
 This route makes one real, minimal call using the already-resolved platform
@@ -18,11 +18,12 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from app.agent import anthropic_client, groq_client
 from app.integrations import sarvam_client
+from app.integrations.tts import TtsError, elevenlabs
 from app.security import get_current_user
 
 router = APIRouter()
 
-_SUPPORTED_PROVIDERS = {"anthropic", "sarvam", "groq"}
+_SUPPORTED_PROVIDERS = {"anthropic", "sarvam", "elevenlabs", "groq"}
 
 
 def _verify_anthropic() -> dict:
@@ -61,6 +62,18 @@ def _verify_sarvam() -> dict:
         return {"ok": False, "message": "Sarvam AI could not be reached."}
 
 
+def _verify_elevenlabs() -> dict:
+    # A free call (list one voice), not a synthesis — verifying shouldn't spend
+    # the account's character quota.
+    try:
+        elevenlabs.ping()
+        return {"ok": True, "message": "Connected — ElevenLabs accepted this key."}
+    except TtsError as exc:
+        return {"ok": False, "message": exc.user_message}
+    except Exception:  # noqa: BLE001
+        return {"ok": False, "message": "ElevenLabs could not be reached."}
+
+
 @router.post("/admin/providers/{provider}/verify")
 def verify_provider(provider: str, user: dict = Depends(get_current_user)):
     if provider not in _SUPPORTED_PROVIDERS:
@@ -69,4 +82,6 @@ def verify_provider(provider: str, user: dict = Depends(get_current_user)):
         return _verify_anthropic()
     if provider == "groq":
         return _verify_groq()
+    if provider == "elevenlabs":
+        return _verify_elevenlabs()
     return _verify_sarvam()

@@ -1,8 +1,25 @@
 import { axiosClient } from '@/api/axiosClient';
 
-export interface AgentRoleKpi {
-  name: string;
-  description: string;
+// Mirrors backend/src/agent-roles/schemas/agent-role.schema.ts's ROLE_CATEGORIES
+// exactly — drives the creation wizard's role-based suggested tools/knowledge.
+export const ROLE_CATEGORIES = ['sales', 'finance', 'hr', 'support', 'marketing', 'operations', 'custom'] as const;
+export type RoleCategory = (typeof ROLE_CATEGORIES)[number];
+
+export const ROLE_CATEGORY_LABEL: Record<RoleCategory, string> = {
+  sales: 'Sales',
+  finance: 'Finance',
+  hr: 'HR',
+  support: 'Support',
+  marketing: 'Marketing',
+  operations: 'Operations',
+  custom: 'Custom',
+};
+
+// A category value that arrived from AI generation (document/description) is
+// free text from the LLM, not guaranteed to be one of ROLE_CATEGORIES — fall
+// back to 'custom' rather than silently mismatching a <select>.
+export function normalizeRoleCategory(value: string | undefined): RoleCategory {
+  return (ROLE_CATEGORIES as readonly string[]).includes(value ?? '') ? (value as RoleCategory) : 'custom';
 }
 
 export interface AgentRole {
@@ -11,13 +28,6 @@ export interface AgentRole {
   name: string;
   department?: string;
   description: string;
-  // Agent Builder Phase 1 — outcome-shaped ("what success means"), distinct
-  // from responsibilities/dailyTasks/weeklyTasks below (task-shaped).
-  goals?: string[];
-  responsibilities?: string[];
-  dailyTasks?: string[];
-  weeklyTasks?: string[];
-  kpis?: AgentRoleKpi[];
   systemPrompt?: string;
   sourceDocumentName?: string;
   status: 'draft' | 'active';
@@ -36,18 +46,7 @@ export interface AgentRole {
 
 type AgentRoleConfigFields = Pick<
   AgentRole,
-  | 'name'
-  | 'department'
-  | 'description'
-  | 'goals'
-  | 'responsibilities'
-  | 'dailyTasks'
-  | 'weeklyTasks'
-  | 'kpis'
-  | 'systemPrompt'
-  | 'assignedDepartments'
-  | 'assignedUserIds'
-  | 'allowedTools'
+  'name' | 'department' | 'description' | 'systemPrompt' | 'assignedDepartments' | 'assignedUserIds' | 'allowedTools'
 >;
 
 export type UpdateAgentRolePayload = Partial<AgentRoleConfigFields> & {
@@ -58,10 +57,10 @@ export type UpdateAgentRolePayload = Partial<AgentRoleConfigFields> & {
   modelTier?: 'fast' | 'standard' | null;
 };
 
-// Agent Builder Phase 1 — Manual and Template methods (Template just
-// pre-fills this same shape client-side from a constant before submitting).
-// Always creates as a draft server-side, same "review before activating"
-// step every creation method goes through.
+// Agent Builder — Manual and Template methods (Template just pre-fills this
+// same shape client-side from a constant before submitting). Always creates
+// as a draft server-side, same "review before activating" step every
+// creation method goes through.
 export type CreateAgentRolePayload = Partial<AgentRoleConfigFields> &
   Pick<AgentRoleConfigFields, 'name' | 'systemPrompt'> & {
     modelTier?: 'fast' | 'standard' | null;
@@ -80,7 +79,7 @@ export const agentRolesService = {
     return data;
   },
 
-  // Agent Builder Phase 1 — Describe method: same structured-review flow as
+  // Agent Builder — Describe method: same structured-review flow as
   // generate() above, sourced from a short typed description instead of a
   // file.
   async generateFromDescription(description: string): Promise<AgentRole> {
@@ -88,7 +87,7 @@ export const agentRolesService = {
     return data;
   },
 
-  // Agent Builder Phase 1 — Manual/Template methods: no AI call, no file.
+  // Agent Builder — Manual/Template methods: no AI call, no file.
   async create(payload: CreateAgentRolePayload): Promise<AgentRole> {
     const { data } = await axiosClient.post<AgentRole>('/agent-roles', payload);
     return data;

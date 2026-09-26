@@ -1,10 +1,13 @@
 import { useEffect, useState } from 'react';
 import toast from 'react-hot-toast';
-import { FiShield, FiZap } from 'react-icons/fi';
+import { FiCheckCircle, FiClock, FiShield, FiZap } from 'react-icons/fi';
+import clsx from 'clsx';
 import { Badge, Button, Input, Modal } from '@/components/ui';
 import type { BadgeVariant } from '@/components/ui';
 import { extractErrorMessage } from '@/utils/errors';
 import { emailIntelligenceService, type EmailIntelligenceItem } from '@/services/emailIntelligenceService';
+import { formatWhen, RESPONDED_VIA_LABEL } from '../emailResponseLabels';
+import { EmailThreadTimeline } from './EmailThreadTimeline';
 import styles from '../email-intelligence.module.css';
 
 // Phase 17 — labels/variants for the new "AI Decision" card, matching
@@ -41,6 +44,49 @@ const PRIORITY_VARIANT: Record<string, BadgeVariant> = { urgent: 'danger', high:
 const URGENCY_LABEL: Record<string, string> = { urgent: 'Reply today', high: 'Reply soon' };
 const URGENCY_VARIANT: Record<string, BadgeVariant> = { urgent: 'danger', high: 'warning' };
 const SENTIMENT_VARIANT: Record<string, BadgeVariant> = { negative: 'danger', frustrated: 'danger', positive: 'success', neutral: 'neutral' };
+
+// One clear sentence about where this email stands, driven by the backend's
+// derived state — including the two cases the old screen got wrong: an email
+// answered in Outlook (still "pending" as far as the AI draft is concerned) and
+// an approved draft whose send failed (looks handled, but nothing went out).
+function ResponseBanner({ item }: { item: EmailIntelligenceItem }) {
+  if (item.responseStatus === 'responded') {
+    const via = item.respondedVia ? RESPONDED_VIA_LABEL[item.respondedVia] : 'Replied';
+    const detail =
+      item.respondedVia === 'outlook'
+        ? 'A reply to this conversation was found in your Outlook Sent Items.'
+        : item.respondedVia === 'thread'
+          ? 'A later reply in this conversation answered it.'
+          : 'Your reply was sent from here.';
+    return (
+      <div className={clsx(styles.banner, styles.bannerDone)} role="status">
+        <FiCheckCircle aria-hidden />
+        <div>
+          <strong>{via}</strong>
+          {item.respondedAt ? ` · ${formatWhen(item.respondedAt)}` : ''}
+          <div className={styles.listItemMeta}>{detail}</div>
+        </div>
+      </div>
+    );
+  }
+  if (item.responseStatus === 'needs_response') {
+    const detail = item.sendError
+      ? 'Sending failed, so nothing has gone out yet.'
+      : item.status === 'approved'
+        ? 'The draft is approved but has not been sent yet.'
+        : 'No reply has gone out for this email.';
+    return (
+      <div className={clsx(styles.banner, styles.bannerWaiting)} role="status">
+        <FiClock aria-hidden />
+        <div>
+          <strong>Needs a reply</strong>
+          <div className={styles.listItemMeta}>{detail}</div>
+        </div>
+      </div>
+    );
+  }
+  return null;
+}
 
 export function EmailIntelligenceDetailModal({
   open,
@@ -135,6 +181,10 @@ export function EmailIntelligenceDetailModal({
 
   const isApproved = item.status === 'approved';
   const isSent = !!item.sentAt;
+  // Answered already — in this app, in Outlook, or by a later reply in the
+  // thread. Nothing left to draft, approve, reject or send: offering those on an
+  // answered email is how a duplicate reply goes out.
+  const isResponded = item.responseStatus === 'responded';
 
   return (
     <Modal open={open} onClose={onClose} title={item.subject || '(no subject)'} maxWidth={640}>
@@ -148,13 +198,17 @@ export function EmailIntelligenceDetailModal({
           {item.sentiment !== 'neutral' && <Badge variant={SENTIMENT_VARIANT[item.sentiment] ?? 'neutral'}>{item.sentiment}</Badge>}
         </div>
 
+        <ResponseBanner item={item} />
+
         <div className={styles.card}>
           <div className={styles.fieldLabel}>Original Message</div>
           <div>From: {item.fromAddress}</div>
           <div>To: {item.toAddresses.join(', ') || '—'}</div>
-          <div>Received: {new Date(item.receivedAt).toLocaleString()}</div>
+          <div>Received: {formatWhen(item.receivedAt)}</div>
           <div style={{ marginTop: 'var(--space-2)' }}>{item.bodyPreview}</div>
         </div>
+
+        <EmailThreadTimeline itemId={item._id} />
 
         {item.matchedBusinessName && (
           <div className={styles.card}>
@@ -216,53 +270,59 @@ export function EmailIntelligenceDetailModal({
           {item.draftReasoning && <div className={styles.listItemMeta}>{item.draftReasoning}</div>}
         </div>
 
-        {item.shouldDraft && (
+        {item.shouldDraft && (isSent || !isResponded) && (
           <div>
-            <div className={styles.fieldLabel}>Draft Reply {item.wasEdited && <Badge variant="accent">Edited</Badge>}</div>
-            <textarea className={styles.textarea} value={draft} disabled={isApproved} onChange={(e) => setDraft(e.target.value)} />
+            <div className={styles.fieldLabel}>
+              {isSent ? 'Reply sent' : 'Draft Reply'} {item.wasEdited && <Badge variant="accent">Edited</Badge>}
+            </div>
+            <textarea
+              className={styles.textarea}
+              value={isSent ? (item.finalDraftReply ?? draft) : draft}
+              disabled={isApproved || isResponded}
+              onChange={(e) => setDraft(e.target.value)}
+            />
           </div>
         )}
 
-        {isSent && (
-          <div className={styles.card}>
-            <Badge variant="success">Sent</Badge>
-            <span className={styles.listItemMeta}>Sent at {new Date(item.sentAt!).toLocaleString()}</span>
-          </div>
-        )}
-
-        {item.sendError && !isSent && (
-          <div className={styles.card}>
-            <Badge variant="danger">Send failed</Badge>
+        {item.sendError && !isSent && !isResponded && (
+          <div className={styles.card} role="alert">
+            <Badge variant="danger">Send failed</Badge>{' '}
             <span>{item.sendError}</span>
+            <div className={styles.listItemMeta}>This email is still waiting for a reply — try sending again.</div>
           </div>
         )}
 
-        {!isApproved && item.status === 'pending' && (
+        {!isApproved && !isResponded && item.status === 'pending' && (
           <Input label="Rejection reason (optional)" value={rejectReason} onChange={(e) => setRejectReason(e.target.value)} />
         )}
 
         <div className={styles.footer}>
-          {!isApproved && (
+          {isResponded && (
+            <Button type="button" variant="outline" onClick={onClose}>
+              Close
+            </Button>
+          )}
+          {!isApproved && !isResponded && (
             <Button type="button" variant="outline" disabled={busy !== null} loading={busy === 'regenerate'} onClick={() => void handleRegenerate()}>
               Regenerate
             </Button>
           )}
-          {!isApproved && (
+          {!isApproved && !isResponded && (
             <Button type="button" variant="danger" disabled={busy !== null} loading={busy === 'reject'} onClick={() => void handleReject()}>
               Reject
             </Button>
           )}
-          {!isApproved && (
+          {!isApproved && !isResponded && (
             <Button type="button" disabled={busy !== null} loading={busy === 'approve'} onClick={() => void handleApprove()}>
               Approve
             </Button>
           )}
-          {isApproved && item.shouldDraft && !isSent && (
+          {isApproved && item.shouldDraft && !isSent && !isResponded && (
             <Button type="button" disabled={busy !== null} loading={busy === 'send'} onClick={() => void handleSend()}>
               Send Reply
             </Button>
           )}
-          {isApproved && !item.shouldDraft && <Button type="button" disabled>Approved — no reply needed</Button>}
+          {isApproved && !item.shouldDraft && !isResponded && <Button type="button" disabled>Approved — no reply needed</Button>}
         </div>
       </div>
     </Modal>

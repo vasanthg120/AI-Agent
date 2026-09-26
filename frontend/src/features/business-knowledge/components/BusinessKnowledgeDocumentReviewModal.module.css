@@ -3,13 +3,15 @@
   flex-direction: column;
   gap: var(--space-3);
   padding: var(--space-4);
-  min-width: 480px;
+  /* Was min-width: 480px — wider than a phone screen, so the dialog
+     overflowed sideways (same fix FinanceDocumentReviewModal already has). */
+  min-width: min(480px, 100%);
   max-width: 100%;
 }
 
 .row {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: var(--space-3);
 }
 

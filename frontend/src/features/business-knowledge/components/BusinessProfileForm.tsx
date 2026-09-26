@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import { FiBookOpen, FiShield } from 'react-icons/fi';
+import { AnimatePresence, motion } from 'framer-motion';
+import { FiBookOpen, FiCheck, FiRotateCcw, FiShield } from 'react-icons/fi';
 import toast from 'react-hot-toast';
 import { Button, Input, SectionCard, Skeleton, StringListEditor } from '@/components/ui';
 import { extractErrorMessage } from '@/utils/errors';
@@ -7,13 +8,58 @@ import { businessProfileService, type BusinessProfile, type UpsertBusinessProfil
 import { TermsAndConditionsPolicy } from './TermsAndConditionsPolicy';
 import styles from '../business-knowledge.module.css';
 
-function TextAreaField({ label, value, onChange }: { label: string; value?: string; onChange: (value: string) => void }) {
+function TextAreaField({
+  label,
+  value,
+  disabled,
+  placeholder,
+  onChange,
+}: {
+  label: string;
+  value?: string;
+  disabled?: boolean;
+  placeholder?: string;
+  onChange: (value: string) => void;
+}) {
   return (
-    <div>
+    <label>
       <span className={styles.fieldLabel}>{label}</span>
-      <textarea className={styles.textarea} value={value ?? ''} onChange={(e) => onChange(e.target.value)} />
-    </div>
+      <textarea
+        className={styles.textarea}
+        value={value ?? ''}
+        disabled={disabled}
+        placeholder={placeholder}
+        onChange={(e) => onChange(e.target.value)}
+      />
+    </label>
   );
+}
+
+// Circular progress ring for profile completeness.
+function CompletenessRing({ pct }: { pct: number }) {
+  const r = 22;
+  const c = 2 * Math.PI * r;
+  return (
+    <svg className={styles.ring} viewBox="0 0 56 56" aria-hidden>
+      <circle cx="28" cy="28" r={r} className={styles.ringTrack} />
+      <motion.circle
+        cx="28"
+        cy="28"
+        r={r}
+        className={styles.ringFill}
+        strokeDasharray={c}
+        initial={{ strokeDashoffset: c }}
+        animate={{ strokeDashoffset: c * (1 - pct / 100) }}
+        transition={{ duration: 1, ease: [0.16, 1, 0.3, 1] }}
+      />
+    </svg>
+  );
+}
+
+function completenessMessage(pct: number): string {
+  if (pct >= 90) return 'Excellent — the AI has a complete picture of your business.';
+  if (pct >= 60) return "Good start. A few more details will make the AI's answers noticeably sharper.";
+  return 'The more you fill in, the more accurately the AI can talk about your business.';
 }
 
 export function BusinessProfileForm({
@@ -88,12 +134,18 @@ export function BusinessProfileForm({
     );
   }
 
+  const dirty = draft !== null;
+
   return (
     <div className={styles.tabContent}>
-      <div className={styles.completenessRow}>
-        <span>Profile completeness: {working.completenessPct}%</span>
-        <div className={styles.completenessTrack}>
-          <div className={styles.completenessFill} style={{ width: `${working.completenessPct}%` }} />
+      <div className={styles.completenessCard}>
+        <div className={styles.ringWrap}>
+          <CompletenessRing pct={working.completenessPct} />
+          <span className={styles.ringValue}>{working.completenessPct}%</span>
+        </div>
+        <div className={styles.completenessText}>
+          <span className={styles.completenessTitle}>Profile completeness</span>
+          <span className={styles.completenessHint}>{completenessMessage(working.completenessPct)}</span>
         </div>
       </div>
 
@@ -104,7 +156,13 @@ export function BusinessProfileForm({
             <Input label="Industry" value={working.industry ?? ''} disabled={!canEdit} onChange={(e) => set('industry', e.target.value)} />
           </div>
           <Input label="Website" value={working.website ?? ''} disabled={!canEdit} onChange={(e) => set('website', e.target.value)} />
-          <TextAreaField label="Description" value={working.description} onChange={(v) => set('description', v)} />
+          <TextAreaField
+            label="Description"
+            value={working.description}
+            disabled={!canEdit}
+            placeholder="What does your business do, and who for? A few sentences is plenty."
+            onChange={(v) => set('description', v)}
+          />
           <StringListEditor label="Branches / Locations" items={working.branches} onChange={(v) => set('branches', v)} addLabel="Add branch" />
         </div>
       </SectionCard>
@@ -115,13 +173,32 @@ export function BusinessProfileForm({
         </div>
       </SectionCard>
 
-      {canEdit && (
-        <div>
-          <Button type="button" disabled={saving} onClick={() => void handleSave()}>
-            {saving ? 'Saving…' : 'Save Business Profile'}
-          </Button>
-        </div>
-      )}
+      {/* Only appears once something has actually changed, and stays pinned
+          to the bottom of the page so saving never means scrolling back. */}
+      <AnimatePresence>
+        {canEdit && dirty && (
+          <motion.div
+            className={styles.saveBar}
+            initial={{ opacity: 0, y: 24 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 24 }}
+            transition={{ type: 'spring', stiffness: 420, damping: 34 }}
+          >
+            <span className={styles.saveBarText}>
+              <span className={styles.saveBarDot} />
+              You have unsaved changes
+            </span>
+            <div className={styles.saveBarActions}>
+              <Button type="button" variant="ghost" size="sm" leftIcon={<FiRotateCcw />} disabled={saving} onClick={() => setDraft(null)}>
+                Discard
+              </Button>
+              <Button type="button" size="sm" leftIcon={<FiCheck />} loading={saving} disabled={saving} onClick={() => void handleSave()}>
+                {saving ? 'Saving…' : 'Save profile'}
+              </Button>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

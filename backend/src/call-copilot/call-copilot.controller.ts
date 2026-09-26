@@ -10,6 +10,7 @@ import { CallCopilotUploadService } from './call-copilot-upload.service';
 import { CallCopilotService } from './call-copilot.service';
 import { SearchCallSessionsQueryDto } from './dto/search-call-sessions-query.dto';
 import { UploadCallRecordingDto } from './dto/upload-call-recording.dto';
+import { VoiceScriptDto } from './dto/voice-script.dto';
 
 // Covers exactly the formats UploadRecordingModal.tsx's file input accepts
 // ("audio/*,video/mp4,.m4a") — a small local map rather than pulling in the
@@ -88,6 +89,33 @@ export class CallCopilotController {
     const session = await this.callCopilotService.getSession(user.organizationId, user.sub, id);
     if (!session) throw new NotFoundException('Call session not found');
     return session;
+  }
+
+  // On-demand AI Sales Coach generation — powers a "Generate Coaching
+  // Report" button for a call that ended before this feature existed (no
+  // backfill/migration; those sessions simply have no coaching fields until
+  // this is called). Reuses the exact same best-effort generateCoaching()
+  // both the live and upload paths already call automatically at call-end.
+  @Post('sessions/:id/coach')
+  async coach(@CurrentUser() user: JwtPayload, @Param('id') id: string) {
+    const session = await this.callCopilotService.getSession(user.organizationId, user.sub, id);
+    if (!session) throw new NotFoundException('Call session not found');
+    const fullTranscript = session.transcript
+      .map((s) => s.text)
+      .filter(Boolean)
+      .join(' ');
+    return this.callCopilotService.generateCoaching(session, fullTranscript);
+  }
+
+  // The AI Coach's spoken script in the language picked in the panel — the
+  // frontend then speaks the returned text via the existing /voice/speak with
+  // the same languageCode. Cached per language on the session.
+  @Post('sessions/:id/voice-script')
+  async voiceScript(@CurrentUser() user: JwtPayload, @Param('id') id: string, @Body() dto: VoiceScriptDto) {
+    const session = await this.callCopilotService.getSession(user.organizationId, user.sub, id);
+    if (!session) throw new NotFoundException('Call session not found');
+    const voiceScript = await this.callCopilotService.getVoiceScript(session, dto.languageCode);
+    return { languageCode: dto.languageCode, voiceScript };
   }
 
   @Get('sessions/:id/audio/:fileId')

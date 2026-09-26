@@ -93,7 +93,7 @@
 
 .planGrid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(260px, 100%), 1fr));
   gap: var(--space-5);
   align-items: stretch;
 }
@@ -317,7 +317,7 @@
   }
 
   .planGrid {
-    grid-template-columns: repeat(2, 1fr);
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   /* The featured card's lift only reads correctly against side-by-side
@@ -348,7 +348,7 @@
   }
 
   .planGrid {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .planCard {

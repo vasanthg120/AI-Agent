@@ -7,40 +7,58 @@
 
 .monthLabel {
   font-size: var(--text-md);
-  font-weight: 600;
+  font-weight: 700;
   color: var(--color-text-primary);
 }
 
 .grid {
   display: grid;
-  grid-template-columns: repeat(7, 1fr);
-  gap: var(--space-1);
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 3px;
 }
 
 .weekdayLabel {
-  font-size: var(--text-xs);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
   color: var(--color-text-muted);
   text-align: center;
   padding: var(--space-1);
 }
 
 .dayCell {
+  position: relative;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 2px;
-  padding: var(--space-2);
+  justify-content: center;
+  gap: 3px;
+  padding: var(--space-1);
   border-radius: var(--radius-md);
   border: 1px solid transparent;
   background: transparent;
   color: var(--color-text-secondary);
+  font-family: inherit;
   font-size: var(--text-sm);
+  font-variant-numeric: tabular-nums;
   cursor: pointer;
-  min-height: 44px;
+  min-height: 42px;
+  transition: background var(--duration-fast) var(--ease-out), color var(--duration-fast) var(--ease-out),
+    transform var(--duration-fast) var(--ease-out), box-shadow var(--duration-normal) var(--ease-out);
 }
 
 .dayCell:hover {
-  background: var(--color-bg-surface);
+  background: var(--color-bg-hover);
+  color: var(--color-text-primary);
+}
+
+.dayCell:active {
+  transform: scale(0.94);
+}
+
+.dayCell:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 1px;
 }
 
 .dayCellEmpty {
@@ -48,25 +66,32 @@
   cursor: default;
 }
 
-.dayCellSelected {
-  border-color: var(--color-accent, #ed7e2c);
-  background: var(--color-bg-surface);
-  color: var(--color-text-primary);
-  font-weight: 600;
-}
-
 .dayCellToday {
   font-weight: 700;
-  color: var(--color-text-primary);
+  color: var(--color-accent);
+  border-color: color-mix(in srgb, var(--color-accent) 40%, transparent);
+}
+
+.dayCellSelected,
+.dayCellSelected:hover {
+  border-color: transparent;
+  background: var(--gradient-accent);
+  color: var(--color-accent-contrast);
+  font-weight: 700;
+  box-shadow: 0 4px 12px rgba(217, 111, 31, 0.3);
 }
 
 .dot {
-  width: 6px;
-  height: 6px;
+  width: 5px;
+  height: 5px;
   border-radius: 50%;
-  background: var(--color-accent, #ed7e2c);
+  background: var(--color-accent);
 }
 
 .dotUrgent {
-  background: #ef4444;
+  background: var(--color-danger);
+}
+
+.dayCellSelected .dot {
+  background: var(--color-accent-contrast);
 }

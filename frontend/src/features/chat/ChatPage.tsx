@@ -51,8 +51,8 @@ export function ChatPage() {
   const startNewConversation = useChatStore((state) => state.startNewConversation);
   const setPendingAgent = useChatStore((state) => state.setPendingAgent);
 
-  // "Test Agent" deep-link from the Agent Builder (AgentConfigurationForm.tsx)
-  // — same query-param-then-strip pattern as the outlook result above.
+  // "Test" deep-link from the AI Agents list (AgentRolesSettings.tsx) —
+  // same query-param-then-strip pattern as the outlook result above.
   // Always starts a brand-new conversation (never repurposes whatever was
   // already open) so testing a persona never overwrites in-progress work.
   useEffect(() => {

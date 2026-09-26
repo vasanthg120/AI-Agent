@@ -19,6 +19,7 @@ import { EmailIntelligenceItem, EmailIntelligenceItemDocument } from '../email-i
 // EmailIntelligenceItem schema directly (below) is the established
 // workaround this file's sibling dashboard.service.ts already uses.
 import { RELEVANT_EMAIL_INTENTS } from '../email-intelligence/email-intelligence.service';
+import { needsResponseMatch } from '../email-intelligence/email-response-state';
 import { resolveAllowedAgentIds } from './agent-scope.util';
 import { isTaskVisibleToUser } from './task-visibility.util';
 import { DailyReport, DailyReportDocument } from './schemas/daily-report.schema';
@@ -43,6 +44,18 @@ export interface TaskOut {
 
 function todayStamp(): string {
   return new Date().toISOString().slice(0, 10);
+}
+
+// Half-open [start, end) UTC range for a given "YYYY-MM-DD" date — matches
+// todayStamp()'s own UTC convention (and DailyReport.date's UTC-bucketed
+// "YYYY-MM-DD"), so a createdAt/updatedAt/receivedAt timestamp check here
+// never disagrees with which calendar day a DailyReport itself considers
+// that date to be. Works for any date, not just today — getEodSummary
+// reuses this for the EOD calendar view's historical dates too.
+function dayRange(date: string): { start: Date; end: Date } {
+  const start = new Date(`${date}T00:00:00.000Z`);
+  const end = new Date(start.getTime() + 24 * 60 * 60 * 1000);
+  return { start, end };
 }
 
 // Half-open [start, end) UTC range for a given "YYYY-MM-DD" date — matches
@@ -184,19 +197,26 @@ export class TasksService {
         this.emailModel.countDocuments({ organizationId, userId, intent: { $in: RELEVANT_EMAIL_INTENTS }, receivedAt: { $gte: start, $lt: end } }).exec(),
         this.emailModel.countDocuments({ organizationId, userId, intent: { $in: RELEVANT_EMAIL_INTENTS }, sentAt: { $gte: start, $lt: end } }).exec(),
         // "Responded" mirrors EmailIntelligenceService.getEmailProductivityStats'
-        // own completed-match: handled either through this app (sentAt) or
-        // directly in the mailbox owner's real Outlook client
-        // (externalReplyDetectedAt) — a genuine either/or, never double-counted.
+        // own completed-match: answered through this app (sentAt), directly in
+        // the mailbox owner's real Outlook client (externalReplyDetectedAt), or
+        // by a later reply in the same thread (threadRespondedAt) — exactly one
+        // of the three per message, so never double-counted.
         this.emailModel
           .countDocuments({
             organizationId,
             userId,
             intent: { $in: RELEVANT_EMAIL_INTENTS },
-            $or: [{ sentAt: { $gte: start, $lt: end } }, { externalReplyDetectedAt: { $gte: start, $lt: end } }],
+            $or: [
+              { sentAt: { $gte: start, $lt: end } },
+              { externalReplyDetectedAt: { $gte: start, $lt: end } },
+              { threadRespondedAt: { $gte: start, $lt: end } },
+            ],
           })
           .exec(),
+        // Pending = a reply is still owed and nobody has given one — the
+        // shared definition, not the AI draft's approval status.
         this.emailModel
-          .countDocuments({ organizationId, userId, intent: { $in: RELEVANT_EMAIL_INTENTS }, status: 'pending', externalReplyDetectedAt: { $exists: false } })
+          .countDocuments({ organizationId, userId, intent: { $in: RELEVANT_EMAIL_INTENTS }, ...needsResponseMatch() })
           .exec(),
         this.dealModel.countDocuments({ organizationId, ownerId: userId, createdAt: { $gte: start, $lt: end } }).exec(),
         this.dealModel.countDocuments({ organizationId, ownerId: userId, updatedAt: { $gte: start, $lt: end } }).exec(),

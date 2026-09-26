@@ -6,7 +6,44 @@ import { Roles } from '../common/decorators/roles.decorator';
 import { CustomerActivityService } from '../crm/customer-activity.service';
 import { JwtPayload } from '../auth/jwt-payload.interface';
 import { EmailIntelligenceSyncService } from './email-intelligence-sync.service';
-import { EmailIntelligenceService } from './email-intelligence.service';
+import { EmailResponseStatus } from './email-response-state';
+import { EmailIntelligenceService, ListEmailsQuery } from './email-intelligence.service';
+
+const APPROVAL_STATUSES = ['pending', 'approved', 'rejected'] as const;
+const RESPONSE_VIEWS: EmailResponseStatus[] = ['needs_response', 'responded', 'resolved'];
+const SORTS = ['urgency', 'newest', 'oldest'] as const;
+
+function oneOf<T extends string>(value: string | undefined, allowed: readonly T[], name: string): T | undefined {
+  if (value === undefined || value === '') return undefined;
+  if (!(allowed as readonly string[]).includes(value)) {
+    throw new BadRequestException(`${name} must be one of: ${allowed.join(', ')}`);
+  }
+  return value as T;
+}
+
+function nonNegativeInt(value: string | undefined, name: string): number | undefined {
+  if (value === undefined || value === '') return undefined;
+  const n = Number(value);
+  if (!Number.isInteger(n) || n < 0) throw new BadRequestException(`${name} must be a non-negative integer`);
+  return n;
+}
+
+// Every filter is optional; the ones that name a fixed vocabulary are checked
+// rather than passed through, so a typo is a 400, not an empty list that looks
+// like "nothing needs a reply".
+function parseListQuery(raw: Record<string, string | undefined>): ListEmailsQuery {
+  return {
+    status: oneOf(raw.status, APPROVAL_STATUSES, 'status'),
+    view: oneOf(raw.view, RESPONSE_VIEWS, 'view'),
+    sort: oneOf(raw.sort, SORTS, 'sort'),
+    from: raw.from || undefined,
+    to: raw.to || undefined,
+    search: raw.search || undefined,
+    intents: raw.intents ? raw.intents.split(',').filter(Boolean) : undefined,
+    limit: nonNegativeInt(raw.limit, 'limit'),
+    skip: nonNegativeInt(raw.skip, 'skip'),
+  };
+}
 
 // No @Roles()/RolesGuard anywhere in this controller — every authenticated
 // user, self-scoped via their own JWT sub. Each item belongs to exactly one
@@ -58,14 +95,21 @@ export class EmailIntelligenceController {
     return this.emailIntelligenceSyncService.getProviderHealth(user.organizationId);
   }
 
+  // The Inbox's three tab badges (Needs Response / Responded / Resolved), under
+  // the same date/type/search filters as the list itself. Static segment, must
+  // be declared before the ':id' GET route below.
+  @Get('counts')
+  counts(@CurrentUser() user: JwtPayload, @Query() query: Record<string, string | undefined>) {
+    const { from, to, intents, search } = parseListQuery(query);
+    return this.emailIntelligenceService.counts(user.sub, { from, to, intents, search });
+  }
+
+  // `view` answers "does this still need a reply" (the backend's single
+  // definition — see email-response-state.ts); `status` remains the AI-draft
+  // approval lifecycle for callers that mean exactly that.
   @Get()
-  list(
-    @CurrentUser() user: JwtPayload,
-    @Query('status') status?: 'pending' | 'approved' | 'rejected',
-    @Query('from') from?: string,
-    @Query('to') to?: string,
-  ) {
-    return this.emailIntelligenceService.list(user.sub, status, from, to);
+  list(@CurrentUser() user: JwtPayload, @Query() query: Record<string, string | undefined>) {
+    return this.emailIntelligenceService.list(user.sub, parseListQuery(query));
   }
 
   // Phase 19 — Unified Analytics Dashboard's email activity widget. A
@@ -167,6 +211,13 @@ export class EmailIntelligenceController {
   @Get(':id')
   getOne(@CurrentUser() user: JwtPayload, @Param('id') id: string) {
     return this.emailIntelligenceService.getOne(user.sub, id);
+  }
+
+  // The stored messages of this email's conversation, with what has been
+  // answered — for the detail view's thread timeline.
+  @Get(':id/thread')
+  thread(@CurrentUser() user: JwtPayload, @Param('id') id: string) {
+    return this.emailIntelligenceService.thread(user.sub, id);
   }
 
   @Post(':id/approve')

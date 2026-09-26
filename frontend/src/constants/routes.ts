@@ -35,8 +35,16 @@ export const ROUTES = {
   settings: '/settings',
   settingsGeneral: '/settings/general',
   settingsNotifications: '/settings/notifications',
+  settingsVoice: '/settings/voice',
+  settingsCalling: '/settings/calling',
   settingsSecurity: '/settings/security',
   settingsAgentRoles: '/settings/agent-roles',
+  // Full-page Agent Builder wizard — deliberately siblings of, not children
+  // under, the /settings/* SettingsLayout route (see routes/index.tsx) so
+  // the wizard gets the full viewport instead of the persistent Settings
+  // sidebar.
+  settingsAgentRolesNew: '/settings/agent-roles/new',
+  settingsAgentRolesEdit: '/settings/agent-roles/:id/edit',
   settingsUsers: '/settings/users',
   settingsSalesTargets: '/settings/sales-targets',
   settingsDealAssignment: '/settings/deal-assignment',

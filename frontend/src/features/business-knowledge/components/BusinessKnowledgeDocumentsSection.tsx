@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { FiFileText } from 'react-icons/fi';
+import { FiArrowRight, FiBook, FiDollarSign, FiFileText, FiImage, FiLayers, FiUploadCloud } from 'react-icons/fi';
 import { Button, SectionCard } from '@/components/ui';
 import type { BusinessKnowledgeDocument } from '@/services/businessKnowledgeDocumentsService';
 import { BusinessKnowledgeDocumentUpload } from './BusinessKnowledgeDocumentUpload';
@@ -13,6 +13,14 @@ import styles from '../business-knowledge.module.css';
 // reachable from a list row. canEdit gates upload/delete/edit only; every
 // role that can reach this page can browse and open a document to view its
 // AI summary (see Phase 14a plan notes' RBAC split).
+const DOC_TYPES = [
+  { icon: FiBook, label: 'Product catalogs' },
+  { icon: FiDollarSign, label: 'Price lists' },
+  { icon: FiLayers, label: 'Sales decks' },
+  { icon: FiImage, label: 'Brochures & brand guides' },
+  { icon: FiFileText, label: 'Agreements & manuals' },
+];
+
 export function BusinessKnowledgeDocumentsSection({ canEdit }: { canEdit: boolean }) {
   const [browsing, setBrowsing] = useState(false);
   const [reviewing, setReviewing] = useState<BusinessKnowledgeDocument | null>(null);
@@ -21,7 +29,7 @@ export function BusinessKnowledgeDocumentsSection({ canEdit }: { canEdit: boolea
   return (
     <div className={styles.tabContent}>
       {canEdit && (
-        <SectionCard title="Upload Business Documents" icon={FiFileText}>
+        <SectionCard title="Upload Business Documents" icon={FiUploadCloud}>
           <BusinessKnowledgeDocumentUpload onDocumentReady={() => setRefreshKey((k) => k + 1)} />
         </SectionCard>
       )}
@@ -34,11 +42,25 @@ export function BusinessKnowledgeDocumentsSection({ canEdit }: { canEdit: boolea
           onSelectDocument={(doc) => setReviewing(doc)}
         />
       ) : (
-        <SectionCard title="Documents & Assets" icon={FiFileText} action={<Button type="button" variant="ghost" size="sm" onClick={() => setBrowsing(true)}>Browse All</Button>}>
-          <div className={styles.emptyState}>
-            Product catalogs, brochures, price lists, agreements, sales decks, brand guidelines, and
-            internal manuals — uploaded documents are summarized/classified by AI and become
-            immediately searchable by every chat persona in your organization.
+        <SectionCard
+          title="Documents & Assets"
+          icon={FiFileText}
+          action={
+            <Button type="button" size="sm" rightIcon={<FiArrowRight />} onClick={() => setBrowsing(true)}>
+              Browse all
+            </Button>
+          }
+        >
+          <p className={styles.explainer}>
+            Everything you upload is read, summarized and classified by the AI — and becomes searchable by every AI
+            assistant in your organization straight away.
+          </p>
+          <div className={styles.docTypes}>
+            {DOC_TYPES.map(({ icon: Icon, label }) => (
+              <span key={label} className={styles.docType}>
+                <Icon /> {label}
+              </span>
+            ))}
           </div>
         </SectionCard>
       )}

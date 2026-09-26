@@ -71,6 +71,9 @@ const SecuritySettings = lazy(() =>
 const AgentRolesSettings = lazy(() =>
   import('@/features/settings/tabs/AgentRolesSettings').then((m) => ({ default: m.AgentRolesSettings })),
 );
+const AgentBuilderPage = lazy(() =>
+  import('@/features/agent-builder/AgentBuilderPage').then((m) => ({ default: m.AgentBuilderPage })),
+);
 const UsersSettings = lazy(() =>
   import('@/features/settings/tabs/UsersSettings').then((m) => ({ default: m.UsersSettings })),
 );
@@ -190,6 +193,14 @@ export function AppRoutes() {
                   <Route path="royalty-rules" element={<RoyaltyRulesSettings />} />
                   <Route path="email-sla" element={<EmailSlaSettings />} />
                 </Route>
+              </Route>
+              {/* Siblings of, not children under, SettingsLayout above — the
+                  Agent Builder wizard needs the full viewport, not the
+                  persistent Settings sidebar. Same admin-only gate as the
+                  backend's own agent-roles mutation routes. */}
+              <Route element={<RequireRole role="admin" />}>
+                <Route path={ROUTES.settingsAgentRolesNew} element={<AgentBuilderPage />} />
+                <Route path={ROUTES.settingsAgentRolesEdit} element={<AgentBuilderPage />} />
               </Route>
             </Route>
           </Route>

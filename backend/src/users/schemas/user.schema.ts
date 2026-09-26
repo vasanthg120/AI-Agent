@@ -223,6 +223,19 @@ export class User {
     default: { desktopPush: true, mobilePush: true, email: true },
   })
   notificationPreferences: { desktopPush: boolean; mobilePush: boolean; email: boolean };
+
+  // Voice & Accent — this user's own override of the organization's voice
+  // (Organization.voiceSettings). Both fields optional and independent: a user
+  // can keep the org's voice and only change its personality. Only applied
+  // while the org allows overrides; resolved centrally in voice/
+  // voice-config.service.ts, never read anywhere else.
+  @Prop({ type: Object, default: {} })
+  voicePreferences: UserVoicePreferences;
+}
+
+export interface UserVoicePreferences {
+  voiceId?: string;
+  personality?: string;
 }
 
 export const UserSchema = SchemaFactory.createForClass(User);

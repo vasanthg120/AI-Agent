@@ -1,13 +1,16 @@
 import { useEffect, useRef, useState } from 'react';
-import { FiAlertCircle, FiMic, FiSquare, FiUploadCloud } from 'react-icons/fi';
-import { Button, Card, SectionCard, Skeleton, StatTile, Tabs } from '@/components/ui';
+import { useNavigate } from 'react-router-dom';
+import { AnimatePresence, MotionConfig, motion } from 'framer-motion';
+import { FiFolder, FiRadio, FiUploadCloud, FiVolume2 } from 'react-icons/fi';
+import { Button } from '@/components/ui';
+import { ROUTES } from '@/constants/routes';
 import { useCallSessionStore } from '@/stores/callSessionStore';
 import { VOICE_LANGUAGES } from '@/services/voiceService';
-import { CustomerPicker, type SelectedCustomer } from './components/CustomerPicker';
-import { CustomerContextCard } from './components/CustomerContextCard';
-import { TranscriptPanel } from './components/TranscriptPanel';
-import { EventsFeed } from './components/EventsFeed';
-import { RecommendationsPanel } from './components/RecommendationsPanel';
+import { EASE_OUT } from './motion';
+import { LiveConsole, type LiveStatus } from './components/LiveConsole';
+import { PillTabs } from './components/PillTabs';
+import { StartHub } from './components/StartHub';
+import type { SelectedCustomer } from './components/CustomerPicker';
 import { CallSummaryModal } from './components/CallSummaryModal';
 import { UploadRecordingModal } from './components/UploadRecordingModal';
 import { CallLibraryListView } from './components/CallLibraryListView';
@@ -26,12 +29,6 @@ function readStoredLanguage(): string {
   return VOICE_LANGUAGES[0].code;
 }
 
-function formatDuration(seconds: number): string {
-  const m = Math.floor(seconds / 60);
-  const s = seconds % 60;
-  return `${m}:${s.toString().padStart(2, '0')}`;
-}
-
 // Real-Time AI Sales Call Copilot — Listen -> Transcribe -> Understand ->
 // Analyze -> Recommend -> Alert. The recording lifecycle (mic capture,
 // segmented upload) lives in useSegmentedRecording; the call session's live
@@ -39,6 +36,7 @@ function formatDuration(seconds: number): string {
 // useCallSessionStore, which owns the /call-copilot socket entirely — this
 // component only renders what the store already has and issues start/stop.
 export function CallCopilotPage() {
+  const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState('live');
   const [customer, setCustomer] = useState<SelectedCustomer | null>(null);
   const [language, setLanguage] = useState(readStoredLanguage);
@@ -48,8 +46,24 @@ export function CallCopilotPage() {
   const [librarySwitch, setLibrarySwitch] = useState(0);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  const { status, contextBlob, transcript, events, recommendations, sentiment, warning, error, summary, startCall, appendAudioSegment, endCall, reset } =
-    useCallSessionStore();
+  const {
+    status,
+    sessionId,
+    sessionStartedAt,
+    contextBlob,
+    transcript,
+    events,
+    recommendations,
+    sentiment,
+    warning,
+    error,
+    summary,
+    coaching,
+    startCall,
+    appendAudioSegment,
+    endCall,
+    reset,
+  } = useCallSessionStore();
 
   const recording = useSegmentedRecording((blob, sequence) => {
     void appendAudioSegment(blob, sequence, language);
@@ -114,116 +128,120 @@ export function CallCopilotPage() {
 
   const isIdle = status === 'idle' || status === 'error';
   const isLive = status === 'starting' || status === 'recording' || status === 'ending';
+  const languageLabel = VOICE_LANGUAGES.find((l) => l.code === language)?.label ?? language;
 
-  const tabItems = [
-    { id: 'live', label: 'Live Call' },
-    { id: 'library', label: 'Call Library' },
-  ];
+  const startErrors = [recording.error ? micErrorMessage(recording.error) : null, error].filter(
+    (message): message is string => !!message,
+  );
+
+  const openLibrary = () => {
+    // A fresh mount of the library, so it loads the call that just finished.
+    setLibrarySwitch((n) => n + 1);
+    setActiveTab('library');
+  };
 
   return (
-    <div className={styles.page}>
-      <div className={styles.headerRow}>
-        <div>
-          <div className={styles.pageTitle}>Call Copilot</div>
-          <div className={styles.pageSubtitle}>Live AI assistance during a sales call — transcript, signals, and recommendations as you talk.</div>
-        </div>
-        {activeTab === 'live' && isIdle && (
-          <Button type="button" variant="secondary" leftIcon={<FiUploadCloud />} onClick={() => setUploadModalOpen(true)}>
-            Upload a Recording
-          </Button>
-        )}
-      </div>
-
-      <Tabs items={tabItems} activeId={activeTab} onChange={setActiveTab} />
-
-      {activeTab === 'library' && <CallLibraryListView key={librarySwitch} />}
-
-      {activeTab === 'live' && (
-        <>
-          {isLive && (
-            <div className={styles.statRow}>
-              <StatTile label="Status" value={status === 'starting' ? 'Starting…' : status === 'ending' ? 'Ending…' : 'Recording'} />
-              <StatTile label="Duration" value={formatDuration(elapsedSeconds)} />
-              <StatTile label="Events Detected" value={events.length} />
-              <StatTile label="Sentiment" value={sentiment ?? '—'} />
+    <MotionConfig reducedMotion="user">
+      <div className={styles.page}>
+        <div className={styles.content}>
+          <header className={styles.headerRow}>
+            <div className={styles.titleBlock}>
+              <h1 className={styles.pageTitle}>Call Copilot</h1>
+              <p className={styles.pageSubtitle}>
+                Capture a call, get live suggestions while you talk, and review it with your AI Coach afterwards.
+              </p>
             </div>
-          )}
-
-          {isIdle && (
-            <Card className={styles.startCard}>
-              <CustomerPicker value={customer} onChange={setCustomer} />
-              <label className={styles.languageRow}>
-                <span>Language</span>
-                <select className={styles.select} value={language} onChange={(e) => changeLanguage(e.target.value)}>
-                  {VOICE_LANGUAGES.map((l) => (
-                    <option key={l.code} value={l.code}>
-                      {l.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              {recording.error && (
-                <div className={styles.errorBox} role="alert">
-                  <FiAlertCircle size={16} />
-                  <span>{micErrorMessage(recording.error)}</span>
-                </div>
-              )}
-              {error && (
-                <div className={styles.errorBox} role="alert">
-                  <FiAlertCircle size={16} />
-                  <span>{error}</span>
-                </div>
-              )}
-              <Button type="button" leftIcon={<FiMic />} onClick={() => void handleStart()}>
-                Record
-              </Button>
-            </Card>
-          )}
-
-          {isLive && (
-            <>
-              {warning && (
-                <div className={styles.warningBox} role="status">
-                  <FiAlertCircle size={14} /> {warning}
-                </div>
-              )}
-
-              <div className={styles.grid}>
-                <div className={styles.mainColumn}>
-                  <SectionCard title="Live Transcript">
-                    <TranscriptPanel transcript={transcript} isRecording={status === 'recording'} />
-                  </SectionCard>
-                  <SectionCard title="Recommendations">
-                    <RecommendationsPanel recommendations={recommendations} />
-                  </SectionCard>
-                </div>
-                <div className={styles.sideColumn}>
-                  <SectionCard title="Customer Context">
-                    {contextBlob === '' && status === 'starting' ? <Skeleton height={80} /> : <CustomerContextCard contextBlob={contextBlob} />}
-                  </SectionCard>
-                  <SectionCard title="Detected Signals">
-                    <EventsFeed events={events} />
-                  </SectionCard>
-                </div>
-              </div>
-
-              <div className={styles.endBar}>
-                <Button type="button" variant="danger" leftIcon={<FiSquare />} onClick={handleEnd} disabled={status === 'ending'}>
-                  End Call
+            {isIdle && (
+              <div className={styles.headerActions}>
+                {/* Not shown mid-call: leaving the page stops the recording. */}
+                <Button type="button" variant="ghost" leftIcon={<FiVolume2 />} onClick={() => navigate(ROUTES.settingsVoice)}>
+                  Voice &amp; Accent
+                </Button>
+                <Button type="button" variant="secondary" leftIcon={<FiUploadCloud />} onClick={() => setUploadModalOpen(true)}>
+                  Upload a Recording
                 </Button>
               </div>
-            </>
-          )}
-        </>
-      )}
+            )}
+          </header>
 
-      <CallSummaryModal open={summaryOpen} onClose={handleCloseSummary} source="live" summaryResult={summary} transcript={transcript} events={events} sentiment={sentiment} />
+          <PillTabs
+            ariaLabel="Call Copilot sections"
+            activeId={activeTab}
+            onChange={setActiveTab}
+            items={[
+              { id: 'live', label: 'Live Call', icon: <FiRadio aria-hidden />, live: isLive },
+              { id: 'library', label: 'Call Library', icon: <FiFolder aria-hidden /> },
+            ]}
+          />
 
-      <UploadRecordingModal
-        open={uploadModalOpen}
-        onClose={() => setUploadModalOpen(false)}
-        onProcessed={() => setLibrarySwitch((n) => n + 1)}
-      />
-    </div>
+          <AnimatePresence mode="wait" initial={false}>
+            {activeTab === 'library' ? (
+              <motion.div key="library" {...SCREEN}>
+                <CallLibraryListView key={librarySwitch} onStartCall={() => setActiveTab('live')} />
+              </motion.div>
+            ) : isLive ? (
+              <motion.div key="console" {...SCREEN}>
+                <LiveConsole
+                  status={status as LiveStatus}
+                  elapsedSeconds={elapsedSeconds}
+                  transcript={transcript}
+                  events={events}
+                  recommendations={recommendations}
+                  sentiment={sentiment}
+                  contextBlob={contextBlob}
+                  warning={warning}
+                  customerLabel={customer?.label}
+                  languageLabel={languageLabel}
+                  stream={recording.stream}
+                  onEnd={handleEnd}
+                />
+              </motion.div>
+            ) : (
+              <motion.div key="hub" {...SCREEN}>
+                <StartHub
+                  customer={customer}
+                  onCustomerChange={setCustomer}
+                  language={language}
+                  onLanguageChange={changeLanguage}
+                  errors={startErrors}
+                  onStart={() => void handleStart()}
+                  onOpenUpload={() => setUploadModalOpen(true)}
+                  onOpenLibrary={openLibrary}
+                />
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
+
+        <CallSummaryModal
+          open={summaryOpen}
+          onClose={handleCloseSummary}
+          source="live"
+          summaryResult={summary}
+          transcript={transcript}
+          sessionId={sessionId ?? undefined}
+          createdAt={sessionStartedAt ?? undefined}
+          sentiment={sentiment}
+          coachingPending={status === 'ended' && !coaching}
+          coaching={coaching ?? undefined}
+          onCoachingGenerated={(report) => useCallSessionStore.setState({ coaching: report })}
+        />
+
+        <UploadRecordingModal
+          open={uploadModalOpen}
+          onClose={() => setUploadModalOpen(false)}
+          onProcessed={() => setLibrarySwitch((n) => n + 1)}
+        />
+      </div>
+    </MotionConfig>
   );
 }
+
+// How one screen replaces another: a short fade with a small lift, so switching
+// tabs or starting a call feels like moving between rooms, not a page reload.
+const SCREEN = {
+  initial: { opacity: 0, y: 10 },
+  animate: { opacity: 1, y: 0 },
+  exit: { opacity: 0, y: -6 },
+  transition: { duration: 0.24, ease: EASE_OUT },
+} as const;

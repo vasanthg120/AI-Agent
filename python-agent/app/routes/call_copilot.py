@@ -1,8 +1,8 @@
-"""Real-Time AI Sales Call Copilot — python-agent's four endpoints, called by
+"""Real-Time AI Sales Call Copilot — python-agent's endpoints, called by
 backend/src/call-copilot's NestJS module (session lifecycle, GridFS storage,
 and Socket.IO relay all live there; this side only ever does one thing per
-call: transcribe a segment, fetch context once, analyze a window, or
-summarize the whole call).
+call: transcribe a segment, fetch context once, analyze a window, summarize
+the whole call, or generate an end-of-call coaching report).
 """
 
 import logging
@@ -11,9 +11,15 @@ from typing import Literal
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel
 
-from app.agent.call_copilot_analysis import analyze_call_segment, summarize_call
+from app.agent.call_copilot_analysis import (
+    analyze_call_segment,
+    generate_coaching_report,
+    localize_voice_script,
+    summarize_call,
+)
 from app.config import settings
 from app.integrations.sarvam_client import (
+    SUPPORTED_LANGUAGES,
     SarvamApiError,
     download_batch_job_result,
     get_batch_job_status,
@@ -211,6 +217,110 @@ def summarize(body: SummarizeRequest, user: dict = Depends(get_current_user)):
         keyTakeaways=result.get("keyTakeaways", []),
         followUpActions=result.get("followUpActions", []),
     )
+
+
+class CoachRequest(BaseModel):
+    sessionId: str
+    contextBlob: str
+    fullTranscript: str
+    detectedEvents: list[str] = []
+    summary: str = ""
+
+
+class CoachCategoryScore(BaseModel):
+    category: str
+    score: int
+    rationale: str
+
+
+class CoachKeyMoment(BaseModel):
+    momentType: str
+    text: str
+    recommendation: str
+    relatedEventText: str
+
+
+class CoachResponse(BaseModel):
+    categoryScores: list[CoachCategoryScore]
+    whatWentWell: list[str]
+    whatToImprove: list[str]
+    whatWouldHaveDoneDifferently: list[str]
+    nextCallFocus: list[str]
+    keyMoments: list[CoachKeyMoment]
+    coachingSummary: str
+    voiceScript: str
+
+
+@router.post("/call-copilot/coach", response_model=CoachResponse)
+def coach(body: CoachRequest, user: dict = Depends(get_current_user)):
+    if not body.fullTranscript.strip():
+        return CoachResponse(
+            categoryScores=[],
+            whatWentWell=[],
+            whatToImprove=[],
+            whatWouldHaveDoneDifferently=[],
+            nextCallFocus=[],
+            keyMoments=[],
+            coachingSummary="No speech was transcribed during this call, so there's nothing to coach on.",
+            voiceScript="There wasn't any speech captured on this call, so I don't have anything to coach you on this time.",
+        )
+
+    result = generate_coaching_report(
+        body.contextBlob,
+        body.fullTranscript,
+        body.detectedEvents,
+        body.summary,
+        organization_id=user.get("organizationId"),
+        user_id=user["sub"],
+    )
+    return CoachResponse(
+        categoryScores=result.get("categoryScores", []),
+        whatWentWell=result.get("whatWentWell", []),
+        whatToImprove=result.get("whatToImprove", []),
+        whatWouldHaveDoneDifferently=result.get("whatWouldHaveDoneDifferently", []),
+        nextCallFocus=result.get("nextCallFocus", []),
+        keyMoments=result.get("keyMoments", []),
+        coachingSummary=result.get("coachingSummary", ""),
+        voiceScript=result.get("voiceScript", ""),
+    )
+
+
+class VoiceScriptRequest(BaseModel):
+    sessionId: str
+    languageCode: str
+    overallScore: float | None = None
+    categoryScores: list[CoachCategoryScore] = []
+    whatWentWell: list[str] = []
+    whatToImprove: list[str] = []
+    whatWouldHaveDoneDifferently: list[str] = []
+    nextCallFocus: list[str] = []
+    coachingSummary: str = ""
+    voiceScript: str = ""
+
+
+class VoiceScriptResponse(BaseModel):
+    languageCode: str
+    voiceScript: str
+
+
+@router.post("/call-copilot/voice-script", response_model=VoiceScriptResponse)
+def voice_script(body: VoiceScriptRequest, user: dict = Depends(get_current_user)):
+    """Rewrites an existing coaching report as a spoken script in the chosen
+    language — see call_copilot_analysis.localize_voice_script. The result is
+    then spoken by the existing /voice/speak (Sarvam TTS) with the same
+    languageCode."""
+    if body.languageCode not in SUPPORTED_LANGUAGES:
+        raise HTTPException(status_code=400, detail=f"'{body.languageCode}' is not a supported voice language.")
+
+    script = localize_voice_script(
+        body.languageCode,
+        body.model_dump(),
+        organization_id=user.get("organizationId"),
+        user_id=user["sub"],
+    )
+    if not script:
+        raise HTTPException(status_code=502, detail="Could not prepare the spoken coaching. Please try again.")
+    return VoiceScriptResponse(languageCode=body.languageCode, voiceScript=script)
 
 
 # --- Uploaded recordings (batch STT) --------------------------------------

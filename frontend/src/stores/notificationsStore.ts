@@ -7,6 +7,9 @@ import { useAuthStore } from '@/stores/authStore';
 interface NotificationsState {
   notifications: AppNotification[];
   initialized: boolean;
+  // True once the first fetch has finished (successfully or not) — lets the
+  // Notifications page tell "still loading" apart from "genuinely empty".
+  loaded: boolean;
   unreadCount: () => number;
   init: () => Promise<void>;
   markRead: (id: string) => void;
@@ -16,6 +19,7 @@ interface NotificationsState {
 export const useNotificationsStore = create<NotificationsState>((set, get) => ({
   notifications: [],
   initialized: false,
+  loaded: false,
 
   unreadCount() {
     return get().notifications.filter((n) => !n.read).length;
@@ -36,6 +40,8 @@ export const useNotificationsStore = create<NotificationsState>((set, get) => ({
     } catch {
       // Notifications are a convenience layer, not core app function — a
       // failed fetch just leaves the list empty until the next reload.
+    } finally {
+      set({ loaded: true });
     }
 
     const token = useAuthStore.getState().accessToken;

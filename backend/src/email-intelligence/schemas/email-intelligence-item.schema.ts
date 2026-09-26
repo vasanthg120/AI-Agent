@@ -1,5 +1,6 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { Document, Types } from 'mongoose';
+import { deriveRespondedInfo, deriveResponseStatus, EmailRespondedVia, EmailResponseStatus } from '../email-response-state';
 
 export type EmailIntelligenceItemDocument = EmailIntelligenceItem & Document<Types.ObjectId>;
 
@@ -198,6 +199,19 @@ export class EmailIntelligenceItem {
   @Prop()
   externalReplyDetectedAt?: Date;
 
+  // Set when a LATER reply in the same conversation answered this message — an
+  // older message in a thread the user has since replied to (through this app's
+  // Send, immediately; see EmailIntelligenceService.coverThread). The reply
+  // answers everything received before it was sent, so those messages must not
+  // linger as pending or resurface as "missed"; a message that arrives AFTER
+  // the reply is a new question and is evaluated on its own. Distinct from
+  // sentAt (this message's own draft was sent) and externalReplyDetectedAt (a
+  // reply found in Outlook's Sent Items), so reporting can still tell "I
+  // answered this" from "a later reply in the thread covered it". One-way,
+  // like the other two: nothing ever clears it.
+  @Prop()
+  threadRespondedAt?: Date;
+
   @Prop()
   rejectedAt?: Date;
 
@@ -223,9 +237,35 @@ export class EmailIntelligenceItem {
 
   createdAt: Date;
   updatedAt: Date;
+
+  // Backend-derived, never stored (see email-response-state.ts) — present on
+  // every serialized item so no client has to guess "answered?" from status.
+  responseStatus: EmailResponseStatus;
+  respondedAt?: Date;
+  respondedVia?: EmailRespondedVia;
 }
 
 export const EmailIntelligenceItemSchema = SchemaFactory.createForClass(EmailIntelligenceItem);
+
+EmailIntelligenceItemSchema.virtual('responseStatus').get(function (this: EmailIntelligenceItemDocument) {
+  return deriveResponseStatus(this);
+});
+EmailIntelligenceItemSchema.virtual('respondedAt').get(function (this: EmailIntelligenceItemDocument) {
+  return deriveRespondedInfo(this).respondedAt;
+});
+EmailIntelligenceItemSchema.virtual('respondedVia').get(function (this: EmailIntelligenceItemDocument) {
+  return deriveRespondedInfo(this).respondedVia;
+});
+// Virtuals are opt-in for JSON; without this the derived fields would exist on
+// the document but never reach a response. `id` (mongoose's default string
+// alias of _id) is dropped so payloads don't grow a duplicate.
+EmailIntelligenceItemSchema.set('toJSON', {
+  virtuals: true,
+  transform: (_doc, ret) => {
+    delete (ret as { id?: unknown }).id;
+    return ret;
+  },
+});
 // The entire dedup mechanism for the scheduled poller — no separate
 // watermark/cursor collection needed (see poller service's own comment).
 EmailIntelligenceItemSchema.index({ userId: 1, externalMessageId: 1 }, { unique: true });
@@ -234,3 +274,6 @@ EmailIntelligenceItemSchema.index({ organizationId: 1, createdAt: -1 });
 // External-reply detection's own lookup — every still-pending item with a
 // captured thread id, for one user, each sync run.
 EmailIntelligenceItemSchema.index({ userId: 1, status: 1, conversationId: 1 });
+// Thread lookups — coverThread (a reply answers every earlier message in its
+// conversation) and the detail view's conversation timeline.
+EmailIntelligenceItemSchema.index({ userId: 1, conversationId: 1, receivedAt: 1 });

@@ -26,6 +26,27 @@ export class Organization {
   // a channel on.
   @Prop({ type: Object, default: { emailEnabled: true, pushEnabled: true } })
   notificationPolicy: { emailEnabled: boolean; pushEnabled: boolean };
+
+  // Voice & Accent — the organization's part of the one central voice
+  // configuration (the other part is User.voicePreferences; voice/
+  // voice-config.service.ts resolve() is the only place they are combined).
+  // Every field is optional: an org that never touched it has {} and speaks
+  // with the system default voice. Ids are plain strings here — the voice
+  // catalog owns what they mean and validates them; this schema stays free of
+  // any dependency on it.
+  @Prop({ type: Object, default: {} })
+  voiceSettings: OrganizationVoiceSettings;
+}
+
+export interface OrganizationVoiceSettings {
+  defaultVoiceId?: string;
+  defaultPersonality?: string;
+  // Whether members may pick their own voice. Absent = allowed; only an
+  // explicit false blocks (a saved personal choice is kept, just not applied,
+  // so turning this back on restores it).
+  allowUserOverride?: boolean;
+  updatedBy?: string;
+  updatedAt?: Date;
 }
 
 export const OrganizationSchema = SchemaFactory.createForClass(Organization);

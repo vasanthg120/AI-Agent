@@ -274,9 +274,13 @@ export class EmailIntelligenceSyncService {
       let newItemsCount = 0;
       let succeededCount = 0;
       let failedCount = 0;
+      const alreadyStored: { id: string; isRead: boolean }[] = [];
       for (const email of data.emails) {
         const exists = await this.emailIntelligenceService.itemExists(userId, email.id);
-        if (exists) continue;
+        if (exists) {
+          alreadyStored.push({ id: email.id, isRead: email.isRead });
+          continue;
+        }
         newItemsCount += 1;
         try {
           await this.emailIntelligenceService.analyzeAndCreate(user.organizationId, userId, connection.email, email, context);
@@ -290,6 +294,11 @@ export class EmailIntelligenceSyncService {
       // Best-effort, after the main scan — a failure here (or nothing to
       // check) must never turn an otherwise-successful sync into a failed
       // one; see detectExternalReplies' own comment for why this exists.
+      try {
+        await this.emailIntelligenceService.refreshReadState(userId, alreadyStored);
+      } catch (err) {
+        this.logger.error(`Read-state refresh failed for user ${userId}: ${(err as Error).message}`);
+      }
       try {
         await this.detectExternalReplies(userId);
       } catch (err) {

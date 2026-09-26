@@ -177,22 +177,24 @@ export function RoyaltyReportSection() {
             icon={FiZap}
           >
             {view === 'table' ? (
-              <table className={clsx(styles.reportTable, styles.summaryTable)}>
-                <thead>
-                  <tr>
-                    <th>Item</th>
-                    <th>Value</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {lines.map((line) => (
-                    <tr key={line.label}>
-                      <td>{line.label}</td>
-                      <td>{line.value}</td>
+              <div className={styles.tableScroll}>
+                <table className={clsx(styles.reportTable, styles.summaryTable)}>
+                  <thead>
+                    <tr>
+                      <th>Item</th>
+                      <th>Value</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {lines.map((line) => (
+                      <tr key={line.label}>
+                        <td>{line.label}</td>
+                        <td>{line.value}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             ) : (
               <div className={styles.statsGrid}>
                 {lines.map((line) => (

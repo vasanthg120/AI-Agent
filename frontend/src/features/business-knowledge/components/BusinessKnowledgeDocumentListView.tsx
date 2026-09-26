@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { FiArrowLeft } from 'react-icons/fi';
-import { Badge, Button, Skeleton } from '@/components/ui';
+import { motion } from 'framer-motion';
+import { FiArrowLeft, FiChevronRight, FiFile, FiFileText, FiGrid, FiImage } from 'react-icons/fi';
+import { Badge, Button, EmptyState, Skeleton } from '@/components/ui';
 import {
   businessKnowledgeDocumentsService,
   type BusinessKnowledgeDocument,
@@ -10,6 +11,14 @@ import {
 import styles from '../business-knowledge.module.css';
 
 const PAGE_SIZE = 25;
+
+function fileIcon(filename: string) {
+  const ext = filename.slice(filename.lastIndexOf('.') + 1).toLowerCase();
+  if (['png', 'jpg', 'jpeg', 'gif', 'webp'].includes(ext)) return FiImage;
+  if (['xlsx', 'xls', 'csv'].includes(ext)) return FiGrid;
+  if (['pdf', 'docx', 'txt', 'md', 'html', 'htm'].includes(ext)) return FiFileText;
+  return FiFile;
+}
 
 // Drill-down detail view, state-swap style — mirrors
 // finance/components/FinanceDocumentListView.tsx exactly. Browsing many
@@ -35,40 +44,56 @@ export function BusinessKnowledgeDocumentListView({
 
   return (
     <div className={styles.formGrid}>
-      <div className={styles.headerRow}>
-        <div>
-          <div className={styles.pageTitle}>All Documents</div>
-          <div className={styles.pageSubtitle}>{data ? `${data.total} document(s)` : 'Loading…'}</div>
-        </div>
+      <div className={styles.listHeader}>
         <Button type="button" variant="ghost" size="sm" leftIcon={<FiArrowLeft />} onClick={onBack}>
           Back
         </Button>
+        <div>
+          <div className={styles.listTitle}>All documents</div>
+          <div className={styles.listCount}>{data ? `${data.total} document${data.total === 1 ? '' : 's'}` : 'Loading…'}</div>
+        </div>
       </div>
 
       {isLoading || !data ? (
-        <Skeleton height={280} />
+        <div className={styles.formGrid}>
+          {[0, 1, 2, 3].map((i) => (
+            <Skeleton key={i} height={62} />
+          ))}
+        </div>
       ) : data.items.length === 0 ? (
-        <div className={styles.emptyState}>No documents match this selection.</div>
+        <EmptyState icon={FiFileText} title="No documents yet" description="Upload a catalog, price list or manual above and it will show up here." />
       ) : (
         <>
-          {data.items.map((d) => (
-            <div
-              key={d._id}
-              className={styles.faqRow}
-              onClick={() => onSelectDocument(d)}
-              style={{ cursor: 'pointer', flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}
-            >
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
-                <span>{d.title ?? d.originalFilename}</span>
-                <span className={styles.pageSubtitle}>
-                  {d.assetType.replace('_', ' ')} · {new Date(d.createdAt).toLocaleDateString()}
-                </span>
-              </div>
-              <Badge variant={d.reviewStatus === 'reviewed' ? 'success' : 'warning'}>
-                {d.reviewStatus === 'reviewed' ? 'Reviewed' : 'Needs review'}
-              </Badge>
-            </div>
-          ))}
+          <div className={styles.docList}>
+            {data.items.map((d, i) => {
+              const Icon = fileIcon(d.originalFilename);
+              return (
+                <motion.button
+                  key={d._id}
+                  type="button"
+                  className={styles.docRow}
+                  onClick={() => onSelectDocument(d)}
+                  initial={{ opacity: 0, y: 6 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.25, delay: Math.min(i, 10) * 0.025 }}
+                >
+                  <span className={styles.docIcon}>
+                    <Icon />
+                  </span>
+                  <span className={styles.docText}>
+                    <span className={styles.docTitle}>{d.title ?? d.originalFilename}</span>
+                    <span className={styles.docMeta}>
+                      {d.assetType.replace(/_/g, ' ')} · {new Date(d.createdAt).toLocaleDateString()}
+                    </span>
+                  </span>
+                  <Badge variant={d.reviewStatus === 'reviewed' ? 'success' : 'warning'}>
+                    {d.reviewStatus === 'reviewed' ? 'Reviewed' : 'Needs review'}
+                  </Badge>
+                  <FiChevronRight className={styles.docChevron} />
+                </motion.button>
+              );
+            })}
+          </div>
 
           {totalPages > 1 && (
             <div className={styles.headerActions}>
