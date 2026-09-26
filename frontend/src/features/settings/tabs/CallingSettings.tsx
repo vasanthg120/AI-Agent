@@ -151,7 +151,7 @@ export function CallingSettings() {
 
   if (isLoading) {
     return (
-      <SettingsSection
+      <SettingsSection icon={<FiPhoneCall />}
         icon={<FiPhoneCall />}
         title="Calling"
         description="Record phone calls and get a summary and AI coaching for each one."
@@ -163,7 +163,7 @@ export function CallingSettings() {
   }
   if (isError || !config) {
     return (
-      <SettingsSection
+      <SettingsSection icon={<FiPhoneCall />}
         icon={<FiPhoneCall />}
         title="Calling"
         description="Record phone calls and get a summary and AI coaching for each one."

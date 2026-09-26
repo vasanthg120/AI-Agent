@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import toast from 'react-hot-toast';
-import { FiEye, FiEyeOff } from 'react-icons/fi';
+import { FiEye, FiEyeOff, FiKey } from 'react-icons/fi';
 import { Button, Input } from '@/components/ui';
 import { authService } from '@/services/authService';
 import { extractErrorMessage } from '@/utils/errors';
@@ -38,7 +38,7 @@ export function PasswordSection() {
   };
 
   return (
-    <SettingsSection title="Password" description="Change your account password.">
+    <SettingsSection icon={<FiKey />} title="Password" description="Change your account password.">
       <Input
         label="Current password"
         type={showCurrentPassword ? 'text' : 'password'}

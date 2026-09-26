@@ -1,23 +1,69 @@
 .section {
   display: flex;
   flex-direction: column;
-  gap: var(--space-4);
+  gap: var(--space-5);
+  padding: var(--space-6);
+  background: var(--color-bg-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+  transition: border-color var(--duration-slow) var(--ease-out), box-shadow var(--duration-slow) var(--ease-out);
+}
+
+.section:hover,
+.section:focus-within {
+  border-color: var(--color-border-strong);
+  box-shadow: var(--shadow-md);
 }
 
 .header {
   display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+}
+
+.headerIcon {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  background: var(--color-bg-active);
+  color: var(--color-accent);
+  font-size: 17px;
+}
+
+.headerText {
+  flex: 1;
+  min-width: 0;
+  display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 4px;
+}
+
+.actions {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
 }
 
 .title {
+  margin: 0;
   font-size: var(--text-lg);
   font-weight: 700;
+  letter-spacing: -0.01em;
+  line-height: 1.3;
   color: var(--color-text-primary);
 }
 
 .description {
+  margin: 0;
+  max-width: 680px;
   font-size: var(--text-sm);
+  line-height: 1.55;
   color: var(--color-text-muted);
 }
 
@@ -39,19 +85,62 @@
   color: var(--color-text-secondary);
 }
 
-.select {
-  height: 44px;
-  padding: 0 var(--space-4);
-  border-radius: var(--radius-md);
-  border: 1px solid var(--color-border-strong);
-  background: var(--color-bg-input);
-  color: var(--color-text-primary);
-  font-size: var(--text-md);
+.fieldHint {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
 }
 
+.select {
+  height: 44px;
+  padding: 0 40px 0 var(--space-4);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border-strong);
+  background-color: var(--color-bg-input);
+  /* Custom chevron (Feather "chevron-down", muted ink) in place of the OS arrow. */
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%238a8579' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 14px center;
+  appearance: none;
+  -webkit-appearance: none;
+  color: var(--color-text-primary);
+  font-size: var(--text-md);
+  cursor: pointer;
+  transition: border-color var(--duration-fast) var(--ease-out), box-shadow var(--duration-fast) var(--ease-out);
+}
+
+.select:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--color-accent) 45%, var(--color-border-strong));
+}
+
+.select:focus {
+  outline: none;
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 3px var(--color-accent-muted);
+}
+
+/* Also used on its own, outside a section (see GeneralSettings). */
 .footer {
   display: flex;
   justify-content: flex-end;
-  padding-top: var(--space-2);
+  gap: var(--space-2);
+}
+
+/* Inside a card, the footer becomes a tinted action strip flush with the card's edges. */
+.section > .footer {
+  margin: var(--space-1) calc(-1 * var(--space-6)) calc(-1 * var(--space-6));
+  padding: var(--space-4) var(--space-6);
   border-top: 1px solid var(--color-border);
+  border-radius: 0 0 var(--radius-lg) var(--radius-lg);
+  background: color-mix(in srgb, var(--color-text-primary) 2.5%, var(--color-bg-surface));
+}
+
+@media (max-width: 600px) {
+  .section {
+    padding: var(--space-5) var(--space-4);
+  }
+
+  .section > .footer {
+    margin: var(--space-1) calc(-1 * var(--space-4)) calc(-1 * var(--space-5));
+    padding: var(--space-3) var(--space-4);
+  }
 }

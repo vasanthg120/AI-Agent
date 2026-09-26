@@ -189,7 +189,7 @@ export function EmailSlaSettings() {
 
   return (
     <>
-      <SettingsSection
+      <SettingsSection icon={<FiClock />}
         title="Response Time Policies"
         description="How long employees have to send a first reply before an email is considered breached, per priority. Falls back to sensible defaults until saved here."
       >
@@ -243,7 +243,7 @@ export function EmailSlaSettings() {
         </div>
       </SettingsSection>
 
-      <SettingsSection
+      <SettingsSection icon={<FiCalendar />}
         title="Business Hours"
         description="Used to calculate SLA due times when 'business hours only' is on above — non-working days/hours don't count toward the clock."
       >
@@ -319,7 +319,7 @@ export function EmailSlaSettings() {
         {hours && <p className={styles.defaultHint}>Currently applies to every priority with "business hours only" enabled.</p>}
       </SettingsSection>
 
-      <SettingsSection
+      <SettingsSection icon={<FiAlertTriangle />}
         title="Escalation Rules"
         description="When a priority's SLA is breached and stays unresolved, escalation levels notify additional people the longer it stays open. Level 1 can fire immediately (delay of 0 minutes)."
       >

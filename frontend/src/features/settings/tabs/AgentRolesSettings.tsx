@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import toast from 'react-hot-toast';
-import { FiPlus, FiTrash2 } from 'react-icons/fi';
+import { FiCpu, FiPlus, FiTrash2 } from 'react-icons/fi';
 import { Avatar, Badge, Button, IconButton, Modal, Spinner } from '@/components/ui';
 import { extractErrorMessage } from '@/utils/errors';
 import { agentRolesService, type AgentRole } from '@/services/agentRolesService';
@@ -74,7 +74,7 @@ export function AgentRolesSettings() {
 
   return (
     <>
-      <SettingsSection
+      <SettingsSection icon={<FiCpu />}
         title="AI Agents"
         description="Create and configure AI agents for your organization — built-in personas plus any you create from a template, your documents, or a description."
         footer={

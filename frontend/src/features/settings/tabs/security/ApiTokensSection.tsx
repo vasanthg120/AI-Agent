@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import toast from 'react-hot-toast';
-import { FiPlus } from 'react-icons/fi';
+import { FiCode, FiPlus } from 'react-icons/fi';
 import { Button, CopyableText, Input, Modal, Skeleton } from '@/components/ui';
 import { apiTokensService, type ApiTokenSummary } from '@/services/apiTokensService';
 import { extractErrorMessage } from '@/utils/errors';
@@ -70,7 +70,7 @@ export function ApiTokensSection() {
 
   return (
     <>
-      <SettingsSection
+      <SettingsSection icon={<FiCode />}
         title="API Tokens"
         description="Personal access tokens for programmatic access to this app's own API."
         footer={

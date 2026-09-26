@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import toast from 'react-hot-toast';
-import { FiSearch } from 'react-icons/fi';
+import { FiSearch, FiShuffle } from 'react-icons/fi';
 import { Badge, Button, Input, MultiSelectDropdown, Skeleton, type MultiSelectOption } from '@/components/ui';
 import { extractErrorMessage } from '@/utils/errors';
 import { formatINR } from '@/utils/currency';
@@ -117,7 +117,7 @@ export function DealAssignmentSettings() {
   };
 
   return (
-    <SettingsSection
+    <SettingsSection icon={<FiShuffle />}
       title="Deal Assignment"
       description="Assign each deal to the employee who owns it — this is what drives real numbers on that person's individual dashboard."
     >

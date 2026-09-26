@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import toast from 'react-hot-toast';
-import { FiTrash2 } from 'react-icons/fi';
+import { FiTrash2, FiUserPlus, FiUsers } from 'react-icons/fi';
 import { Badge, Button, IconButton, Input, Modal, Switch } from '@/components/ui';
 import { extractErrorMessage } from '@/utils/errors';
 import { agentRolesService, type AgentRole } from '@/services/agentRolesService';
@@ -180,7 +180,7 @@ export function UsersSettings() {
 
   return (
     <>
-      <SettingsSection
+      <SettingsSection icon={<FiUserPlus />}
         title="Create a New User"
         description="Create an account directly and assign it a role. Agent User accounts are locked to a single AI agent."
         footer={
@@ -192,7 +192,7 @@ export function UsersSettings() {
         <p>Users you create here get a temporary password shown once — share it with them directly.</p>
       </SettingsSection>
 
-      <SettingsSection title="Existing Users" description="All accounts in this workspace.">
+      <SettingsSection icon={<FiUsers />} title="Existing Users" description="All accounts in this workspace.">
         {loading ? (
           <p>Loading users…</p>
         ) : (
