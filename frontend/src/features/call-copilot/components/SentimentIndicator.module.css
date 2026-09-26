@@ -1,0 +1,83 @@
+.pill {
+  --pill-ink: var(--color-text-secondary);
+  --pill-soft: color-mix(in srgb, var(--brand-bg-primary) 7%, transparent);
+  display: inline-flex;
+  align-items: center;
+  padding: 5px 12px;
+  border-radius: var(--radius-full);
+  background: var(--pill-soft);
+  color: var(--pill-ink);
+  font-size: var(--text-xs);
+  font-weight: 700;
+  white-space: nowrap;
+  transition:
+    background var(--duration-slow) var(--ease-out),
+    color var(--duration-slow) var(--ease-out);
+}
+
+.success {
+  --pill-ink: var(--color-success-ink);
+  --pill-soft: var(--color-success-soft);
+}
+
+.danger {
+  --pill-ink: var(--color-danger-ink);
+  --pill-soft: var(--color-danger-soft);
+}
+
+.warning {
+  --pill-ink: var(--color-warning-ink);
+  --pill-soft: var(--color-warning-soft);
+}
+
+/* On the dark console bar the same tones need to glow, not sink. */
+.onDark {
+  --pill-soft: color-mix(in srgb, var(--brand-surface-light) 10%, transparent);
+  --pill-ink: var(--brand-surface-light);
+}
+
+.onDark.success {
+  --pill-soft: color-mix(in srgb, var(--color-success) 20%, transparent);
+  --pill-ink: var(--color-success);
+}
+
+.onDark.danger {
+  --pill-soft: color-mix(in srgb, var(--color-danger) 22%, transparent);
+  --pill-ink: var(--color-danger);
+}
+
+.onDark.warning {
+  --pill-soft: color-mix(in srgb, var(--color-warning) 20%, transparent);
+  --pill-ink: var(--color-warning);
+}
+
+.inner {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.pending {
+  width: 6px;
+  height: 6px;
+  border-radius: var(--radius-full);
+  background: currentColor;
+  opacity: 0.6;
+  animation: breathe 1.6s ease-in-out infinite;
+}
+
+@keyframes breathe {
+  0%,
+  100% {
+    opacity: 0.25;
+  }
+  50% {
+    opacity: 0.9;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pending {
+    animation: none;
+  }
+}

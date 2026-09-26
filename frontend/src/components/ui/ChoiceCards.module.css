@@ -1,0 +1,175 @@
+.cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr));
+  gap: var(--space-3);
+}
+
+.tone_accent {
+  --tone: var(--color-accent);
+  --tone-soft: var(--color-bg-active);
+}
+.tone_success {
+  --tone: var(--color-success-ink);
+  --tone-soft: var(--color-success-soft);
+}
+.tone_warning {
+  --tone: var(--color-warning-ink);
+  --tone-soft: var(--color-warning-soft);
+}
+.tone_danger {
+  --tone: var(--color-danger-ink);
+  --tone-soft: var(--color-danger-soft);
+}
+.tone_neutral {
+  --tone: var(--color-text-secondary);
+  --tone-soft: color-mix(in srgb, var(--color-text-primary) 6%, transparent);
+}
+
+.card {
+  position: relative;
+  isolation: isolate;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--color-border);
+  background: var(--color-bg-surface);
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+  box-shadow: var(--shadow-sm);
+  transition: border-color var(--duration-normal) var(--ease-out), box-shadow var(--duration-normal) var(--ease-out),
+    transform var(--duration-normal) var(--ease-out);
+}
+
+.card:hover {
+  border-color: var(--color-border-strong);
+  box-shadow: var(--shadow-md);
+  transform: translateY(-2px);
+}
+
+.card:active {
+  transform: scale(0.99);
+}
+
+.card:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+.cardActive,
+.cardActive:hover {
+  border-color: color-mix(in srgb, var(--tone) 45%, transparent);
+  transform: none;
+}
+
+.highlight {
+  position: absolute;
+  inset: -1px;
+  z-index: -1;
+  border-radius: var(--radius-lg);
+  background: linear-gradient(180deg, var(--tone-soft) 0%, transparent 85%), var(--color-bg-surface);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--tone) 18%, transparent), var(--shadow-md);
+}
+
+.icon {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 42px;
+  height: 42px;
+  border-radius: 12px;
+  background: var(--tone-soft);
+  color: var(--tone);
+  font-size: 19px;
+  transition: transform var(--duration-slow) var(--ease-out), background var(--duration-normal) var(--ease-out),
+    color var(--duration-normal) var(--ease-out);
+}
+
+.card:hover .icon {
+  transform: scale(1.06) rotate(-4deg);
+}
+
+.cardActive .icon {
+  background: var(--tone);
+  color: var(--color-text-inverse);
+  box-shadow: 0 6px 16px color-mix(in srgb, var(--tone) 35%, transparent);
+}
+
+.text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+}
+
+.labelRow {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.label {
+  font-size: var(--text-md);
+  font-weight: 700;
+  color: var(--color-text-primary);
+}
+
+.count {
+  font-size: var(--text-xl);
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  color: var(--tone);
+}
+
+.description {
+  font-size: var(--text-xs);
+  line-height: 1.4;
+  color: var(--color-text-muted);
+}
+
+/* Phones: side-by-side compact cards (icon, name, count) instead of one
+   full-width card per row, which filled the screen before any content. */
+@media (max-width: 640px) {
+  .cards {
+    grid-template-columns: repeat(auto-fit, minmax(0, 1fr));
+    gap: var(--space-2);
+  }
+
+  .card {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: var(--space-2);
+    padding: var(--space-3);
+  }
+
+  .icon {
+    width: 32px;
+    height: 32px;
+    border-radius: 9px;
+    font-size: 15px;
+  }
+
+  .labelRow {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0;
+  }
+
+  .label {
+    font-size: var(--text-xs);
+    line-height: 1.3;
+  }
+
+  .count {
+    font-size: var(--text-lg);
+  }
+
+  .description {
+    display: none;
+  }
+}

@@ -1,0 +1,39 @@
+.meter {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  height: 32px;
+}
+
+.bar {
+  width: 3px;
+  height: 100%;
+  border-radius: var(--radius-full);
+  background: linear-gradient(180deg, var(--brand-accent-primary), var(--brand-accent-secondary));
+  transform: scaleY(0.14);
+  transform-origin: center;
+  will-change: transform;
+}
+
+/* No mic stream yet — a slow wave so the meter reads as "ready", not broken. */
+.meter[data-live='false'] .bar {
+  animation: idleWave 2.2s ease-in-out infinite;
+  animation-delay: calc(var(--i) * 90ms);
+  opacity: 0.55;
+}
+
+@keyframes idleWave {
+  0%,
+  100% {
+    transform: scaleY(0.16);
+  }
+  50% {
+    transform: scaleY(0.42);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .meter[data-live='false'] .bar {
+    animation: none;
+  }
+}
