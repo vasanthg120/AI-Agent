@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
-import { FiInbox, FiArrowUpRight } from 'react-icons/fi';
+import { motion } from 'framer-motion';
+import { FiInbox, FiArrowUpRight, FiChevronRight } from 'react-icons/fi';
 import { Card } from '@/components/ui';
 import { emailAnalyticsService, type BiFilters } from '@/services/emailAnalyticsService';
 import { ROUTES } from '@/constants/routes';
@@ -58,8 +59,18 @@ export function PendingConversationsCard({ dateFrom, dateTo, storeId }: PendingC
             </button>
           </div>
           <div className={styles.list}>
-            {pending.map((item) => (
-              <button key={item._id} type="button" className={styles.item} onClick={() => navigate(ROUTES.emailIntelligence)}>
+            {/* Each row opens that exact email in the inbox (same EmailIntelligenceItem
+                id the inbox's ?openEmailId= deep link expects), not just the inbox. */}
+            {pending.map((item, i) => (
+              <motion.button
+                key={item._id}
+                type="button"
+                className={styles.item}
+                onClick={() => navigate(`${ROUTES.emailIntelligence}?openEmailId=${item._id}`)}
+                initial={{ opacity: 0, x: -8 }}
+                animate={{ opacity: 1, x: 0 }}
+                transition={{ duration: 0.25, delay: i * 0.05 }}
+              >
                 <span className={styles.iconBadge}>
                   <FiInbox size={16} />
                 </span>
@@ -67,7 +78,8 @@ export function PendingConversationsCard({ dateFrom, dateTo, storeId }: PendingC
                   <span className={styles.itemTitle}>{item.subject || '(no subject)'}</span>
                   <span className={styles.itemMeta}>{item.matchedBusinessName ?? item.fromAddress}</span>
                 </span>
-              </button>
+                <FiChevronRight className={styles.itemChevron} aria-hidden />
+              </motion.button>
             ))}
           </div>
         </>

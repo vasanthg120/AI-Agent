@@ -145,3 +145,54 @@
 .overallMuted {
   opacity: 0.7;
 }
+
+/* ---------- Interaction polish ---------- */
+
+.row {
+  margin: 0 calc(-1 * var(--space-3));
+  padding-left: var(--space-3);
+  padding-right: var(--space-3);
+  border-radius: var(--radius-md);
+  transition: background var(--duration-normal) var(--ease-out);
+}
+
+.row:hover {
+  background: color-mix(in srgb, var(--color-bg-hover) 60%, transparent);
+}
+
+.overall strong {
+  font-weight: 700;
+}
+
+.overallGood strong {
+  color: var(--color-success-ink);
+}
+
+.overallOk strong {
+  color: var(--color-warning-ink);
+}
+
+.overallLow strong {
+  color: var(--color-danger-ink);
+}
+
+/* Bars grow in from the left when they first render (clip-path, so any
+   label inside the bar isn't squashed the way a scaleX animation would). */
+@keyframes barReveal {
+  from {
+    clip-path: inset(0 100% 0 0);
+  }
+  to {
+    clip-path: inset(0 0 0 0);
+  }
+}
+
+.bucketFill {
+  animation: barReveal 0.9s var(--ease-out) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bucketFill {
+    animation: none;
+  }
+}

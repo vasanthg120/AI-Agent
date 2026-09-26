@@ -1,7 +1,9 @@
 import { useState } from 'react';
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
-import { FiAward, FiPercent, FiTrendingUp } from 'react-icons/fi';
-import { DateRangeControl, SectionCard, Skeleton, Tabs, type DateRange } from '@/components/ui';
+import { AnimatePresence, LayoutGroup, motion } from 'framer-motion';
+import clsx from 'clsx';
+import { FiAward, FiCalendar, FiPercent, FiPieChart, FiTrendingUp } from 'react-icons/fi';
+import { ChoiceCards, DateRangeControl, EmptyState, PageHeader, SectionCard, Skeleton, type DateRange } from '@/components/ui';
 import { dayjs } from '@/utils/date';
 import { salesReportService } from '@/services/salesReportService';
 import { grossMarginReportService } from '@/services/grossMarginReportService';
@@ -12,10 +14,12 @@ import styles from './reporting.module.css';
 
 type ReportType = 'sales' | 'grossMargin' | 'royalty';
 
-const REPORT_TYPE_TABS = [
-  { id: 'sales', label: 'Sales', icon: <FiTrendingUp /> },
-  { id: 'grossMargin', label: 'Gross Margin', icon: <FiPercent /> },
-  { id: 'royalty', label: 'Royalty', icon: <FiAward /> },
+// Each report explains itself on its picker card, so someone who has never
+// opened this page knows which one answers their question.
+const REPORT_TYPES: { id: ReportType; label: string; description: string; icon: typeof FiTrendingUp }[] = [
+  { id: 'sales', label: 'Sales', description: 'Won-deal revenue by customer, user or quote owner', icon: FiTrendingUp },
+  { id: 'grossMargin', label: 'Gross Margin', description: 'What you earned versus what it cost', icon: FiPercent },
+  { id: 'royalty', label: 'Royalty', description: 'Royalties owed on invoices in a period', icon: FiAward },
 ];
 
 const GROUP_OPTIONS: Record<'sales' | 'grossMargin', { value: string; label: string }[]> = {
@@ -91,44 +95,101 @@ export function ReportingPage() {
   });
 
   const loading = (reportType === 'sales' && salesFetching && !salesReport) || (reportType === 'grossMargin' && gmFetching && !grossMarginReport);
+  // Refetching over data that's already on screen (new range / grouping) —
+  // keep showing it, dimmed, with a progress line, instead of a skeleton flash.
+  const refreshing = !loading && ((reportType === 'sales' && salesFetching) || (reportType === 'grossMargin' && gmFetching));
   const ReportIcon = REPORT_ICON[reportType];
 
   return (
     <div className={styles.page}>
-      <div className={styles.headerRow}>
-        <div className={styles.pageTitle}>Reporting</div>
-        <div className={styles.pageSubtitle}>Analyse your financial, customer &amp; team performance with easy reporting.</div>
-      </div>
+      <PageHeader
+        icon={FiPieChart}
+        title="Reporting"
+        subtitle="Analyse your financial, customer and team performance — pick a report, choose a period, and the numbers update instantly."
+      />
 
-      <div className={styles.reportTypeBar}>
-        <Tabs items={REPORT_TYPE_TABS} activeId={reportType} onChange={handleReportTypeChange} />
-      </div>
+      <ChoiceCards
+        ariaLabel="Report type"
+        items={REPORT_TYPES}
+        activeId={reportType}
+        onChange={(id) => handleReportTypeChange(id)}
+      />
 
-      {reportType === 'royalty' ? (
-        <RoyaltyReportSection />
-      ) : (
-        <>
-          <div className={styles.filterBar}>
-            <div className={styles.filterRow}>
-              <DateRangeControl value={range} onChange={setRange} />
-              <Tabs
-                items={GROUP_OPTIONS[reportType].map((opt) => ({ id: opt.value, label: opt.label }))}
-                activeId={groupBy}
-                onChange={setGroupBy}
-              />
-            </div>
-          </div>
+      <AnimatePresence mode="wait" initial={false}>
+        <motion.div
+          key={reportType === 'royalty' ? 'royalty' : 'aggregate'}
+          className={styles.reportArea}
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={{ opacity: 0, y: -6 }}
+          transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
+        >
+          {reportType === 'royalty' ? (
+            <RoyaltyReportSection />
+          ) : (
+            <>
+              <div className={styles.filterBar}>
+                <div className={styles.filterGroup}>
+                  <span className={styles.filterLabel}>Period</span>
+                  <DateRangeControl value={range} onChange={setRange} />
+                </div>
+                <div className={styles.filterGroup}>
+                  <span className={styles.filterLabel}>Group by</span>
+                  <LayoutGroup id="report-group-by">
+                    <div className={styles.segmented} role="radiogroup" aria-label="Group by">
+                      {GROUP_OPTIONS[reportType].map((opt) => {
+                        const active = opt.value === groupBy;
+                        return (
+                          <button
+                            key={opt.value}
+                            type="button"
+                            role="radio"
+                            aria-checked={active}
+                            className={clsx(styles.segment, active && styles.segmentActive)}
+                            onClick={() => setGroupBy(opt.value)}
+                          >
+                            {active && (
+                              <motion.span
+                                layoutId="group-by-thumb"
+                                className={styles.segmentThumb}
+                                transition={{ type: 'spring', stiffness: 460, damping: 36 }}
+                              />
+                            )}
+                            <span className={styles.segmentLabel}>{opt.label}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </LayoutGroup>
+                </div>
+              </div>
 
-          <SectionCard title="Report Results" icon={ReportIcon}>
-            {!hasRange && <div className={styles.emptyState}>Choose a start date and an end date.</div>}
-            {loading && <Skeleton height={320} />}
-            {!loading && hasRange && reportType === 'sales' && salesReport && <SalesReportView report={salesReport} />}
-            {!loading && hasRange && reportType === 'grossMargin' && grossMarginReport && (
-              <GrossMarginReportView report={grossMarginReport} />
-            )}
-          </SectionCard>
-        </>
-      )}
+              <SectionCard title="Results" icon={ReportIcon}>
+                <div className={clsx(styles.results, refreshing && styles.resultsRefreshing)}>
+                  {refreshing && <span className={styles.refreshBar} aria-label="Updating" />}
+                  {!hasRange && (
+                    <EmptyState icon={FiCalendar} title="Pick a period" description="Choose a start date and an end date to run the report." />
+                  )}
+                  {loading && (
+                    <div className={styles.loadingBlock}>
+                      <div className={styles.kpiRow}>
+                        {[0, 1, 2].map((i) => (
+                          <Skeleton key={i} height={104} />
+                        ))}
+                      </div>
+                      <Skeleton height={260} />
+                    </div>
+                  )}
+                  {!loading && hasRange && reportType === 'sales' && salesReport && <SalesReportView report={salesReport} />}
+                  {!loading && hasRange && reportType === 'grossMargin' && grossMarginReport && (
+                    <GrossMarginReportView report={grossMarginReport} />
+                  )}
+                </div>
+              </SectionCard>
+            </>
+          )}
+        </motion.div>
+      </AnimatePresence>
     </div>
   );
 }

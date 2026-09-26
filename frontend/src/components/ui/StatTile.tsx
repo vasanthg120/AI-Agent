@@ -1,6 +1,7 @@
 import clsx from 'clsx';
 import type { IconType } from 'react-icons';
 import { FiArrowDown, FiArrowUp } from 'react-icons/fi';
+import { AnimatedNumber } from './AnimatedNumber';
 import { Card } from './Card';
 import styles from './StatTile.module.css';
 
@@ -40,7 +41,8 @@ export function StatTile({
           <Icon size={14} />
         </span>
       )}
-      <div className={styles.value}>{value}</div>
+      {/* Plain integers count up; pre-formatted strings (currency, %) render as given. */}
+      <div className={styles.value}>{typeof value === 'number' && Number.isInteger(value) ? <AnimatedNumber value={value} /> : value}</div>
       <div className={styles.label}>{label}</div>
       {trend && (
         <span className={clsx(styles.trend, trend.direction === 'up' ? styles.trendUp : styles.trendDown)}>

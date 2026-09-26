@@ -1,24 +1,10 @@
 .page {
-  padding: var(--space-6);
+  padding: var(--space-6) var(--space-8);
   height: 100%;
   display: flex;
   flex-direction: column;
   gap: var(--space-4);
   overflow: hidden;
-}
-
-.header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-3);
-  flex-wrap: wrap;
-}
-
-.title {
-  font-size: var(--text-xl);
-  font-weight: 800;
-  color: var(--color-text-primary);
 }
 
 .statRow {
@@ -29,7 +15,8 @@
 
 @media (max-width: 720px) {
   .statRow {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: var(--space-2);
   }
 }
 
@@ -78,33 +65,6 @@
   min-width: 220px;
 }
 
-.filterRow {
-  display: flex;
-  gap: var(--space-2);
-}
-
-.chip {
-  padding: 6px 14px;
-  border-radius: var(--radius-full);
-  border: 1px solid var(--color-border-strong);
-  background: transparent;
-  color: var(--color-text-secondary);
-  font-size: var(--text-sm);
-  font-weight: 600;
-  cursor: pointer;
-  white-space: nowrap;
-}
-
-.chip:hover {
-  background: var(--color-bg-hover);
-}
-
-.chipActive {
-  background: var(--gradient-accent);
-  border-color: transparent;
-  color: #fff;
-}
-
 .groupLabel {
   padding: var(--space-2) var(--space-1) var(--space-1);
   font-size: var(--text-xs);
@@ -121,11 +81,16 @@
 }
 
 .item {
+  position: relative;
+  isolation: isolate;
   display: flex;
   align-items: center;
   gap: var(--space-3);
   padding: var(--space-3) var(--space-4);
   border-bottom: 1px solid var(--color-border);
+  overflow: hidden;
+  cursor: pointer;
+  transition: background var(--duration-fast) var(--ease-out);
 }
 
 .item:last-child {
@@ -136,14 +101,43 @@
   background: var(--color-bg-hover);
 }
 
-.itemActive {
-  background: var(--color-bg-active);
+.itemActive,
+.itemActive:hover {
+  background: transparent;
 }
 
-.itemIcon {
+/* Selected-row highlight; glides between rows via a shared layoutId. */
+.itemIndicator {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background: var(--color-bg-active);
+  box-shadow: inset 3px 0 0 var(--brand-accent-primary);
+}
+
+.itemIconTile {
   flex-shrink: 0;
-  font-size: 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--color-text-primary) 5%, transparent);
   color: var(--color-text-muted);
+  font-size: 15px;
+  transition: background var(--duration-normal) var(--ease-out), color var(--duration-normal) var(--ease-out),
+    transform var(--duration-slow) var(--ease-out);
+}
+
+.item:hover .itemIconTile {
+  color: var(--color-accent);
+  transform: scale(1.06);
+}
+
+.itemActive .itemIconTile {
+  background: var(--gradient-accent);
+  color: var(--color-accent-contrast);
 }
 
 .itemMain {
@@ -168,6 +162,24 @@
 .itemTitle svg {
   color: var(--color-accent);
   flex-shrink: 0;
+}
+
+.itemTitle:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+.itemTitleText {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.itemTitleText mark {
+  padding: 0 1px;
+  border-radius: 3px;
+  background: var(--color-accent-muted);
+  color: inherit;
 }
 
 .itemPreview {
@@ -215,15 +227,23 @@
   color: var(--color-text-primary);
 }
 
-.emptyState {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: var(--space-2);
-  padding: var(--space-10);
-  color: var(--color-text-muted);
-  text-align: center;
+/* The menu button stays reachable by keyboard but only shows on hover/focus. */
+.itemActionsWrap {
+  display: inline-flex;
+  opacity: 0;
+  transition: opacity var(--duration-fast) var(--ease-out);
+}
+
+.item:hover .itemActionsWrap,
+.itemActive .itemActionsWrap,
+.itemActionsWrap:focus-within {
+  opacity: 1;
+}
+
+@media (hover: none) {
+  .itemActionsWrap {
+    opacity: 1;
+  }
 }
 
 .detailColumn {
@@ -239,13 +259,15 @@
 .detailEmpty {
   flex: 1;
   display: flex;
-  flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: var(--space-2);
-  color: var(--color-text-muted);
-  text-align: center;
-  padding: var(--space-8);
+}
+
+.detailInner {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
 }
 
 .detailHeader {
@@ -311,4 +333,10 @@
   display: flex;
   justify-content: flex-end;
   gap: var(--space-2);
+}
+
+@media (max-width: 640px) {
+  .page {
+    padding: var(--space-4);
+  }
 }

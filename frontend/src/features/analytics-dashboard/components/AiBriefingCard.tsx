@@ -1,5 +1,7 @@
 import { FiZap, FiTrendingDown, FiClock, FiActivity, FiCheckCircle, FiChevronRight } from 'react-icons/fi';
 import type { IconType } from 'react-icons';
+import { motion } from 'framer-motion';
+import clsx from 'clsx';
 import { formatRelativeTime } from '@/utils/date';
 import type { AiInsightItem } from '@/services/analyticsDashboardService';
 import styles from './AiBriefingCard.module.css';
@@ -52,7 +54,13 @@ export function AiBriefingCard({ insights, dataUpdatedAt, onAction }: AiBriefing
           const { title, description } = splitMessage(insight.message);
           const Icon = insightIcon(insight);
           return (
-            <div key={i} className={styles.item}>
+            <motion.div
+              key={i}
+              className={clsx(styles.item, styles[insight.severity])}
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1], delay: 0.1 + i * 0.06 }}
+            >
               <span className={styles.iconBadge}>
                 <Icon size={16} />
               </span>
@@ -66,7 +74,7 @@ export function AiBriefingCard({ insights, dataUpdatedAt, onAction }: AiBriefing
                   <FiChevronRight size={14} />
                 </button>
               )}
-            </div>
+            </motion.div>
           );
         })}
       </div>

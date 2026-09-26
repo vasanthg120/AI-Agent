@@ -113,7 +113,7 @@ export function TwoFactorSection() {
 
   if (loading) {
     return (
-      <SettingsSection icon={<FiShield />}
+      <SettingsSection
         icon={<FiShield />}
         title="Two-Factor Authentication"
         description="Add an extra layer of security to your account."
@@ -125,7 +125,7 @@ export function TwoFactorSection() {
 
   return (
     <>
-      <SettingsSection icon={<FiShield />}
+      <SettingsSection
         icon={<FiShield />}
         title="Two-Factor Authentication"
         description="Add an extra layer of security to your account."

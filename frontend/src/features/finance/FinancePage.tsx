@@ -3,8 +3,13 @@ import { useSearchParams } from 'react-router-dom';
 import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query';
 import clsx from 'clsx';
 import toast from 'react-hot-toast';
+import { AnimatePresence, motion } from 'framer-motion';
 import {
+  FiAlertCircle,
   FiBarChart2,
+  FiChevronRight,
+  FiDollarSign,
+  FiGrid,
   FiCloud,
   FiCreditCard,
   FiDownload,
@@ -17,7 +22,17 @@ import {
   FiUsers,
   FiZap,
 } from 'react-icons/fi';
-import { Button, Dropdown, MultiSelectDropdown, SectionCard, Skeleton, StatTile, Tabs } from '@/components/ui';
+import {
+  Button,
+  Dropdown,
+  EmptyState,
+  MultiSelectDropdown,
+  PageHeader,
+  SectionCard,
+  Skeleton,
+  StatTile,
+  Tabs,
+} from '@/components/ui';
 import { useAuthStore } from '@/stores/authStore';
 import { getSocket } from '@/api/socketClient';
 import { extractErrorMessage } from '@/utils/errors';
@@ -50,9 +65,9 @@ const WIDGET_OPTIONS = [
 // spending breakdown competing for space at once — the same crowding fix
 // applied to Deal Performance.
 const TAB_ITEMS = [
-  { id: 'overview', label: 'Overview' },
-  { id: 'spending', label: 'Spending Breakdown' },
-  { id: 'documents', label: 'Documents' },
+  { id: 'overview', label: 'Overview', icon: <FiGrid /> },
+  { id: 'spending', label: 'Spending Breakdown', icon: <FiBarChart2 /> },
+  { id: 'documents', label: 'Documents', icon: <FiFileText /> },
 ];
 
 interface DrillDown {
@@ -194,29 +209,42 @@ export function FinancePage() {
 
   return (
     <div className={styles.page}>
-      <div className={styles.headerRow}>
-        <div>
-          <div className={styles.pageTitle}>Finance AI</div>
-          <div className={styles.pageSubtitle}>
-            {data ? `${data.summary.totalVendorPayments.count} document(s) in view · ${data.reviewQueueCount} awaiting review` : 'Loading…'}
-          </div>
-        </div>
-        <div className={styles.headerActions}>
-          <MultiSelectDropdown label="Hidden Widgets" options={WIDGET_OPTIONS} selected={hiddenWidgets} onChange={setHiddenWidgets} />
-          <Dropdown
-            trigger={
-              <Button type="button" variant="ghost" size="sm" leftIcon={<FiDownload />}>
-                Export
-              </Button>
-            }
-            items={[
-              { id: 'csv', label: 'Export as CSV', onSelect: () => void handleExport('csv') },
-              { id: 'xlsx', label: 'Export as Excel', onSelect: () => void handleExport('xlsx') },
-              { id: 'pdf', label: 'Export as PDF', onSelect: () => void handleExport('pdf') },
-            ]}
-          />
-        </div>
-      </div>
+      <PageHeader
+        icon={FiDollarSign}
+        title="Finance AI"
+        subtitle="Upload vendor invoices and receipts — the AI reads them, tracks what's paid and due, and flags anything unusual."
+        meta={
+          data && (
+            <>
+              <span className={styles.metaChip}>
+                <FiFileText /> {data.summary.totalVendorPayments.count} documents in view
+              </span>
+              {data.reviewQueueCount > 0 && (
+                <span className={clsx(styles.metaChip, styles.metaChipWarning)}>
+                  <FiAlertCircle /> {data.reviewQueueCount} awaiting review
+                </span>
+              )}
+            </>
+          )
+        }
+        actions={
+          <>
+            <MultiSelectDropdown label="Hidden Widgets" options={WIDGET_OPTIONS} selected={hiddenWidgets} onChange={setHiddenWidgets} />
+            <Dropdown
+              trigger={
+                <Button type="button" variant="ghost" size="sm" leftIcon={<FiDownload />}>
+                  Export
+                </Button>
+              }
+              items={[
+                { id: 'csv', label: 'Export as CSV', onSelect: () => void handleExport('csv') },
+                { id: 'xlsx', label: 'Export as Excel', onSelect: () => void handleExport('xlsx') },
+                { id: 'pdf', label: 'Export as PDF', onSelect: () => void handleExport('pdf') },
+              ]}
+            />
+          </>
+        }
+      />
 
       <FinanceSavedViewsBar
         presets={presets}
@@ -244,149 +272,172 @@ export function FinancePage() {
         </>
       ) : (
         <>
-          <div className={styles.aiInsightCard}>
-            <span className={styles.aiInsightLabel}>
-              <FiZap size={14} /> AI Insight
+          <motion.div
+            className={styles.aiInsightCard}
+            initial={{ opacity: 0, scale: 0.98 }}
+            animate={{ opacity: 1, scale: 1 }}
+            transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
+          >
+            <span className={styles.aiInsightIcon}>
+              <FiZap />
             </span>
-            <span className={styles.aiInsightText}>{data.aiInsight}</span>
-          </div>
+            <span className={styles.aiInsightBody}>
+              <span className={styles.aiInsightLabel}>AI Insight</span>
+              <span className={styles.aiInsightText}>{data.aiInsight}</span>
+            </span>
+          </motion.div>
 
           <div className={styles.tabBar}>
             <Tabs items={TAB_ITEMS} activeId={activeTab} onChange={setActiveTab} />
           </div>
 
-          <div className={clsx(styles.tabContent, isFetching && styles.fetching)}>
-            {activeTab === 'overview' && (
-              <>
-                <FinanceSummaryPanel summary={data.aiGeneratedSummary} onGenerate={handleGenerateSummary} />
+          <AnimatePresence mode="wait" initial={false}>
+            <motion.div
+              key={activeTab}
+              className={clsx(styles.tabContent, isFetching && styles.fetching)}
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -6 }}
+              transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
+            >
+              {activeTab === 'overview' && (
+                <>
+                  <FinanceSummaryPanel summary={data.aiGeneratedSummary} onGenerate={handleGenerateSummary} />
 
-                {isVisible('summary') && (
-                  <SectionCard title="Summary" icon={FiBarChart2}>
-                    <div className={styles.statsGrid}>
-                      <StatTile
-                        value={`${data.summary.totalVendorPayments.count} (${money(data.summary.totalVendorPayments.value)})`}
-                        label="Total Vendor Payments"
-                        onClick={() => setDrillDown({ title: 'All Documents', filters })}
-                      />
-                      <StatTile value={money(data.summary.totalExpenses.value)} label="Total Expenses" />
-                      <StatTile
-                        value={`${data.summary.paymentsMade.count} (${money(data.summary.paymentsMade.value)})`}
-                        label="Payments Made"
-                        onClick={() => setDrillDown({ title: 'Paid', filters: { ...filters, paymentStatus: ['paid'] } })}
-                      />
-                      <StatTile
-                        value={`${data.summary.pendingPayments.count} (${money(data.summary.pendingPayments.value)})`}
-                        label="Pending Payments"
-                        onClick={() => setDrillDown({ title: 'Pending / Overdue', filters: { ...filters, paymentStatus: ['pending', 'overdue'] } })}
-                      />
-                      <StatTile
-                        value={`${data.summary.upcomingDuePayments.count} (${money(data.summary.upcomingDuePayments.value)})`}
-                        label="Upcoming Due"
-                      />
-                    </div>
-                  </SectionCard>
-                )}
-
-                {isVisible('monthlyExpenseTrend') && (
-                  <SectionCard title="Monthly Expense Trend" icon={FiTrendingUp}>
-                    <MonthlyExpenseTrendChart points={data.monthlyExpenseTrend} />
-                  </SectionCard>
-                )}
-              </>
-            )}
-
-            {activeTab === 'spending' && (
-              <>
-                <div className={styles.twoColumn}>
-                  {isVisible('vendorSpending') && (
-                    <SectionCard title="Vendor-wise Spending (Top Vendors)" icon={FiUsers}>
-                      <RankedBreakdownList
-                        items={data.vendorSpending.breakdown.map((b) => ({ key: b.key, label: b.key, value: b.value, valueFormatted: money(b.value) }))}
-                        emptyMessage="No documents tagged with a vendor yet."
-                        coverageNote={`${data.vendorSpending.taggedCount} of ${data.vendorSpending.totalCount} documents tagged (${data.vendorSpending.coveragePct}%)`}
-                        onSelect={(key) => setDrillDown({ title: `Vendor: ${key}`, filters: { ...filters, vendorName: [key] } })}
-                      />
-                    </SectionCard>
-                  )}
-                  {isVisible('categorySpending') && (
-                    <SectionCard title="Category-wise Spending" icon={FiTag}>
-                      <RankedBreakdownList
-                        items={data.categorySpending.breakdown.map((b) => ({ key: b.key, label: b.key, value: b.value, valueFormatted: money(b.value) }))}
-                        emptyMessage="No documents tagged with a category yet."
-                        coverageNote={`${data.categorySpending.taggedCount} of ${data.categorySpending.totalCount} documents tagged (${data.categorySpending.coveragePct}%)`}
-                        onSelect={(key) => setDrillDown({ title: `Category: ${key}`, filters: { ...filters, expenseCategory: [key] } })}
-                      />
-                    </SectionCard>
-                  )}
-                </div>
-
-                <div className={styles.threeColumn}>
-                  {isVisible('microsoftSubscriptionCosts') && (
-                    <SectionCard title="Microsoft Subscription Costs" icon={FiCloud}>
+                  {isVisible('summary') && (
+                    <SectionCard title="Summary" icon={FiBarChart2}>
                       <div className={styles.statsGrid}>
-                        <StatTile value={money(data.microsoftSubscriptionCosts.microsoftAmount)} label="Microsoft (Azure/365)" />
-                        <StatTile value={money(data.microsoftSubscriptionCosts.totalAmount)} label="All Subscriptions" />
+                        <StatTile
+                          value={`${data.summary.totalVendorPayments.count} (${money(data.summary.totalVendorPayments.value)})`}
+                          label="Total Vendor Payments"
+                          onClick={() => setDrillDown({ title: 'All Documents', filters })}
+                        />
+                        <StatTile value={money(data.summary.totalExpenses.value)} label="Total Expenses" />
+                        <StatTile
+                          value={`${data.summary.paymentsMade.count} (${money(data.summary.paymentsMade.value)})`}
+                          label="Payments Made"
+                          onClick={() => setDrillDown({ title: 'Paid', filters: { ...filters, paymentStatus: ['paid'] } })}
+                        />
+                        <StatTile
+                          value={`${data.summary.pendingPayments.count} (${money(data.summary.pendingPayments.value)})`}
+                          label="Pending Payments"
+                          onClick={() => setDrillDown({ title: 'Pending / Overdue', filters: { ...filters, paymentStatus: ['pending', 'overdue'] } })}
+                        />
+                        <StatTile
+                          value={`${data.summary.upcomingDuePayments.count} (${money(data.summary.upcomingDuePayments.value)})`}
+                          label="Upcoming Due"
+                        />
                       </div>
                     </SectionCard>
                   )}
-                  {isVisible('deliveryShippingCosts') && (
-                    <SectionCard title="Delivery & Shipping Costs" icon={FiTruck}>
-                      <StatTile value={money(data.deliveryShippingCosts.value)} label={`${data.deliveryShippingCosts.count} document(s)`} />
+
+                  {isVisible('monthlyExpenseTrend') && (
+                    <SectionCard title="Monthly Expense Trend" icon={FiTrendingUp}>
+                      <MonthlyExpenseTrendChart points={data.monthlyExpenseTrend} />
                     </SectionCard>
                   )}
-                  {isVisible('taxBreakdown') && (
-                    <SectionCard title="Tax Breakdown" icon={FiPercent}>
+                </>
+              )}
+
+              {activeTab === 'spending' && (
+                <>
+                  <div className={styles.twoColumn}>
+                    {isVisible('vendorSpending') && (
+                      <SectionCard title="Vendor-wise Spending (Top Vendors)" icon={FiUsers}>
+                        <RankedBreakdownList
+                          items={data.vendorSpending.breakdown.map((b) => ({ key: b.key, label: b.key, value: b.value, valueFormatted: money(b.value) }))}
+                          emptyMessage="No documents tagged with a vendor yet."
+                          coverageNote={`${data.vendorSpending.taggedCount} of ${data.vendorSpending.totalCount} documents tagged (${data.vendorSpending.coveragePct}%)`}
+                          onSelect={(key) => setDrillDown({ title: `Vendor: ${key}`, filters: { ...filters, vendorName: [key] } })}
+                        />
+                      </SectionCard>
+                    )}
+                    {isVisible('categorySpending') && (
+                      <SectionCard title="Category-wise Spending" icon={FiTag}>
+                        <RankedBreakdownList
+                          items={data.categorySpending.breakdown.map((b) => ({ key: b.key, label: b.key, value: b.value, valueFormatted: money(b.value) }))}
+                          emptyMessage="No documents tagged with a category yet."
+                          coverageNote={`${data.categorySpending.taggedCount} of ${data.categorySpending.totalCount} documents tagged (${data.categorySpending.coveragePct}%)`}
+                          onSelect={(key) => setDrillDown({ title: `Category: ${key}`, filters: { ...filters, expenseCategory: [key] } })}
+                        />
+                      </SectionCard>
+                    )}
+                  </div>
+
+                  <div className={styles.threeColumn}>
+                    {isVisible('microsoftSubscriptionCosts') && (
+                      <SectionCard title="Microsoft Subscription Costs" icon={FiCloud}>
+                        <div className={styles.statsGrid}>
+                          <StatTile value={money(data.microsoftSubscriptionCosts.microsoftAmount)} label="Microsoft (Azure/365)" />
+                          <StatTile value={money(data.microsoftSubscriptionCosts.totalAmount)} label="All Subscriptions" />
+                        </div>
+                      </SectionCard>
+                    )}
+                    {isVisible('deliveryShippingCosts') && (
+                      <SectionCard title="Delivery & Shipping Costs" icon={FiTruck}>
+                        <StatTile value={money(data.deliveryShippingCosts.value)} label={`${data.deliveryShippingCosts.count} document(s)`} />
+                      </SectionCard>
+                    )}
+                    {isVisible('taxBreakdown') && (
+                      <SectionCard title="Tax Breakdown" icon={FiPercent}>
+                        <RankedBreakdownList
+                          items={data.taxBreakdown.breakdown.map((b) => ({ key: b.key, label: b.key, value: b.value, valueFormatted: money(b.value) }))}
+                          emptyMessage="No tax data captured yet."
+                        />
+                      </SectionCard>
+                    )}
+                  </div>
+
+                  {isVisible('paymentMethodBreakdown') && (
+                    <SectionCard title="Payment Method Breakdown" icon={FiCreditCard}>
                       <RankedBreakdownList
-                        items={data.taxBreakdown.breakdown.map((b) => ({ key: b.key, label: b.key, value: b.value, valueFormatted: money(b.value) }))}
-                        emptyMessage="No tax data captured yet."
+                        items={data.paymentMethodBreakdown.breakdown.map((b) => ({ key: b.key, label: b.key, value: b.value, valueFormatted: money(b.value) }))}
+                        emptyMessage="No documents tagged with a payment method yet."
+                        coverageNote={`${data.paymentMethodBreakdown.taggedCount} of ${data.paymentMethodBreakdown.totalCount} documents tagged (${data.paymentMethodBreakdown.coveragePct}%)`}
+                        onSelect={(key) => setDrillDown({ title: `Payment Method: ${key}`, filters: { ...filters, paymentMethod: [key] } })}
                       />
                     </SectionCard>
                   )}
-                </div>
+                </>
+              )}
 
-                {isVisible('paymentMethodBreakdown') && (
-                  <SectionCard title="Payment Method Breakdown" icon={FiCreditCard}>
-                    <RankedBreakdownList
-                      items={data.paymentMethodBreakdown.breakdown.map((b) => ({ key: b.key, label: b.key, value: b.value, valueFormatted: money(b.value) }))}
-                      emptyMessage="No documents tagged with a payment method yet."
-                      coverageNote={`${data.paymentMethodBreakdown.taggedCount} of ${data.paymentMethodBreakdown.totalCount} documents tagged (${data.paymentMethodBreakdown.coveragePct}%)`}
-                      onSelect={(key) => setDrillDown({ title: `Payment Method: ${key}`, filters: { ...filters, paymentMethod: [key] } })}
+              {activeTab === 'documents' && isVisible('recentDocuments') && (
+                <SectionCard title="Recent Uploaded Documents" icon={FiFileText}>
+                  {data.recentDocuments.length === 0 ? (
+                    <EmptyState
+                      icon={FiFileText}
+                      title="No documents uploaded yet"
+                      description="Drop an invoice or receipt into the upload box above to get started."
                     />
-                  </SectionCard>
-                )}
-              </>
-            )}
-
-            {activeTab === 'documents' && isVisible('recentDocuments') && (
-              <SectionCard title="Recent Uploaded Documents" icon={FiFileText}>
-                {data.recentDocuments.length === 0 ? (
-                  <div className={styles.emptyState}>No documents uploaded yet.</div>
-                ) : (
-                  data.recentDocuments.map((d) => (
-                    <div
-                      key={d._id}
-                      className={styles.listItem}
-                      role="button"
-                      tabIndex={0}
-                      onClick={() => setReviewDoc(d)}
-                      onKeyDown={(e) => {
-                        if (e.key !== 'Enter' && e.key !== ' ') return;
-                        e.preventDefault();
-                        setReviewDoc(d);
-                      }}
-                      style={{ cursor: 'pointer' }}
-                    >
-                      <div className={styles.listItemMain}>
-                        <span className={styles.listItemTitle}>{d.vendorName ?? d.originalFilename}</span>
-                        <span className={styles.listItemMeta}>{d.invoiceDate ?? 'No invoice date'}</span>
-                      </div>
-                      <span className={styles.rankValue}>{money(d.paymentAmount)}</span>
+                  ) : (
+                    <div className={styles.docList}>
+                      {data.recentDocuments.map((d, i) => (
+                        <motion.button
+                          key={d._id}
+                          type="button"
+                          className={styles.docRow}
+                          onClick={() => setReviewDoc(d)}
+                          initial={{ opacity: 0, y: 6 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          transition={{ duration: 0.25, delay: Math.min(i, 10) * 0.03 }}
+                        >
+                          <span className={styles.docIcon}>
+                            <FiFileText />
+                          </span>
+                          <span className={styles.listItemMain}>
+                            <span className={styles.listItemTitle}>{d.vendorName ?? d.originalFilename}</span>
+                            <span className={styles.listItemMeta}>{d.invoiceDate ?? 'No invoice date'}</span>
+                          </span>
+                          <span className={styles.docAmount}>{money(d.paymentAmount)}</span>
+                          <FiChevronRight className={styles.rankChevron} aria-hidden />
+                        </motion.button>
+                      ))}
                     </div>
-                  ))
-                )}
-              </SectionCard>
-            )}
-          </div>
+                  )}
+                </SectionCard>
+              )}
+            </motion.div>
+          </AnimatePresence>
         </>
       )}
 

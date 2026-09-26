@@ -149,10 +149,77 @@
   flex-shrink: 0;
 }
 
+.tabIntro {
+  margin: var(--space-3) 0 0;
+  font-size: var(--text-sm);
+  line-height: 1.5;
+  color: var(--color-text-secondary);
+}
+
+.tabHint {
+  color: var(--color-text-muted);
+}
+
+@media (max-width: 720px) {
+  .tabHint {
+    display: none;
+  }
+}
+
 .emptyState {
   font-size: var(--text-sm);
   color: var(--color-text-muted);
   padding: var(--space-4);
+}
+
+/* ---------- Employee leaderboard ---------- */
+
+.leaderRow {
+  cursor: pointer;
+  margin-bottom: var(--space-2);
+  transition: border-color var(--duration-normal) var(--ease-out), box-shadow var(--duration-normal) var(--ease-out),
+    transform var(--duration-normal) var(--ease-out);
+}
+
+.leaderRow:hover,
+.leaderRow:focus-visible {
+  outline: none;
+  border-color: color-mix(in srgb, var(--color-accent) 40%, var(--color-border));
+  box-shadow: var(--shadow-md);
+  transform: translateX(2px);
+}
+
+.leaderTrack {
+  height: 5px;
+  margin: 4px 0 2px;
+  border-radius: var(--radius-full);
+  background: var(--color-bg-active);
+  overflow: hidden;
+}
+
+.leaderFill {
+  height: 100%;
+  border-radius: var(--radius-full);
+  background: var(--gradient-accent);
+}
+
+.leaderValue {
+  font-variant-numeric: tabular-nums;
+}
+
+.rankBadge1 {
+  background: color-mix(in srgb, #f5b301 22%, transparent);
+  color: #a06f00;
+}
+
+.rankBadge2 {
+  background: color-mix(in srgb, #9aa4b1 25%, transparent);
+  color: #5b6573;
+}
+
+.rankBadge3 {
+  background: color-mix(in srgb, #c97a3d 22%, transparent);
+  color: #8a4f22;
 }
 
 .drillDownList {

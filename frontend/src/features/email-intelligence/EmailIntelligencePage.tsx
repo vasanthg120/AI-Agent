@@ -7,9 +7,9 @@ import clsx from 'clsx';
 import { getSocket } from '@/api/socketClient';
 import { useAuthStore } from '@/stores/authStore';
 import { useDebouncedValue } from '@/hooks/useDebouncedValue';
-import { Button, DateRangeControl, Input, MultiSelectDropdown, SectionCard, Tabs } from '@/components/ui';
-import type { DateRange } from '@/components/ui';
-import { FiClock, FiInbox, FiRefreshCw, FiSearch } from 'react-icons/fi';
+import { Button, ChoiceCards, DateRangeControl, Input, MultiSelectDropdown, PageHeader, SectionCard } from '@/components/ui';
+import type { ChoiceCardItem, DateRange } from '@/components/ui';
+import { FiAlertCircle, FiCheckCircle, FiClock, FiCornerUpLeft, FiInbox, FiRefreshCw, FiSearch } from 'react-icons/fi';
 import { dayjs } from '@/utils/date';
 import { extractErrorMessage } from '@/utils/errors';
 import {
@@ -40,6 +40,14 @@ const SORT_OPTIONS: { value: SortKey; label: string }[] = [
   { value: 'newest', label: 'Newest first' },
   { value: 'oldest', label: 'Oldest first' },
 ];
+
+// What each queue card says about itself — so the three queues explain
+// the reply workflow without a paragraph of instructions.
+const VIEW_META: Record<EmailResponseStatus, Omit<ChoiceCardItem<EmailResponseStatus>, 'id' | 'label' | 'count'>> = {
+  needs_response: { icon: FiAlertCircle, tone: 'warning', description: 'Waiting on a reply from you' },
+  responded: { icon: FiCornerUpLeft, tone: 'success', description: 'Answered — here or in Outlook' },
+  resolved: { icon: FiCheckCircle, tone: 'neutral', description: 'No reply needed, or rejected' },
+};
 
 const EMPTY_MESSAGE: Record<EmailResponseStatus, string> = {
   needs_response: "You're all caught up — no emails are waiting for a reply.",
@@ -252,7 +260,12 @@ export function EmailIntelligencePage() {
     };
   }, [queryClient]);
 
-  const tabs = VIEWS.map((id) => ({ id, label: counts ? `${RESPONSE_VIEW_LABEL[id]} (${counts[id]})` : RESPONSE_VIEW_LABEL[id] }));
+  const queueCards: ChoiceCardItem<EmailResponseStatus>[] = VIEWS.map((id) => ({
+    id,
+    label: RESPONSE_VIEW_LABEL[id],
+    count: counts?.[id],
+    ...VIEW_META[id],
+  }));
   const total = counts?.[view];
   const filtersActive = debouncedSearch !== '' || range.dateFrom !== undefined || range.dateTo !== undefined;
   const clearFilters = () => {
@@ -262,16 +275,20 @@ export function EmailIntelligencePage() {
 
   return (
     <div className={styles.page}>
-      <div className={styles.headerRow}>
-        <div>
-          <div className={styles.pageTitle}>AI Email Inbox</div>
-          <div className={styles.pageSubtitle}>
-            Emails still waiting for your reply are under Needs Response. Reply — here or in Outlook — and they move to
-            Responded on their own. Your mailbox syncs every 30 minutes; hit Sync to check now.
-          </div>
-          {providerHealth && providerHealth.length > 0 && (
-            <div className={styles.providerHealthRow}>
-              {providerHealth.map((p) => (
+      <PageHeader
+        icon={FiInbox}
+        title="AI Email Inbox"
+        subtitle="The AI sorts your mail and drafts replies. Answer an email — here or in Outlook — and it moves out of Needs Response on its own. Syncs every 30 minutes."
+        meta={
+          <>
+            {lastSyncedAt && (
+              <span className={styles.lastSynced}>
+                <FiClock /> Last synced {dayjs(lastSyncedAt).format('h:mm A')}
+              </span>
+            )}
+            {providerHealth &&
+              providerHealth.length > 0 &&
+              providerHealth.map((p) => (
                 <span key={p.provider} className={styles.providerPill} title={p.lastError ?? undefined}>
                   <span
                     className={clsx(
@@ -281,23 +298,19 @@ export function EmailIntelligencePage() {
                     )}
                   />
                   {PROVIDER_LABEL[p.provider] ?? p.provider}
-                  {p.status === 'degraded' ? ' unavailable' : p.status === 'unknown' ? ' status unknown' : ''}
+                  {p.status === 'degraded' ? ' unavailable' : p.status === 'unknown' ? ' status unknown' : ' online'}
                 </span>
               ))}
-            </div>
-          )}
-        </div>
-        <div className={styles.headerActions}>
-          {lastSyncedAt && <span className={styles.lastSynced}>Last synced {dayjs(lastSyncedAt).format('h:mm A')}</span>}
+          </>
+        }
+        actions={
           <Button type="button" leftIcon={<FiRefreshCw />} loading={previewing} onClick={() => void handleOpenSyncPreview()}>
             Sync Inbox
           </Button>
-        </div>
-      </div>
+        }
+      />
 
-      <div className={styles.tabBar}>
-        <Tabs items={tabs} activeId={view} onChange={(id) => setView(id as EmailResponseStatus)} />
-      </div>
+      <ChoiceCards ariaLabel="Email queue" items={queueCards} activeId={view} onChange={setView} />
 
       <div className={styles.filterRow}>
         <div className={styles.searchBox}>
@@ -349,7 +362,9 @@ export function EmailIntelligencePage() {
             <EmailIntelligenceList
               items={items}
               isLoading={isLoading}
+              emptyTitle={filtersActive ? 'No matching emails' : view === 'needs_response' ? "You're all caught up" : 'Nothing here yet'}
               emptyMessage={filtersActive ? 'No emails match your search or dates.' : EMPTY_MESSAGE[view]}
+              celebrate={!filtersActive && view === 'needs_response'}
               onSelect={setSelected}
             />
             {filtersActive && items && items.length === 0 && (

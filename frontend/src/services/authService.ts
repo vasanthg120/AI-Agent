@@ -6,6 +6,7 @@ import type {
   OAuthProvider,
   RegisterPayload,
   ResetPasswordPayload,
+  UpdateProfilePayload,
   User,
 } from '@/types';
 
@@ -33,6 +34,13 @@ interface BackendUserProfile {
   name: string;
   roles: string[];
   assignedAgentId?: string;
+  department?: string;
+  // Self-editable profile fields (PATCH /users/me). Absent until the user
+  // first saves them — timezone/language then fall back to the device's.
+  phone?: string;
+  timezone?: string;
+  language?: string;
+  createdAt?: string;
 }
 
 function toUser(profile: BackendUserProfile): User {
@@ -44,9 +52,11 @@ function toUser(profile: BackendUserProfile): User {
     lastName: rest.join(' '),
     roles: profile.roles ?? [],
     assignedAgentId: profile.assignedAgentId,
-    timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-    language: 'en-US',
-    createdAt: new Date().toISOString(),
+    department: profile.department,
+    phone: profile.phone,
+    timezone: profile.timezone ?? Intl.DateTimeFormat().resolvedOptions().timeZone,
+    language: profile.language ?? 'en-US',
+    createdAt: profile.createdAt ?? new Date().toISOString(),
   };
 }
 
@@ -105,6 +115,18 @@ export const authService = {
 
   async fetchCurrentUser(accessToken: string): Promise<User> {
     return toUser(await fetchProfile(accessToken));
+  },
+
+  // Same as fetchCurrentUser but through the normal authenticated client —
+  // for refreshing the signed-in user's own profile.
+  async getMe(): Promise<User> {
+    const { data } = await axiosClient.get<BackendUserProfile>('/users/me');
+    return toUser(data);
+  },
+
+  async updateMe(patch: UpdateProfilePayload): Promise<User> {
+    const { data } = await axiosClient.patch<BackendUserProfile>('/users/me', patch);
+    return toUser(data);
   },
 
   async getOAuthUrl(provider: OAuthProvider): Promise<string> {

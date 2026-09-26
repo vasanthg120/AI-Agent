@@ -2,9 +2,10 @@ import { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import dayjs from 'dayjs';
 import type { IconType } from 'react-icons';
-import { FiTrendingUp, FiTarget, FiActivity, FiClock } from 'react-icons/fi';
+import type { ReactNode } from 'react';
+import { FiTrendingUp, FiTarget, FiActivity, FiClock, FiArrowUpRight, FiArrowDownRight } from 'react-icons/fi';
 import { useState } from 'react';
-import { Card } from '@/components/ui';
+import { AnimatedNumber, Card } from '@/components/ui';
 import { formatINR as money } from '@/utils/currency';
 import { dealsService } from '@/services/dealsService';
 import { employeeProductivityService } from '@/services/employeeProductivityService';
@@ -22,7 +23,7 @@ function StatCard({
 }: {
   icon: IconType;
   label: string;
-  value: string | number;
+  value: ReactNode;
   note?: string;
   noteTone?: 'positive' | 'negative' | 'neutral';
   onClick?: () => void;
@@ -34,7 +35,13 @@ function StatCard({
       </span>
       <div className={styles.label}>{label}</div>
       <div className={styles.value}>{value}</div>
-      {note && <div className={styles[`note-${noteTone ?? 'neutral'}`]}>{note}</div>}
+      {note && (
+        <div className={styles[`note-${noteTone ?? 'neutral'}`]}>
+          {noteTone === 'positive' && <FiArrowUpRight />}
+          {noteTone === 'negative' && <FiArrowDownRight />}
+          {note}
+        </div>
+      )}
     </Card>
   );
 }
@@ -147,7 +154,7 @@ export function TeamPerformanceSummaryCards({ data, dateFrom, dateTo, storeId }:
       <StatCard
         icon={FiTrendingUp}
         label="Team revenue"
-        value={money(data.revenue.achieved)}
+        value={<AnimatedNumber value={data.revenue.achieved} format={money} />}
         note={revenueTrendPct !== null ? `${revenueTrendPct >= 0 ? '+' : ''}${revenueTrendPct.toFixed(1)}% vs. previous period` : undefined}
         noteTone={revenueTrendPct !== null ? (revenueTrendPct >= 0 ? 'positive' : 'negative') : 'neutral'}
         onClick={() => setOpenPopup('revenue')}
@@ -155,7 +162,7 @@ export function TeamPerformanceSummaryCards({ data, dateFrom, dateTo, storeId }:
       <StatCard
         icon={FiTarget}
         label="Deals won"
-        value={data.deals.wonCount}
+        value={<AnimatedNumber value={data.deals.wonCount} />}
         note={`${wonDelta >= 0 ? '+' : ''}${wonDelta} vs. previous period`}
         noteTone={wonDelta >= 0 ? 'positive' : 'negative'}
         onClick={() => setOpenPopup('won')}
@@ -163,7 +170,7 @@ export function TeamPerformanceSummaryCards({ data, dateFrom, dateTo, storeId }:
       <StatCard
         icon={FiActivity}
         label="Completion rate"
-        value={completionPct !== null ? `${completionPct.toFixed(1)}%` : '—'}
+        value={completionPct !== null ? <AnimatedNumber value={completionPct} format={(n) => `${n.toFixed(1)}%`} /> : '—'}
         note={onTrack !== null ? (onTrack ? 'On track for this period' : 'Behind pace for this period') : undefined}
         noteTone={onTrack === false ? 'negative' : 'positive'}
         onClick={() => setOpenPopup('completion')}
@@ -171,7 +178,7 @@ export function TeamPerformanceSummaryCards({ data, dateFrom, dateTo, storeId }:
       <StatCard
         icon={FiClock}
         label="Overdue work"
-        value={totals.overdue}
+        value={<AnimatedNumber value={totals.overdue} />}
         note={
           totals.overdue > 0
             ? `Needs review across ${totals.ownersWithOverdue} owner${totals.ownersWithOverdue === 1 ? '' : 's'}`

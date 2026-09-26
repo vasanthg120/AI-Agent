@@ -14,8 +14,8 @@
   gap: var(--space-4);
 }
 
-.viewArea > :first-child {
-  align-self: flex-start;
+.stepperRow {
+  display: flex;
 }
 
 .calendarHint {

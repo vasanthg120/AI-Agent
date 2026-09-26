@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import dayjs from 'dayjs';
 import { AreaChart, Area, ResponsiveContainer } from 'recharts';
-import { Card } from '@/components/ui';
+import { AnimatedNumber, Card } from '@/components/ui';
 import { formatINR as money } from '@/utils/currency';
 import { dealsService } from '@/services/dealsService';
 import { customerQuotePaymentService } from '@/services/customerQuotePaymentService';
@@ -118,7 +118,9 @@ export function KeyStatsGrid({ deals, businessHealthScore, revenueTrend, dateFro
     <div className={styles.grid}>
       <Card interactive={!!onDealsClick} onClick={onDealsClick} className={styles.cell}>
         <div className={styles.label}>Deals Won</div>
-        <div className={styles.value}>{deals.wonCount}</div>
+        <div className={styles.value}>
+          <AnimatedNumber value={deals.wonCount} />
+        </div>
         <div className={styles.caption}>of {totalDeals} deals in range</div>
         <div className={styles.divider} />
         <div className={styles.footer}>
@@ -128,7 +130,9 @@ export function KeyStatsGrid({ deals, businessHealthScore, revenueTrend, dateFro
 
       <Card className={styles.cell} interactive onClick={() => setOpenDrilldown('conversion')}>
         <div className={styles.label}>Conversion</div>
-        <div className={styles.value}>{conversionPct !== null ? `${conversionPct}%` : '—'}</div>
+        <div className={styles.value}>
+          {conversionPct !== null ? <AnimatedNumber value={conversionPct} format={(n) => `${Math.round(n)}%`} /> : '—'}
+        </div>
         <div className={styles.caption}>won / closed deals</div>
         <div className={styles.divider} />
         <div className={styles.footer}>{deals.lostCount} deals lost this month</div>
@@ -136,13 +140,13 @@ export function KeyStatsGrid({ deals, businessHealthScore, revenueTrend, dateFro
 
       <Card className={styles.cell} interactive={revenueTrend.length > 1} onClick={revenueTrend.length > 1 ? () => setOpenDrilldown('health') : undefined}>
         <div className={styles.label}>Business Health</div>
-        <div className={styles.value}>{businessHealthScore ?? '—'}</div>
+        <div className={styles.value}>{businessHealthScore !== null ? <AnimatedNumber value={businessHealthScore} /> : '—'}</div>
         <div className={styles.caption}>composite score out of 100</div>
         {revenueTrend.length > 1 && (
           <div className={styles.sparkline}>
             <ResponsiveContainer width="100%" height={36}>
               <AreaChart data={revenueTrend} margin={{ top: 2, right: 0, bottom: 0, left: 0 }}>
-                <Area type="monotone" dataKey="achieved" stroke="var(--brand-accent-primary)" strokeWidth={2} fill="var(--color-accent-muted)" dot={false} isAnimationActive={false} />
+                <Area type="monotone" dataKey="achieved" stroke="var(--brand-accent-primary)" strokeWidth={2} fill="var(--color-accent-muted)" dot={false} animationDuration={900} />
               </AreaChart>
             </ResponsiveContainer>
           </div>
@@ -151,7 +155,9 @@ export function KeyStatsGrid({ deals, businessHealthScore, revenueTrend, dateFro
 
       <Card className={styles.cell} interactive onClick={() => setOpenDrilldown('outstanding')}>
         <div className={styles.label}>Outstanding</div>
-        <div className={styles.value}>{totalOutstanding !== null ? money(totalOutstanding) : '—'}</div>
+        <div className={styles.value}>
+          {totalOutstanding !== null ? <AnimatedNumber value={totalOutstanding} format={money} /> : '—'}
+        </div>
         <div className={styles.caption}>{bucketSentence ?? 'Loading…'}</div>
         <div className={styles.divider} />
         <div className={overdueOutstanding > 0 ? styles.footerWarn : styles.footerOk}>

@@ -28,49 +28,6 @@
   flex-wrap: wrap;
 }
 
-.boardDateNav {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  padding: var(--space-1) var(--space-2);
-  border-radius: var(--radius-lg);
-  background: var(--color-bg-surface);
-  border: 1px solid var(--color-border);
-  box-shadow: var(--shadow-sm);
-}
-
-/* Fixed-size window the date label slides through. */
-.dateWindow {
-  position: relative;
-  overflow: hidden;
-  width: 200px;
-  height: 40px;
-}
-
-.dateStack {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-}
-
-.boardDateRelative {
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
-  color: var(--color-accent);
-}
-
-.boardDateLabel {
-  font-size: var(--text-sm);
-  font-weight: 600;
-  color: var(--color-text-primary);
-  white-space: nowrap;
-}
-
 .calendarLayout {
   display: flex;
   gap: var(--space-5);
@@ -121,9 +78,5 @@
 @media (max-width: 640px) {
   .page {
     padding: var(--space-4);
-  }
-
-  .dateWindow {
-    width: 160px;
   }
 }

@@ -23,3 +23,5 @@ export * from './StatTile';
 export * from './CopyableText';
 export * from './PageHeader';
 export * from './EmptyState';
+export * from './AnimatedNumber';
+export * from './ChoiceCards';

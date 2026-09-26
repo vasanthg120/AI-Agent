@@ -64,3 +64,14 @@
     grid-template-columns: minmax(0, 1fr);
   }
 }
+
+.note-positive,
+.note-negative {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.note-positive {
+  color: var(--color-success-ink);
+}

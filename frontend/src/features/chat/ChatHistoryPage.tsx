@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
+import type { ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 import clsx from 'clsx';
+import { AnimatePresence, LayoutGroup, motion } from 'framer-motion';
 import {
   FiPlus,
   FiSearch,
@@ -14,8 +16,9 @@ import {
   FiArrowLeft,
   FiArrowRight,
   FiAlertTriangle,
+  FiInbox,
 } from 'react-icons/fi';
-import { Button, Card, Dropdown, Input, Modal, StatTile } from '@/components/ui';
+import { Button, Card, Dropdown, EmptyState, Input, Modal, PageHeader, StatTile } from '@/components/ui';
 import { useChatStore } from '@/stores/chatStore';
 import { ROUTES } from '@/constants/routes';
 import { formatRelativeTime, getConversationGroup, CONVERSATION_GROUP_LABELS, type ConversationGroupKey } from '@/utils/date';
@@ -31,12 +34,25 @@ const EMPTY_MESSAGES: ChatMessage[] = [];
 
 const GROUP_ORDER: ConversationGroupKey[] = ['today', 'yesterday', 'lastWeek', 'older'];
 
-const FILTERS: { id: ConversationFilter; label: string }[] = [
-  { id: 'all', label: 'All' },
-  { id: 'pinned', label: 'Pinned' },
-  { id: 'favorites', label: 'Favorites' },
-  { id: 'archived', label: 'Archived' },
-];
+// Wraps every case-insensitive occurrence of `query` in <mark>, so search
+// results show *why* they matched.
+function highlight(text: string, query: string): ReactNode {
+  const q = query.trim();
+  if (!q) return text;
+  const lower = text.toLowerCase();
+  const needle = q.toLowerCase();
+  const parts: ReactNode[] = [];
+  let from = 0;
+  let at = lower.indexOf(needle);
+  while (at !== -1) {
+    if (at > from) parts.push(text.slice(from, at));
+    parts.push(<mark key={at}>{text.slice(at, at + q.length)}</mark>);
+    from = at + q.length;
+    at = lower.indexOf(needle, from);
+  }
+  parts.push(text.slice(from));
+  return parts;
+}
 
 // Master-detail layout — a list on the left, the selected conversation's
 // full thread rendered inline on the right (reusing MessageList, the SAME
@@ -74,7 +90,9 @@ export function ChatHistoryPage() {
 
   const stats = useMemo(
     () => ({
-      total: conversations.length,
+      // "All" hides archived conversations (see `filtered` below), so its
+      // tile counts the same set it shows.
+      total: conversations.filter((c) => !c.archived).length,
       pinned: conversations.filter((c) => c.pinned).length,
       favorites: conversations.filter((c) => c.favorite).length,
       archived: conversations.filter((c) => c.archived).length,
@@ -137,142 +155,204 @@ export function ChatHistoryPage() {
 
   return (
     <div className={styles.page}>
-      <div className={styles.header}>
-        <div className={styles.title}>Chat History</div>
-        <Button leftIcon={<FiPlus />} onClick={handleNewChat}>
-          New conversation
-        </Button>
-      </div>
+      <PageHeader
+        icon={FiMessageSquare}
+        title="History"
+        subtitle="Every conversation you've had with the AI. Pick one to read it here, or continue it in Chat."
+        actions={
+          <Button leftIcon={<FiPlus />} onClick={handleNewChat}>
+            New conversation
+          </Button>
+        }
+      />
 
-      <div className={styles.statRow}>
-        <StatTile label="Total Conversations" value={stats.total} />
-        <StatTile label="Pinned" value={stats.pinned} icon={FiBookmark} />
-        <StatTile label="Favorites" value={stats.favorites} icon={FiStar} />
-        <StatTile label="Archived" value={stats.archived} icon={FiArchive} />
+      {/* The tiles double as the filter — click one to show only those. */}
+      <div className={styles.statRow} role="tablist" aria-label="Filter conversations">
+        <StatTile label="All conversations" value={stats.total} icon={FiInbox} active={filter === 'all'} onClick={() => setFilter('all')} />
+        <StatTile label="Pinned" value={stats.pinned} icon={FiBookmark} active={filter === 'pinned'} onClick={() => setFilter('pinned')} />
+        <StatTile
+          label="Favorites"
+          value={stats.favorites}
+          icon={FiStar}
+          active={filter === 'favorites'}
+          onClick={() => setFilter('favorites')}
+        />
+        <StatTile
+          label="Archived"
+          value={stats.archived}
+          icon={FiArchive}
+          active={filter === 'archived'}
+          onClick={() => setFilter('archived')}
+        />
       </div>
 
       <div className={styles.toolbar}>
         <Input
-          placeholder="Search chats..."
+          placeholder="Search conversations by title…"
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
           leftIcon={<FiSearch />}
           aria-label="Search chats"
         />
-        <div className={styles.filterRow}>
-          {FILTERS.map((f) => (
-            <button
-              key={f.id}
-              type="button"
-              className={clsx(styles.chip, filter === f.id && styles.chipActive)}
-              onClick={() => setFilter(f.id)}
-            >
-              {f.label}
-            </button>
-          ))}
-        </div>
       </div>
 
       <div className={styles.layout} data-mobile-detail={showDetailOnMobile ? 'true' : 'false'}>
         <div className={styles.listColumn}>
           {filtered.length === 0 ? (
-            <Card className={styles.emptyState}>
-              <FiMessageSquare size={28} />
-              <p>No conversations here yet.</p>
+            <Card>
+              <EmptyState
+                icon={searchQuery ? FiSearch : FiMessageSquare}
+                title={searchQuery ? 'No conversations match your search' : 'No conversations here yet'}
+                description={
+                  searchQuery
+                    ? 'Try a different word, or clear the search.'
+                    : filter === 'all'
+                      ? 'Start a new conversation and it will show up here.'
+                      : 'Use the ••• menu on a conversation to add it here.'
+                }
+                action={
+                  !searchQuery && filter === 'all' ? (
+                    <Button leftIcon={<FiPlus />} onClick={handleNewChat}>
+                      New conversation
+                    </Button>
+                  ) : undefined
+                }
+              />
             </Card>
           ) : (
-            GROUP_ORDER.map((groupKey) => {
-              const items = grouped[groupKey];
-              if (items.length === 0) return null;
-              return (
-                <div key={groupKey}>
-                  <div className={styles.groupLabel}>{CONVERSATION_GROUP_LABELS[groupKey]}</div>
-                  <Card padded={false} className={styles.groupCard}>
-                    {items.map((conversation) => (
-                      <div
-                        key={conversation.id}
-                        className={clsx(styles.item, activeConversationId === conversation.id && styles.itemActive)}
-                      >
-                        <FiMessageSquare className={styles.itemIcon} />
-                        <div className={styles.itemMain}>
-                          {renamingId === conversation.id ? (
-                            <input
-                              autoFocus
-                              value={renameValue}
-                              onChange={(e) => setRenameValue(e.target.value)}
-                              onBlur={() => handleRenameSubmit(conversation.id)}
-                              onKeyDown={(e) => e.key === 'Enter' && handleRenameSubmit(conversation.id)}
-                              className={styles.renameInput}
-                            />
-                          ) : (
-                            <button type="button" className={styles.itemTitle} onClick={() => handleSelectConversation(conversation.id)}>
-                              {conversation.title}
-                              {conversation.pinned && <FiBookmark size={12} />}
-                              {conversation.favorite && <FiStar size={12} />}
-                            </button>
-                          )}
-                          {conversation.preview && <div className={styles.itemPreview}>{conversation.preview}</div>}
-                        </div>
-                        <div className={styles.itemMeta}>{formatRelativeTime(conversation.updatedAt)}</div>
-                        <Dropdown
-                          usePortal
-                          align="right"
-                          trigger={<button type="button" className={styles.itemActions} aria-label="Conversation actions"><FiMoreHorizontal /></button>}
-                          items={[
-                            {
-                              id: 'rename',
-                              label: 'Rename',
-                              icon: <FiEdit2 />,
-                              onSelect: () => {
-                                setRenamingId(conversation.id);
-                                setRenameValue(conversation.title);
-                              },
-                            },
-                            {
-                              id: 'pin',
-                              label: conversation.pinned ? 'Unpin' : 'Pin',
-                              icon: <FiBookmark />,
-                              onSelect: () => void toggleConversationFlag(conversation.id, 'pinned'),
-                            },
-                            {
-                              id: 'favorite',
-                              label: conversation.favorite ? 'Remove favorite' : 'Add to favorites',
-                              icon: <FiStar />,
-                              onSelect: () => void toggleConversationFlag(conversation.id, 'favorite'),
-                            },
-                            {
-                              id: 'archive',
-                              label: conversation.archived ? 'Unarchive' : 'Archive',
-                              icon: <FiArchive />,
-                              onSelect: () => void toggleConversationFlag(conversation.id, 'archived'),
-                            },
-                            {
-                              id: 'delete',
-                              label: 'Delete',
-                              icon: <FiTrash2 />,
-                              danger: true,
-                              separatorBefore: true,
-                              onSelect: () => setDeleteTarget(conversation),
-                            },
-                          ]}
-                        />
-                      </div>
-                    ))}
-                  </Card>
-                </div>
-              );
-            })
+            <LayoutGroup id="history-list">
+              {GROUP_ORDER.map((groupKey) => {
+                const items = grouped[groupKey];
+                if (items.length === 0) return null;
+                return (
+                  <div key={groupKey}>
+                    <div className={styles.groupLabel}>{CONVERSATION_GROUP_LABELS[groupKey]}</div>
+                    <Card padded={false} className={styles.groupCard}>
+                      <AnimatePresence initial={false}>
+                        {items.map((conversation) => (
+                          <motion.div
+                            key={conversation.id}
+                            initial={{ opacity: 0, height: 0 }}
+                            animate={{ opacity: 1, height: 'auto' }}
+                            exit={{ opacity: 0, height: 0 }}
+                            transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
+                            className={clsx(styles.item, activeConversationId === conversation.id && styles.itemActive)}
+                            onClick={() => renamingId !== conversation.id && handleSelectConversation(conversation.id)}
+                          >
+                            {activeConversationId === conversation.id && (
+                              <motion.span
+                                layoutId="history-active"
+                                className={styles.itemIndicator}
+                                transition={{ type: 'spring', stiffness: 420, damping: 36 }}
+                              />
+                            )}
+                            <span className={styles.itemIconTile}>
+                              <FiMessageSquare />
+                            </span>
+                            <div className={styles.itemMain}>
+                              {renamingId === conversation.id ? (
+                                <input
+                                  autoFocus
+                                  value={renameValue}
+                                  onChange={(e) => setRenameValue(e.target.value)}
+                                  onBlur={() => handleRenameSubmit(conversation.id)}
+                                  onKeyDown={(e) => e.key === 'Enter' && handleRenameSubmit(conversation.id)}
+                                  className={styles.renameInput}
+                                />
+                              ) : (
+                                <button
+                                  type="button"
+                                  className={styles.itemTitle}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleSelectConversation(conversation.id);
+                                  }}
+                                >
+                                  <span className={styles.itemTitleText}>{highlight(conversation.title, searchQuery)}</span>
+                                  {conversation.pinned && <FiBookmark size={12} />}
+                                  {conversation.favorite && <FiStar size={12} />}
+                                </button>
+                              )}
+                              {conversation.preview && <div className={styles.itemPreview}>{conversation.preview}</div>}
+                            </div>
+                            <div className={styles.itemMeta}>{formatRelativeTime(conversation.updatedAt)}</div>
+                            {/* Keeps menu clicks from also selecting the row. */}
+                            <span className={styles.itemActionsWrap} onClick={(e) => e.stopPropagation()}>
+                              <Dropdown
+                                usePortal
+                                align="right"
+                                trigger={
+                                  <button type="button" className={styles.itemActions} aria-label="Conversation actions">
+                                    <FiMoreHorizontal />
+                                  </button>
+                                }
+                                items={[
+                                  {
+                                    id: 'rename',
+                                    label: 'Rename',
+                                    icon: <FiEdit2 />,
+                                    onSelect: () => {
+                                      setRenamingId(conversation.id);
+                                      setRenameValue(conversation.title);
+                                    },
+                                  },
+                                  {
+                                    id: 'pin',
+                                    label: conversation.pinned ? 'Unpin' : 'Pin',
+                                    icon: <FiBookmark />,
+                                    onSelect: () => void toggleConversationFlag(conversation.id, 'pinned'),
+                                  },
+                                  {
+                                    id: 'favorite',
+                                    label: conversation.favorite ? 'Remove favorite' : 'Add to favorites',
+                                    icon: <FiStar />,
+                                    onSelect: () => void toggleConversationFlag(conversation.id, 'favorite'),
+                                  },
+                                  {
+                                    id: 'archive',
+                                    label: conversation.archived ? 'Unarchive' : 'Archive',
+                                    icon: <FiArchive />,
+                                    onSelect: () => void toggleConversationFlag(conversation.id, 'archived'),
+                                  },
+                                  {
+                                    id: 'delete',
+                                    label: 'Delete',
+                                    icon: <FiTrash2 />,
+                                    danger: true,
+                                    separatorBefore: true,
+                                    onSelect: () => setDeleteTarget(conversation),
+                                  },
+                                ]}
+                              />
+                            </span>
+                          </motion.div>
+                        ))}
+                      </AnimatePresence>
+                    </Card>
+                  </div>
+                );
+              })}
+            </LayoutGroup>
           )}
         </div>
 
         <div className={styles.detailColumn}>
           {!selected ? (
             <div className={styles.detailEmpty}>
-              <FiMessageSquare size={28} />
-              <p>Select a conversation to read it here.</p>
+              <EmptyState
+                icon={FiMessageSquare}
+                title="Pick a conversation"
+                description="Select one on the left to read the full thread here."
+              />
             </div>
           ) : (
-            <>
+            <motion.div
+              key={selected.id}
+              className={styles.detailInner}
+              initial={{ opacity: 0, x: 12 }}
+              animate={{ opacity: 1, x: 0 }}
+              transition={{ duration: 0.25, ease: [0.16, 1, 0.3, 1] }}
+            >
               <div className={styles.detailHeader}>
                 <button type="button" className={styles.detailBackButton} onClick={() => setShowDetailOnMobile(false)} aria-label="Back to list">
                   <FiArrowLeft />
@@ -292,7 +372,7 @@ export function ChatHistoryPage() {
               <div className={styles.detailMessages}>
                 <MessageList messages={messages} isLoading={isLoadingMessages} />
               </div>
-            </>
+            </motion.div>
           )}
         </div>
       </div>

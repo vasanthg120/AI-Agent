@@ -112,3 +112,29 @@
 .dot-review {
   background: color-mix(in srgb, var(--brand-accent-primary) 35%, var(--color-accent-muted));
 }
+
+.row:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+/* Bars grow in from the left when they first render (clip-path, so any
+   label inside the bar isn't squashed the way a scaleX animation would). */
+@keyframes barReveal {
+  from {
+    clip-path: inset(0 100% 0 0);
+  }
+  to {
+    clip-path: inset(0 0 0 0);
+  }
+}
+
+.fill {
+  animation: barReveal 0.9s var(--ease-out) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fill {
+    animation: none;
+  }
+}

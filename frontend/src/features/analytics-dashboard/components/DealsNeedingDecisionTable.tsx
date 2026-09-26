@@ -2,8 +2,9 @@ import { Fragment, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import dayjs from 'dayjs';
 import clsx from 'clsx';
-import { FiSearch, FiChevronDown, FiChevronRight } from 'react-icons/fi';
-import { Card, Input } from '@/components/ui';
+import { FiSearch, FiChevronDown, FiChevronRight, FiMail, FiPhone, FiUser } from 'react-icons/fi';
+import { Card, EmptyState, Input } from '@/components/ui';
+import { pressable } from '@/utils/pressable';
 import { formatINR as money } from '@/utils/currency';
 import { dealsService } from '@/services/dealsService';
 import { quotesService } from '@/services/quotesService';
@@ -101,6 +102,16 @@ export function DealsNeedingDecisionTable({ dateFrom, dateTo, storeId, ownerName
     });
   }, [rows, query, statusFilter]);
 
+  // Per-status counts for the filter chips, respecting the current search.
+  const statusCounts = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    const searched = q
+      ? rows.filter((r) => r.customerName.toLowerCase().includes(q) || r.ownerName.toLowerCase().includes(q))
+      : rows;
+    const approved = searched.filter((r) => r.approved).length;
+    return { all: searched.length, approved, awaiting: searched.length - approved };
+  }, [rows, query]);
+
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const currentPage = Math.min(page, totalPages);
   const pageRows = filtered.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
@@ -148,13 +159,21 @@ export function DealsNeedingDecisionTable({ dateFrom, dateTo, storeId, ownerName
                 }}
               >
                 {f === 'all' ? 'All' : f === 'awaiting' ? 'Awaiting response' : 'Approved'}
+                <span className={styles.chipCount}>{statusCounts[f]}</span>
               </button>
             ))}
           </div>
         </div>
 
         {rows.length === 0 ? (
-          <div className={styles.empty}>No open deals with quotes in this period.</div>
+          <EmptyState
+            compact
+            icon={FiSearch}
+            title="No open deals with quotes in this period"
+            description="Deals show up here once a quote is sent and a decision is pending."
+          />
+        ) : filtered.length === 0 ? (
+          <EmptyState compact icon={FiSearch} title="No deals match" description="Try another search or status filter." />
         ) : (
           <>
             <div className={styles.tableWrap}>
@@ -172,7 +191,12 @@ export function DealsNeedingDecisionTable({ dateFrom, dateTo, storeId, ownerName
                 <tbody>
                   {pageRows.map((r) => (
                     <Fragment key={r.quoteId}>
-                      <tr className={styles.row} onClick={() => setExpandedId(expandedId === r.quoteId ? null : r.quoteId)}>
+                      <tr
+                        className={clsx(styles.row, expandedId === r.quoteId && styles.rowOpen)}
+                        {...pressable(() => setExpandedId(expandedId === r.quoteId ? null : r.quoteId))}
+                        aria-expanded={expandedId === r.quoteId}
+                        title="Show contact details"
+                      >
                         <td>
                           <div className={styles.customerCell}>
                             <span className={styles.avatar}>{r.customerName.charAt(0).toUpperCase()}</span>
@@ -198,9 +222,21 @@ export function DealsNeedingDecisionTable({ dateFrom, dateTo, storeId, ownerName
                         <tr className={styles.detailRow}>
                           <td colSpan={6}>
                             <div className={styles.detailContent}>
-                              {r.contactName && <span>Contact: {r.contactName}</span>}
-                              {r.email && <span>Email: {r.email}</span>}
-                              {r.phone && <span>Phone: {r.phone}</span>}
+                              {r.contactName && (
+                                <span className={styles.detailItem}>
+                                  <FiUser /> {r.contactName}
+                                </span>
+                              )}
+                              {r.email && (
+                                <a className={styles.detailLink} href={`mailto:${r.email}`} onClick={(e) => e.stopPropagation()}>
+                                  <FiMail /> {r.email}
+                                </a>
+                              )}
+                              {r.phone && (
+                                <a className={styles.detailLink} href={`tel:${r.phone}`} onClick={(e) => e.stopPropagation()}>
+                                  <FiPhone /> {r.phone}
+                                </a>
+                              )}
                             </div>
                           </td>
                         </tr>

@@ -52,7 +52,9 @@ function StatCard({
         <Icon size={16} />
       </span>
       <div className={statStyles.label}>{label}</div>
-      <div className={statStyles.value}>{value.toLocaleString()}</div>
+      <div className={statStyles.value}>
+        <AnimatedNumber value={value} />
+      </div>
       <div className={statStyles.note}>{note}</div>
     </Card>
   );

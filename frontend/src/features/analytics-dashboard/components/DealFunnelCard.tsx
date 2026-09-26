@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Card } from '@/components/ui';
+import { pressable } from '@/utils/pressable';
 import { dealsService, type Deal } from '@/services/dealsService';
 import { usePipelineDecisionCounts } from './usePipelineDecisionCounts';
 import { DrillDownModal, type DrillDownRow } from './DrillDownModal';
@@ -79,9 +80,7 @@ export function DealFunnelCard({ deals, dateFrom, dateTo, storeId }: DealFunnelC
           <div
             key={stage.key}
             className={styles.bar}
-            role="button"
-            tabIndex={0}
-            onClick={() => setOpenStage(stage.key)}
+            {...pressable(() => setOpenStage(stage.key))}
             style={{ width: `${Math.max(12, (stage.count / max) * 100)}%`, background: `color-mix(in srgb, var(--brand-accent-primary) ${30 + i * 22}%, var(--color-accent-muted))` }}
           >
             <span className={styles.barLabel}>{stage.label}</span>

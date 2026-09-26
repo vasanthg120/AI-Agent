@@ -2,7 +2,18 @@ import { useMemo, useState } from 'react';
 import { useQuery, keepPreviousData } from '@tanstack/react-query';
 import { AnimatePresence, LayoutGroup, motion } from 'framer-motion';
 import clsx from 'clsx';
-import { FiActivity, FiArrowRight, FiAward, FiBarChart2, FiClock, FiDollarSign, FiSearch, FiTarget, FiTrendingUp, FiUsers } from 'react-icons/fi';
+import {
+  FiActivity,
+  FiArrowRight,
+  FiAward,
+  FiBarChart2,
+  FiClock,
+  FiDollarSign,
+  FiSearch,
+  FiTarget,
+  FiTrendingUp,
+  FiUsers,
+} from 'react-icons/fi';
 import { Avatar, EmptyState, MonthYearFilterPopup, PageHeader, SectionCard, Skeleton, StatTile } from '@/components/ui';
 import type { DateRange } from '@/components/ui';
 import { CURRENT_MONTH, CURRENT_YEAR, rangeForMonth } from '@/components/ui';

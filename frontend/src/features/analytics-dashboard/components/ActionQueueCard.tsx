@@ -1,9 +1,10 @@
 import { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import dayjs from 'dayjs';
-import { FiClock, FiTarget, FiInbox, FiChevronRight, FiArrowUpRight } from 'react-icons/fi';
+import { FiClock, FiTarget, FiInbox, FiChevronRight, FiArrowUpRight, FiCheckCircle } from 'react-icons/fi';
 import type { IconType } from 'react-icons';
-import { Card } from '@/components/ui';
+import { motion } from 'framer-motion';
+import { Card, EmptyState } from '@/components/ui';
 import { formatINR as money } from '@/utils/currency';
 import { dealsService } from '@/services/dealsService';
 import { aiFollowupSummaryService } from '@/services/aiFollowupSummaryService';
@@ -107,11 +108,24 @@ export function ActionQueueCard({ dateFrom, dateTo, storeId, newEnquiryCount, on
       </div>
 
       {items.length === 0 ? (
-        <div className={styles.empty}>Nothing needs attention right now.</div>
+        <EmptyState
+          compact
+          icon={FiCheckCircle}
+          title="Nothing needs attention right now"
+          description="Overdue follow-ups, big open deals and new enquiries show up here."
+        />
       ) : (
         <div className={styles.list}>
-          {items.map((item) => (
-            <button key={item.id} type="button" className={styles.item} onClick={item.onSelect}>
+          {items.map((item, i) => (
+            <motion.button
+              key={item.id}
+              type="button"
+              className={styles.item}
+              onClick={item.onSelect}
+              initial={{ opacity: 0, x: -8 }}
+              animate={{ opacity: 1, x: 0 }}
+              transition={{ duration: 0.28, ease: [0.16, 1, 0.3, 1], delay: 0.1 + i * 0.07 }}
+            >
               <span className={styles.iconBadge}>
                 <item.icon size={16} />
               </span>
@@ -120,13 +134,13 @@ export function ActionQueueCard({ dateFrom, dateTo, storeId, newEnquiryCount, on
                 <span className={styles.itemSubtitle}>{item.subtitle}</span>
               </span>
               <FiChevronRight size={14} className={styles.chevron} />
-            </button>
+            </motion.button>
           ))}
         </div>
       )}
 
       <button type="button" className={styles.openQueueBtn} onClick={onOpenFollowUps}>
-        Open action queue
+        Open follow-ups in AI Email Inbox
         <FiArrowUpRight size={14} />
       </button>
     </Card>

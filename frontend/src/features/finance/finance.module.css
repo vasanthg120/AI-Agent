@@ -1,5 +1,5 @@
 .page {
-  padding: var(--space-6);
+  padding: var(--space-6) var(--space-8) var(--space-10);
   overflow-y: auto;
   height: 100%;
   display: flex;
@@ -142,26 +142,35 @@
   align-items: center;
   gap: var(--space-3);
   padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-md);
+  transition: background var(--duration-fast) var(--ease-out);
 }
 
 .rankPosition {
+  flex-shrink: 0;
   font-size: var(--text-sm);
-  font-weight: 700;
+  font-weight: 800;
   color: var(--color-text-muted);
   width: 1.5em;
+  font-variant-numeric: tabular-nums;
 }
 
 .rankName {
-  flex: 1;
+  min-width: 0;
   font-size: var(--text-sm);
+  font-weight: 500;
   color: var(--color-text-primary);
-  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .rankValue {
+  flex-shrink: 0;
   font-size: var(--text-sm);
-  font-weight: 600;
+  font-weight: 700;
   color: var(--color-text-primary);
+  font-variant-numeric: tabular-nums;
 }
 
 .card {
@@ -193,8 +202,8 @@
 
 .aiInsightCard {
   display: flex;
-  flex-direction: column;
-  gap: var(--space-1);
+  align-items: center;
+  gap: var(--space-3);
   padding: var(--space-4);
   border-radius: var(--radius-md);
   background: var(--color-bg-surface);
@@ -218,6 +227,7 @@
 
 .aiInsightText {
   font-size: var(--text-sm);
+  line-height: 1.55;
   color: var(--color-text-primary);
 }
 
@@ -289,4 +299,177 @@
   gap: var(--space-1);
   font-size: var(--text-sm);
   color: var(--color-text-primary);
+}
+
+/* ---------- Header meta chips ---------- */
+
+.metaChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+  border-radius: var(--radius-full);
+  background: color-mix(in srgb, var(--color-text-primary) 5%, transparent);
+  color: var(--color-text-secondary);
+  font-size: var(--text-xs);
+  font-weight: 600;
+}
+
+.metaChipWarning {
+  background: var(--color-warning-soft);
+  color: var(--color-warning-ink);
+}
+
+/* ---------- AI insight (redesigned) ---------- */
+
+.aiInsightIcon {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  background: var(--gradient-accent);
+  color: var(--color-accent-contrast);
+  font-size: 16px;
+  box-shadow: 0 6px 14px rgba(217, 111, 31, 0.3);
+}
+
+.aiInsightBody {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+/* ---------- Ranked breakdown ---------- */
+
+.rankList {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.rankRowButton {
+  width: 100%;
+  border: none;
+  background: transparent;
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.rankRowButton:hover,
+.rankRowButton:focus-visible {
+  outline: none;
+  background: var(--color-bg-hover);
+}
+
+.rankTop {
+  color: var(--color-accent);
+}
+
+.rankBody {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.rankLine {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.rankTrack {
+  display: block;
+  height: 5px;
+  border-radius: var(--radius-full);
+  background: var(--color-bg-active);
+  overflow: hidden;
+}
+
+.rankFill {
+  display: block;
+  height: 100%;
+  border-radius: var(--radius-full);
+  background: var(--gradient-accent);
+}
+
+.rankChevron {
+  flex-shrink: 0;
+  color: var(--color-text-muted);
+  transition: transform var(--duration-normal) var(--ease-out), color var(--duration-normal) var(--ease-out);
+}
+
+.rankRowButton:hover .rankChevron,
+.docRow:hover .rankChevron {
+  transform: translateX(3px);
+  color: var(--color-accent);
+}
+
+/* ---------- Recent documents ---------- */
+
+.docList {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.docRow {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  width: 100%;
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border);
+  background: var(--color-bg-surface);
+  font-family: inherit;
+  font-size: var(--text-sm);
+  text-align: left;
+  cursor: pointer;
+  transition: border-color var(--duration-normal) var(--ease-out), box-shadow var(--duration-normal) var(--ease-out),
+    transform var(--duration-normal) var(--ease-out);
+}
+
+.docRow:hover,
+.docRow:focus-visible {
+  outline: none;
+  border-color: color-mix(in srgb, var(--color-accent) 40%, var(--color-border));
+  box-shadow: var(--shadow-md);
+  transform: translateY(-1px);
+}
+
+.docRow .listItemMain {
+  flex: 1;
+}
+
+.docIcon {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  background: var(--color-bg-active);
+  color: var(--color-accent);
+  font-size: 16px;
+}
+
+.docAmount {
+  font-weight: 700;
+  color: var(--color-text-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+@media (max-width: 640px) {
+  .page {
+    padding: var(--space-4);
+  }
 }

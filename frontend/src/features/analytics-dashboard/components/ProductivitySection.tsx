@@ -1,12 +1,23 @@
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import clsx from 'clsx';
-import { Card, Skeleton, Avatar, Badge } from '@/components/ui';
+import { motion } from 'framer-motion';
+import { FiUsers } from 'react-icons/fi';
+import { Card, Skeleton, Avatar, Badge, EmptyState } from '@/components/ui';
 import { formatINR as money } from '@/utils/currency';
 import { employeeProductivityService } from '@/services/employeeProductivityService';
 import styles from './ProductivitySection.module.css';
 
 function completionPct(completed: number, assigned: number): number {
   return assigned > 0 ? Math.round((completed / assigned) * 100) : 0;
+}
+
+// Colour band for a member's overall completion — green on pace, amber
+// slipping, red well behind — so the list scans without reading numbers.
+function completionTone(pct: number | null): string | undefined {
+  if (pct === null) return undefined;
+  if (pct >= 75) return styles.overallGood;
+  if (pct >= 40) return styles.overallOk;
+  return styles.overallLow;
 }
 
 // Business Intelligence section 3 — Employee Work Completion & Productivity.
@@ -36,11 +47,17 @@ export function ProductivitySection({ dateFrom, dateTo, storeId }: { dateFrom: s
       {isLoading || !data ? (
         <Skeleton height={140} />
       ) : data.rows.length === 0 ? (
-        <div className={styles.empty}>No eligible employees in scope for this period.</div>
+        <EmptyState compact icon={FiUsers} title="No eligible employees in scope for this period" />
       ) : (
         <div className={styles.list}>
-          {data.rows.map((r) => (
-            <div key={r.userId} className={styles.row}>
+          {data.rows.map((r, i) => (
+            <motion.div
+              key={r.userId}
+              className={styles.row}
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1], delay: Math.min(i, 10) * 0.05 }}
+            >
               <div className={styles.rowTop}>
                 <div className={styles.memberInfo}>
                   <Avatar name={r.userName} size="md" />
@@ -81,10 +98,16 @@ export function ProductivitySection({ dateFrom, dateTo, storeId }: { dateFrom: s
                 ))}
               </div>
 
-              <div className={clsx(styles.overall, r.overallCompletionPct === null && styles.overallMuted)}>
-                Overall completion {r.overallCompletionPct !== null ? `${r.overallCompletionPct}%` : '—'}
+              <div
+                className={clsx(
+                  styles.overall,
+                  r.overallCompletionPct === null && styles.overallMuted,
+                  completionTone(r.overallCompletionPct),
+                )}
+              >
+                Overall completion <strong>{r.overallCompletionPct !== null ? `${r.overallCompletionPct}%` : '—'}</strong>
               </div>
-            </div>
+            </motion.div>
           ))}
         </div>
       )}

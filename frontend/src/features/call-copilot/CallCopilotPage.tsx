@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { AnimatePresence, MotionConfig, motion } from 'framer-motion';
-import { FiFolder, FiRadio, FiUploadCloud, FiVolume2 } from 'react-icons/fi';
-import { Button } from '@/components/ui';
+import { FiFolder, FiMic, FiRadio, FiUploadCloud, FiVolume2 } from 'react-icons/fi';
+import { Button, PageHeader } from '@/components/ui';
 import { ROUTES } from '@/constants/routes';
 import { useCallSessionStore } from '@/stores/callSessionStore';
 import { VOICE_LANGUAGES } from '@/services/voiceService';
@@ -144,25 +144,24 @@ export function CallCopilotPage() {
     <MotionConfig reducedMotion="user">
       <div className={styles.page}>
         <div className={styles.content}>
-          <header className={styles.headerRow}>
-            <div className={styles.titleBlock}>
-              <h1 className={styles.pageTitle}>Call Copilot</h1>
-              <p className={styles.pageSubtitle}>
-                Capture a call, get live suggestions while you talk, and review it with your AI Coach afterwards.
-              </p>
-            </div>
-            {isIdle && (
-              <div className={styles.headerActions}>
-                {/* Not shown mid-call: leaving the page stops the recording. */}
-                <Button type="button" variant="ghost" leftIcon={<FiVolume2 />} onClick={() => navigate(ROUTES.settingsVoice)}>
-                  Voice &amp; Accent
-                </Button>
-                <Button type="button" variant="secondary" leftIcon={<FiUploadCloud />} onClick={() => setUploadModalOpen(true)}>
-                  Upload a Recording
-                </Button>
-              </div>
-            )}
-          </header>
+          <PageHeader
+            icon={FiMic}
+            title="Call Copilot"
+            subtitle="Capture a call, get live suggestions while you talk, and review it with your AI Coach afterwards."
+            actions={
+              isIdle && (
+                // Not shown mid-call: leaving the page stops the recording.
+                <>
+                  <Button type="button" variant="ghost" leftIcon={<FiVolume2 />} onClick={() => navigate(ROUTES.settingsVoice)}>
+                    Voice &amp; Accent
+                  </Button>
+                  <Button type="button" variant="secondary" leftIcon={<FiUploadCloud />} onClick={() => setUploadModalOpen(true)}>
+                    Upload a Recording
+                  </Button>
+                </>
+              )
+            }
+          />
 
           <PillTabs
             ariaLabel="Call Copilot sections"

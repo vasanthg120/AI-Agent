@@ -224,7 +224,9 @@ export function EodPage() {
             </SectionCard>
           ) : (
             <>
-              <DateStepper date={eodDate} onChange={setEodDate} />
+              <div className={styles.stepperRow}>
+                <DateStepper date={eodDate} onChange={setEodDate} />
+              </div>
 
               {isLoading || !data ? (
                 <div className={styles.loading}>

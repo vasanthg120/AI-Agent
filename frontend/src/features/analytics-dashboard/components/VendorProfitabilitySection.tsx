@@ -1,14 +1,21 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
+import type { ReactNode } from 'react';
+import { motion } from 'framer-motion';
+import clsx from 'clsx';
 import { useNavigate } from 'react-router-dom';
 import { keepPreviousData, useMutation, useQuery } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import dayjs from 'dayjs';
-import { FiTrendingUp, FiPackage, FiArrowUpRight, FiTarget, FiZap, FiHelpCircle, FiDownload } from 'react-icons/fi';
+import { FiTrendingUp, FiPackage, FiArrowUpRight, FiTarget, FiZap, FiHelpCircle, FiDownload, FiSearch } from 'react-icons/fi';
 import type { IconType } from 'react-icons';
-import { Badge, Card, Skeleton } from '@/components/ui';
+import { AnimatedNumber, Badge, Card, EmptyState, Skeleton } from '@/components/ui';
 import { extractErrorMessage } from '@/utils/errors';
 import { formatINR as money } from '@/utils/currency';
-import { vendorProfitabilityService, type VendorCustomerCompareResult } from '@/services/vendorProfitabilityService';
+import {
+  vendorProfitabilityService,
+  type VendorCustomerCompareResult,
+  type VendorProfitabilityTransactionRow,
+} from '@/services/vendorProfitabilityService';
 import { financeDocumentsService } from '@/services/financeDocumentsService';
 import { ROUTES } from '@/constants/routes';
 import biStyles from '@/features/business-intelligence/business-intelligence.module.css';
@@ -30,6 +37,26 @@ function statusVariant(status: string): 'success' | 'warning' | 'danger' | 'neut
   return 'neutral';
 }
 
+type SortMode = 'newest' | 'profit' | 'margin';
+const SORT_LABEL: Record<SortMode, string> = { newest: 'Newest', profit: 'Highest profit', margin: 'Lowest margin' };
+
+// Green healthy, amber thin, red losing money — so a problem row jumps out
+// of a 12-column table without reading every number.
+function marginClass(pct: number | null): string | undefined {
+  if (pct === null) return undefined;
+  if (pct >= 20) return panelStyles.marginGood;
+  if (pct >= 5) return panelStyles.marginOk;
+  return panelStyles.marginBad;
+}
+
+function sortRows(rows: VendorProfitabilityTransactionRow[], mode: SortMode) {
+  const sorted = [...rows];
+  if (mode === 'profit') sorted.sort((a, b) => (b.profitAmount ?? -Infinity) - (a.profitAmount ?? -Infinity));
+  else if (mode === 'margin') sorted.sort((a, b) => (a.profitMarginPct ?? Infinity) - (b.profitMarginPct ?? Infinity));
+  else sorted.sort((a, b) => (b.quoteDate ?? b.invoiceDate ?? '').localeCompare(a.quoteDate ?? a.invoiceDate ?? ''));
+  return sorted;
+}
+
 function StatCard({
   icon: Icon,
   label,
@@ -39,7 +66,7 @@ function StatCard({
 }: {
   icon: IconType;
   label: string;
-  value: string;
+  value: ReactNode;
   note: string;
   onClick?: () => void;
 }) {
@@ -73,6 +100,8 @@ export function VendorProfitabilitySection({ dateFrom, dateTo }: { dateFrom: str
   const navigate = useNavigate();
   const [aiResult, setAiResult] = useState<VendorCustomerCompareResult | null>(null);
   const [viewingId, setViewingId] = useState<string | null>(null);
+  const [query, setQuery] = useState('');
+  const [sortMode, setSortMode] = useState<SortMode>('newest');
   const filters = { dateFrom, dateTo };
 
   const { data, isLoading } = useQuery({
@@ -102,6 +131,16 @@ export function VendorProfitabilitySection({ dateFrom, dateTo }: { dateFrom: str
 
   const hasRows = !!data && data.rows.length > 0;
 
+  const visibleRows = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    const rows = (data?.rows ?? []).filter(
+      (r) =>
+        !q ||
+        [r.customerName, r.vendorName, r.customerQuoteNo, r.vendorInvoiceNumber].some((f) => f?.toLowerCase().includes(q)),
+    );
+    return sortRows(rows, sortMode);
+  }, [data, query, sortMode]);
+
   const handleViewInvoice = async (transactionId: string) => {
     setViewingId(transactionId);
     try {
@@ -128,25 +167,31 @@ export function VendorProfitabilitySection({ dateFrom, dateTo }: { dateFrom: str
           <StatCard
             icon={FiTrendingUp}
             label="Customer quoted"
-            value={money(data.totals.customerQuoteAmount)}
+            value={<AnimatedNumber value={data.totals.customerQuoteAmount} format={money} />}
             note={data.totals.customerQuoteAmount > 0 ? 'in this period' : 'no linked transactions'}
           />
           <StatCard
             icon={FiPackage}
             label="Vendor invoiced"
-            value={money(data.totals.vendorInvoiceAmount)}
+            value={<AnimatedNumber value={data.totals.vendorInvoiceAmount} format={money} />}
             note={hasRows ? 'in this period' : 'awaiting linked invoices'}
           />
           <StatCard
             icon={FiArrowUpRight}
             label="Profit"
-            value={money(data.totals.profitAmount)}
+            value={<AnimatedNumber value={data.totals.profitAmount} format={money} />}
             note={hasRows ? 'quote minus invoice' : 'awaiting linked invoices'}
           />
           <StatCard
             icon={FiTarget}
             label="Profit margin"
-            value={data.totals.profitMarginPct !== null ? `${data.totals.profitMarginPct}%` : '—'}
+            value={
+              data.totals.profitMarginPct !== null ? (
+                <span className={marginClass(data.totals.profitMarginPct)}>{data.totals.profitMarginPct}%</span>
+              ) : (
+                '—'
+              )
+            }
             note={data.totals.profitMarginPct !== null ? 'of customer quote amount' : 'not enough data'}
           />
         </div>
@@ -190,65 +235,109 @@ export function VendorProfitabilitySection({ dateFrom, dateTo }: { dateFrom: str
             </button>
           </div>
         ) : (
-          <div className={panelStyles.tableWrap}>
-            <table className={panelStyles.table}>
-              <thead>
-                <tr>
-                  <th>Customer Name</th>
-                  <th>Customer Quote No</th>
-                  <th>Customer Quote Amount</th>
-                  <th>Vendor Name</th>
-                  <th>Vendor Invoice No</th>
-                  <th>Vendor Invoice Amount</th>
-                  <th>Profit</th>
-                  <th>Profit Margin</th>
-                  <th>Quote Date</th>
-                  <th>Invoice Date</th>
-                  <th>Status</th>
-                  <th></th>
-                </tr>
-              </thead>
-              <tbody>
-                {data.rows.map((r) => (
-                  <tr key={r.transactionId}>
-                    <td className={panelStyles.dealCell}>{r.customerName ?? '—'}</td>
-                    <td>{r.customerQuoteNo ?? '—'}</td>
-                    <td>
-                      {money(r.customerQuoteAmount)} {r.quoteCurrency !== 'INR' ? r.quoteCurrency : ''}
-                    </td>
-                    <td>{r.vendorName ?? '—'}</td>
-                    <td>{r.vendorInvoiceNumber ?? '—'}</td>
-                    <td>
-                      {money(r.vendorInvoiceAmount)} {r.vendorCurrency !== 'INR' ? r.vendorCurrency : ''}
-                    </td>
-                    <td>{r.currencyMismatch ? <Badge variant="warning">Currency mismatch</Badge> : money(r.profitAmount ?? 0)}</td>
-                    <td>{r.profitMarginPct !== null ? `${r.profitMarginPct}%` : '—'}</td>
-                    <td>{r.quoteDate ? dayjs(r.quoteDate).format('YYYY-MM-DD') : '—'}</td>
-                    <td>{r.invoiceDate ?? '—'}</td>
-                    <td>
-                      <Badge variant={statusVariant(r.status)}>{STATUS_LABEL[r.status] ?? r.status}</Badge>
-                    </td>
-                    <td>
-                      <button
-                        type="button"
-                        className={panelStyles.learnBtn}
-                        disabled={viewingId === r.transactionId}
-                        onClick={() => void handleViewInvoice(r.transactionId)}
-                      >
-                        <FiDownload size={13} />
-                        {viewingId === r.transactionId ? 'Opening…' : 'View Invoice'}
-                      </button>
-                    </td>
-                  </tr>
+          <>
+            <div className={panelStyles.tableToolbar}>
+              <label className={panelStyles.tableSearch}>
+                <FiSearch aria-hidden />
+                <input value={query} placeholder="Search customer, vendor or number" onChange={(e) => setQuery(e.target.value)} />
+              </label>
+              <div className={panelStyles.sortGroup} role="radiogroup" aria-label="Sort transactions">
+                {(Object.keys(SORT_LABEL) as SortMode[]).map((m) => (
+                  <button
+                    key={m}
+                    type="button"
+                    role="radio"
+                    aria-checked={sortMode === m}
+                    className={clsx(panelStyles.sortButton, sortMode === m && panelStyles.sortButtonActive)}
+                    onClick={() => setSortMode(m)}
+                  >
+                    {SORT_LABEL[m]}
+                  </button>
                 ))}
-              </tbody>
-            </table>
-          </div>
+              </div>
+            </div>
+            {visibleRows.length === 0 ? (
+              <EmptyState compact icon={FiSearch} title="No transactions match that search" />
+            ) : (
+              <div className={panelStyles.tableWrap}>
+                <table className={panelStyles.table}>
+                  <thead>
+                    <tr>
+                      <th>Customer Name</th>
+                      <th>Customer Quote No</th>
+                      <th>Customer Quote Amount</th>
+                      <th>Vendor Name</th>
+                      <th>Vendor Invoice No</th>
+                      <th>Vendor Invoice Amount</th>
+                      <th>Profit</th>
+                      <th>Profit Margin</th>
+                      <th>Quote Date</th>
+                      <th>Invoice Date</th>
+                      <th>Status</th>
+                      <th></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {visibleRows.map((r, i) => (
+                      <motion.tr
+                        key={r.transactionId}
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        transition={{ duration: 0.25, delay: Math.min(i, 12) * 0.02 }}
+                      >
+                        <td className={panelStyles.dealCell}>{r.customerName ?? '—'}</td>
+                        <td>{r.customerQuoteNo ?? '—'}</td>
+                        <td>
+                          {money(r.customerQuoteAmount)} {r.quoteCurrency !== 'INR' ? r.quoteCurrency : ''}
+                        </td>
+                        <td>{r.vendorName ?? '—'}</td>
+                        <td>{r.vendorInvoiceNumber ?? '—'}</td>
+                        <td>
+                          {money(r.vendorInvoiceAmount)} {r.vendorCurrency !== 'INR' ? r.vendorCurrency : ''}
+                        </td>
+                        <td className={r.profitAmount !== null && r.profitAmount < 0 ? panelStyles.loss : undefined}>
+                          {r.currencyMismatch ? <Badge variant="warning">Currency mismatch</Badge> : money(r.profitAmount ?? 0)}
+                        </td>
+                        <td>
+                          {r.profitMarginPct !== null ? (
+                            <span className={clsx(panelStyles.marginChip, marginClass(r.profitMarginPct))}>{r.profitMarginPct}%</span>
+                          ) : (
+                            '—'
+                          )}
+                        </td>
+                        <td>{r.quoteDate ? dayjs(r.quoteDate).format('YYYY-MM-DD') : '—'}</td>
+                        <td>{r.invoiceDate ?? '—'}</td>
+                        <td>
+                          <Badge variant={statusVariant(r.status)}>{STATUS_LABEL[r.status] ?? r.status}</Badge>
+                        </td>
+                        <td>
+                          <button
+                            type="button"
+                            className={panelStyles.learnBtn}
+                            disabled={viewingId === r.transactionId}
+                            onClick={() => void handleViewInvoice(r.transactionId)}
+                          >
+                            <FiDownload size={13} />
+                            {viewingId === r.transactionId ? 'Opening…' : 'View Invoice'}
+                          </button>
+                        </td>
+                      </motion.tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </>
         )}
       </Card>
 
       {aiResult && (
-        <div className={biStyles.aiSummaryCard}>
+        <motion.div
+          className={biStyles.aiSummaryCard}
+          initial={{ opacity: 0, y: 12 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
+        >
           <span className={biStyles.aiInsightLabel}>
             <FiZap size={14} /> AI Pricing Comparison
           </span>
@@ -283,7 +372,7 @@ export function VendorProfitabilitySection({ dateFrom, dateTo }: { dateFrom: str
               ))}
             </div>
           )}
-        </div>
+        </motion.div>
       )}
     </div>
   );

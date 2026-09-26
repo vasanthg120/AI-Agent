@@ -1,7 +1,8 @@
 import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import dayjs from 'dayjs';
-import { Card } from '@/components/ui';
+import { AnimatedNumber, Card } from '@/components/ui';
+import { pressable } from '@/utils/pressable';
 import { formatINR as money } from '@/utils/currency';
 import { dealsService, type Deal } from '@/services/dealsService';
 import { customerQuotePaymentService } from '@/services/customerQuotePaymentService';
@@ -89,7 +90,9 @@ export function PipelineHealthCard({ deals, dateFrom, dateTo, storeId }: Pipelin
       <div className={styles.mainCol}>
         <div className={styles.label}>Pipeline Health</div>
         <div className={styles.valueRow}>
-          <span className={styles.value}>{paymentSummary ? money(paymentSummary.totalOutstanding) : '—'}</span>
+          <span className={styles.value}>
+            {paymentSummary ? <AnimatedNumber value={paymentSummary.totalOutstanding} format={money} /> : '—'}
+          </span>
           <span className={styles.valueLabel}>total outstanding</span>
         </div>
         <div className={styles.progressTrack}>
@@ -104,16 +107,22 @@ export function PipelineHealthCard({ deals, dateFrom, dateTo, storeId }: Pipelin
       <div className={styles.divider} />
 
       <div className={styles.statsCol}>
-        <div className={styles.stat} role="button" tabIndex={0} onClick={() => setOpenDrilldown('total')}>
-          <div className={styles.statValue}>{totalDeals}</div>
+        <div className={styles.stat} {...pressable(() => setOpenDrilldown('total'))}>
+          <div className={styles.statValue}>
+            <AnimatedNumber value={totalDeals} />
+          </div>
           <div className={styles.statLabel}>total deals</div>
         </div>
-        <div className={styles.stat} role="button" tabIndex={0} onClick={() => setOpenDrilldown('won')}>
-          <div className={styles.statValue}>{deals.wonCount}</div>
+        <div className={styles.stat} {...pressable(() => setOpenDrilldown('won'))}>
+          <div className={styles.statValue}>
+            <AnimatedNumber value={deals.wonCount} />
+          </div>
           <div className={styles.statLabel}>won</div>
         </div>
-        <div className={styles.stat} role="button" tabIndex={0} onClick={() => setOpenDrilldown('overdue')}>
-          <div className={styles.statValue}>{overdueCount}</div>
+        <div className={styles.stat} {...pressable(() => setOpenDrilldown('overdue'))}>
+          <div className={styles.statValue}>
+            <AnimatedNumber value={overdueCount} />
+          </div>
           <div className={styles.statLabel}>overdue</div>
         </div>
       </div>

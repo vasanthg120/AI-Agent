@@ -170,3 +170,26 @@
     text-align: left;
   }
 }
+
+/* Bars grow in from the left when they first render (clip-path, so any
+   label inside the bar isn't squashed the way a scaleX animation would). */
+@keyframes barReveal {
+  from {
+    clip-path: inset(0 100% 0 0);
+  }
+  to {
+    clip-path: inset(0 0 0 0);
+  }
+}
+
+.progressAchieved,
+.progressForecast {
+  animation: barReveal 0.9s var(--ease-out) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .progressAchieved,
+  .progressForecast {
+    animation: none;
+  }
+}

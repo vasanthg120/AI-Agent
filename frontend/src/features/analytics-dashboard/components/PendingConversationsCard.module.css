@@ -122,3 +122,16 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+.itemChevron {
+  flex-shrink: 0;
+  margin-left: auto;
+  color: var(--color-text-muted);
+  transition: transform var(--duration-normal) var(--ease-out), color var(--duration-normal) var(--ease-out);
+}
+
+.item:hover .itemChevron,
+.item:focus-visible .itemChevron {
+  transform: translateX(3px);
+  color: var(--color-accent);
+}

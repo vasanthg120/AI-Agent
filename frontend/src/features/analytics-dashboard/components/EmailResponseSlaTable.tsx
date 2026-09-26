@@ -1,6 +1,9 @@
 import { useMemo, useState } from 'react';
+import type { MouseEvent } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Card, Skeleton } from '@/components/ui';
+import clsx from 'clsx';
+import { FiMail } from 'react-icons/fi';
+import { Avatar, Card, EmptyState, Skeleton } from '@/components/ui';
 import { emailAnalyticsService } from '@/services/emailAnalyticsService';
 import { EmailDetailModal } from '@/features/business-intelligence/components/EmailDetailModal';
 import { DrillDownModal, type DrillDownRow } from './DrillDownModal';
@@ -103,7 +106,7 @@ export function EmailResponseSlaTable({ dateFrom, dateTo, storeId }: EmailRespon
     meta: new Date(item.receivedAt).toLocaleString(),
   }));
 
-  const openDrill = (userId: string, userName: string, kind: DrillKind) => (e: React.MouseEvent) => {
+  const openDrill = (userId: string, userName: string, kind: DrillKind) => (e: MouseEvent) => {
     e.stopPropagation();
     setDrillDown({ userId, userName, kind });
   };
@@ -116,7 +119,7 @@ export function EmailResponseSlaTable({ dateFrom, dateTo, storeId }: EmailRespon
       {isLoading ? (
         <Skeleton height={120} />
       ) : rows.length === 0 ? (
-        <div className={styles.empty}>No email activity in scope for this period.</div>
+        <EmptyState compact icon={FiMail} title="No email activity in scope for this period" />
       ) : (
         <div className={styles.tableWrap}>
           <table className={styles.table}>
@@ -138,25 +141,50 @@ export function EmailResponseSlaTable({ dateFrom, dateTo, storeId }: EmailRespon
                 const missedPct = total > 0 ? (r.missed / total) * 100 : 0;
                 return (
                   <tr key={r.userId}>
-                    <td className={styles.nameCell}>{r.userName}</td>
-                    <td className={styles.clickableCell} onClick={openDrill(r.userId, r.userName, 'sent')}>
-                      {r.sent}
+                    <td className={styles.nameCell}>
+                      <span className={styles.nameWrap}>
+                        <Avatar name={r.userName} size="sm" />
+                        {r.userName}
+                      </span>
                     </td>
-                    <td className={styles.clickableCell} onClick={openDrill(r.userId, r.userName, 'replied')}>
-                      {r.replied}
+                    {/* Real buttons (not clickable <td>s) so each count opens by keyboard too. */}
+                    <td>
+                      <button
+                        type="button"
+                        className={clsx(styles.cellButton, r.sent === 0 && styles.zero)}
+                        onClick={openDrill(r.userId, r.userName, 'sent')}
+                        title={`See ${r.userName}'s sent emails`}
+                      >
+                        {r.sent}
+                      </button>
                     </td>
-                    <td className={styles.clickableCell} onClick={openDrill(r.userId, r.userName, 'missed')}>
-                      <div className={styles.missedCell}>
+                    <td>
+                      <button
+                        type="button"
+                        className={clsx(styles.cellButton, r.replied === 0 && styles.zero)}
+                        onClick={openDrill(r.userId, r.userName, 'replied')}
+                        title={`See ${r.userName}'s replied emails`}
+                      >
+                        {r.replied}
+                      </button>
+                    </td>
+                    <td>
+                      <button
+                        type="button"
+                        className={clsx(styles.cellButton, styles.missedCell, r.missed === 0 && styles.zero)}
+                        onClick={openDrill(r.userId, r.userName, 'missed')}
+                        title={`See ${r.userName}'s missed emails`}
+                      >
                         <span>{r.missed}</span>
-                        <div className={styles.missedTrack}>
-                          <div className={styles.missedFill} style={{ width: `${missedPct}%` }} />
-                        </div>
-                      </div>
+                        <span className={styles.missedTrack}>
+                          <span className={styles.missedFill} style={{ width: `${missedPct}%` }} />
+                        </span>
+                      </button>
                     </td>
-                    <td className={r.urgent > 0 ? styles.urgentValue : undefined}>{r.urgent}</td>
-                    <td>{r.b24}</td>
-                    <td>{r.b48}</td>
-                    <td>{r.b72}</td>
+                    <td className={r.urgent > 0 ? styles.urgentValue : styles.zero}>{r.urgent}</td>
+                    <td className={r.b24 === 0 ? styles.zero : undefined}>{r.b24}</td>
+                    <td className={r.b48 === 0 ? styles.zero : undefined}>{r.b48}</td>
+                    <td className={r.b72 > 0 ? styles.urgentValue : styles.zero}>{r.b72}</td>
                   </tr>
                 );
               })}

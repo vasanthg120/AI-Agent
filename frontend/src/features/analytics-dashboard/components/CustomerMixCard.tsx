@@ -1,5 +1,8 @@
+import { useState } from 'react';
+import clsx from 'clsx';
+import { FiUsers } from 'react-icons/fi';
 import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from 'recharts';
-import { Card } from '@/components/ui';
+import { AnimatedNumber, Card, EmptyState } from '@/components/ui';
 import styles from './CustomerMixCard.module.css';
 
 export interface CustomerMixCardProps {
@@ -22,6 +25,10 @@ const SEGMENTS = [
 export function CustomerMixCard({ newCount, existingCount, lostCount, totalConsidered, onSegmentClick }: CustomerMixCardProps) {
   const values: Record<string, number> = { new: newCount, existing: existingCount, lost: lostCount };
   const data = SEGMENTS.map((s) => ({ ...s, value: values[s.key] }));
+  // Slice and legend row highlight together; the centre follows the hover.
+  const [hovered, setHovered] = useState<string | null>(null);
+  const focus = data.find((s) => s.key === hovered);
+  const pct = (v: number) => (totalConsidered > 0 ? Math.round((v / totalConsidered) * 100) : 0);
 
   return (
     <Card className={styles.card}>
@@ -34,18 +41,22 @@ export function CustomerMixCard({ newCount, existingCount, lostCount, totalConsi
       </div>
 
       {totalConsidered === 0 ? (
-        <div className={styles.empty}>No customer activity for this period yet.</div>
+        <EmptyState compact icon={FiUsers} title="No customer activity for this period yet" />
       ) : (
         <div className={styles.body}>
           <div className={styles.donutWrap}>
             <ResponsiveContainer width="100%" height={220}>
               <PieChart>
-                <Pie data={data} dataKey="value" nameKey="label" innerRadius={62} outerRadius={92} paddingAngle={2} startAngle={90} endAngle={-270}>
+                <Pie data={data} dataKey="value" nameKey="label" innerRadius={62} outerRadius={92} paddingAngle={2} cornerRadius={4} startAngle={90} endAngle={-270} animationDuration={800}>
                   {data.map((s) => (
                     <Cell
                       key={s.key}
                       fill={s.color}
                       stroke="none"
+                      fillOpacity={hovered && hovered !== s.key ? 0.3 : 1}
+                      style={{ transition: 'fill-opacity 200ms ease', outline: 'none' }}
+                      onMouseEnter={() => setHovered(s.key)}
+                      onMouseLeave={() => setHovered(null)}
                       cursor={onSegmentClick ? 'pointer' : undefined}
                       onClick={onSegmentClick ? () => onSegmentClick(s.key) : undefined}
                     />
@@ -63,8 +74,10 @@ export function CustomerMixCard({ newCount, existingCount, lostCount, totalConsi
               </PieChart>
             </ResponsiveContainer>
             <div className={styles.centerLabel}>
-              <div className={styles.centerValue}>{totalConsidered.toLocaleString()}</div>
-              <div className={styles.centerCaption}>customers</div>
+              <div className={styles.centerValue}>
+                <AnimatedNumber value={focus ? focus.value : totalConsidered} duration={0.4} />
+              </div>
+              <div className={styles.centerCaption}>{focus ? `${focus.label} · ${pct(focus.value)}%` : 'customers'}</div>
             </div>
           </div>
 
@@ -74,12 +87,17 @@ export function CustomerMixCard({ newCount, existingCount, lostCount, totalConsi
                 <button
                   key={s.key}
                   type="button"
-                  className={`${styles.legendItem} ${styles.legendItemClickable}`}
+                  className={clsx(styles.legendItem, styles.legendItemClickable, hovered === s.key && styles.legendItemActive)}
                   onClick={() => onSegmentClick(s.key)}
+                  onMouseEnter={() => setHovered(s.key)}
+                  onMouseLeave={() => setHovered(null)}
+                  onFocus={() => setHovered(s.key)}
+                  onBlur={() => setHovered(null)}
                 >
                   <i className={styles.dot} style={{ background: s.color }} />
                   <span className={styles.legendValue}>{s.value.toLocaleString()}</span>
                   <span className={styles.legendLabel}>{s.label}</span>
+                  <span className={styles.legendPct}>{pct(s.value)}%</span>
                 </button>
               ) : (
                 <div key={s.key} className={styles.legendItem}>

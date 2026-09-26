@@ -6,6 +6,7 @@ import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { JwtPayload } from '../auth/jwt-payload.interface';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
+import { UpdateProfileDto } from './dto/update-profile.dto';
 import { UsersService } from './users.service';
 
 @UseGuards(JwtAuthGuard)
@@ -17,6 +18,14 @@ export class UsersController {
   async me(@CurrentUser() user: JwtPayload) {
     const found = await this.usersService.findById(user.sub);
     return found ? this.usersService.toPublic(found) : null;
+  }
+
+  // Self-service profile edit — any signed-in user, only their own record,
+  // only the fields UpdateProfileDto allows. Declared before PATCH :id so
+  // "me" is never captured as an id by the admin-only route below.
+  @Patch('me')
+  updateMe(@CurrentUser() user: JwtPayload, @Body() dto: UpdateProfileDto) {
+    return this.usersService.updateOwnProfile(user.sub, dto);
   }
 
   @Get()

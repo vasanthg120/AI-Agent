@@ -65,6 +65,12 @@ const GeneralSettings = lazy(() =>
 const NotificationSettings = lazy(() =>
   import('@/features/settings/tabs/NotificationSettings').then((m) => ({ default: m.NotificationSettings })),
 );
+const VoiceSettings = lazy(() =>
+  import('@/features/settings/tabs/VoiceSettings').then((m) => ({ default: m.VoiceSettings })),
+);
+const CallingSettings = lazy(() =>
+  import('@/features/settings/tabs/CallingSettings').then((m) => ({ default: m.CallingSettings })),
+);
 const SecuritySettings = lazy(() =>
   import('@/features/settings/tabs/SecuritySettings').then((m) => ({ default: m.SecuritySettings })),
 );
@@ -181,6 +187,7 @@ export function AppRoutes() {
                 <Route index element={<Navigate to={ROUTES.settingsGeneral} replace />} />
                 <Route path="general" element={<GeneralSettings />} />
                 <Route path="notifications" element={<NotificationSettings />} />
+                <Route path="voice" element={<VoiceSettings />} />
                 <Route path="security" element={<SecuritySettings />} />
                 <Route path="agent-roles" element={<AgentRolesSettings />} />
                 <Route path="integrations" element={<IntegrationsPage />} />
@@ -190,6 +197,7 @@ export function AppRoutes() {
                   <Route path="deal-assignment" element={<DealAssignmentSettings />} />
                 </Route>
                 <Route element={<RequireRole role={['owner', 'admin']} />}>
+                  <Route path="calling" element={<CallingSettings />} />
                   <Route path="royalty-rules" element={<RoyaltyRulesSettings />} />
                   <Route path="email-sla" element={<EmailSlaSettings />} />
                 </Route>

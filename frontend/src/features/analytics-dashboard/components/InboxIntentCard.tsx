@@ -1,4 +1,6 @@
-import { Card } from '@/components/ui';
+import { FiInbox } from 'react-icons/fi';
+import { Card, EmptyState } from '@/components/ui';
+import { pressable } from '@/utils/pressable';
 import styles from './InboxIntentCard.module.css';
 
 export interface InboxIntentCardProps {
@@ -15,16 +17,14 @@ export function InboxIntentCard({ byIntent, onIntentClick }: InboxIntentCardProp
       <div className={styles.title}>By intent</div>
 
       {byIntent.length === 0 ? (
-        <div className={styles.empty}>No relevant emails in this period.</div>
+        <EmptyState compact icon={FiInbox} title="No relevant emails in this period" />
       ) : (
         <div className={styles.list}>
           {byIntent.map((row) => (
             <div
               key={row.intent}
               className={styles.row}
-              role={onIntentClick ? 'button' : undefined}
-              tabIndex={onIntentClick ? 0 : undefined}
-              onClick={onIntentClick ? () => onIntentClick(row.intent, row.label) : undefined}
+              {...(onIntentClick ? pressable(() => onIntentClick(row.intent, row.label)) : {})}
             >
               <div className={styles.rowHeader}>
                 <span className={styles.rowLabel}>{row.label}</span>

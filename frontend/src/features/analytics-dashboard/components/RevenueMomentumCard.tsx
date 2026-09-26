@@ -4,7 +4,7 @@ import dayjs from 'dayjs';
 import clsx from 'clsx';
 import { AreaChart, Area, XAxis, ResponsiveContainer, Tooltip } from 'recharts';
 import { FiArrowUpRight, FiArrowDownRight } from 'react-icons/fi';
-import { Card } from '@/components/ui';
+import { AnimatedNumber, Card } from '@/components/ui';
 import { formatINR as money } from '@/utils/currency';
 import { dealsService } from '@/services/dealsService';
 import { DrillDownModal, type DrillDownRow } from './DrillDownModal';
@@ -74,7 +74,9 @@ export function RevenueMomentumCard({ dateFrom, dateTo, storeId }: RevenueMoment
       <div className={styles.title}>Revenue momentum</div>
 
       <div className={styles.valueRow}>
-        <span className={styles.value}>{money(total)}</span>
+        <span className={styles.value}>
+          <AnimatedNumber value={total} format={money} />
+        </span>
         {momentumPct !== null && (
           <span className={clsx(styles.momentum, momentumPct >= 0 ? styles.up : styles.down)}>
             {momentumPct >= 0 ? <FiArrowUpRight size={13} /> : <FiArrowDownRight size={13} />}
@@ -120,7 +122,8 @@ export function RevenueMomentumCard({ dateFrom, dateTo, storeId }: RevenueMoment
                 strokeWidth={2.5}
                 fill="url(#momentumFill)"
                 dot={false}
-                isAnimationActive={false}
+                activeDot={{ r: 5, strokeWidth: 2, stroke: 'var(--color-bg-surface)' }}
+                animationDuration={900}
               />
             </AreaChart>
           </ResponsiveContainer>

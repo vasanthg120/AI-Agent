@@ -308,7 +308,7 @@ export function RoyaltyRulesSettings() {
         </SettingsField>
       </SettingsSection>
 
-      <SettingsSection icon={<FiRotateCcw />}
+      <SettingsSection
         icon={<FiRotateCcw />}
         title="Version History"
         description="Every royalty rule version ever saved, most recent first."

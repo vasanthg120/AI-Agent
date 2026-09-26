@@ -2,12 +2,14 @@ import { useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
 import toast from 'react-hot-toast';
 import { useNavigate } from 'react-router-dom';
+import { AnimatePresence, motion } from 'framer-motion';
 import {
   FiArrowRight,
   FiCheckCircle,
   FiChevronDown,
-  FiChevronUp,
   FiCreditCard,
+  FiLayers,
+  FiPlus,
   FiDatabase,
   FiDownload,
   FiFileText,
@@ -15,7 +17,7 @@ import {
   FiSliders,
   FiZap,
 } from 'react-icons/fi';
-import { Badge, Button, SectionCard, Skeleton, StatTile } from '@/components/ui';
+import { Badge, Button, EmptyState, PageHeader, SectionCard, Skeleton, StatTile } from '@/components/ui';
 import { ROUTES } from '@/constants/routes';
 import { billingService } from '@/services/billingService';
 import type {
@@ -39,6 +41,27 @@ import { PlanPriceCard } from './components/PlanPriceCard';
 import { TransactionHistoryTable } from './components/TransactionHistoryTable';
 import { WalletBalanceCard } from './components/WalletBalanceCard';
 import styles from './BillingPage.module.css';
+
+const EASE = [0.16, 1, 0.3, 1] as const;
+
+// Height-animated reveal for the collapsible sections below.
+function Reveal({ open, children }: { open: boolean; children: ReactNode }) {
+  return (
+    <AnimatePresence initial={false}>
+      {open && (
+        <motion.div
+          initial={{ height: 0, opacity: 0 }}
+          animate={{ height: 'auto', opacity: 1 }}
+          exit={{ height: 0, opacity: 0 }}
+          transition={{ duration: 0.3, ease: EASE }}
+          style={{ overflow: 'hidden' }}
+        >
+          {children}
+        </motion.div>
+      )}
+    </AnimatePresence>
+  );
+}
 
 const INVOICE_TYPE_LABEL: Record<BillingInvoiceSummary['type'], string> = {
   purchase: 'Credit purchase',
@@ -123,9 +146,13 @@ export function BillingPage() {
   if (loading || !wallet || !usage) {
     return (
       <div className={styles.page}>
-        <Skeleton height={100} />
-        <Skeleton height={220} />
+        <Skeleton height={56} width="40%" />
         <Skeleton height={160} />
+        <div className={styles.planRow}>
+          <Skeleton height={220} />
+          <Skeleton height={220} />
+        </div>
+        <Skeleton height={180} />
       </div>
     );
   }
@@ -139,10 +166,21 @@ export function BillingPage() {
 
   return (
     <div className={styles.page}>
-      <div className={styles.pageHeader}>
-        <h1 className={styles.pageTitle}>Billing</h1>
-        <p className={styles.pageSubtitle}>Your plan, Haive Credits, and Auto Recharge — all in one place.</p>
-      </div>
+      <PageHeader
+        icon={FiCreditCard}
+        title="Billing"
+        subtitle="Your plan, Haive Credits and Auto Recharge — all in one place."
+        actions={
+          <>
+            <Button variant="outline" leftIcon={<FiLayers />} onClick={() => navigate(ROUTES.pricing)}>
+              View plans
+            </Button>
+            <Button leftIcon={<FiPlus />} onClick={() => navigate(ROUTES.addCredits)}>
+              Add credits
+            </Button>
+          </>
+        }
+      />
 
       <WalletBalanceCard
         wallet={wallet}
@@ -204,10 +242,12 @@ export function BillingPage() {
                 </div>
                 {e.type === 'numeric' && e.limit !== undefined && (
                   <div className={styles.entitlementProgressTrack}>
-                    <div
+                    <motion.div
                       className={styles.entitlementProgressFill}
+                      initial={{ width: 0 }}
+                      animate={{ width: `${Math.min(100, ((e.used ?? 0) / e.limit) * 100)}%` }}
+                      transition={{ duration: 0.8, ease: EASE }}
                       style={{
-                        width: `${Math.min(100, ((e.used ?? 0) / e.limit) * 100)}%`,
                         background: e.allowed ? 'var(--color-accent, var(--brand-accent-primary))' : 'var(--color-danger)',
                       }}
                     />
@@ -235,7 +275,12 @@ export function BillingPage() {
 
       <SectionCard title="Billing History" icon={FiFileText}>
         {invoices.length === 0 ? (
-          <p className={styles.muted}>No invoices yet.</p>
+          <EmptyState
+            compact
+            icon={FiFileText}
+            title="No invoices yet"
+            description="Invoices for credit purchases and subscriptions will appear here, ready to download."
+          />
         ) : (
           <div className={styles.invoiceList}>
             {invoices.map((invoice) => (
@@ -275,35 +320,42 @@ export function BillingPage() {
         className={`${styles.disclosureToggle} ${showUsage ? styles.disclosureToggleOpen : ''}`}
         onClick={() => setShowUsage((v) => !v)}
       >
-        <span className={styles.disclosureToggleIcon}>{showUsage ? <FiChevronUp /> : <FiChevronDown />}</span>
+        <span className={styles.disclosureToggleIcon}>
+          <FiChevronDown />
+        </span>
         Usage details
+        <span className={styles.disclosureHint}>Credits, AI requests and tokens used</span>
       </button>
-      {showUsage && (
+      {/* Plain numbers (not pre-formatted strings) so StatTile counts them up. */}
+      <Reveal open={showUsage}>
         <div className={styles.statGrid}>
-          <StatTile icon={FiDatabase} value={usage.creditsUsedTotal.toLocaleString()} label="Credits Used" />
-          <StatTile icon={FiPieChart} value={usage.aiRequestCount.toLocaleString()} label="AI Requests" />
-          <StatTile value={usage.totalInputTokens.toLocaleString()} label="Input Tokens" />
-          <StatTile value={usage.totalOutputTokens.toLocaleString()} label="Output Tokens" />
-          <StatTile value={usage.totalTokens.toLocaleString()} label="Total Tokens" />
-          <StatTile value={usage.totalPurchasedCredits.toLocaleString()} label="Total Purchased" />
-          <StatTile value={usage.usageTodayCredits.toLocaleString()} label="Usage Today" />
-          <StatTile value={usage.usageThisMonthCredits.toLocaleString()} label="Usage This Month" />
+          <StatTile icon={FiDatabase} value={usage.creditsUsedTotal} label="Credits Used" />
+          <StatTile icon={FiPieChart} value={usage.aiRequestCount} label="AI Requests" />
+          <StatTile value={usage.totalInputTokens} label="Input Tokens" />
+          <StatTile value={usage.totalOutputTokens} label="Output Tokens" />
+          <StatTile value={usage.totalTokens} label="Total Tokens" />
+          <StatTile value={usage.totalPurchasedCredits} label="Total Purchased" />
+          <StatTile value={usage.usageTodayCredits} label="Usage Today" />
+          <StatTile value={usage.usageThisMonthCredits} label="Usage This Month" />
         </div>
-      )}
+      </Reveal>
 
       <button
         type="button"
         className={`${styles.disclosureToggle} ${showHistory ? styles.disclosureToggleOpen : ''}`}
         onClick={() => setShowHistory((v) => !v)}
       >
-        <span className={styles.disclosureToggleIcon}>{showHistory ? <FiChevronUp /> : <FiChevronDown />}</span>
+        <span className={styles.disclosureToggleIcon}>
+          <FiChevronDown />
+        </span>
         Transaction history
+        <span className={styles.disclosureHint}>Every credit added or spent</span>
       </button>
-      {showHistory && (
+      <Reveal open={showHistory}>
         <SectionCard title="Transaction History" icon={FiCreditCard}>
           <TransactionHistoryTable transactions={transactions} />
         </SectionCard>
-      )}
+      </Reveal>
     </div>
   );
 }

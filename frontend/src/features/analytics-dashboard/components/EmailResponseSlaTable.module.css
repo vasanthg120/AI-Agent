@@ -95,3 +95,77 @@
   font-weight: 700;
   color: var(--color-danger);
 }
+
+/* ---------- Interaction polish ---------- */
+
+.table tbody tr {
+  transition: background var(--duration-fast) var(--ease-out);
+}
+
+.table tbody tr:hover {
+  background: color-mix(in srgb, var(--color-bg-hover) 60%, transparent);
+}
+
+.nameWrap {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.cellButton {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 36px;
+  padding: 4px 10px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-full);
+  background: transparent;
+  color: var(--color-text-primary);
+  font-family: inherit;
+  font-size: inherit;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+  transition: background var(--duration-fast) var(--ease-out), border-color var(--duration-fast) var(--ease-out),
+    color var(--duration-fast) var(--ease-out);
+}
+
+.cellButton:hover,
+.cellButton:focus-visible {
+  outline: none;
+  background: var(--color-bg-active);
+  border-color: color-mix(in srgb, var(--color-accent) 35%, transparent);
+  color: var(--color-accent-hover);
+}
+
+.missedTrack,
+.missedFill {
+  display: block;
+}
+
+.zero {
+  color: var(--color-text-muted);
+  font-weight: 400;
+}
+
+/* Bars grow in from the left when they first render (clip-path, so any
+   label inside the bar isn't squashed the way a scaleX animation would). */
+@keyframes barReveal {
+  from {
+    clip-path: inset(0 100% 0 0);
+  }
+  to {
+    clip-path: inset(0 0 0 0);
+  }
+}
+
+.missedFill {
+  animation: barReveal 0.9s var(--ease-out) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .missedFill {
+    animation: none;
+  }
+}

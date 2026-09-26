@@ -41,15 +41,26 @@
   margin: 0 auto;
 }
 
+/* Centred with auto margins, not justify-content: center — when the welcome
+   content is taller than the space (phones), centring pushed the heading
+   above the scrollable area where it could never be scrolled back to. */
 .welcome {
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: center;
   height: 100%;
+  overflow-y: auto;
   gap: var(--space-6);
   padding: var(--space-6);
   text-align: center;
+}
+
+.welcome > :first-child {
+  margin-top: auto;
+}
+
+.welcome > :last-child {
+  margin-bottom: auto;
 }
 
 .welcomeTitle {
@@ -78,6 +89,19 @@
 @media (max-width: 640px) {
   .suggestionsGrid {
     grid-template-columns: minmax(0, 1fr);
+  }
+
+  .welcome {
+    gap: var(--space-4);
+    padding: var(--space-4);
+  }
+
+  .welcomeTitle {
+    font-size: var(--text-2xl);
+  }
+
+  .inputArea {
+    padding: var(--space-2) var(--space-3) var(--space-3);
   }
 }
 

@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import clsx from 'clsx';
 import { Card } from '@/components/ui';
+import { pressable } from '@/utils/pressable';
 import { dealsService, type Deal } from '@/services/dealsService';
 import { usePipelineDecisionCounts } from './usePipelineDecisionCounts';
 import { DrillDownModal, type DrillDownRow } from './DrillDownModal';
@@ -55,7 +56,7 @@ export function DealStatusDistributionCard({ deals, dateFrom, dateTo, storeId }:
 
       <div className={styles.list}>
         {rows.map((row) => (
-          <div key={row.id} className={styles.row} role="button" tabIndex={0} onClick={() => setOpenRow(row.id)}>
+          <div key={row.id} className={styles.row} {...pressable(() => setOpenRow(row.id))}>
             <div className={styles.rowHeader}>
               <span className={styles.rowLabel}>{row.label}</span>
               <span className={styles.rowCount}>

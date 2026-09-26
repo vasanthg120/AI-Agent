@@ -107,7 +107,8 @@ export function ProfilePage() {
 
   const initial = useMemo(() => (baseline ? draftFrom(baseline) : null), [baseline]);
   const dirty = !!draft && !!initial && JSON.stringify(draft) !== JSON.stringify(initial);
-  const phoneError = draft && draft.phone.trim() && !PHONE_PATTERN.test(draft.phone.trim()) ? 'Use digits, spaces, ( ) - and an optional leading +' : null;
+  const phoneError =
+    draft && draft.phone.trim() && !PHONE_PATTERN.test(draft.phone.trim()) ? 'Use digits, spaces, ( ) - and an optional leading +' : null;
   const nameError = draft && !draft.firstName.trim() ? 'First name is required' : null;
   const canSave = dirty && !phoneError && !nameError && !saving;
 
@@ -243,7 +244,7 @@ export function ProfilePage() {
               />
             </svg>
             <span className={styles.ringValue}>{completePct}%</span>
-            <span className={styles.ringLabel}>{completePct === 100 ? 'Profile complete' : 'Profile complete'}</span>
+            <span className={styles.ringLabel}>{completePct === 100 ? 'Profile complete' : 'Profile completeness'}</span>
           </div>
         </div>
 
@@ -275,10 +276,13 @@ export function ProfilePage() {
               <Input label="Last name" value={draft.lastName} onChange={(e) => set('lastName', e.target.value)} autoComplete="family-name" />
             </div>
             <div className={styles.grid2}>
-              <div className={styles.lockedField}>
-                <Input label="Email" value={baseline.email} disabled leftIcon={<FiLock />} />
-                <span className={sectionStyles.fieldHint}>Your sign-in email — only an admin can change it.</span>
-              </div>
+              <Input
+                label="Email"
+                value={baseline.email}
+                disabled
+                leftIcon={<FiLock />}
+                hint="Your sign-in email — only an admin can change it."
+              />
               <Input
                 label="Phone"
                 type="tel"

@@ -1,7 +1,7 @@
 import dayjs from 'dayjs';
 import clsx from 'clsx';
 import { FiArrowDown, FiArrowUp } from 'react-icons/fi';
-import { Card, Badge } from '@/components/ui';
+import { AnimatedNumber, Card, Badge } from '@/components/ui';
 import { formatINR as money } from '@/utils/currency';
 import styles from './MonthlySalesPerformanceCard.module.css';
 
@@ -78,7 +78,9 @@ export function MonthlySalesPerformanceCard({
 
       <div className={styles.mainRow}>
         <div className={styles.mainCol}>
-          <div className={styles.bigValue}>{money(achieved)}</div>
+          <div className={styles.bigValue}>
+            <AnimatedNumber value={achieved} format={money} />
+          </div>
           <div className={styles.trendLine}>
             {trend && (
               <span className={clsx(styles.trend, trend.direction === 'up' ? styles.trendUp : styles.trendDown)}>

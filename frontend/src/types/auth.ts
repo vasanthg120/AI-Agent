@@ -9,7 +9,17 @@ export interface User {
   avatarUrl?: string;
   timezone?: string;
   language?: string;
+  phone?: string;
+  department?: string;
   createdAt: string;
+}
+
+// What a user may change about themselves via PATCH /users/me.
+export interface UpdateProfilePayload {
+  name?: string;
+  phone?: string;
+  timezone?: string;
+  language?: string;
 }
 
 export interface AuthSession {

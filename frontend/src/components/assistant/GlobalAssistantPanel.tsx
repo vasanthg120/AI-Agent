@@ -1,5 +1,5 @@
 import { useNavigate } from 'react-router-dom';
-import { FiX, FiMaximize2, FiFileText, FiMail, FiBarChart2, FiUsers } from 'react-icons/fi';
+import { FiX, FiExternalLink, FiFileText, FiMail, FiBarChart2, FiUsers, FiEdit, FiMaximize2, FiMinimize2 } from 'react-icons/fi';
 import type { ReactElement } from 'react';
 import { IconButton } from '@/components/ui';
 import { useChatStore } from '@/stores/chatStore';
@@ -31,7 +31,7 @@ const SUGGESTION_ICONS: Record<string, ReactElement> = {
 // a message, then clicking "Open full chat" lands on the exact same
 // activeConversationId/messages already in the store, mid-stream if one is
 // running. This component only ever composes existing pieces.
-export function GlobalAssistantPanel() {
+export function GlobalAssistantPanel({ expanded, onToggleExpand }: { expanded: boolean; onToggleExpand: () => void }) {
   const navigate = useNavigate();
   const setAssistantPanelOpen = useUiStore((state) => state.setAssistantPanelOpen);
   const user = useAuthStore((state) => state.user);
@@ -42,6 +42,7 @@ export function GlobalAssistantPanel() {
     state.activeConversationId ? (state.messages[state.activeConversationId] ?? EMPTY_MESSAGES) : EMPTY_MESSAGES,
   );
   const sendMessage = useChatStore((state) => state.sendMessage);
+  const startNewConversation = useChatStore((state) => state.startNewConversation);
 
   const handleOpenFullChat = () => {
     setAssistantPanelOpen(false);
@@ -52,10 +53,27 @@ export function GlobalAssistantPanel() {
     <div className={styles.panel}>
       <div className={styles.header}>
         <span className={styles.headerTitle}>
-          <img src="/haive-logo.png" alt="" className={styles.headerIcon} /> Haive AI
+          <span className={styles.headerLogo}>
+            <img src="/haive-logo.png" alt="" className={styles.headerIcon} />
+          </span>
+          <span className={styles.headerText}>
+            Haive AI
+            <span className={styles.headerStatus}>
+              <span className={styles.statusDot} /> Ready to help
+            </span>
+          </span>
         </span>
         <div className={styles.headerActions}>
-          <IconButton icon={<FiMaximize2 />} label="Open full chat" size="sm" onClick={handleOpenFullChat} />
+          {activeConversationId && (
+            <IconButton icon={<FiEdit />} label="New chat" size="sm" onClick={startNewConversation} />
+          )}
+          <IconButton
+            icon={expanded ? <FiMinimize2 /> : <FiMaximize2 />}
+            label={expanded ? 'Make smaller' : 'Make bigger'}
+            size="sm"
+            onClick={onToggleExpand}
+          />
+          <IconButton icon={<FiExternalLink />} label="Open full chat" size="sm" onClick={handleOpenFullChat} />
           <IconButton icon={<FiX />} label="Close assistant" size="sm" onClick={() => setAssistantPanelOpen(false)} />
         </div>
       </div>
