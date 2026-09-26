@@ -32,4 +32,5 @@ export declare class ChatController {
         toolsUsed: string[];
         suggestions: string[];
     }>;
+    private assertAiAccessAllowed;
 }

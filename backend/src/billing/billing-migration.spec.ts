@@ -61,13 +61,32 @@ describe('BillingMigrationService (real Mongo)', () => {
   });
 
   afterAll(async () => {
+    // Wallet.organizationId (and everything keyed off it — transactions,
+    // reservations, payment records/methods) is always a raw Mongo
+    // ObjectId, or that same id prefixed with "migrated:" — NEVER the
+    // TEST_PREFIX string itself. The previous version of this cleanup
+    // matched wallets/transactions/etc. by `{ organizationId: { $regex:
+    // TEST_PREFIX } }`, which can never match either shape — confirmed
+    // live: every run of this spec was leaking its wallet/transaction/
+    // reservation/payment fixtures into the database forever, undetected
+    // because the org/user documents themselves (matched correctly, by
+    // slug/email) DID get cleaned up, so nothing here looked broken from
+    // the test's own passing assertions. Fixed by collecting the real
+    // org/user ids this run created FIRST, then matching every dependent
+    // collection against those ids (bare or "migrated:"-prefixed) before
+    // deleting the org/user documents themselves.
+    const orgs = await orgModel.find({ slug: { $regex: `^${TEST_PREFIX}` } }).select({ _id: 1 }).exec();
+    const users = await userModel.find({ email: { $regex: `^${TEST_PREFIX}` } }).select({ _id: 1 }).exec();
+    const ids = [...orgs.map((o) => o._id.toString()), ...users.map((u) => u._id.toString())];
+    const keyPattern = { $in: [...ids, ...ids.map((id) => `migrated:${id}`)] };
+
+    await walletModel.deleteMany({ organizationId: keyPattern });
+    await transactionModel.deleteMany({ organizationId: keyPattern });
+    await reservationModel.deleteMany({ organizationId: keyPattern });
+    await paymentRecordModel.deleteMany({ organizationId: keyPattern });
+    await paymentMethodModel.deleteMany({ organizationId: keyPattern });
     await orgModel.deleteMany({ slug: { $regex: `^${TEST_PREFIX}` } });
     await userModel.deleteMany({ email: { $regex: `^${TEST_PREFIX}` } });
-    await walletModel.deleteMany({ organizationId: { $regex: TEST_PREFIX } });
-    await transactionModel.deleteMany({ organizationId: { $regex: TEST_PREFIX } });
-    await reservationModel.deleteMany({ organizationId: { $regex: TEST_PREFIX } });
-    await paymentRecordModel.deleteMany({ organizationId: { $regex: TEST_PREFIX } });
-    await paymentMethodModel.deleteMany({ organizationId: { $regex: TEST_PREFIX } });
     await connection.close();
   });
 
@@ -223,6 +242,48 @@ describe('BillingMigrationService (real Mongo)', () => {
       expect(rerun.organizations[0].action).toBe('none');
       const targetAfterRerun = await walletModel.findById(ownerWallet._id);
       expect(targetAfterRerun?.balanceCredits).toBe(130); // unchanged — not merged a second time
+    });
+  });
+
+  describe('Pre-existing org-keyed wallet collision', () => {
+    // Found live: billing-admin.service.ts's organization detail/list views
+    // call WalletService.getOrCreateWallet directly with the real org id,
+    // which silently creates an empty org-keyed wallet the first time a
+    // platform admin merely VIEWS that organization — well before this
+    // migration ever runs. A single-user org then has TWO wallets: the real
+    // (user-keyed) one and this empty phantom already sitting at the target
+    // id. A plain 'rename' onto that id collides with Wallet.organizationId's
+    // unique index (confirmed with a real E11000 duplicate key error against
+    // production-shaped data) — this must fold into a merge instead.
+    it('merges into a wallet that already exists at the real organizationId, instead of colliding on rename', async () => {
+      const org = await orgModel.create({ name: 'Collision Org', slug: `${TEST_PREFIX}-collision-org` });
+      const owner = await userModel.create({
+        email: `${TEST_PREFIX}-collision-owner@example.com`,
+        name: 'Collision Owner',
+        organizationId: org._id.toString(),
+        roles: ['owner', 'admin'],
+      });
+      const realWallet = await walletModel.create({ organizationId: owner._id.toString(), balanceCredits: 1331.97, reservedCredits: 0 });
+      // The phantom, admin-view-created wallet — already correctly keyed,
+      // but created independently of the real one.
+      const phantomWallet = await walletModel.create({ organizationId: org._id.toString(), balanceCredits: 20, reservedCredits: 0 });
+
+      const dry = await migrationService.run({ dryRun: true, organizationId: org._id.toString() });
+      expect(dry.organizations[0].action).toBe('merge');
+      expect(dry.organizations[0].targetWalletId).toBe(phantomWallet._id.toString());
+
+      await migrationService.run({ dryRun: false, organizationId: org._id.toString() });
+
+      const target = await walletModel.findById(phantomWallet._id);
+      expect(target?.organizationId).toBe(org._id.toString());
+      expect(target?.balanceCredits).toBe(1351.97); // 20 (phantom) + 1331.97 (real)
+
+      const archivedReal = await walletModel.findById(realWallet._id);
+      expect(archivedReal?.organizationId).toBe(`migrated:${owner._id.toString()}`);
+
+      // Re-run is a no-op — the collision is fully resolved.
+      const rerun = await migrationService.run({ dryRun: false, organizationId: org._id.toString() });
+      expect(rerun.organizations[0].action).toBe('none');
     });
   });
 });

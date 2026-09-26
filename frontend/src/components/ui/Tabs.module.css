@@ -3,6 +3,16 @@
   gap: var(--space-1);
   border-bottom: 1px solid var(--color-border);
   overflow-x: auto;
+  /* A flex item's default min-width is `auto`, not 0 — without this, a Tabs
+     row with more items than fit at the current width never actually
+     triggers its own overflow-x:auto scroll; it just renders at its full
+     natural content width and pushes past whatever flex/grid container it
+     sits in (confirmed live: on a narrow admin page this widened a parent
+     content region instead of the tab row scrolling in place, clipping the
+     last tab off-screen with no way to reach it). max-width keeps it from
+     ever claiming more than its container actually has to give. */
+  min-width: 0;
+  max-width: 100%;
 }
 
 .tab {

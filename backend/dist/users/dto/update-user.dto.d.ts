@@ -7,4 +7,5 @@ export declare class UpdateUserDto {
     active?: boolean;
     department?: string;
     voiceAccessEnabled?: boolean;
+    aiAccessEnabled?: boolean;
 }

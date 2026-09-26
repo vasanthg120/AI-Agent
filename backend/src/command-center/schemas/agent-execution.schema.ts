@@ -60,6 +60,17 @@ export class AgentExecution {
   @Prop()
   outputTokens?: number;
 
+  // Anthropic prompt-cache write/read tokens — reported separately by the
+  // provider and NOT already included in inputTokens/totalTokens (see
+  // python-agent/app/observability/cost.py's docstring). Undefined on rows
+  // written before this field existed, and always 0 (not undefined) for
+  // providers/calls that don't use prompt caching.
+  @Prop()
+  cacheCreationInputTokens?: number;
+
+  @Prop()
+  cacheReadInputTokens?: number;
+
   // Always inputTokens + outputTokens when both are present — stored
   // directly (not a virtual) so it's queryable/aggregatable without a
   // pipeline stage recomputing it on every read.

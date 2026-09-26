@@ -1,5 +1,6 @@
 import { Global, Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
+import { OrganizationsModule } from '../organizations/organizations.module';
 import { UsersModule } from '../users/users.module';
 import { ApiTokensController } from './api-tokens.controller';
 import { ApiTokensService } from './api-tokens.service';
@@ -13,7 +14,7 @@ import { ApiToken, ApiTokenSchema } from './schemas/api-token.schema';
 // point of putting the PAT branch inside the guard in the first place.
 @Global()
 @Module({
-  imports: [MongooseModule.forFeature([{ name: ApiToken.name, schema: ApiTokenSchema }]), UsersModule],
+  imports: [MongooseModule.forFeature([{ name: ApiToken.name, schema: ApiTokenSchema }]), UsersModule, OrganizationsModule],
   controllers: [ApiTokensController],
   providers: [ApiTokensService],
   exports: [ApiTokensService],

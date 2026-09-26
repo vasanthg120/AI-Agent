@@ -7,4 +7,5 @@ export declare class CreateUserDto {
     storeId?: string;
     department?: string;
     voiceAccessEnabled?: boolean;
+    aiAccessEnabled?: boolean;
 }

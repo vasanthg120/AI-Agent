@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import toast from 'react-hot-toast';
 import { FiHelpCircle } from 'react-icons/fi';
-import { Badge, Card, SectionCard, Spinner, Tabs } from '@/components/ui';
+import { Card, SectionCard, Spinner, Tabs } from '@/components/ui';
 import { billingService } from '@/services/billingService';
 import type { BillingCycle, BillingPageConfig, PaymentMethod, PlanPrice, PublicPlan, SubscriptionSummary } from '@/services/billingService';
 import { extractErrorMessage } from '@/utils/errors';
@@ -93,19 +93,10 @@ export function PricingPage() {
   return (
     <div className={styles.page} style={themeStyle}>
       <div className={styles.hero}>
+        <span className={styles.heroEyebrow}>Pricing</span>
         {pageConfig?.heroHeadline && <h1 className={styles.heroHeadline}>{pageConfig.heroHeadline}</h1>}
         {pageConfig?.heroSubtext && <p className={styles.heroSubtext}>{pageConfig.heroSubtext}</p>}
       </div>
-
-      {subscription && (
-        <div className={styles.subscribedBanner}>
-          <span>
-            You&apos;re currently on the <strong>{subscription.plan?.name ?? 'Unknown'}</strong> plan
-            {subscription.cancelAtPeriodEnd ? ' (canceling at period end)' : ''}.
-          </span>
-          <Badge variant={subscription.status === 'past_due' ? 'warning' : 'success'}>{subscription.status}</Badge>
-        </div>
-      )}
 
       {availableCycles.length > 1 && (
         <div className={styles.cycleToggle}>

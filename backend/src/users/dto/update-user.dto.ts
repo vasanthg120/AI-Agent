@@ -41,4 +41,11 @@ export class UpdateUserDto {
   @IsOptional()
   @IsBoolean()
   voiceAccessEnabled?: boolean;
+
+  // The organization-credits on/off switch for this employee — see
+  // user.schema.ts's own comment. Enforced server-side in ChatController,
+  // never left to the frontend hiding a button.
+  @IsOptional()
+  @IsBoolean()
+  aiAccessEnabled?: boolean;
 }

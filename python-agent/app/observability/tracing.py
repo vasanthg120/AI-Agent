@@ -100,7 +100,20 @@ def traced_llm_call(
             span.set_attribute("success", success)
             input_tokens = usage.get("input_tokens", 0)
             output_tokens = usage.get("output_tokens", 0)
-            cost_usd = estimate_cost(input_tokens, output_tokens, provider) if usage else None
+            cache_creation_input_tokens = usage.get("cache_creation_input_tokens", 0)
+            cache_read_input_tokens = usage.get("cache_read_input_tokens", 0)
+            cost_usd = (
+                estimate_cost(
+                    input_tokens,
+                    output_tokens,
+                    provider,
+                    model,
+                    cache_creation_input_tokens,
+                    cache_read_input_tokens,
+                )
+                if usage
+                else None
+            )
             if usage:
                 span.set_attribute("tokens.input", input_tokens)
                 span.set_attribute("tokens.output", output_tokens)
@@ -116,6 +129,8 @@ def traced_llm_call(
                     model=model,
                     input_tokens=input_tokens,
                     output_tokens=output_tokens,
+                    cache_creation_input_tokens=cache_creation_input_tokens,
+                    cache_read_input_tokens=cache_read_input_tokens,
                     cost_usd=cost_usd,
                     latency_ms=latency_ms,
                     success=success,

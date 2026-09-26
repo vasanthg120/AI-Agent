@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, ForbiddenException, Get, Param, Patch, Post, Req, UseGuards } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import { Request } from 'express';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
@@ -56,10 +56,27 @@ export class ChatController {
   @Post('messages')
   @Throttle(CHAT_THROTTLE)
   sendMessage(@CurrentUser() user: JwtPayload, @Req() req: Request, @Body() dto: SendMessageDto) {
+    this.assertAiAccessAllowed(user);
     const bearerToken = (req.headers.authorization ?? '').replace(/^Bearer\s+/i, '');
     // agent_user accounts only ever see one agent in the mention list anyway
     // — default new conversations to it so they don't need to @mention.
     const agentId = dto.agentId ?? (user.roles.includes('agent_user') ? user.assignedAgentId : undefined);
     return this.chatService.sendMessage(user.sub, user.organizationId, bearerToken, dto.message, dto.conversationId, agentId);
+  }
+
+  // The organization purchased the AI credits; this is the per-employee
+  // on/off switch (see user.schema.ts's aiAccessEnabled comment) — checked
+  // BEFORE chatService.sendMessage (which is what actually reaches
+  // python-agent and reserves credits against the org wallet), so a blocked
+  // request never makes an LLM call and never spends anything. Same shape
+  // as VoiceController.assertVoiceAllowed: user.aiAccessEnabled is undefined
+  // only for special-purpose tokens (2FA challenge, OAuth state) that can't
+  // reach this guard anyway (JwtAuthGuard rejects them first); for every
+  // real session/API-token request it's always a live boolean refreshed
+  // from the User document on this exact request (see JwtStrategy.validate()).
+  private assertAiAccessAllowed(user: JwtPayload): void {
+    if (user.aiAccessEnabled === false) {
+      throw new ForbiddenException('AI access has been disabled for your account by an administrator.');
+    }
   }
 }

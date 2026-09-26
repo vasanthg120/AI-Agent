@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import { FiArrowLeft } from 'react-icons/fi';
-import { Badge, SectionCard, Skeleton, StatTile, Tabs } from '@/components/ui';
+import { Badge, Button, SectionCard, Skeleton, StatTile, Tabs } from '@/components/ui';
 import {
   billingAdminService,
   type AdminInvoice,
@@ -48,6 +48,7 @@ export function AdminOrganizationDetailPage() {
   const [payments, setPayments] = useState<AdminPaymentRecord[] | null>(null);
   const [invoices, setInvoices] = useState<AdminInvoice[] | null>(null);
   const [tabLoading, setTabLoading] = useState(false);
+  const [savingStatus, setSavingStatus] = useState(false);
 
   useEffect(() => {
     if (!organizationId) return;
@@ -81,6 +82,24 @@ export function AdminOrganizationDetailPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab, organizationId]);
 
+  const toggleStatus = async () => {
+    if (!organizationId || !detail) return;
+    const nextStatus = detail.status === 'active' ? 'suspended' : 'active';
+    if (nextStatus === 'suspended' && !window.confirm(`Suspend ${detail.name}? Every user in this organization will be immediately signed out and unable to use Haive until reactivated.`)) {
+      return;
+    }
+    setSavingStatus(true);
+    try {
+      await billingAdminService.setOrganizationStatus(organizationId, nextStatus);
+      setDetail({ ...detail, status: nextStatus });
+      toast.success(nextStatus === 'suspended' ? `${detail.name} suspended.` : `${detail.name} reactivated.`);
+    } catch (error) {
+      toast.error(extractErrorMessage(error));
+    } finally {
+      setSavingStatus(false);
+    }
+  };
+
   if (loading || !detail) {
     return (
       <div className={shared.page}>
@@ -103,7 +122,12 @@ export function AdminOrganizationDetailPage() {
             <span className={shared.mono}>{detail.organizationId}</span> · Created {formatFullDate(detail.createdAt)}
           </p>
         </div>
-        <Badge variant={detail.status === 'active' ? 'success' : 'danger'}>{detail.status}</Badge>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)' }}>
+          <Badge variant={detail.status === 'active' ? 'success' : 'danger'}>{detail.status}</Badge>
+          <Button size="sm" variant={detail.status === 'active' ? 'danger' : 'secondary'} loading={savingStatus} onClick={toggleStatus}>
+            {detail.status === 'active' ? 'Suspend' : 'Reactivate'}
+          </Button>
+        </div>
       </div>
 
       <div className={shared.tabsBar}>

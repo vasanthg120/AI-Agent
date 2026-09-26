@@ -247,6 +247,15 @@ export const billingAdminService = {
     return data;
   },
 
+  // Actually flips Organization.status — previously read-only scaffolding
+  // (a badge with nothing behind it). JwtStrategy.validate() now blocks a
+  // suspended org's own users at login/every request; this is the
+  // platform-admin action that flips the switch.
+  async setOrganizationStatus(organizationId: string, status: 'active' | 'suspended'): Promise<{ organizationId: string; status: string }> {
+    const { data } = await adminAxiosClient.post(`/billing/admin/organizations/${organizationId}/status`, { status });
+    return data;
+  },
+
   async listWallets(params?: { search?: string; page?: number; limit?: number }): Promise<PagedResult<AdminWalletRow>> {
     const { data } = await adminAxiosClient.get<PagedResult<AdminWalletRow>>('/billing/admin/wallets', { params });
     return data;
