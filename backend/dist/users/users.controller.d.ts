@@ -1,6 +1,7 @@
 import { JwtPayload } from '../auth/jwt-payload.interface';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
+import { UpdateProfileDto } from './dto/update-profile.dto';
 import { UsersService } from './users.service';
 export declare class UsersController {
     private usersService;
@@ -17,7 +18,28 @@ export declare class UsersController {
         active: boolean;
         voiceAccessEnabled: boolean;
         aiAccessEnabled: boolean;
+        phone: string | undefined;
+        timezone: string | undefined;
+        language: string | undefined;
+        createdAt: Date | undefined;
     } | null>;
+    updateMe(user: JwtPayload, dto: UpdateProfileDto): Promise<{
+        id: string;
+        email: string;
+        name: string;
+        organizationId: string;
+        storeId: string | undefined;
+        roles: string[];
+        assignedAgentId: string | undefined;
+        department: string | undefined;
+        active: boolean;
+        voiceAccessEnabled: boolean;
+        aiAccessEnabled: boolean;
+        phone: string | undefined;
+        timezone: string | undefined;
+        language: string | undefined;
+        createdAt: Date | undefined;
+    }>;
     list(caller: JwtPayload): Promise<{
         id: string;
         email: string;
@@ -30,6 +52,10 @@ export declare class UsersController {
         active: boolean;
         voiceAccessEnabled: boolean;
         aiAccessEnabled: boolean;
+        phone: string | undefined;
+        timezone: string | undefined;
+        language: string | undefined;
+        createdAt: Date | undefined;
     }[]>;
     create(caller: JwtPayload, dto: CreateUserDto): Promise<{
         user: {
@@ -44,6 +70,10 @@ export declare class UsersController {
             active: boolean;
             voiceAccessEnabled: boolean;
             aiAccessEnabled: boolean;
+            phone: string | undefined;
+            timezone: string | undefined;
+            language: string | undefined;
+            createdAt: Date | undefined;
         };
         tempPassword: string;
     }>;
@@ -59,6 +89,10 @@ export declare class UsersController {
         active: boolean;
         voiceAccessEnabled: boolean;
         aiAccessEnabled: boolean;
+        phone: string | undefined;
+        timezone: string | undefined;
+        language: string | undefined;
+        createdAt: Date | undefined;
     }>;
     remove(caller: JwtPayload, id: string): Promise<void>;
 }

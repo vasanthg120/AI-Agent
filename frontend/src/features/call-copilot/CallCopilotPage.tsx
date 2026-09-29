@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { AnimatePresence, MotionConfig, motion } from 'framer-motion';
+import { MotionConfig, motion } from 'framer-motion';
 import { FiFolder, FiMic, FiRadio, FiUploadCloud, FiVolume2 } from 'react-icons/fi';
 import { Button, PageHeader } from '@/components/ui';
 import { ROUTES } from '@/constants/routes';
@@ -183,7 +183,7 @@ export function CallCopilotPage() {
             ]}
           />
 
-          <AnimatePresence mode="wait" initial={false}>
+          <>
             {activeTab === 'library' ? (
               <motion.div key="library" {...SCREEN}>
                 <CallLibraryListView key={librarySwitch} onStartCall={() => setActiveTab('live')} />
@@ -219,7 +219,7 @@ export function CallCopilotPage() {
                 />
               </motion.div>
             )}
-          </AnimatePresence>
+          </>
         </div>
 
         <CallSummaryModal

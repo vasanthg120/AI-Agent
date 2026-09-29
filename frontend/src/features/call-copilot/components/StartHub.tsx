@@ -5,7 +5,7 @@ import { AnimatePresence, motion } from 'framer-motion';
 import clsx from 'clsx';
 import { FiAlertCircle, FiArrowUpRight, FiAward, FiMic, FiPhoneCall, FiUploadCloud, FiZap } from 'react-icons/fi';
 import { Button } from '@/components/ui';
-import { plivoService } from '@/services/plivoService';
+import { callingService } from '@/services/callingService';
 import { VOICE_LANGUAGES } from '@/services/voiceService';
 import { EASE_OUT, FADE_UP, ROW_IN, SPRING_SNAPPY, staggerChildren } from '../motion';
 import { CustomerPicker, type SelectedCustomer } from './CustomerPicker';
@@ -80,14 +80,14 @@ export function StartHub({
   const [mode, setMode] = useState<Mode>(readStoredMode);
 
   // Same query the phone panel uses, so it's one request — this only feeds the "Ready / Needs setup" tag.
-  const { data: plivo } = useQuery({
-    queryKey: ['plivo', 'config'],
-    queryFn: plivoService.getConfig,
+  const { data: calling } = useQuery({
+    queryKey: ['calling', 'overview'],
+    queryFn: callingService.getOverview,
     staleTime: 30_000,
   });
-  const phoneTag: ModeCardProps['tag'] = !plivo
+  const phoneTag: ModeCardProps['tag'] = !calling
     ? undefined
-    : plivo.canCall
+    : calling.canCall
       ? { label: 'Ready', tone: 'success' }
       : { label: 'Needs setup', tone: 'warning' };
 
@@ -113,7 +113,8 @@ export function StartHub({
       id: 'phone',
       icon: <FiPhoneCall />,
       title: 'Call a customer',
-      description: 'HaiVE rings your phone, then connects the customer. The whole call is recorded for you.',
+      description:
+        'Any country — HaiVE rings your phone, then connects the customer. The whole call is recorded for you.',
       tag: phoneTag,
     },
     {
@@ -171,14 +172,13 @@ export function StartHub({
       </motion.div>
 
       <motion.div variants={FADE_UP}>
-        <AnimatePresence mode="wait" initial={false}>
+        <>
           <motion.section
             key={mode}
             className={styles.panel}
             aria-label={mode === 'record' ? 'Record here' : 'Call a customer'}
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
             transition={{ duration: 0.28, ease: EASE_OUT }}
           >
             {mode === 'record' ? (
@@ -194,7 +194,7 @@ export function StartHub({
               <PhoneCallCard onOpenLibrary={onOpenLibrary} />
             )}
           </motion.section>
-        </AnimatePresence>
+        </>
       </motion.div>
     </motion.div>
   );

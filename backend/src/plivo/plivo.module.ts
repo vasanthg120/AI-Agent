@@ -33,5 +33,7 @@ import { PlivoLine, PlivoLineSchema } from './schemas/plivo-line.schema';
   ],
   controllers: [PlivoController, PlivoWebhookController],
   providers: [PlivoService, PlivoWebhooksService],
+  // The calling layer routes each call to Plivo or Twilio and merges their logs.
+  exports: [PlivoService, PlivoWebhooksService],
 })
 export class PlivoModule {}

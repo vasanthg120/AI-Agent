@@ -1,7 +1,7 @@
 import { useMemo } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import clsx from 'clsx';
-import { AnimatePresence, motion } from 'framer-motion';
+import { motion } from 'framer-motion';
 import { FiBell, FiSidebar, FiMenu, FiCommand, FiChevronRight } from 'react-icons/fi';
 import { IconButton, Avatar } from '@/components/ui';
 import { useUiStore } from '@/stores/uiStore';
@@ -57,19 +57,18 @@ export function TopBar({ onMenuClick }: TopBarProps) {
               <FiChevronRight className={styles.breadcrumbSeparator} />
             </>
           )}
-          <AnimatePresence mode="wait" initial={false}>
+          <>
             <motion.span
               key={breadcrumb.title}
               className={styles.breadcrumbCurrent}
               initial={{ opacity: 0, y: 6 }}
               animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -6 }}
               transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
             >
               <span className={styles.breadcrumbTitle}>{breadcrumb.title}</span>
               {breadcrumb.hint && <span className={styles.breadcrumbHint}>{breadcrumb.hint}</span>}
             </motion.span>
-          </AnimatePresence>
+          </>
         </span>
       </div>
       <div className={styles.right}>
@@ -109,7 +108,12 @@ export function TopBar({ onMenuClick }: TopBarProps) {
           </button>
         )}
 
-        <button type="button" className={styles.avatarButton} onClick={() => navigate(ROUTES.profile)} aria-label="Profile">
+        <button
+          type="button"
+          className={styles.avatarButton}
+          onClick={() => navigate(ROUTES.profile)}
+          aria-label="Profile"
+        >
           <Avatar name={user ? `${user.firstName} ${user.lastName}` : 'User'} size="sm" />
         </button>
       </div>

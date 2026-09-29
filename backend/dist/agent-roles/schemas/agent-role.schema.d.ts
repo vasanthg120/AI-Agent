@@ -1,20 +1,13 @@
 import { Document, Types } from 'mongoose';
 export type AgentRoleDocument = AgentRole & Document<Types.ObjectId>;
-export declare class AgentRoleKpi {
-    name: string;
-    description: string;
-}
+export declare const ROLE_CATEGORIES: readonly ["sales", "finance", "hr", "support", "marketing", "operations", "custom"];
+export type RoleCategory = (typeof ROLE_CATEGORIES)[number];
 export declare class AgentRole {
     organizationId: string;
     slug: string;
     name: string;
     department: string;
     description: string;
-    goals: string[];
-    responsibilities: string[];
-    dailyTasks: string[];
-    weeklyTasks: string[];
-    kpis: AgentRoleKpi[];
     systemPrompt: string;
     sourceDocumentName?: string;
     sourceDocumentId?: string;

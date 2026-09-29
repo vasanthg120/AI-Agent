@@ -21,7 +21,9 @@ export function SessionsSection() {
   const [confirmingRevokeAll, setConfirmingRevokeAll] = useState(false);
 
   const load = () => {
-    setLoading(true);
+    // Only the first load shows the loading state; a refresh after a change keeps
+    // the current list on screen until the new one arrives (no flash).
+    if (!sessions?.length) setLoading(true);
     sessionsService
       .list()
       .then(setSessions)

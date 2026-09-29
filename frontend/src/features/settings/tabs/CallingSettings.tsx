@@ -1,433 +1,254 @@
 import { useState } from 'react';
+import type { ReactNode } from 'react';
 import toast from 'react-hot-toast';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { FiAlertCircle, FiCheckCircle, FiGlobe, FiLink, FiPhone, FiPhoneCall, FiTrash2 } from 'react-icons/fi';
-import { Badge, Button, CopyableText, Input, Skeleton, Switch } from '@/components/ui';
+import { LayoutGroup, motion } from 'framer-motion';
+import clsx from 'clsx';
+import { FiArrowRight, FiCheckCircle, FiCircle, FiGlobe, FiPhoneCall } from 'react-icons/fi';
+import { Skeleton } from '@/components/ui';
 import { CallStatus } from '@/features/calling/CallStatus';
+import { Flag } from '@/features/calling/Flag';
+import { ProviderPill } from '@/features/calling/ProviderPill';
 import {
-  plivoService,
-  formatDuration,
-  formatPhone,
-  isCallActive,
-  type PlivoCall,
-  type PlivoConfig,
-  type PlivoLine,
-} from '@/services/plivoService';
-import { usersService } from '@/services/usersService';
-import { VOICE_LANGUAGES } from '@/services/voiceService';
+  callingService,
+  countryOfNumber,
+  flagPrefix,
+  formatInternational,
+  type CallingCall,
+  type CallingProvider,
+} from '@/services/callingService';
+import { formatDuration, isCallActive, plivoService } from '@/services/plivoService';
+import { twilioService } from '@/services/twilioService';
 import { extractErrorMessage } from '@/utils/errors';
 import { SettingsSection } from '../components/SettingsSection';
+import { PlivoSetup } from './calling/PlivoSetup';
+import { TwilioSetup } from './calling/TwilioSetup';
 import styles from './CallingSettings.module.css';
 
-const EMPTY_LINE = { plivoNumber: '', userId: '', agentPhone: '', languageCode: 'en' };
+const TAB_STORAGE_KEY = 'haive-calling-settings-provider';
 
-// Settings -> Calling. Phone calls placed or received through Plivo are recorded
-// and land in Call Library with a transcript, summary and AI Coach report. The
-// steps below are in the order they have to happen: Plivo can't be told where to
-// send a recording until this server is reachable, and a number can't ring anyone
-// until it is linked to a person and their phone.
+function readStoredTab(): CallingProvider {
+  try {
+    return localStorage.getItem(TAB_STORAGE_KEY) === 'twilio' ? 'twilio' : 'plivo';
+  } catch {
+    return 'plivo';
+  }
+}
+
+interface ProviderCardInfo {
+  id: CallingProvider;
+  name: string;
+  scope: string;
+  flag: ReactNode;
+  connected?: boolean;
+  // The provider's status couldn't be loaded (e.g. the server is older than this page).
+  failed?: boolean;
+  lines?: number;
+}
+
+// Settings -> Calling. Two carriers, one experience: Plivo for Indian numbers,
+// Twilio for the rest of the world. Every call either way is recorded and lands
+// in Call Library with a transcript, summary and AI Coach report.
 export function CallingSettings() {
   const queryClient = useQueryClient();
-  const {
-    data: config,
-    isLoading,
-    isError,
-    error,
-    refetch,
-  } = useQuery({ queryKey: ['plivo', 'config'], queryFn: plivoService.getConfig });
-  const connected = config?.connected === true;
-
-  const { data: calls } = useQuery({
-    queryKey: ['plivo', 'calls', 'org'],
-    queryFn: () => plivoService.listCalls('org'),
-    enabled: connected,
-    refetchInterval: (query) => (query.state.data?.some(isCallActive) ? 8_000 : false),
-  });
-  const { data: users } = useQuery({ queryKey: ['users'], queryFn: usersService.list, enabled: connected });
-
-  const [authId, setAuthId] = useState('');
-  const [authToken, setAuthToken] = useState('');
-  const [connecting, setConnecting] = useState(false);
-  const [line, setLine] = useState(EMPTY_LINE);
-  const [savingLine, setSavingLine] = useState(false);
+  const [tab, setTab] = useState<CallingProvider>(readStoredTab);
   const [retrying, setRetrying] = useState<string | null>(null);
 
-  const refreshConfig = () => queryClient.invalidateQueries({ queryKey: ['plivo', 'config'] });
-  // The API answers a line change with the whole updated list — show it at once
-  // rather than waiting for a refetch, so a switch flips the moment it is saved.
-  const applyLines = (lines: PlivoLine[]) => {
-    queryClient.setQueryData<PlivoConfig>(['plivo', 'config'], (old) => old && { ...old, lines });
-    return refreshConfig(); // still confirm with the server (e.g. whether this person can now call)
-  };
+  // Both are also used by the setup panels below (same query keys, one request each).
+  const { data: plivo, isError: plivoFailed } = useQuery({
+    queryKey: ['plivo', 'config'],
+    queryFn: plivoService.getConfig,
+  });
+  const { data: twilio, isError: twilioFailed } = useQuery({
+    queryKey: ['twilio', 'config'],
+    queryFn: twilioService.getConfig,
+  });
+  const anyConnected = plivo?.connected || twilio?.connected;
+  const { data: calls } = useQuery({
+    queryKey: ['calling', 'calls', 'org'],
+    queryFn: () => callingService.listCalls('org'),
+    enabled: !!anyConnected,
+    refetchInterval: (query) => (query.state.data?.some(isCallActive) ? 8_000 : false),
+  });
 
-  const handleConnect = async () => {
-    setConnecting(true);
+  const chooseTab = (next: CallingProvider) => {
+    setTab(next);
     try {
-      await plivoService.connect(authId.trim(), authToken.trim());
-      setAuthId('');
-      setAuthToken('');
-      toast.success('Plivo connected');
-      await refreshConfig();
-    } catch (err) {
-      toast.error(extractErrorMessage(err));
-    } finally {
-      setConnecting(false);
+      localStorage.setItem(TAB_STORAGE_KEY, next);
+    } catch {
+      // Non-fatal.
     }
   };
 
-  const handleDisconnect = async () => {
-    if (!window.confirm('Disconnect Plivo? Calls will stop being recorded until it is connected again.')) return;
-    try {
-      await plivoService.disconnect();
-      toast.success('Plivo disconnected');
-      await refreshConfig();
-    } catch (err) {
-      toast.error(extractErrorMessage(err));
-    }
-  };
-
-  const saveLine = async (payload: Parameters<typeof plivoService.saveLine>[0], message: string) => {
-    const lines = await plivoService.saveLine(payload);
-    toast.success(message);
-    await applyLines(lines);
-  };
-
-  const handleAddLine = async () => {
-    setSavingLine(true);
-    try {
-      await saveLine(line, 'Line saved');
-      setLine(EMPTY_LINE);
-    } catch (err) {
-      toast.error(extractErrorMessage(err));
-    } finally {
-      setSavingLine(false);
-    }
-  };
-
-  const handleToggleLine = async (l: PlivoLine, active: boolean) => {
-    try {
-      await saveLine(
-        {
-          plivoNumber: l.plivoNumber,
-          userId: l.userId,
-          agentPhone: l.agentPhone,
-          languageCode: l.languageCode,
-          active,
-        },
-        active ? 'Line turned on' : 'Line turned off',
-      );
-    } catch (err) {
-      toast.error(extractErrorMessage(err));
-    }
-  };
-
-  const handleDeleteLine = async (l: PlivoLine) => {
-    if (
-      !window.confirm(
-        `Remove ${formatPhone(l.plivoNumber)}? Calls to this number will no longer be forwarded or recorded.`,
-      )
-    )
-      return;
-    try {
-      const lines = await plivoService.deleteLine(l.id);
-      toast.success('Line removed');
-      await applyLines(lines);
-    } catch (err) {
-      toast.error(extractErrorMessage(err));
-    }
-  };
-
-  const handleRetry = async (call: PlivoCall) => {
+  const handleRetry = async (call: CallingCall) => {
     setRetrying(call.id);
     try {
-      await plivoService.retryImport(call.id);
+      await callingService.retryImport(call);
     } catch (err) {
       toast.error(extractErrorMessage(err));
     } finally {
       setRetrying(null);
-      await queryClient.invalidateQueries({ queryKey: ['plivo', 'calls'] });
+      await queryClient.invalidateQueries({ queryKey: ['calling', 'calls'] });
     }
   };
 
-  if (isLoading) {
-    return (
-      <SettingsSection
-        icon={<FiPhoneCall />}
-        title="Calling"
-        description="Record phone calls and get a summary and AI coaching for each one."
-      >
-        <Skeleton height={64} />
-        <Skeleton height={64} />
-      </SettingsSection>
-    );
-  }
-  if (isError || !config) {
-    return (
-      <SettingsSection
-        icon={<FiPhoneCall />}
-        title="Calling"
-        description="Record phone calls and get a summary and AI coaching for each one."
-      >
-        <div className={styles.errorState} role="alert">
-          <span>Couldn't load calling settings. {extractErrorMessage(error)}</span>
-          <Button type="button" variant="secondary" size="sm" onClick={() => void refetch()}>
-            Try again
-          </Button>
-        </div>
-      </SettingsSection>
-    );
-  }
+  const cards: ProviderCardInfo[] = [
+    {
+      id: 'plivo',
+      name: 'Plivo',
+      scope: 'Indian numbers (+91)',
+      flag: <Flag iso="IN" size="lg" />,
+      connected: plivo?.connected,
+      failed: plivoFailed,
+      lines: plivo?.lines.filter((l) => l.active).length,
+    },
+    {
+      id: 'twilio',
+      name: 'Twilio',
+      scope: 'International numbers',
+      flag: <FiGlobe className={styles.globe} />,
+      connected: twilio?.connected,
+      failed: twilioFailed,
+      lines: twilio?.lines.filter((l) => l.active).length,
+    },
+  ];
+  const both = plivo?.connected && twilio?.connected;
 
   return (
     <div className={styles.page}>
-      <SettingsSection icon={<FiLink />}
-        title="1. Connect Plivo"
-        description="Calls go through your Plivo account, which is what lets HaiVE record them. Copy the Auth ID and Auth Token from the top of the Plivo console overview page."
+      <SettingsSection
+        icon={<FiPhoneCall />}
+        title="Phone calling"
+        description="Place and receive real phone calls from HaiVE. Each call is recorded, then transcribed, summarized and coached in Call Library."
       >
-        {connected ? (
-          <div className={styles.connectedRow}>
-            <span className={styles.connectedLabel}>
-              <FiCheckCircle aria-hidden /> Connected as <code>{config.authIdMasked}</code>
-            </span>
-            <Button type="button" variant="outline" size="sm" onClick={() => void handleDisconnect()}>
-              Disconnect
-            </Button>
+        <LayoutGroup id="calling-providers">
+          <div className={styles.providers} role="tablist" aria-label="Phone provider">
+            {cards.map((card) => {
+              const active = tab === card.id;
+              const loading = card.connected === undefined && !card.failed;
+              return (
+                <button
+                  key={card.id}
+                  type="button"
+                  role="tab"
+                  aria-selected={active}
+                  className={clsx(styles.provider, active && styles.providerActive)}
+                  onClick={() => chooseTab(card.id)}
+                >
+                  {active && (
+                    <motion.span
+                      layoutId="provider-highlight"
+                      className={styles.providerHighlight}
+                      transition={{ type: 'spring', stiffness: 420, damping: 34 }}
+                    />
+                  )}
+                  <span className={styles.providerTop}>
+                    <span className={styles.providerFlag} aria-hidden>
+                      {card.flag}
+                    </span>
+                    {loading ? (
+                      <Skeleton height={18} width={90} />
+                    ) : card.failed ? (
+                      <span className={styles.providerState}>
+                        <FiCircle aria-hidden /> Status unavailable
+                      </span>
+                    ) : card.connected ? (
+                      <span className={clsx(styles.providerState, styles.providerOn)}>
+                        <FiCheckCircle aria-hidden />{' '}
+                        {card.lines ? `${card.lines} live number${card.lines === 1 ? '' : 's'}` : 'Connected'}
+                      </span>
+                    ) : (
+                      <span className={styles.providerState}>
+                        <FiCircle aria-hidden /> Not connected
+                      </span>
+                    )}
+                  </span>
+                  <span className={styles.providerName}>{card.name}</span>
+                  <span className={styles.providerScope}>{card.scope}</span>
+                </button>
+              );
+            })}
           </div>
-        ) : (
-          <form
-            className={styles.form}
-            onSubmit={(e) => {
-              e.preventDefault();
-              void handleConnect();
-            }}
-          >
-            <div className={styles.fieldGrid}>
-              <Input
-                label="Auth ID"
-                value={authId}
-                onChange={(e) => setAuthId(e.target.value)}
-                placeholder="MAXXXXXXXXXXXXXXXXXX"
-                autoComplete="off"
-              />
-              <Input
-                label="Auth Token"
-                type="password"
-                value={authToken}
-                onChange={(e) => setAuthToken(e.target.value)}
-                placeholder="Auth Token"
-                autoComplete="new-password"
-              />
-            </div>
-            <div className={styles.actions}>
-              <Button
-                type="submit"
-                loading={connecting}
-                disabled={authId.trim().length < 6 || authToken.trim().length < 6}
-              >
-                Connect Plivo
-              </Button>
-            </div>
-            <p className={styles.hint}>
-              The token is checked with Plivo before it is saved, and stored encrypted — it is never shown again.
-            </p>
-          </form>
-        )}
+        </LayoutGroup>
+
+        <div className={styles.routing}>
+          <FiGlobe aria-hidden />
+          <span>
+            {both ? (
+              <>
+                Calls are routed automatically: {flagPrefix('IN')}
+                <strong>+91</strong> <FiArrowRight className={styles.inlineIcon} aria-hidden /> Plivo, every other
+                country <FiArrowRight className={styles.inlineIcon} aria-hidden /> Twilio. People can still pick the
+                other route for a single call.
+              </>
+            ) : plivo?.connected ? (
+              <>Only Plivo is connected, so it carries every call. Connect Twilio for reliable international calling.</>
+            ) : twilio?.connected ? (
+              <>
+                Only Twilio is connected, so it carries every call, Indian numbers included. Connect Plivo to call
+                Indian numbers from an Indian number.
+              </>
+            ) : (
+              <>
+                Connect one provider to start. With both, Indian numbers go through Plivo and every other country
+                through Twilio.
+              </>
+            )}
+          </span>
+        </div>
       </SettingsSection>
 
-      {connected && (
-        <SettingsSection icon={<FiGlobe />}
-          title="2. Point Plivo at HaiVE"
-          description="Plivo tells HaiVE when a call is answered and when its recording is ready, so it has to be able to reach this server over the internet."
+      <>
+        <motion.div
+          key={tab}
+          className={styles.page}
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ duration: 0.18 }}
         >
-          {!config.publicUrlConfigured || !config.webhookUrls ? (
-            <div className={styles.warning} role="status">
-              <FiAlertCircle aria-hidden />
-              <div>
-                <strong>This server has no public address yet.</strong>
-                <p>
-                  Set <code>PLIVO_PUBLIC_BASE_URL</code> in <code>backend/.env</code> to the address Plivo can reach —
-                  for example <code>https://api.yourcompany.com</code> in production. To try it on your own computer,
-                  run <code>ngrok http 3000</code> (or <code>cloudflared tunnel --url http://localhost:3000</code>) and
-                  use the https address it prints. Then restart the backend and reload this page.
-                </p>
-              </div>
-            </div>
-          ) : (
-            <>
-              <p className={styles.hint}>
-                In the Plivo console go to <strong>Voice → Applications → XML → Add New Application</strong>. Use these
-                two addresses (both method <strong>POST</strong>), then open <strong>Phone Numbers</strong>, choose your
-                number and assign that application to it.
-              </p>
-              <div className={styles.urlBlock}>
-                <span className={styles.urlLabel}>Answer URL</span>
-                <CopyableText value={config.webhookUrls.answer} />
-              </div>
-              <div className={styles.urlBlock}>
-                <span className={styles.urlLabel}>Hangup URL</span>
-                <CopyableText value={config.webhookUrls.hangup} />
-              </div>
-            </>
-          )}
-        </SettingsSection>
-      )}
+          {tab === 'plivo' ? <PlivoSetup /> : <TwilioSetup />}
+        </motion.div>
+      </>
 
-      {connected && (
-        <SettingsSection icon={<FiPhone />}
-          title="3. Link each Plivo number to a person"
-          description="When a customer calls the Plivo number it rings the person's own phone (for example their Airtel SIM), and the call is recorded. When that person places a call from HaiVE, Plivo rings this phone first, then dials the customer."
-        >
-          {config.lines.length > 0 ? (
-            <div className={styles.tableWrap}>
-              <table className={styles.table}>
-                <thead>
-                  <tr>
-                    <th>Plivo number</th>
-                    <th>Person</th>
-                    <th>Their phone</th>
-                    <th>Language</th>
-                    <th>On</th>
-                    <th aria-label="Remove" />
-                  </tr>
-                </thead>
-                <tbody>
-                  {config.lines.map((l) => (
-                    <tr key={l.id}>
-                      <td>{formatPhone(l.plivoNumber)}</td>
-                      <td>{l.userName}</td>
-                      <td>{formatPhone(l.agentPhone)}</td>
-                      <td>{VOICE_LANGUAGES.find((v) => v.code === l.languageCode)?.label ?? l.languageCode}</td>
-                      <td>
-                        <Switch
-                          checked={l.active}
-                          onChange={(checked) => void handleToggleLine(l, checked)}
-                          ariaLabel={`${formatPhone(l.plivoNumber)} active`}
-                        />
-                      </td>
-                      <td>
-                        <button
-                          type="button"
-                          className={styles.iconButton}
-                          aria-label={`Remove ${formatPhone(l.plivoNumber)}`}
-                          onClick={() => void handleDeleteLine(l)}
-                        >
-                          <FiTrash2 />
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          ) : (
-            <p className={styles.hint}>No numbers linked yet. Add one below.</p>
-          )}
-
-          <form
-            className={styles.form}
-            onSubmit={(e) => {
-              e.preventDefault();
-              void handleAddLine();
-            }}
-          >
-            <div className={styles.fieldGrid}>
-              <Input
-                label="Plivo number"
-                value={line.plivoNumber}
-                onChange={(e) => setLine({ ...line, plivoNumber: e.target.value })}
-                placeholder="91 80 1234 5678"
-                hint="With country code."
-              />
-              <div className={styles.selectField}>
-                <label htmlFor="calling-user">Person who takes the calls</label>
-                <select
-                  id="calling-user"
-                  className={styles.select}
-                  value={line.userId}
-                  onChange={(e) => setLine({ ...line, userId: e.target.value })}
-                >
-                  <option value="">Choose a person…</option>
-                  {(users ?? [])
-                    .filter((u) => u.active)
-                    .map((u) => (
-                      <option key={u.id} value={u.id}>
-                        {u.name}
-                      </option>
-                    ))}
-                </select>
-              </div>
-              <Input
-                label="Their phone"
-                value={line.agentPhone}
-                onChange={(e) => setLine({ ...line, agentPhone: e.target.value })}
-                placeholder="98765 43210"
-                hint={`The phone that rings. +${config.defaultCountryCode} is assumed if you leave out the country code.`}
-              />
-              <div className={styles.selectField}>
-                <label htmlFor="calling-language">Language of the calls</label>
-                <select
-                  id="calling-language"
-                  className={styles.select}
-                  value={line.languageCode}
-                  onChange={(e) => setLine({ ...line, languageCode: e.target.value })}
-                >
-                  {VOICE_LANGUAGES.map((l) => (
-                    <option key={l.code} value={l.code}>
-                      {l.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            </div>
-            <div className={styles.actions}>
-              <Button
-                type="submit"
-                loading={savingLine}
-                disabled={!line.plivoNumber.trim() || !line.userId || !line.agentPhone.trim()}
-              >
-                Save line
-              </Button>
-            </div>
-          </form>
-        </SettingsSection>
-      )}
-
-      {connected && (
-        <SettingsSection icon={<FiPhoneCall />}
+      {anyConnected && (
+        <SettingsSection
+          icon={<FiPhoneCall />}
           title="Recent calls"
-          description="Every call through your Plivo numbers, and where its recording is on its way to Call Library."
+          description="Every call through your Plivo and Twilio numbers, and where its recording is on its way to Call Library."
         >
           {!calls ? (
             <Skeleton height={96} />
           ) : calls.length === 0 ? (
-            <p className={styles.hint}>No calls yet. Place one from Call Copilot, or call one of your Plivo numbers.</p>
+            <p className={styles.hint}>No calls yet. Place one from Call Copilot, or call one of your numbers.</p>
           ) : (
             <ul className={styles.callList}>
-              {calls.map((call) => (
-                <li key={call.id} className={styles.callItem}>
-                  <div className={styles.callMain}>
-                    <span className={styles.callTitle}>
-                      {call.direction === 'outbound' ? 'Called' : 'Received from'} {formatPhone(call.customerNumber)}
-                    </span>
-                    <span className={styles.callMeta}>
-                      {new Date(call.createdAt).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })}
-                      {formatDuration(call.durationSeconds) ? ` · ${formatDuration(call.durationSeconds)}` : ''}
-                      {` · ${call.direction}`}
-                    </span>
-                  </div>
-                  <CallStatus call={call} onRetry={(c) => void handleRetry(c)} retrying={retrying === call.id} />
-                </li>
-              ))}
+              {calls.map((call) => {
+                const country = countryOfNumber(call.customerNumber);
+                return (
+                  <li key={`${call.provider}-${call.id}`} className={styles.callItem}>
+                    <div className={styles.callMain}>
+                      <span className={styles.callTitle}>
+                        {country ? flagPrefix(country.iso) : ''}
+                        {call.direction === 'outbound' ? 'Called' : 'Received from'}{' '}
+                        {formatInternational(call.customerNumber)}
+                      </span>
+                      <span className={styles.callMeta}>
+                        <ProviderPill provider={call.provider} />{' '}
+                        {new Date(call.createdAt).toLocaleString(undefined, {
+                          dateStyle: 'medium',
+                          timeStyle: 'short',
+                        })}
+                        {formatDuration(call.durationSeconds) ? ` · ${formatDuration(call.durationSeconds)}` : ''}
+                        {` · via ${formatInternational(call.businessNumber)}`}
+                      </span>
+                    </div>
+                    <CallStatus call={call} onRetry={(c) => void handleRetry(c)} retrying={retrying === call.id} />
+                  </li>
+                );
+              })}
             </ul>
           )}
         </SettingsSection>
-      )}
-
-      {!connected && (
-        <p className={styles.hint}>
-          <Badge variant="neutral">Next</Badge> Once Plivo is connected you'll see how to point it at HaiVE and link
-          your number to a person.
-        </p>
       )}
     </div>
   );

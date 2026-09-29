@@ -1,9 +1,9 @@
 import { Badge, Button } from '@/components/ui';
 import type { BadgeVariant } from '@/components/ui';
-import { CALL_STATUS_LABEL, isCallStale, isImportStuck, type PlivoCall } from '@/services/plivoService';
+import { CALL_STATUS_LABEL, isCallStale, isImportStuck, type CallLike } from '@/services/plivoService';
 import styles from './CallStatus.module.css';
 
-const STATUS_VARIANT: Record<PlivoCall['status'], BadgeVariant> = {
+const STATUS_VARIANT: Record<CallLike['status'], BadgeVariant> = {
   initiated: 'info',
   in_progress: 'info',
   completed: 'success',
@@ -13,21 +13,21 @@ const STATUS_VARIANT: Record<PlivoCall['status'], BadgeVariant> = {
   cancelled: 'neutral',
 };
 
-// How long after a call ends we keep saying "waiting for the recording" — Plivo
+// How long after a call ends we keep saying "waiting for the recording" — the provider
 // sends it a little after hangup; past this something is more likely wrong than slow.
 const RECORDING_GRACE_MS = 10 * 60_000;
 
 // Where one phone call stands, in words: the call itself, then the recording's
 // journey into Call Library (transcript, summary, AI Coach). Shared by the
 // Settings call log and the Call Copilot page so the two never disagree.
-export function CallStatus({
+export function CallStatus<T extends CallLike>({
   call,
   onRetry,
   retrying,
   onOpenLibrary,
 }: {
-  call: PlivoCall;
-  onRetry?: (call: PlivoCall) => void;
+  call: T;
+  onRetry?: (call: T) => void;
   retrying?: boolean;
   onOpenLibrary?: () => void;
 }) {
@@ -43,7 +43,7 @@ export function CallStatus({
     <div className={styles.status}>
       <div className={styles.badges}>
         {stale ? (
-          <Badge variant="neutral">No report from Plivo</Badge>
+          <Badge variant="neutral">No report from {call.provider === 'twilio' ? 'Twilio' : 'Plivo'}</Badge>
         ) : (
           <Badge variant={STATUS_VARIANT[call.status]}>{CALL_STATUS_LABEL[call.status]}</Badge>
         )}

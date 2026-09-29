@@ -46,7 +46,6 @@
 .card:hover {
   border-color: var(--color-border-strong);
   box-shadow: var(--shadow-md);
-  transform: translateY(-2px);
 }
 
 .card:active {

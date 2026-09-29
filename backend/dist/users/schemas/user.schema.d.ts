@@ -59,6 +59,11 @@ export declare class User {
         mobilePush: boolean;
         email: boolean;
     };
+    voicePreferences: UserVoicePreferences;
+}
+export interface UserVoicePreferences {
+    voiceId?: string;
+    personality?: string;
 }
 export declare const UserSchema: import("mongoose").Schema<User, import("mongoose").Model<User, any, any, any, Document<unknown, any, User, any, {}> & User & {
     _id: Types.ObjectId;

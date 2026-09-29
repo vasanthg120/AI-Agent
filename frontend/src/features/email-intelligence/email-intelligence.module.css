@@ -282,7 +282,6 @@
 .listItem:hover {
   border-color: var(--color-border-strong);
   box-shadow: var(--shadow-md);
-  transform: translateY(-1px);
 }
 
 /* Urgency stripe down the left edge of emails that shouldn't sit. */

@@ -63,7 +63,8 @@
 }
 
 .chip:hover {
-  transform: translateY(-1px);
+  /* No lift: moving the element out from under the pointer made hover flicker at its edge. */
+  background: var(--color-bg-hover);
 }
 
 .chip:focus-visible {

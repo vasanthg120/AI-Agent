@@ -2,7 +2,8 @@ import { Model } from 'mongoose';
 import { AgentRoleDocument } from '../agent-roles/schemas/agent-role.schema';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
-import { PushSubscriptionEntry, SessionEntry, TwoFactorBackupCode, User, UserDocument } from './schemas/user.schema';
+import { UpdateProfileDto } from './dto/update-profile.dto';
+import { PushSubscriptionEntry, SessionEntry, TwoFactorBackupCode, User, UserDocument, UserVoicePreferences } from './schemas/user.schema';
 export declare class UsersService {
     private userModel;
     private agentRoleModel;
@@ -54,6 +55,10 @@ export declare class UsersService {
             active: boolean;
             voiceAccessEnabled: boolean;
             aiAccessEnabled: boolean;
+            phone: string | undefined;
+            timezone: string | undefined;
+            language: string | undefined;
+            createdAt: Date | undefined;
         };
         tempPassword: string;
     }>;
@@ -69,8 +74,29 @@ export declare class UsersService {
         active: boolean;
         voiceAccessEnabled: boolean;
         aiAccessEnabled: boolean;
+        phone: string | undefined;
+        timezone: string | undefined;
+        language: string | undefined;
+        createdAt: Date | undefined;
     }>;
     deleteByAdmin(id: string, organizationId: string): Promise<void>;
+    updateOwnProfile(userId: string, dto: UpdateProfileDto): Promise<{
+        id: string;
+        email: string;
+        name: string;
+        organizationId: string;
+        storeId: string | undefined;
+        roles: string[];
+        assignedAgentId: string | undefined;
+        department: string | undefined;
+        active: boolean;
+        voiceAccessEnabled: boolean;
+        aiAccessEnabled: boolean;
+        phone: string | undefined;
+        timezone: string | undefined;
+        language: string | undefined;
+        createdAt: Date | undefined;
+    }>;
     private assertNotOwner;
     toPublic(user: UserDocument): {
         id: string;
@@ -84,6 +110,10 @@ export declare class UsersService {
         active: boolean;
         voiceAccessEnabled: boolean;
         aiAccessEnabled: boolean;
+        phone: string | undefined;
+        timezone: string | undefined;
+        language: string | undefined;
+        createdAt: Date | undefined;
     };
     setVerifyOtp(userId: string, otpHash: string, expiresAt: Date): Promise<(import("mongoose").Document<unknown, {}, UserDocument, {}, {}> & User & import("mongoose").Document<import("mongoose").Types.ObjectId, any, any, Record<string, any>, {}> & Required<{
         _id: import("mongoose").Types.ObjectId;
@@ -120,6 +150,11 @@ export declare class UsersService {
     }> & {
         __v: number;
     }) | null>;
+    getVoicePreferences(userId: string): Promise<UserVoicePreferences>;
+    updateVoicePreferences(userId: string, patch: {
+        voiceId?: string | null;
+        personality?: string | null;
+    }): Promise<UserVoicePreferences>;
     setPendingTwoFactorSecret(userId: string, secretEncrypted: string, expiresAt: Date): Promise<(import("mongoose").Document<unknown, {}, UserDocument, {}, {}> & User & import("mongoose").Document<import("mongoose").Types.ObjectId, any, any, Record<string, any>, {}> & Required<{
         _id: import("mongoose").Types.ObjectId;
     }> & {

@@ -114,6 +114,19 @@ export const plivoService = {
   },
 };
 
+// The fields every call has, whichever provider carried it (Plivo or Twilio) —
+// what the status helpers and the CallStatus badge need.
+export interface CallLike {
+  status: PlivoCallStatus;
+  importStatus: PlivoImportStatus;
+  failureReason?: string;
+  importError?: string;
+  sessionId?: string;
+  provider?: 'plivo' | 'twilio';
+  createdAt: string;
+  updatedAt: string;
+}
+
 // A call still marked live long after Plivo's own 4-hour call limit never got its
 // hangup report — it is over, and nothing is left to wait for.
 const STALE_CALL_AFTER_MS = 5 * 60 * 60_000;
@@ -121,20 +134,20 @@ const STALE_CALL_AFTER_MS = 5 * 60 * 60_000;
 // the server restarted mid-way), and can be retried.
 const STUCK_IMPORT_AFTER_MS = 15 * 60_000;
 
-export function isCallStale(call: PlivoCall): boolean {
+export function isCallStale(call: CallLike): boolean {
   return (
     (call.status === 'initiated' || call.status === 'in_progress') &&
     Date.now() - new Date(call.createdAt).getTime() > STALE_CALL_AFTER_MS
   );
 }
 
-export function isImportStuck(call: PlivoCall): boolean {
+export function isImportStuck(call: CallLike): boolean {
   return call.importStatus === 'pending' && Date.now() - new Date(call.updatedAt).getTime() > STUCK_IMPORT_AFTER_MS;
 }
 
 // A call is "live" while it is being set up or connected, or while its recording
 // is still being turned into a summary — the states worth polling for.
-export function isCallActive(call: PlivoCall): boolean {
+export function isCallActive(call: CallLike): boolean {
   if (isCallStale(call) || isImportStuck(call)) return false;
   return call.status === 'initiated' || call.status === 'in_progress' || call.importStatus === 'pending';
 }

@@ -31,6 +31,14 @@
   cursor: not-allowed;
 }
 
+/* Busy (saving/loading) is not "unavailable": keep the button at full
+   strength with its spinner, instead of fading it to half opacity the moment
+   it's clicked — that fade is what read as the app flickering or freezing. */
+.button[aria-busy='true']:disabled {
+  opacity: 1;
+  cursor: progress;
+}
+
 /* Sizes */
 .sm {
   height: 32px;
@@ -102,8 +110,12 @@
   width: 14px;
   height: 14px;
   border-radius: 50%;
-  border: 2px solid rgba(255, 255, 255, 0.4);
-  border-top-color: #fff;
+  flex: none;
+  /* Drawn in the button's own text colour, so it shows on every variant (it
+     used to be white — invisible on the light secondary/outline/ghost buttons). */
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  opacity: 0.85;
   animation: spin 0.7s linear infinite;
 }
 

@@ -25,6 +25,7 @@ const deal_schema_1 = require("../crm/schemas/deal.schema");
 const quote_schema_1 = require("../crm/schemas/quote.schema");
 const email_intelligence_item_schema_1 = require("../email-intelligence/schemas/email-intelligence-item.schema");
 const email_intelligence_service_1 = require("../email-intelligence/email-intelligence.service");
+const email_response_state_1 = require("../email-intelligence/email-response-state");
 const agent_scope_util_1 = require("./agent-scope.util");
 const task_visibility_util_1 = require("./task-visibility.util");
 const daily_report_schema_1 = require("./schemas/daily-report.schema");
@@ -110,11 +111,15 @@ let TasksService = class TasksService {
                 organizationId,
                 userId,
                 intent: { $in: email_intelligence_service_1.RELEVANT_EMAIL_INTENTS },
-                $or: [{ sentAt: { $gte: start, $lt: end } }, { externalReplyDetectedAt: { $gte: start, $lt: end } }],
+                $or: [
+                    { sentAt: { $gte: start, $lt: end } },
+                    { externalReplyDetectedAt: { $gte: start, $lt: end } },
+                    { threadRespondedAt: { $gte: start, $lt: end } },
+                ],
             })
                 .exec(),
             this.emailModel
-                .countDocuments({ organizationId, userId, intent: { $in: email_intelligence_service_1.RELEVANT_EMAIL_INTENTS }, status: 'pending', externalReplyDetectedAt: { $exists: false } })
+                .countDocuments({ organizationId, userId, intent: { $in: email_intelligence_service_1.RELEVANT_EMAIL_INTENTS }, ...(0, email_response_state_1.needsResponseMatch)() })
                 .exec(),
             this.dealModel.countDocuments({ organizationId, ownerId: userId, createdAt: { $gte: start, $lt: end } }).exec(),
             this.dealModel.countDocuments({ organizationId, ownerId: userId, updatedAt: { $gte: start, $lt: end } }).exec(),

@@ -1,0 +1,45 @@
+.emoji {
+  line-height: 1;
+}
+
+.sm {
+  font-size: 16px;
+}
+
+.md {
+  font-size: 20px;
+}
+
+.lg {
+  font-size: 26px;
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  background: var(--color-bg-active);
+  color: var(--color-accent);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  line-height: 1;
+}
+
+.badge_sm {
+  width: 22px;
+  height: 16px;
+  font-size: 9px;
+}
+
+.badge_md {
+  width: 26px;
+  height: 19px;
+}
+
+.badge_lg {
+  width: 34px;
+  height: 24px;
+  font-size: 11px;
+}

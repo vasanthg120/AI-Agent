@@ -9,23 +9,9 @@ var __metadata = (this && this.__metadata) || function (k, v) {
     if (typeof Reflect === "object" && typeof Reflect.metadata === "function") return Reflect.metadata(k, v);
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.AgentRoleSchema = exports.AgentRole = exports.AgentRoleKpi = void 0;
+exports.AgentRoleSchema = exports.AgentRole = exports.ROLE_CATEGORIES = void 0;
 const mongoose_1 = require("@nestjs/mongoose");
-let AgentRoleKpi = class AgentRoleKpi {
-};
-exports.AgentRoleKpi = AgentRoleKpi;
-__decorate([
-    (0, mongoose_1.Prop)({ required: true }),
-    __metadata("design:type", String)
-], AgentRoleKpi.prototype, "name", void 0);
-__decorate([
-    (0, mongoose_1.Prop)({ required: true }),
-    __metadata("design:type", String)
-], AgentRoleKpi.prototype, "description", void 0);
-exports.AgentRoleKpi = AgentRoleKpi = __decorate([
-    (0, mongoose_1.Schema)({ _id: false })
-], AgentRoleKpi);
-const AgentRoleKpiSchema = mongoose_1.SchemaFactory.createForClass(AgentRoleKpi);
+exports.ROLE_CATEGORIES = ['sales', 'finance', 'hr', 'support', 'marketing', 'operations', 'custom'];
 let AgentRole = class AgentRole {
 };
 exports.AgentRole = AgentRole;
@@ -49,26 +35,6 @@ __decorate([
     (0, mongoose_1.Prop)({ default: '' }),
     __metadata("design:type", String)
 ], AgentRole.prototype, "description", void 0);
-__decorate([
-    (0, mongoose_1.Prop)({ type: [String], default: [] }),
-    __metadata("design:type", Array)
-], AgentRole.prototype, "goals", void 0);
-__decorate([
-    (0, mongoose_1.Prop)({ type: [String], default: [] }),
-    __metadata("design:type", Array)
-], AgentRole.prototype, "responsibilities", void 0);
-__decorate([
-    (0, mongoose_1.Prop)({ type: [String], default: [] }),
-    __metadata("design:type", Array)
-], AgentRole.prototype, "dailyTasks", void 0);
-__decorate([
-    (0, mongoose_1.Prop)({ type: [String], default: [] }),
-    __metadata("design:type", Array)
-], AgentRole.prototype, "weeklyTasks", void 0);
-__decorate([
-    (0, mongoose_1.Prop)({ type: [AgentRoleKpiSchema], default: [] }),
-    __metadata("design:type", Array)
-], AgentRole.prototype, "kpis", void 0);
 __decorate([
     (0, mongoose_1.Prop)({ required: true }),
     __metadata("design:type", String)

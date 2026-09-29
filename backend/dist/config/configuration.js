@@ -7,6 +7,18 @@ exports.default = () => ({
     mongoUri: process.env.MONGO_URI ?? 'mongodb://localhost:27017/agent',
     pythonAgentUrl: process.env.PYTHON_AGENT_URL ?? 'http://localhost:8000',
     redisUrl: process.env.REDIS_URL ?? 'redis://localhost:6379/0',
+    plivo: {
+        publicBaseUrl: (process.env.PLIVO_PUBLIC_BASE_URL ?? process.env.CALLING_PUBLIC_BASE_URL ?? '').trim().replace(/\/+$/, ''),
+        apiBaseUrl: (process.env.PLIVO_API_BASE_URL ?? 'https://api.plivo.com').trim().replace(/\/+$/, ''),
+        defaultCountryCode: process.env.PLIVO_DEFAULT_COUNTRY_CODE ?? '91',
+    },
+    twilio: {
+        publicBaseUrl: (process.env.TWILIO_PUBLIC_BASE_URL ?? process.env.CALLING_PUBLIC_BASE_URL ?? process.env.PLIVO_PUBLIC_BASE_URL ?? '')
+            .trim()
+            .replace(/\/+$/, ''),
+        apiBaseUrl: (process.env.TWILIO_API_BASE_URL ?? 'https://api.twilio.com').trim().replace(/\/+$/, ''),
+        defaultCountryCode: process.env.PLIVO_DEFAULT_COUNTRY_CODE ?? '91',
+    },
     jwt: {
         secret: process.env.JWT_SECRET,
         expiresIn: process.env.JWT_EXPIRES_IN ?? '1d',

@@ -146,6 +146,32 @@ let UsersService = class UsersService {
         if (!deleted)
             throw new common_1.NotFoundException('User not found');
     }
+    async updateOwnProfile(userId, dto) {
+        const update = {};
+        if (dto.name !== undefined) {
+            const name = dto.name.trim();
+            if (!name)
+                throw new common_1.BadRequestException('Name cannot be empty');
+            update.name = name;
+        }
+        if (dto.phone !== undefined)
+            update['preferences.phone'] = dto.phone.trim();
+        if (dto.timezone !== undefined) {
+            try {
+                new Intl.DateTimeFormat('en-US', { timeZone: dto.timezone });
+            }
+            catch {
+                throw new common_1.BadRequestException('timezone must be a valid IANA time zone, e.g. Asia/Kolkata');
+            }
+            update['preferences.timezone'] = dto.timezone;
+        }
+        if (dto.language !== undefined)
+            update['preferences.language'] = dto.language;
+        const updated = await this.userModel.findByIdAndUpdate(userId, { $set: update }, { new: true }).exec();
+        if (!updated)
+            throw new common_1.NotFoundException('User not found');
+        return this.toPublic(updated);
+    }
     async assertNotOwner(id, organizationId) {
         const target = await this.userModel.findOne({ _id: id, organizationId }).select({ roles: 1 }).exec();
         if (target?.roles.includes('owner')) {
@@ -165,6 +191,10 @@ let UsersService = class UsersService {
             active: user.active,
             voiceAccessEnabled: user.voiceAccessEnabled,
             aiAccessEnabled: user.aiAccessEnabled,
+            phone: typeof user.preferences?.phone === 'string' ? user.preferences.phone : undefined,
+            timezone: typeof user.preferences?.timezone === 'string' ? user.preferences.timezone : undefined,
+            language: typeof user.preferences?.language === 'string' ? user.preferences.language : undefined,
+            createdAt: user.createdAt,
         };
     }
     setVerifyOtp(userId, otpHash, expiresAt) {
@@ -245,6 +275,30 @@ let UsersService = class UsersService {
         if (patch.email !== undefined)
             update['notificationPreferences.email'] = patch.email;
         return this.userModel.findByIdAndUpdate(userId, update, { new: true }).exec();
+    }
+    async getVoicePreferences(userId) {
+        const user = await this.userModel.findById(userId).select({ voicePreferences: 1 }).lean().exec();
+        return user?.voicePreferences ?? {};
+    }
+    async updateVoicePreferences(userId, patch) {
+        const set = {};
+        const unset = {};
+        for (const key of ['voiceId', 'personality']) {
+            const value = patch[key];
+            if (value === null)
+                unset[`voicePreferences.${key}`] = '';
+            else if (value !== undefined)
+                set[`voicePreferences.${key}`] = value;
+        }
+        const update = {};
+        if (Object.keys(set).length)
+            update.$set = set;
+        if (Object.keys(unset).length)
+            update.$unset = unset;
+        if (!Object.keys(update).length)
+            return this.getVoicePreferences(userId);
+        const user = await this.userModel.findByIdAndUpdate(userId, update, { new: true }).select({ voicePreferences: 1 }).lean().exec();
+        return user?.voicePreferences ?? {};
     }
     setPendingTwoFactorSecret(userId, secretEncrypted, expiresAt) {
         return this.userModel

@@ -8,6 +8,8 @@ import { ConnectIntegrationDto } from './dto/connect-integration.dto';
 import { TestConnectionDto } from './dto/test-connection.dto';
 import { ProviderRule } from './provider-rules';
 import { IntegrationCredentialDocument } from './schemas/integration-credential.schema';
+export declare const PLATFORM_PROVIDERS: readonly ["anthropic", "sarvam", "elevenlabs", "groq"];
+export type PlatformProvider = (typeof PLATFORM_PROVIDERS)[number];
 export interface IntegrationStatus {
     connected: boolean;
     authType?: AuthType;
@@ -52,7 +54,7 @@ export declare class IntegrationsService {
         authType: AuthType;
         baseUrl?: string;
     }>;
-    verifyPlatformProvider(provider: 'anthropic' | 'sarvam' | 'groq'): Promise<{
+    verifyPlatformProvider(provider: PlatformProvider): Promise<{
         ok: boolean;
         message: string;
     }>;

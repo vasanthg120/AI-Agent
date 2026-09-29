@@ -20,6 +20,7 @@ const roles_decorator_1 = require("../common/decorators/roles.decorator");
 const current_user_decorator_1 = require("../common/decorators/current-user.decorator");
 const create_user_dto_1 = require("./dto/create-user.dto");
 const update_user_dto_1 = require("./dto/update-user.dto");
+const update_profile_dto_1 = require("./dto/update-profile.dto");
 const users_service_1 = require("./users.service");
 let UsersController = class UsersController {
     constructor(usersService) {
@@ -28,6 +29,9 @@ let UsersController = class UsersController {
     async me(user) {
         const found = await this.usersService.findById(user.sub);
         return found ? this.usersService.toPublic(found) : null;
+    }
+    updateMe(user, dto) {
+        return this.usersService.updateOwnProfile(user.sub, dto);
     }
     async list(caller) {
         const users = await this.usersService.findAll(caller.organizationId);
@@ -57,6 +61,14 @@ __decorate([
     __metadata("design:paramtypes", [Object]),
     __metadata("design:returntype", Promise)
 ], UsersController.prototype, "me", null);
+__decorate([
+    (0, common_1.Patch)('me'),
+    __param(0, (0, current_user_decorator_1.CurrentUser)()),
+    __param(1, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, update_profile_dto_1.UpdateProfileDto]),
+    __metadata("design:returntype", void 0)
+], UsersController.prototype, "updateMe", null);
 __decorate([
     (0, common_1.Get)(),
     (0, common_1.UseGuards)(roles_guard_1.RolesGuard),

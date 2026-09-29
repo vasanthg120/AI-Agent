@@ -11,9 +11,18 @@ export default () => ({
   // each webhook against the exact URL it called, so this must match what was
   // given to Plivo; while it is unset every Plivo webhook is refused.
   plivo: {
-    publicBaseUrl: (process.env.PLIVO_PUBLIC_BASE_URL ?? '').trim().replace(/\/+$/, ''),
+    publicBaseUrl: (process.env.PLIVO_PUBLIC_BASE_URL ?? process.env.CALLING_PUBLIC_BASE_URL ?? '').trim().replace(/\/+$/, ''),
     apiBaseUrl: (process.env.PLIVO_API_BASE_URL ?? 'https://api.plivo.com').trim().replace(/\/+$/, ''),
     // Prepended to a bare national number (10 digits) typed without one.
+    defaultCountryCode: process.env.PLIVO_DEFAULT_COUNTRY_CODE ?? '91',
+  },
+  // Twilio calling (international numbers). Same public address as Plivo unless
+  // set separately — one tunnel/domain serves both providers' webhooks.
+  twilio: {
+    publicBaseUrl: (process.env.TWILIO_PUBLIC_BASE_URL ?? process.env.CALLING_PUBLIC_BASE_URL ?? process.env.PLIVO_PUBLIC_BASE_URL ?? '')
+      .trim()
+      .replace(/\/+$/, ''),
+    apiBaseUrl: (process.env.TWILIO_API_BASE_URL ?? 'https://api.twilio.com').trim().replace(/\/+$/, ''),
     defaultCountryCode: process.env.PLIVO_DEFAULT_COUNTRY_CODE ?? '91',
   },
   jwt: {

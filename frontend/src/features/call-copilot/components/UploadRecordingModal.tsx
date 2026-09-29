@@ -176,14 +176,13 @@ export function UploadRecordingModal({ open, onClose, onProcessed }: UploadRecor
             }}
           />
 
-          <AnimatePresence mode="wait" initial={false}>
+          <>
             {busy ? (
               <motion.div
                 key="progress"
                 className={styles.progress}
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -6 }}
                 transition={{ duration: 0.24, ease: EASE_OUT }}
                 role="status"
                 aria-live="polite"
@@ -230,7 +229,6 @@ export function UploadRecordingModal({ open, onClose, onProcessed }: UploadRecor
                 key="drop"
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -6 }}
                 transition={{ duration: 0.24, ease: EASE_OUT }}
               >
                 <button
@@ -259,7 +257,7 @@ export function UploadRecordingModal({ open, onClose, onProcessed }: UploadRecor
                 </button>
               </motion.div>
             )}
-          </AnimatePresence>
+          </>
 
           <AnimatePresence initial={false}>
             {error && (

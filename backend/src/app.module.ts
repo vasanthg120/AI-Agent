@@ -25,6 +25,8 @@ import { CommandCenterModule } from './command-center/command-center.module';
 import { FinanceModule } from './finance/finance.module';
 import { VoiceModule } from './voice/voice.module';
 import { PlivoModule } from './plivo/plivo.module';
+import { TwilioModule } from './twilio/twilio.module';
+import { CallingModule } from './calling/calling.module';
 import { CallCopilotModule } from './call-copilot/call-copilot.module';
 import { BusinessKnowledgeModule } from './business-knowledge/business-knowledge.module';
 import { EmailIntelligenceModule } from './email-intelligence/email-intelligence.module';
@@ -80,6 +82,8 @@ import { HealthController } from './health/health.controller';
     FinanceModule,
     VoiceModule,
     PlivoModule,
+    TwilioModule,
+    CallingModule,
     CallCopilotModule,
     BusinessKnowledgeModule,
     EmailIntelligenceModule,

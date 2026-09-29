@@ -17,7 +17,6 @@
 .interactive:hover {
   border-color: var(--color-border-strong);
   box-shadow: var(--shadow-md);
-  transform: translateY(-2px);
 }
 .interactive:active {
   transform: translateY(0) scale(0.995);

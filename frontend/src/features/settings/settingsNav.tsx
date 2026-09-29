@@ -115,8 +115,9 @@ export const SETTINGS_NAV: SettingsNavGroup[] = [
         icon: <FiPhoneCall />,
         path: ROUTES.settingsCalling,
         hint: 'Phone numbers & recording',
-        summary: 'Connect Plivo, link each phone number to a person, and send recorded calls to Call Copilot.',
-        keywords: ['plivo', 'phone', 'numbers', 'recording', 'calls'],
+        summary:
+          'Connect Plivo (Indian numbers) and Twilio (international), link each number to a person, and send recorded calls to Call Copilot.',
+        keywords: ['plivo', 'twilio', 'international', 'phone', 'numbers', 'recording', 'calls'],
         requireRoles: ['owner', 'admin'],
       },
     ],

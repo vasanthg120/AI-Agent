@@ -36,6 +36,7 @@ exports.IntegrationsModule = IntegrationsModule = __decorate([
         ],
         controllers: [integrations_controller_1.IntegrationsController, resources_controller_1.ResourcesController, admin_integrations_controller_1.AdminIntegrationsController],
         providers: [integrations_service_1.IntegrationsService, integration_resources_service_1.IntegrationResourcesService, dynamic_executor_service_1.DynamicExecutorService],
+        exports: [integrations_service_1.IntegrationsService],
     })
 ], IntegrationsModule);
 //# sourceMappingURL=integrations.module.js.map

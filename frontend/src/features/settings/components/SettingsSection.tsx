@@ -1,5 +1,4 @@
 import type { ReactNode } from 'react';
-import { motion } from 'framer-motion';
 import styles from './SettingsSection.module.css';
 
 export interface SettingsSectionProps {
@@ -15,15 +14,10 @@ export interface SettingsSectionProps {
 
 export function SettingsSection({ title, description, icon, actions, children, footer }: SettingsSectionProps) {
   return (
-    // Fades up the first time it scrolls into view, so long tabs reveal
-    // section by section instead of popping in all at once.
-    <motion.section
-      className={styles.section}
-      initial={{ opacity: 0 }}
-      whileInView={{ opacity: 1 }}
-      viewport={{ once: true, margin: '0px 0px -40px 0px' }}
-      transition={{ duration: 0.36, ease: [0.16, 1, 0.3, 1] }}
-    >
+    // A plain section: the page's own entrance animation fades it in. It used to
+    // start invisible and wait for an IntersectionObserver, so every tab switch
+    // or reload of a section blinked before its content showed.
+    <section className={styles.section}>
       <div className={styles.header}>
         {icon && <span className={styles.headerIcon}>{icon}</span>}
         <div className={styles.headerText}>
@@ -34,7 +28,7 @@ export function SettingsSection({ title, description, icon, actions, children, f
       </div>
       <div className={styles.body}>{children}</div>
       {footer && <div className={styles.footer}>{footer}</div>}
-    </motion.section>
+    </section>
   );
 }
 

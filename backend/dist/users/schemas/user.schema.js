@@ -199,6 +199,10 @@ __decorate([
     }),
     __metadata("design:type", Object)
 ], User.prototype, "notificationPreferences", void 0);
+__decorate([
+    (0, mongoose_1.Prop)({ type: Object, default: {} }),
+    __metadata("design:type", Object)
+], User.prototype, "voicePreferences", void 0);
 exports.User = User = __decorate([
     (0, mongoose_1.Schema)({ timestamps: true })
 ], User);

@@ -7,9 +7,10 @@
   justify-content: center;
   padding: var(--space-4);
   background: rgba(9, 7, 9, 0.6);
-  /* blur is animated inline (see Modal.tsx's motion props) so it fades in
-     alongside opacity instead of snapping on instantly. */
-  will-change: opacity, backdrop-filter;
+  /* A fixed, light blur that simply fades in with the backdrop's opacity —
+     cheap to composite, unlike animating the blur radius itself. */
+  backdrop-filter: blur(3px);
+  -webkit-backdrop-filter: blur(3px);
 }
 
 .modal {
@@ -23,7 +24,6 @@
   border-radius: var(--radius-xl);
   box-shadow: var(--shadow-lg);
   padding: var(--space-6);
-  will-change: transform, opacity;
 }
 
 .header {

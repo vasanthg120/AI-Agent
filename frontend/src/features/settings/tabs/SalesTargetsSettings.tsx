@@ -26,7 +26,9 @@ export function SalesTargetsSettings() {
   const [saving, setSaving] = useState<Record<RowKey, boolean>>({});
 
   const load = async (forPeriod: string) => {
-    setLoading(true);
+    // Switching period keeps the current tables up until the new figures arrive,
+    // instead of replacing the whole page with "Loading…" (a flash and a jump).
+    if (stores.length === 0 && users.length === 0) setLoading(true);
     try {
       const [storeList, userList, targetList] = await Promise.all([
         organizationsService.listStores(),

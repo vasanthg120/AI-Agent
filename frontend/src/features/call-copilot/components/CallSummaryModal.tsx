@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
 import toast from 'react-hot-toast';
-import { AnimatePresence, motion } from 'framer-motion';
+import { motion } from 'framer-motion';
 import clsx from 'clsx';
 import {
   FiAlertTriangle,
@@ -158,12 +158,11 @@ export function CallSummaryModal({
           <PillTabs ariaLabel="Call summary sections" items={tabs} activeId={activeTab} onChange={setTab} size="sm" />
         )}
 
-        <AnimatePresence mode="wait" initial={false}>
+        <>
           <motion.div
             key={activeTab}
             initial={{ opacity: 0, y: 8 }}
             animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -4 }}
             transition={{ duration: 0.2, ease: EASE_OUT }}
           >
             {activeTab === 'overview' && summaryResult && <OverviewTab result={summaryResult} />}
@@ -187,7 +186,7 @@ export function CallSummaryModal({
               />
             )}
           </motion.div>
-        </AnimatePresence>
+        </>
       </div>
     </Modal>
   );

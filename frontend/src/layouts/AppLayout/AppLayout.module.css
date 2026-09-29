@@ -68,24 +68,29 @@
    - fill-mode "backwards", not "both": a finished animation that is still
      held ("forwards") keeps each block on its own stacking layer, which is
      what made a header's dropdown (e.g. the Dashboard's reporting-period
-     picker) render underneath the tab bar below it. */
-.page > :first-child > * {
+     picker) render underneath the tab bar below it.
+   - Only while the page is opening ([data-entering], set by PageTransition
+     for a moment after navigation). Without that, any block that appeared
+     later — a panel opened by a click, content replacing its skeleton, a
+     result list after a search — replayed the fade from invisible, which is
+     the "flicker" people saw on almost every interaction. */
+.page[data-entering] > :first-child > * {
   animation: pageRise 0.4s var(--ease-out) backwards;
 }
 
-.page > :first-child > :nth-child(2) {
+.page[data-entering] > :first-child > :nth-child(2) {
   animation-delay: 50ms;
 }
-.page > :first-child > :nth-child(3) {
+.page[data-entering] > :first-child > :nth-child(3) {
   animation-delay: 100ms;
 }
-.page > :first-child > :nth-child(4) {
+.page[data-entering] > :first-child > :nth-child(4) {
   animation-delay: 150ms;
 }
-.page > :first-child > :nth-child(5) {
+.page[data-entering] > :first-child > :nth-child(5) {
   animation-delay: 200ms;
 }
-.page > :first-child > :nth-child(n + 6) {
+.page[data-entering] > :first-child > :nth-child(n + 6) {
   animation-delay: 240ms;
 }
 
@@ -99,7 +104,7 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .page > :first-child > * {
+  .page[data-entering] > :first-child > * {
     animation: none;
   }
 }

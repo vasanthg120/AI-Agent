@@ -64,7 +64,9 @@ export function UsersSettings() {
   const [deleting, setDeleting] = useState(false);
 
   const load = async () => {
-    setLoading(true);
+    // Only the first load shows the loading state; a refresh after a change keeps
+    // the current list on screen until the new one arrives (no flash).
+    if (users.length === 0) setLoading(true);
     try {
       const [userList, roleList, storeList] = await Promise.all([
         usersService.list(),

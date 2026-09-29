@@ -77,6 +77,9 @@ export function CallLibraryListView({ onStartCall }: { onStartCall?: () => void 
   const [dateRange, setDateRange] = useState<DateRange>(todayRange);
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
+  // Bumped each time a new result set arrives — the list's entrance animation
+  // replays for new results only, not on every keystroke or refresh.
+  const [resultVersion, setResultVersion] = useState(0);
   const [items, setItems] = useState<CallSessionSummary[]>([]);
   const [total, setTotal] = useState(0);
   const [mode, setMode] = useState<'browse' | 'search'>('browse');
@@ -94,6 +97,8 @@ export function CallLibraryListView({ onStartCall }: { onStartCall?: () => void 
   const searching = query.trim() !== '';
 
   useEffect(() => {
+    // A slower, older request must never overwrite the results of a newer one.
+    let stale = false;
     const timer = setTimeout(
       () => {
         setLoading(true);
@@ -107,19 +112,27 @@ export function CallLibraryListView({ onStartCall }: { onStartCall?: () => void 
             pageSize: PAGE_SIZE,
           })
           .then((result) => {
+            if (stale) return;
+            setResultVersion((v) => v + 1);
             setItems(result.items);
             setTotal(result.total);
             setMode(result.mode);
           })
           .catch(() => {
+            if (stale) return;
             setItems([]);
             setTotal(0);
           })
-          .finally(() => setLoading(false));
+          .finally(() => {
+            if (!stale) setLoading(false);
+          });
       },
       searching ? SEARCH_DEBOUNCE_MS : 0,
     );
-    return () => clearTimeout(timer);
+    return () => {
+      stale = true;
+      clearTimeout(timer);
+    };
     // `searching` is derived from `query`, which is already a dependency.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [query, dateRange, page]);
@@ -222,7 +235,9 @@ export function CallLibraryListView({ onStartCall }: { onStartCall?: () => void 
         <p className={styles.hint}>Showing the best matches for &ldquo;{query.trim()}&rdquo; across all dates.</p>
       )}
 
-      {loading ? (
+      {/* Skeletons only before the first results; after that the current list stays up, dimmed, while the next
+          page or search loads — swapping it for placeholders on every change is what made it flicker. */}
+      {loading && resultVersion === 0 ? (
         <div className={styles.list} aria-busy>
           {Array.from({ length: 5 }).map((_, i) => (
             <Skeleton key={i} height={92} className={styles.skeletonRow} />
@@ -261,8 +276,10 @@ export function CallLibraryListView({ onStartCall }: { onStartCall?: () => void 
         </motion.div>
       ) : (
         <motion.ul
-          key={`${page}|${searching ? query.trim() : ''}|${dateRange.dateFrom ?? ''}|${dateRange.dateTo ?? ''}`}
+          key={resultVersion}
           className={styles.list}
+          aria-busy={loading || undefined}
+          style={{ opacity: loading ? 0.55 : 1, transition: 'opacity 150ms ease-out' }}
           variants={staggerChildren(0.045)}
           initial="hidden"
           animate="show"

@@ -205,7 +205,10 @@ export class PlivoService {
    * PlivoWebhooksService.answer). The customer sees the Plivo number — which is
    * also what makes the call recordable, since it goes through Plivo.
    */
-  async startCall(user: JwtPayload, dto: StartPlivoCallDto): Promise<PlivoCallDocument> {
+  // `preNormalized`: the calling layer has already turned the number into digits
+  // with its country code (so a short international number isn't mistaken for a
+  // national one and given the default country code a second time).
+  async startCall(user: JwtPayload, dto: StartPlivoCallDto, preNormalized = false): Promise<PlivoCallDocument> {
     const creds = await this.getCredentials(user.organizationId);
     if (!creds) throw new BadRequestException('Plivo is not connected yet. Ask an administrator to connect it in Settings → Calling.');
     const urls = this.webhookUrls();
@@ -216,7 +219,7 @@ export class PlivoService {
     const line = await this.lineModel.findOne({ organizationId: user.organizationId, userId: user.sub, active: true }).sort({ createdAt: 1 }).exec();
     if (!line) throw new BadRequestException('You do not have a Plivo line yet. Ask an administrator to link a Plivo number and your phone to you in Settings → Calling.');
 
-    const customerNumber = this.normalize(dto.customerNumber);
+    const customerNumber = preNormalized ? dto.customerNumber : this.normalize(dto.customerNumber);
     if (!customerNumber) throw new BadRequestException('Enter the customer number with its country code, e.g. 91 98765 43210.');
     if (customerNumber === line.agentPhone || customerNumber === line.plivoNumber) {
       throw new BadRequestException('That is your own number. Enter the customer’s number.');
@@ -285,6 +288,12 @@ export class PlivoService {
     const call = await this.callModel.findOne({ _id: id, organizationId: user.organizationId, ...(orgWide ? {} : { userId: user.sub }) }).exec();
     if (!call) throw new NotFoundException('Call not found.');
     return call;
+  }
+
+  hasCallInProgress(userId: string): Promise<boolean> {
+    return this.callModel
+      .exists({ userId, status: { $in: ['initiated', 'in_progress'] }, createdAt: { $gte: new Date(Date.now() - CALL_IN_PROGRESS_WINDOW_MS) } })
+      .then((doc) => !!doc);
   }
 
   mask(digits: string): string {

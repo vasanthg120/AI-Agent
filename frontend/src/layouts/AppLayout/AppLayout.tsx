@@ -17,18 +17,29 @@ import styles from './AppLayout.module.css';
 // is that section's own job, so it isn't animated twice. No exit animation:
 // the outgoing <Outlet /> already renders the next route, so fading it out
 // would only flash the new page twice.
+// Longest block delay (240ms) + the fade itself (400ms), with a little room.
+const ENTRANCE_MS = 700;
+
 function PageTransition({ scrollRef }: { scrollRef: RefObject<HTMLElement | null> }) {
   const location = useLocation();
   const section = location.pathname.split('/')[1] ?? '';
 
+  // The staggered block entrance (AppLayout.module.css) runs only while the
+  // page is opening; blocks that appear later just appear.
+  const [entering, setEntering] = useState(true);
+
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: 0 });
+    setEntering(true);
+    const timer = window.setTimeout(() => setEntering(false), ENTRANCE_MS);
+    return () => window.clearTimeout(timer);
   }, [section, scrollRef]);
 
   return (
     <motion.div
       key={section}
       className={styles.page}
+      data-entering={entering || undefined}
       // Opacity only — the upward movement comes from the per-block stagger
       // in AppLayout.module.css, so the page doesn't travel twice.
       initial={{ opacity: 0 }}

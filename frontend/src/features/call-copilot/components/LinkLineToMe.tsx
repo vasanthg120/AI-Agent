@@ -39,7 +39,10 @@ export function LinkLineToMe({ lines, userId, defaultCountryCode, onOpenSettings
       toast.success('Number linked to you — you can place calls now.');
       // Show the new line at once; the refetch then confirms whether this person can call.
       queryClient.setQueryData<PlivoConfig>(['plivo', 'config'], (old) => old && { ...old, lines: updated });
-      await queryClient.invalidateQueries({ queryKey: ['plivo'] });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['plivo'] }),
+        queryClient.invalidateQueries({ queryKey: ['calling'] }),
+      ]);
     } catch (err) {
       toast.error(extractErrorMessage(err));
     } finally {

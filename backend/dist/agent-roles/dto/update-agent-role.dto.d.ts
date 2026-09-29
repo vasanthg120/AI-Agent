@@ -1,16 +1,8 @@
-declare class AgentRoleKpiDto {
-    name: string;
-    description: string;
-}
+import { RoleCategory } from '../schemas/agent-role.schema';
 export declare class UpdateAgentRoleDto {
     name?: string;
-    department?: string;
+    department?: RoleCategory;
     description?: string;
-    goals?: string[];
-    responsibilities?: string[];
-    dailyTasks?: string[];
-    weeklyTasks?: string[];
-    kpis?: AgentRoleKpiDto[];
     systemPrompt?: string;
     status?: 'draft' | 'active';
     assignedDepartments?: string[];
@@ -18,4 +10,3 @@ export declare class UpdateAgentRoleDto {
     allowedTools?: string[];
     modelTier?: 'fast' | 'standard' | null;
 }
-export {};

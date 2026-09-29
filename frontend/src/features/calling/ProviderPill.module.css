@@ -1,0 +1,22 @@
+.pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 8px;
+  border-radius: var(--radius-full);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  line-height: 18px;
+  white-space: nowrap;
+}
+
+/* Plivo's green and Twilio's red, softened to fit the palette. */
+.plivo {
+  background: rgba(52, 211, 153, 0.14);
+  color: #0f8a5f;
+}
+
+.twilio {
+  background: rgba(242, 47, 70, 0.12);
+  color: #c81e3a;
+}

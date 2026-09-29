@@ -22,7 +22,9 @@ export function ApiTokensSection() {
   const [revoking, setRevoking] = useState(false);
 
   const load = () => {
-    setLoading(true);
+    // Only the first load shows the loading state; a refresh after a change keeps
+    // the current list on screen until the new one arrives (no flash).
+    if (!tokens?.length) setLoading(true);
     apiTokensService
       .list()
       .then(setTokens)

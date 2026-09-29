@@ -10,18 +10,8 @@ var __metadata = (this && this.__metadata) || function (k, v) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.UpdateAgentRoleDto = void 0;
-const class_transformer_1 = require("class-transformer");
 const class_validator_1 = require("class-validator");
-class AgentRoleKpiDto {
-}
-__decorate([
-    (0, class_validator_1.IsString)(),
-    __metadata("design:type", String)
-], AgentRoleKpiDto.prototype, "name", void 0);
-__decorate([
-    (0, class_validator_1.IsString)(),
-    __metadata("design:type", String)
-], AgentRoleKpiDto.prototype, "description", void 0);
+const agent_role_schema_1 = require("../schemas/agent-role.schema");
 class UpdateAgentRoleDto {
 }
 exports.UpdateAgentRoleDto = UpdateAgentRoleDto;
@@ -32,7 +22,7 @@ __decorate([
 ], UpdateAgentRoleDto.prototype, "name", void 0);
 __decorate([
     (0, class_validator_1.IsOptional)(),
-    (0, class_validator_1.IsString)(),
+    (0, class_validator_1.IsIn)(agent_role_schema_1.ROLE_CATEGORIES),
     __metadata("design:type", String)
 ], UpdateAgentRoleDto.prototype, "department", void 0);
 __decorate([
@@ -40,37 +30,6 @@ __decorate([
     (0, class_validator_1.IsString)(),
     __metadata("design:type", String)
 ], UpdateAgentRoleDto.prototype, "description", void 0);
-__decorate([
-    (0, class_validator_1.IsOptional)(),
-    (0, class_validator_1.IsArray)(),
-    (0, class_validator_1.IsString)({ each: true }),
-    __metadata("design:type", Array)
-], UpdateAgentRoleDto.prototype, "goals", void 0);
-__decorate([
-    (0, class_validator_1.IsOptional)(),
-    (0, class_validator_1.IsArray)(),
-    (0, class_validator_1.IsString)({ each: true }),
-    __metadata("design:type", Array)
-], UpdateAgentRoleDto.prototype, "responsibilities", void 0);
-__decorate([
-    (0, class_validator_1.IsOptional)(),
-    (0, class_validator_1.IsArray)(),
-    (0, class_validator_1.IsString)({ each: true }),
-    __metadata("design:type", Array)
-], UpdateAgentRoleDto.prototype, "dailyTasks", void 0);
-__decorate([
-    (0, class_validator_1.IsOptional)(),
-    (0, class_validator_1.IsArray)(),
-    (0, class_validator_1.IsString)({ each: true }),
-    __metadata("design:type", Array)
-], UpdateAgentRoleDto.prototype, "weeklyTasks", void 0);
-__decorate([
-    (0, class_validator_1.IsOptional)(),
-    (0, class_validator_1.IsArray)(),
-    (0, class_validator_1.ValidateNested)({ each: true }),
-    (0, class_transformer_1.Type)(() => AgentRoleKpiDto),
-    __metadata("design:type", Array)
-], UpdateAgentRoleDto.prototype, "kpis", void 0);
 __decorate([
     (0, class_validator_1.IsOptional)(),
     (0, class_validator_1.IsString)(),

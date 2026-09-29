@@ -5,6 +5,16 @@ declare const _default: () => {
     mongoUri: string;
     pythonAgentUrl: string;
     redisUrl: string;
+    plivo: {
+        publicBaseUrl: string;
+        apiBaseUrl: string;
+        defaultCountryCode: string;
+    };
+    twilio: {
+        publicBaseUrl: string;
+        apiBaseUrl: string;
+        defaultCountryCode: string;
+    };
     jwt: {
         secret: string | undefined;
         expiresIn: string;

@@ -13,7 +13,7 @@ var __param = (this && this.__param) || function (paramIndex, decorator) {
 };
 var IntegrationsService_1;
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.IntegrationsService = void 0;
+exports.IntegrationsService = exports.PLATFORM_PROVIDERS = void 0;
 const axios_1 = require("@nestjs/axios");
 const common_1 = require("@nestjs/common");
 const config_1 = require("@nestjs/config");
@@ -28,6 +28,7 @@ const provider_rules_1 = require("./provider-rules");
 const integration_credential_schema_1 = require("./schemas/integration-credential.schema");
 const CRM_PROVIDERS = new Set(['crm', 'prospectconnect']);
 const PROVIDER_SLUG = /^[a-z0-9][a-z0-9_-]{0,63}$/i;
+exports.PLATFORM_PROVIDERS = ['anthropic', 'sarvam', 'elevenlabs', 'groq'];
 let IntegrationsService = IntegrationsService_1 = class IntegrationsService {
     constructor(credentialModel, encryption, http, jwt, config) {
         this.credentialModel = credentialModel;

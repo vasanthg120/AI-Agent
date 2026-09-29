@@ -88,7 +88,9 @@ export const PROVIDER_RULES: Record<string, ProviderRule> = {
   groq: { label: 'Groq', allowedAuthTypes: ['apiKey'] },
   openai: { label: 'OpenAI', allowedAuthTypes: ['apiKey'] },
   stripe: { label: 'Stripe', allowedAuthTypes: ['apiKey'] },
-  twilio: { label: 'Twilio', allowedAuthTypes: ['apiKey'] },
+  // Twilio authenticates with HTTP Basic (Account SID : Auth Token). Connected
+  // from Settings -> Calling (international calls), which verifies the pair first.
+  twilio: { label: 'Twilio', allowedAuthTypes: ['basic', 'apiKey'] },
   // White-labeled on purpose: this is the connector id of the external CRM
   // provider used behind the scenes (see python-agent/app/integrations/
   // prospectconnect.py). Customers should only ever see "CRM", never the

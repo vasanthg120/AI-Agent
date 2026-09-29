@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { AnimatePresence, motion } from 'framer-motion';
@@ -43,7 +43,14 @@ interface PortalPosition {
   right?: number;
 }
 
-export function Dropdown({ trigger, items, align = 'left', placement = 'bottom', usePortal = false, className }: DropdownProps) {
+export function Dropdown({
+  trigger,
+  items,
+  align = 'left',
+  placement = 'bottom',
+  usePortal = false,
+  className,
+}: DropdownProps) {
   const [open, setOpen] = useState(false);
   const [portalPos, setPortalPos] = useState<PortalPosition | null>(null);
   const wrapperRef = useRef<HTMLDivElement>(null);
@@ -66,7 +73,10 @@ export function Dropdown({ trigger, items, align = 'left', placement = 'bottom',
     return () => document.removeEventListener('mousedown', listener);
   }, [open, usePortal]);
 
-  useEffect(() => {
+  // Layout effect, not effect: the position is measured before the browser
+  // paints, so the menu never shows for a frame at the wrong spot (or not at
+  // all) and then jumps into place.
+  useLayoutEffect(() => {
     if (!open || !usePortal || !wrapperRef.current) return;
     const updatePosition = () => {
       const rect = wrapperRef.current!.getBoundingClientRect();
@@ -90,6 +100,7 @@ export function Dropdown({ trigger, items, align = 'left', placement = 'bottom',
 
   const menuContent = (
     <motion.div
+      key="menu"
       ref={menuRef}
       role="menu"
       className={clsx(
@@ -127,9 +138,13 @@ export function Dropdown({ trigger, items, align = 'left', placement = 'bottom',
   return (
     <div className={clsx(styles.wrapper, className)} ref={wrapperRef}>
       <span onClick={() => setOpen((prev) => !prev)}>{trigger}</span>
-      <AnimatePresence>
-        {open && (usePortal ? (portalPos ? createPortal(menuContent, document.body) : null) : menuContent)}
-      </AnimatePresence>
+      {usePortal ? (
+        // AnimatePresence lives inside the portal so the menu's closing
+        // animation still plays (it can't track a portal as its child).
+        createPortal(<AnimatePresence>{open && portalPos && menuContent}</AnimatePresence>, document.body)
+      ) : (
+        <AnimatePresence>{open && menuContent}</AnimatePresence>
+      )}
     </div>
   );
 }

@@ -94,13 +94,12 @@ export function RecommendationsPanel({ recommendations }: { recommendations: Cal
 
   return (
     <div className={styles.wrapper}>
-      <AnimatePresence mode="wait" initial={false}>
+      <>
         <motion.article
           key={`${recommendations.length}-${latest.text}`}
           className={clsx(styles.hero, styles[meta.tone])}
           initial={{ opacity: 0, scale: 0.985 }}
           animate={{ opacity: 1, scale: 1 }}
-          exit={{ opacity: 0 }}
           transition={{ duration: 0.34, ease: EASE_OUT }}
         >
           <span className={styles.heroIcon} aria-hidden>
@@ -125,7 +124,7 @@ export function RecommendationsPanel({ recommendations }: { recommendations: Cal
             {copied ? <FiCheck /> : <FiCopy />}
           </button>
         </motion.article>
-      </AnimatePresence>
+      </>
 
       {earlier.length > 0 && (
         <div className={styles.earlier}>

@@ -1,0 +1,263 @@
+/* Shared form/notice pieces come from the Plivo page so both providers look alike. */
+.form {
+  composes: form from '../CallingSettings.module.css';
+}
+.fieldGrid {
+  composes: fieldGrid from '../CallingSettings.module.css';
+}
+.actions {
+  composes: actions from '../CallingSettings.module.css';
+}
+.hint {
+  composes: hint from '../CallingSettings.module.css';
+}
+.connectedRow {
+  composes: connectedRow from '../CallingSettings.module.css';
+}
+.connectedLabel {
+  composes: connectedLabel from '../CallingSettings.module.css';
+  flex-wrap: wrap;
+}
+.warning {
+  composes: warning from '../CallingSettings.module.css';
+}
+.urlBlock {
+  composes: urlBlock from '../CallingSettings.module.css';
+}
+.urlLabel {
+  composes: urlLabel from '../CallingSettings.module.css';
+}
+.selectField {
+  composes: selectField from '../CallingSettings.module.css';
+}
+.select {
+  composes: select from '../CallingSettings.module.css';
+}
+.iconButton {
+  composes: iconButton from '../CallingSettings.module.css';
+}
+.errorState {
+  composes: errorState from '../CallingSettings.module.css';
+}
+
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.warning code,
+.success code,
+.note code,
+.connectedLabel code {
+  padding: 1px 6px;
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-hover);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+}
+
+.success {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-md);
+  background: rgba(52, 211, 153, 0.12);
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+  line-height: 1.5;
+}
+
+.success > svg {
+  flex: none;
+  margin-top: 3px;
+  color: var(--color-success);
+}
+
+.disclosure {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--color-accent);
+  font: inherit;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.chevron {
+  transition: transform var(--duration-normal) var(--ease-out);
+}
+
+.chevronOpen {
+  transform: rotate(180deg);
+}
+
+.urls {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  overflow: hidden;
+}
+
+.empty {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-5);
+  border-radius: var(--radius-md);
+  border: 1px dashed var(--color-border-strong);
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+  text-align: center;
+}
+
+.empty strong {
+  color: var(--color-text-primary);
+}
+
+/* ---- numbers ---- */
+
+.numbers {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.number {
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border);
+  background: var(--color-bg-surface);
+  transition:
+    border-color var(--duration-normal) var(--ease-out),
+    box-shadow var(--duration-normal) var(--ease-out);
+}
+
+.numberLive {
+  border-color: rgba(52, 211, 153, 0.45);
+  box-shadow: 0 0 0 3px rgba(52, 211, 153, 0.08);
+}
+
+.numberRow {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+  padding: var(--space-3) var(--space-4);
+}
+
+.flag {
+  font-size: 24px;
+  line-height: 1;
+}
+
+.numberMain {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: min(180px, 100%);
+}
+
+.numberValue {
+  font-size: var(--text-md);
+  font-weight: 700;
+  color: var(--color-text-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+.numberMeta {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+}
+
+.lineControls {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+
+.ringsWho {
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.ringsWho strong {
+  color: var(--color-text-primary);
+}
+
+.lineFooter {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+  padding: var(--space-2) var(--space-4) var(--space-3);
+  border-top: 1px solid var(--color-border);
+}
+
+.inlineToggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+}
+
+.assign {
+  overflow: hidden;
+}
+
+.assignInner {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  border-top: 1px solid var(--color-border);
+  background: var(--color-bg-hover);
+}
+
+.note {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+  line-height: 1.5;
+}
+
+.note > svg {
+  flex: none;
+  margin-top: 3px;
+  color: var(--color-warning);
+}
+
+.orphans {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin-top: var(--space-4);
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+}
+
+.orphan {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-md);
+  background: rgba(251, 191, 36, 0.12);
+}
