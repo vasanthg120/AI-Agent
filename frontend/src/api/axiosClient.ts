@@ -3,6 +3,7 @@ import toast from 'react-hot-toast';
 import { env } from '@/config/env';
 import { queryClient } from '@/config/queryClient';
 import { useAuthStore } from '@/stores/authStore';
+import { useDataSourceStore } from '@/stores/dataSourceStore';
 
 export const axiosClient = axios.create({ baseURL: env.apiUrl });
 
@@ -14,6 +15,12 @@ axiosClient.interceptors.request.use((config) => {
   const token = useAuthStore.getState().accessToken;
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
+  }
+  // Which CRM data source to read (the backend scopes every CRM query to it).
+  // Nothing is sent for the organization's default source.
+  const selection = useDataSourceStore.getState().getSelection(useAuthStore.getState().user?.id);
+  if (selection !== 'default') {
+    config.headers['X-Data-Source'] = selection;
   }
   return config;
 });

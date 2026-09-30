@@ -19,6 +19,14 @@ exports.default = () => ({
         apiBaseUrl: (process.env.TWILIO_API_BASE_URL ?? 'https://api.twilio.com').trim().replace(/\/+$/, ''),
         defaultCountryCode: process.env.PLIVO_DEFAULT_COUNTRY_CODE ?? '91',
     },
+    dataSources: {
+        webhookBaseUrl: (process.env.PUBLIC_API_BASE_URL ?? process.env.CALLING_PUBLIC_BASE_URL ?? process.env.PLIVO_PUBLIC_BASE_URL ?? '')
+            .trim()
+            .replace(/\/+$/, ''),
+    },
+    gorilladash: {
+        apiBaseUrl: (process.env.GORILLADASH_API_BASE_URL ?? 'https://api.gorilladash.com').trim().replace(/\/+$/, ''),
+    },
     jwt: {
         secret: process.env.JWT_SECRET,
         expiresIn: process.env.JWT_EXPIRES_IN ?? '1d',

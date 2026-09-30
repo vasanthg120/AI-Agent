@@ -1,5 +1,6 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { Document, Types } from 'mongoose';
+import { dataSourceScopePlugin } from '../../data-sources/data-source-scope.plugin';
 
 export type ContactDocument = Contact & Document<Types.ObjectId>;
 
@@ -12,6 +13,17 @@ export type ContactDocument = Contact & Document<Types.ObjectId>;
 export class Contact {
   @Prop({ required: true, index: true })
   organizationId: string;
+
+  // The data source (CRM) this record came from — see
+  // data-sources/schemas/data-source.schema.ts. Reads are scoped by it
+  // automatically (dataSourceScopePlugin), so two CRMs' records never mix.
+  @Prop({ index: true })
+  dataSourceId?: string;
+
+  // The record's own id in the CRM it was synced from; absent for records
+  // created in HaiVE.
+  @Prop()
+  externalId?: string;
 
   @Prop()
   storeId?: string;
@@ -39,3 +51,6 @@ export class Contact {
 }
 
 export const ContactSchema = SchemaFactory.createForClass(Contact);
+ContactSchema.plugin(dataSourceScopePlugin);
+ContactSchema.index({ organizationId: 1, dataSourceId: 1 });
+ContactSchema.index({ organizationId: 1, dataSourceId: 1, externalId: 1 }, { unique: true, partialFilterExpression: { externalId: { $exists: true } } });

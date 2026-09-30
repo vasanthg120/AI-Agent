@@ -1,0 +1,57 @@
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.label {
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--color-text-secondary);
+}
+
+.boxes {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: clamp(6px, 2vw, 10px);
+}
+
+.box {
+  width: 100%;
+  min-width: 0;
+  height: clamp(48px, 13vw, 56px);
+  padding: 0;
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-input);
+  color: var(--color-text-primary);
+  font-family: var(--font-mono);
+  font-size: clamp(20px, 5.5vw, 24px);
+  font-weight: 700;
+  text-align: center;
+  caret-color: var(--brand-accent-primary);
+  transition:
+    border-color var(--duration-fast) var(--ease-out),
+    box-shadow var(--duration-fast) var(--ease-out),
+    background var(--duration-fast) var(--ease-out);
+}
+
+.box:focus {
+  outline: none;
+  border-color: var(--brand-accent-primary);
+  box-shadow: 0 0 0 4px var(--color-accent-muted);
+}
+
+.boxFilled {
+  border-color: var(--color-accent);
+  background: var(--color-bg-surface);
+}
+
+.boxError {
+  border-color: var(--color-danger);
+}
+
+.error {
+  font-size: var(--text-xs);
+  color: var(--color-danger);
+}

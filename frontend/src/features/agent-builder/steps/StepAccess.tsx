@@ -18,31 +18,58 @@ export function StepAccess({
   update: (patch: Partial<FormState>) => void;
   users: AdminUser[];
 }) {
-  const [providerStatus, setProviderStatus] = useState<Record<'outlook' | 'gmail' | 'crm', ProviderStatus | null>>({
+  const [providerStatus, setProviderStatus] = useState<
+    Record<'outlook' | 'gmail' | 'crm' | 'gorilladash' | 'zapier', ProviderStatus | null>
+  >({
     outlook: null,
     gmail: null,
     crm: null,
+    gorilladash: null,
+    zapier: null,
   });
 
   useEffect(() => {
     let cancelled = false;
-    void integrationsService.getOutlookStatus().then((s) => {
-      if (!cancelled) setProviderStatus((prev) => ({ ...prev, outlook: { connected: s.connected, label: s.email ?? '' } }));
-    }).catch(() => undefined);
-    void integrationsService.getGmailStatus().then((s) => {
-      if (!cancelled) setProviderStatus((prev) => ({ ...prev, gmail: { connected: s.connected, label: s.email ?? '' } }));
-    }).catch(() => undefined);
-    void integrationsService.getCredentialStatus('crm').then((s) => {
-      if (!cancelled) setProviderStatus((prev) => ({ ...prev, crm: { connected: s.connected, label: '' } }));
-    }).catch(() => undefined);
+    void integrationsService
+      .getOutlookStatus()
+      .then((s) => {
+        if (!cancelled)
+          setProviderStatus((prev) => ({ ...prev, outlook: { connected: s.connected, label: s.email ?? '' } }));
+      })
+      .catch(() => undefined);
+    void integrationsService
+      .getGmailStatus()
+      .then((s) => {
+        if (!cancelled)
+          setProviderStatus((prev) => ({ ...prev, gmail: { connected: s.connected, label: s.email ?? '' } }));
+      })
+      .catch(() => undefined);
+    void integrationsService
+      .getCredentialStatus('crm')
+      .then((s) => {
+        if (!cancelled) setProviderStatus((prev) => ({ ...prev, crm: { connected: s.connected, label: '' } }));
+      })
+      .catch(() => undefined);
+    void integrationsService
+      .getCredentialStatus('gorilladash')
+      .then((s) => {
+        if (!cancelled) setProviderStatus((prev) => ({ ...prev, gorilladash: { connected: s.connected, label: '' } }));
+      })
+      .catch(() => undefined);
+    void integrationsService
+      .getCredentialStatus('zapier')
+      .then((s) => {
+        if (!cancelled) setProviderStatus((prev) => ({ ...prev, zapier: { connected: s.connected, label: '' } }));
+      })
+      .catch(() => undefined);
     return () => {
       cancelled = true;
     };
   }, []);
 
-  const providersUsed = (systemId: string): ('outlook' | 'gmail' | 'crm')[] => {
+  const providersUsed = (systemId: string): ('outlook' | 'gmail' | 'crm' | 'gorilladash' | 'zapier')[] => {
     const system = TOOL_SYSTEMS.find((s) => s.id === systemId);
-    const set = new Set<'outlook' | 'gmail' | 'crm'>();
+    const set = new Set<'outlook' | 'gmail' | 'crm' | 'gorilladash' | 'zapier'>();
     system?.tools.forEach((t) => t.provider && set.add(t.provider));
     return [...set];
   };
@@ -77,7 +104,16 @@ export function StepAccess({
                   <div className={styles.chipRow}>
                     {providers.map((p) => {
                       const status = providerStatus[p];
-                      const label = p === 'crm' ? 'CRM' : p === 'outlook' ? 'Outlook' : 'Gmail';
+                      const label =
+                        p === 'crm'
+                          ? 'CRM'
+                          : p === 'outlook'
+                            ? 'Outlook'
+                            : p === 'gorilladash'
+                              ? 'Gorilla Dash'
+                              : p === 'zapier'
+                                ? 'Zapier'
+                                : 'Gmail';
                       if (!status) return null;
                       return (
                         <Badge key={p} variant={status.connected ? 'success' : 'neutral'}>
@@ -99,7 +135,9 @@ export function StepAccess({
       </p>
 
       <SectionCard title="Who can use this agent" icon={FiUsers}>
-        <p className={styles.stepIntro}>Leave both empty to make this agent visible to everyone in your organization.</p>
+        <p className={styles.stepIntro}>
+          Leave both empty to make this agent visible to everyone in your organization.
+        </p>
         <StringListEditor
           label="Visible to departments"
           items={form.assignedDepartments}

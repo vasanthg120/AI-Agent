@@ -1,5 +1,6 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { Document, Types } from 'mongoose';
+import { dataSourceScopePlugin } from '../../data-sources/data-source-scope.plugin';
 
 export type QuoteDocument = Quote & Document<Types.ObjectId>;
 
@@ -67,6 +68,12 @@ const QuoteLineItemSchema = SchemaFactory.createForClass(QuoteLineItem);
 export class Quote {
   @Prop({ required: true, index: true })
   organizationId: string;
+
+  // The data source (CRM) this record came from — see
+  // data-sources/schemas/data-source.schema.ts. Reads are scoped by it
+  // automatically (dataSourceScopePlugin), so two CRMs' records never mix.
+  @Prop({ index: true })
+  dataSourceId?: string;
 
   @Prop({ index: true })
   dealId?: string;
@@ -195,12 +202,11 @@ export class Quote {
 }
 
 export const QuoteSchema = SchemaFactory.createForClass(Quote);
+QuoteSchema.plugin(dataSourceScopePlugin);
+QuoteSchema.index({ organizationId: 1, dataSourceId: 1 });
 // Same partialFilterExpression pattern as Deal's index — see deal.schema.ts's
 // comment for why `sparse: true` alone is wrong for a compound unique index.
-QuoteSchema.index(
-  { organizationId: 1, externalId: 1 },
-  { unique: true, partialFilterExpression: { externalId: { $exists: true } } },
-);
+QuoteSchema.index({ organizationId: 1, dataSourceId: 1, externalId: 1 }, { unique: true, partialFilterExpression: { externalId: { $exists: true } } });
 // One email should draft at most one quote — same partialFilterExpression
 // idiom as externalId above (excludes every quote lacking this field from
 // the index entirely, rather than colliding on "missing").

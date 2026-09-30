@@ -15,6 +15,12 @@ declare const _default: () => {
         apiBaseUrl: string;
         defaultCountryCode: string;
     };
+    dataSources: {
+        webhookBaseUrl: string;
+    };
+    gorilladash: {
+        apiBaseUrl: string;
+    };
     jwt: {
         secret: string | undefined;
         expiresIn: string;

@@ -37,6 +37,7 @@ export const ROUTES = {
   settingsNotifications: '/settings/notifications',
   settingsVoice: '/settings/voice',
   settingsCalling: '/settings/calling',
+  settingsDataSources: '/settings/data-sources',
   settingsSecurity: '/settings/security',
   settingsAgentRoles: '/settings/agent-roles',
   // Full-page Agent Builder wizard — deliberately siblings of, not children

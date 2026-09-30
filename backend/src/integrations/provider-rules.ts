@@ -86,6 +86,16 @@ export const PROVIDER_RULES: Record<string, ProviderRule> = {
   // Settings -> Calling, which verifies the pair before saving it.
   plivo: { label: 'Plivo', allowedAuthTypes: ['basic'] },
   groq: { label: 'Groq', allowedAuthTypes: ['apiKey'] },
+  // Gorilla Dash authenticates with an API key + secret pair (two headers);
+  // stored as basic (key = username, secret = password) by GorillaDashService,
+  // which verifies the pair against /api/v1/ping before saving it.
+  gorilladash: {
+    label: 'Gorilla Dash',
+    allowedAuthTypes: ['basic', 'customHeaders'],
+  },
+  // Zapier MCP: the organization's Zapier MCP server connection token, saved
+  // by ZapierService only after Zapier accepted it.
+  zapier: { label: 'Zapier', allowedAuthTypes: ['bearer'] },
   openai: { label: 'OpenAI', allowedAuthTypes: ['apiKey'] },
   stripe: { label: 'Stripe', allowedAuthTypes: ['apiKey'] },
   // Twilio authenticates with HTTP Basic (Account SID : Auth Token). Connected

@@ -1,0 +1,63 @@
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.connected {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-md);
+  background: rgba(52, 211, 153, 0.12);
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+}
+
+.connected > svg {
+  flex: none;
+  margin-top: 3px;
+  color: var(--color-success);
+}
+
+.connected div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.connected strong {
+  color: var(--color-text-primary);
+}
+
+.connected code {
+  padding: 1px 6px;
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-surface);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+}
+
+.note {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  margin: 0;
+  font-size: var(--text-sm);
+  line-height: 1.55;
+  color: var(--color-text-muted);
+}
+
+.note svg {
+  flex: none;
+  margin-top: 3px;
+  color: var(--color-accent);
+}
+
+.actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}

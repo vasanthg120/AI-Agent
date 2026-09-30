@@ -1,6 +1,7 @@
 import { useMemo } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import clsx from 'clsx';
+import { DataSourceSwitcher } from '@/components/data-sources/DataSourceSwitcher';
 import { motion } from 'framer-motion';
 import { FiBell, FiSidebar, FiMenu, FiCommand, FiChevronRight } from 'react-icons/fi';
 import { IconButton, Avatar } from '@/components/ui';
@@ -72,6 +73,8 @@ export function TopBar({ onMenuClick }: TopBarProps) {
         </span>
       </div>
       <div className={styles.right}>
+        <DataSourceSwitcher />
+
         <button type="button" className={styles.quickActions} onClick={() => setCommandPaletteOpen(true)}>
           <FiCommand />
           <span className={styles.quickActionsLabel}>Quick actions</span>

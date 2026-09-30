@@ -1,4 +1,6 @@
 import { HttpService } from '@nestjs/axios';
+import { DataSourcesService } from '../data-sources/data-sources.service';
+import { CRM_INTEGRATION_PROVIDERS } from '../data-sources/provider-catalog';
 import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
@@ -11,16 +13,15 @@ import { AuthCredentials, AuthType, buildAuthHeaders, requiredCredentialFields }
 import { ConnectIntegrationDto } from './dto/connect-integration.dto';
 import { TestConnectionDto } from './dto/test-connection.dto';
 import { getProviderRule, ProviderRule } from './provider-rules';
-import {
-  IntegrationCredential,
-  IntegrationCredentialDocument,
-} from './schemas/integration-credential.schema';
+import { IntegrationCredential, IntegrationCredentialDocument } from './schemas/integration-credential.schema';
 
 // The two provider slugs a connected CRM is ever stored under (the fixed
 // 'crm' card's legacy apiKey path, or the generic Custom Integration flow
 // using the external CRM's own connector id) — see prospectconnect.py's
 // resolve_credentials for why both are checked everywhere else too.
-const CRM_PROVIDERS = new Set(['crm', 'prospectconnect']);
+// Every CRM HaiVE can take data from (the customised CRM, HubSpot,
+// Salesforce, Zoho…) — see data-sources/provider-catalog.ts.
+const CRM_PROVIDERS = new Set(CRM_INTEGRATION_PROVIDERS);
 
 const PROVIDER_SLUG = /^[a-z0-9][a-z0-9_-]{0,63}$/i;
 
@@ -57,6 +58,7 @@ export class IntegrationsService {
     private http: HttpService,
     private jwt: JwtService,
     private config: ConfigService,
+    private dataSources: DataSourcesService,
   ) {
     this.pythonAgentUrl = this.config.get<string>('pythonAgentUrl') ?? 'http://localhost:8000';
   }
@@ -94,14 +96,19 @@ export class IntegrationsService {
    * 10 minutes of an apparently-connected-but-empty dashboard, which is
    * exactly the "doesn't fetch automatically" complaint). Best-effort and
    * never blocks/fails the connect response — mirrors business-profile.
-   * service.ts's post-save Qdrant sync call. Scoped to 'crm'/'prospectconnect'
-   * only; every other provider (Anthropic, Stripe, a customer's own custom
-   * REST API, ...) has nothing to sync. */
+   * service.ts's post-save Qdrant sync call. Scoped to CRM providers (see
+   * data-sources/provider-catalog.ts); every other provider (Anthropic,
+   * Stripe, a customer's own custom REST API, ...) has nothing to sync. */
   private triggerCrmSyncIfApplicable(organizationId: string, provider: string): void {
-    if (!CRM_PROVIDERS.has(provider)) return;
-    this.syncCrmNow(organizationId).catch((err) => {
-      this.logger.error(`Immediate CRM sync failed for org ${organizationId}: ${(err as Error).message}`);
-    });
+    if (!CRM_PROVIDERS.has(provider.toLowerCase())) return;
+    // The CRM becomes its own data source first, so what the sync writes is
+    // tagged with it from the very first record.
+    this.dataSources
+      .reconcile(organizationId)
+      .then(() => this.syncCrmNow(organizationId))
+      .catch((err) => {
+        this.logger.error(`Immediate CRM sync failed for org ${organizationId}: ${(err as Error).message}`);
+      });
   }
 
   /** Legacy shape, request/response byte-for-byte unchanged: apiKey (+
@@ -109,12 +116,7 @@ export class IntegrationsService {
    * The stored value is now encrypted at rest (was plaintext) — every read
    * site goes through decryptStoredApiKey() below, which also transparently
    * upgrades any row still holding an old plaintext value. */
-  async connect(
-    organizationId: string,
-    provider: string,
-    apiKey: string,
-    baseUrl?: string,
-  ): Promise<{ connected: true; maskedKey: string; baseUrl?: string }> {
+  async connect(organizationId: string, provider: string, apiKey: string, baseUrl?: string): Promise<{ connected: true; maskedKey: string; baseUrl?: string }> {
     this.assertAllowed(provider);
     await this.credentialModel.findOneAndUpdate(
       { organizationId, provider },
@@ -209,9 +211,7 @@ export class IntegrationsService {
    * (those already have their own fixed cards) so this only surfaces
    * providers the user actually typed in themselves. */
   async listCustom(organizationId: string): Promise<IntegrationSummary[]> {
-    const docs = await this.credentialModel
-      .find({ organizationId, provider: { $nin: ['anthropic', 'crm'] } })
-      .sort({ createdAt: -1 });
+    const docs = await this.credentialModel.find({ organizationId, provider: { $nin: ['anthropic', 'crm'] } }).sort({ createdAt: -1 });
     return docs.map((doc) => ({
       provider: doc.provider,
       label: getProviderRule(doc.provider).label,
@@ -226,6 +226,9 @@ export class IntegrationsService {
   async disconnect(organizationId: string, provider: string): Promise<void> {
     this.assertAllowed(provider);
     await this.credentialModel.deleteOne({ organizationId, provider });
+    // A disconnected CRM's data source is kept (its history stays viewable)
+    // but marked disconnected and never read by default or unified views.
+    if (CRM_PROVIDERS.has(provider.toLowerCase())) await this.dataSources.reconcile(organizationId);
   }
 
   /** Pings the provider's baseUrl (+ optional healthCheckPath) with the
@@ -233,11 +236,7 @@ export class IntegrationsService {
    * Never throws — every failure mode (DNS, timeout, 401/403, 5xx) is
    * translated into a friendly {ok:false, message} instead of a raw HTTP/
    * network error, per the "never expose raw errors" requirement. */
-  async testConnection(
-    organizationId: string,
-    provider: string,
-    dto: TestConnectionDto,
-  ): Promise<{ ok: boolean; message: string }> {
+  async testConnection(organizationId: string, provider: string, dto: TestConnectionDto): Promise<{ ok: boolean; message: string }> {
     let baseUrl = dto.baseUrl;
     let healthCheckPath = dto.healthCheckPath;
     let authType = dto.authType;
@@ -323,7 +322,7 @@ export class IntegrationsService {
     const axiosErr = err as { response?: { status?: number }; code?: string };
     const status = axiosErr.response?.status;
     if (status === 401) return 'The provider rejected these credentials (401 Unauthorized).';
-    if (status === 403) return 'These credentials don\'t have permission to access this resource (403 Forbidden).';
+    if (status === 403) return "These credentials don't have permission to access this resource (403 Forbidden).";
     if (status === 404) return 'Reached the server, but that URL/endpoint was not found (404).';
     if (status && status >= 500) return `The provider's server had an error (HTTP ${status}).`;
     if (axiosErr.code === 'ECONNABORTED') return 'The connection timed out — check the base URL.';
@@ -352,10 +351,7 @@ export class IntegrationsService {
       throw new BadRequestException(rule.note ?? `"${provider}" has its own dedicated connect flow.`);
     }
     if (authType && !rule.allowedAuthTypes.includes(authType)) {
-      throw new BadRequestException(
-        rule.note ??
-          `${rule.label} only supports: ${rule.allowedAuthTypes.join(', ') || 'a dedicated flow not yet built here'}.`,
-      );
+      throw new BadRequestException(rule.note ?? `${rule.label} only supports: ${rule.allowedAuthTypes.join(', ') || 'a dedicated flow not yet built here'}.`);
     }
   }
 

@@ -15,6 +15,8 @@ var IntegrationsService_1;
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.IntegrationsService = exports.PLATFORM_PROVIDERS = void 0;
 const axios_1 = require("@nestjs/axios");
+const data_sources_service_1 = require("../data-sources/data-sources.service");
+const provider_catalog_1 = require("../data-sources/provider-catalog");
 const common_1 = require("@nestjs/common");
 const config_1 = require("@nestjs/config");
 const jwt_1 = require("@nestjs/jwt");
@@ -26,16 +28,17 @@ const encryption_service_1 = require("../common/encryption/encryption.service");
 const auth_methods_1 = require("./auth-methods");
 const provider_rules_1 = require("./provider-rules");
 const integration_credential_schema_1 = require("./schemas/integration-credential.schema");
-const CRM_PROVIDERS = new Set(['crm', 'prospectconnect']);
+const CRM_PROVIDERS = new Set(provider_catalog_1.CRM_INTEGRATION_PROVIDERS);
 const PROVIDER_SLUG = /^[a-z0-9][a-z0-9_-]{0,63}$/i;
 exports.PLATFORM_PROVIDERS = ['anthropic', 'sarvam', 'elevenlabs', 'groq'];
 let IntegrationsService = IntegrationsService_1 = class IntegrationsService {
-    constructor(credentialModel, encryption, http, jwt, config) {
+    constructor(credentialModel, encryption, http, jwt, config, dataSources) {
         this.credentialModel = credentialModel;
         this.encryption = encryption;
         this.http = http;
         this.jwt = jwt;
         this.config = config;
+        this.dataSources = dataSources;
         this.logger = new common_1.Logger(IntegrationsService_1.name);
         this.pythonAgentUrl = this.config.get('pythonAgentUrl') ?? 'http://localhost:8000';
     }
@@ -45,9 +48,12 @@ let IntegrationsService = IntegrationsService_1 = class IntegrationsService {
         return data;
     }
     triggerCrmSyncIfApplicable(organizationId, provider) {
-        if (!CRM_PROVIDERS.has(provider))
+        if (!CRM_PROVIDERS.has(provider.toLowerCase()))
             return;
-        this.syncCrmNow(organizationId).catch((err) => {
+        this.dataSources
+            .reconcile(organizationId)
+            .then(() => this.syncCrmNow(organizationId))
+            .catch((err) => {
             this.logger.error(`Immediate CRM sync failed for org ${organizationId}: ${err.message}`);
         });
     }
@@ -104,9 +110,7 @@ let IntegrationsService = IntegrationsService_1 = class IntegrationsService {
         return { connected: true, maskedKey: this.mask(this.decryptStoredApiKey(doc.apiKey)), baseUrl: doc.baseUrl };
     }
     async listCustom(organizationId) {
-        const docs = await this.credentialModel
-            .find({ organizationId, provider: { $nin: ['anthropic', 'crm'] } })
-            .sort({ createdAt: -1 });
+        const docs = await this.credentialModel.find({ organizationId, provider: { $nin: ['anthropic', 'crm'] } }).sort({ createdAt: -1 });
         return docs.map((doc) => ({
             provider: doc.provider,
             label: (0, provider_rules_1.getProviderRule)(doc.provider).label,
@@ -120,6 +124,8 @@ let IntegrationsService = IntegrationsService_1 = class IntegrationsService {
     async disconnect(organizationId, provider) {
         this.assertAllowed(provider);
         await this.credentialModel.deleteOne({ organizationId, provider });
+        if (CRM_PROVIDERS.has(provider.toLowerCase()))
+            await this.dataSources.reconcile(organizationId);
     }
     async testConnection(organizationId, provider, dto) {
         let baseUrl = dto.baseUrl;
@@ -193,7 +199,7 @@ let IntegrationsService = IntegrationsService_1 = class IntegrationsService {
         if (status === 401)
             return 'The provider rejected these credentials (401 Unauthorized).';
         if (status === 403)
-            return 'These credentials don\'t have permission to access this resource (403 Forbidden).';
+            return "These credentials don't have permission to access this resource (403 Forbidden).";
         if (status === 404)
             return 'Reached the server, but that URL/endpoint was not found (404).';
         if (status && status >= 500)
@@ -217,8 +223,7 @@ let IntegrationsService = IntegrationsService_1 = class IntegrationsService {
             throw new common_1.BadRequestException(rule.note ?? `"${provider}" has its own dedicated connect flow.`);
         }
         if (authType && !rule.allowedAuthTypes.includes(authType)) {
-            throw new common_1.BadRequestException(rule.note ??
-                `${rule.label} only supports: ${rule.allowedAuthTypes.join(', ') || 'a dedicated flow not yet built here'}.`);
+            throw new common_1.BadRequestException(rule.note ?? `${rule.label} only supports: ${rule.allowedAuthTypes.join(', ') || 'a dedicated flow not yet built here'}.`);
         }
     }
     mask(apiKey) {
@@ -243,6 +248,7 @@ exports.IntegrationsService = IntegrationsService = IntegrationsService_1 = __de
         encryption_service_1.EncryptionService,
         axios_1.HttpService,
         jwt_1.JwtService,
-        config_1.ConfigService])
+        config_1.ConfigService,
+        data_sources_service_1.DataSourcesService])
 ], IntegrationsService);
 //# sourceMappingURL=integrations.service.js.map

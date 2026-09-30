@@ -1,5 +1,6 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { Document, Types } from 'mongoose';
+import { dataSourceScopePlugin } from '../../data-sources/data-source-scope.plugin';
 
 export type DealDocument = Deal & Document<Types.ObjectId>;
 
@@ -10,6 +11,12 @@ export type DealDocument = Deal & Document<Types.ObjectId>;
 export class Deal {
   @Prop({ required: true, index: true })
   organizationId: string;
+
+  // The data source (CRM) this record came from — see
+  // data-sources/schemas/data-source.schema.ts. Reads are scoped by it
+  // automatically (dataSourceScopePlugin), so two CRMs' records never mix.
+  @Prop({ index: true })
+  dataSourceId?: string;
 
   @Prop()
   storeId?: string;
@@ -137,6 +144,8 @@ export class Deal {
 }
 
 export const DealSchema = SchemaFactory.createForClass(Deal);
+DealSchema.plugin(dataSourceScopePlugin);
+DealSchema.index({ organizationId: 1, dataSourceId: 1 });
 // One native Mongo doc per external deal per org. `sparse` alone does NOT
 // achieve this for a COMPOUND index — Mongo only excludes a document from a
 // sparse compound index when ALL of its fields are missing, and
@@ -146,13 +155,7 @@ export const DealSchema = SchemaFactory.createForClass(Deal);
 // dormant since Phase 2). `partialFilterExpression` is the correct
 // primitive: it excludes any document lacking externalId from the index
 // entirely, regardless of what else is missing.
-DealSchema.index(
-  { organizationId: 1, externalId: 1 },
-  { unique: true, partialFilterExpression: { externalId: { $exists: true } } },
-);
+DealSchema.index({ organizationId: 1, dataSourceId: 1, externalId: 1 }, { unique: true, partialFilterExpression: { externalId: { $exists: true } } });
 // Powers deal-owner-mapping.service.ts's "distinct unmapped external
 // owners" listing and its bulk-apply-on-map update.
-DealSchema.index(
-  { organizationId: 1, externalOwnerRef: 1 },
-  { partialFilterExpression: { externalOwnerRef: { $exists: true } } },
-);
+DealSchema.index({ organizationId: 1, externalOwnerRef: 1 }, { partialFilterExpression: { externalOwnerRef: { $exists: true } } });

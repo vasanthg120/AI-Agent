@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 
 from app.integrations.crm_mongo_sync import sync_all_orgs as sync_crm_deals_to_mongo
 from app.integrations.crm_mongo_sync import sync_all_quote_orgs as sync_crm_quotes_to_mongo
-from app.integrations.crm_mongo_sync import sync_deals_for_org, sync_quotes_for_org
+from app.integrations.crm_mongo_sync import sync_org, sync_source_by_id
 from app.rag.business_sync import sync_all
 from app.security import get_current_user
 
@@ -35,6 +35,22 @@ def run_crm_sync_for_org(user: dict = Depends(get_current_user)):
     organization_id = user.get("organizationId")
     if not organization_id:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Token has no organizationId")
-    deals_synced = sync_deals_for_org(organization_id)
-    quotes_synced = sync_quotes_for_org(organization_id)
-    return {"dealsSynced": deals_synced, "quotesSynced": quotes_synced}
+    results = sync_org(organization_id)
+    return {
+        "dealsSynced": sum(int(r.get("deals", 0)) for r in results.values()),
+        "quotesSynced": sum(int(r.get("quotes", 0)) for r in results.values()),
+        "sources": results,
+    }
+
+
+# "Sync now" for one data source (Settings -> Data Sources). The source must
+# belong to the caller's own organization.
+@router.post("/sync/crm/run-for-source")
+def run_crm_sync_for_source(body: dict, user: dict = Depends(get_current_user)):
+    organization_id = user.get("organizationId")
+    if not organization_id:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Token has no organizationId")
+    data_source_id = str((body or {}).get("dataSourceId") or "")
+    if not data_source_id:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "dataSourceId is required")
+    return sync_source_by_id(organization_id, data_source_id)

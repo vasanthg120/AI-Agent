@@ -12,6 +12,7 @@ import {
   FiPercent,
   FiLink2,
   FiClock,
+  FiDatabase,
 } from 'react-icons/fi';
 import { ROUTES } from '@/constants/routes';
 
@@ -105,6 +106,19 @@ export const SETTINGS_NAV: SettingsNavGroup[] = [
         hint: 'Connected apps & data',
         summary: 'Connect the tools your business already runs on so the AI can work with real data.',
         keywords: ['outlook', 'crm', 'connect', 'apps', 'oauth'],
+      },
+      // Each connected CRM as its own data source — mappings, capabilities,
+      // sync state and which one the dashboards show by default.
+      {
+        id: 'data-sources',
+        label: 'Data Sources',
+        icon: <FiDatabase />,
+        path: ROUTES.settingsDataSources,
+        hint: 'CRMs, mappings & sync',
+        summary:
+          'Each connected CRM is kept separate: choose the default, map its fields to HaiVE’s, and see what it can and can’t provide.',
+        keywords: ['crm', 'hubspot', 'salesforce', 'zoho', 'mapping', 'fields', 'sync', 'source', 'unified'],
+        requireRoles: ['owner', 'admin'],
       },
       // Record phone calls through Plivo into Call Library — connecting the account
       // and linking numbers to people is an owner/admin job; everyone else just

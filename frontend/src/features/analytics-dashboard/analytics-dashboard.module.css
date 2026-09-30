@@ -228,3 +228,13 @@
   overflow-y: auto;
   padding: var(--space-4);
 }
+
+/* Where this tab's figures come from, and the Customize button. */
+.sourceStrip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+  margin-top: var(--space-2);
+}

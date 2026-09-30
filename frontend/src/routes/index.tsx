@@ -68,6 +68,9 @@ const NotificationSettings = lazy(() =>
 const VoiceSettings = lazy(() =>
   import('@/features/settings/tabs/VoiceSettings').then((m) => ({ default: m.VoiceSettings })),
 );
+const DataSourcesSettings = lazy(() =>
+  import('@/features/settings/tabs/DataSourcesSettings').then((m) => ({ default: m.DataSourcesSettings })),
+);
 const CallingSettings = lazy(() =>
   import('@/features/settings/tabs/CallingSettings').then((m) => ({ default: m.CallingSettings })),
 );
@@ -116,7 +119,7 @@ export function AppRoutes() {
           <Route
             path={ROUTES.login}
             element={
-              <AuthLayout title="Welcome back" subtitle="Sign in to your enterprise AI workspace">
+              <AuthLayout title="Welcome back" subtitle="Sign in to your HaiVE workspace.">
                 <LoginPage />
               </AuthLayout>
             }
@@ -124,7 +127,7 @@ export function AppRoutes() {
           <Route
             path={ROUTES.register}
             element={
-              <AuthLayout title="Create your workspace" subtitle="Set up your enterprise AI account">
+              <AuthLayout title="Create your workspace" subtitle="Three quick steps — it takes about a minute." wide>
                 <RegisterPage />
               </AuthLayout>
             }
@@ -132,7 +135,7 @@ export function AppRoutes() {
           <Route
             path={ROUTES.forgotPassword}
             element={
-              <AuthLayout title="Reset your password" subtitle="We'll send a verification code to your email">
+              <AuthLayout title="Reset your password" subtitle="We’ll email you a code so you can set a new one.">
                 <ForgotPasswordPage />
               </AuthLayout>
             }
@@ -198,6 +201,7 @@ export function AppRoutes() {
                 </Route>
                 <Route element={<RequireRole role={['owner', 'admin']} />}>
                   <Route path="calling" element={<CallingSettings />} />
+                  <Route path="data-sources" element={<DataSourcesSettings />} />
                   <Route path="royalty-rules" element={<RoyaltyRulesSettings />} />
                   <Route path="email-sla" element={<EmailSlaSettings />} />
                 </Route>

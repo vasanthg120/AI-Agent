@@ -52,7 +52,4 @@ ProductSchema.index({ organizationId: 1, name: 1 });
 // comments for the real production bug that convention avoids). Two
 // products in the same org with no sku must both be allowed; two with the
 // same sku must not.
-ProductSchema.index(
-  { organizationId: 1, sku: 1 },
-  { unique: true, partialFilterExpression: { sku: { $exists: true } } },
-);
+ProductSchema.index({ organizationId: 1, sku: 1 }, { unique: true, partialFilterExpression: { sku: { $exists: true } } });

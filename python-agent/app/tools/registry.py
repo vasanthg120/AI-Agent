@@ -12,6 +12,7 @@ from app.tools import (
     crm_note_tool,
     crm_product_tool,
     crm_quote_tool,
+    crm_source_records_tool,
     crm_tag_tool,
     crm_tool,
     database_tool,
@@ -19,12 +20,15 @@ from app.tools import (
     email_tool,
     employee_tool,
     gmail_tool,
+    gorilladash_action_tool,
+    gorilladash_lookup_tool,
     integration_capabilities_tool,
     integration_execute_tool,
     memory_tool,
     outlook_tool,
     search_tool,
     whatsapp_tool,
+    zapier_tool,
 )
 
 _MODULES = [
@@ -48,6 +52,10 @@ _MODULES = [
     memory_tool,
     integration_capabilities_tool,
     integration_execute_tool,
+    gorilladash_lookup_tool,
+    gorilladash_action_tool,
+    crm_source_records_tool,
+    zapier_tool,
 ]
 
 TOOL_DEFINITIONS = [m.SPEC for m in _MODULES]

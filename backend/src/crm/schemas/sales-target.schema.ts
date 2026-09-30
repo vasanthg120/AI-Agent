@@ -32,7 +32,4 @@ export const SalesTargetSchema = SchemaFactory.createForClass(SalesTarget);
 // One target per (org, scope, storeId/userId, period) — storeId/userId are
 // both absent for scope:'org', so this also correctly rejects two org-level
 // targets for the same period.
-SalesTargetSchema.index(
-  { organizationId: 1, scope: 1, storeId: 1, userId: 1, period: 1 },
-  { unique: true },
-);
+SalesTargetSchema.index({ organizationId: 1, scope: 1, storeId: 1, userId: 1, period: 1 }, { unique: true });

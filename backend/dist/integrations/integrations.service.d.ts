@@ -1,4 +1,5 @@
 import { HttpService } from '@nestjs/axios';
+import { DataSourcesService } from '../data-sources/data-sources.service';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { Model, Types } from 'mongoose';
@@ -27,9 +28,10 @@ export declare class IntegrationsService {
     private http;
     private jwt;
     private config;
+    private dataSources;
     private readonly logger;
     private readonly pythonAgentUrl;
-    constructor(credentialModel: Model<IntegrationCredentialDocument>, encryption: EncryptionService, http: HttpService, jwt: JwtService, config: ConfigService);
+    constructor(credentialModel: Model<IntegrationCredentialDocument>, encryption: EncryptionService, http: HttpService, jwt: JwtService, config: ConfigService, dataSources: DataSourcesService);
     syncCrmNow(organizationId: string): Promise<{
         dealsSynced: number;
         quotesSynced: number;

@@ -63,6 +63,29 @@ def resolve_credentials(organization_id: str | None = None, user_id: str = "") -
     paths (/contact/..., /deal/..., /note/..., ...) are appended by each
     tool, regardless of whether the stored base URL includes a sub-path.
     """
+    external = resolve_external_credentials(organization_id)
+    if external:
+        return external
+
+    # Tier 3 — the static .env CRM — is only for callers with no organization
+    # (as documented above). Using it for an organization that simply hasn't
+    # connected a CRM would show that organization another company's CRM data.
+    if not organization_id and settings.crm_base_url and settings.crm_api_key:
+        parsed = urlparse(settings.crm_base_url)
+        return f"{parsed.scheme}://{parsed.netloc}", settings.crm_api_key
+
+    if organization_id:
+        token = mint_service_token(user_id, organization_id)
+        return f"{settings.backend_url}/crm", f"Bearer {token}"
+
+    return "", ""
+
+
+def resolve_external_credentials(organization_id: str | None) -> tuple[str, str] | None:
+    """Tiers 1-2 only: this organization's own connection to the customised
+    CRM, or None. The CRM sync uses this directly — it must never fall back to
+    HaiVE's own backend (that would copy HaiVE's records into the CRM's data
+    source) or to another organization's .env CRM."""
     base_url = integration_store.get_base_url("crm", organization_id)
     api_key = integration_store.get_api_key("crm", organization_id)
     if base_url and api_key:
@@ -122,15 +145,7 @@ def resolve_credentials(organization_id: str | None = None, user_id: str = "") -
             parsed = urlparse(creds["baseUrl"])
             return f"{parsed.scheme}://{parsed.netloc}", auth_header
 
-    if settings.crm_base_url and settings.crm_api_key:
-        parsed = urlparse(settings.crm_base_url)
-        return f"{parsed.scheme}://{parsed.netloc}", settings.crm_api_key
-
-    if organization_id:
-        token = mint_service_token(user_id, organization_id)
-        return f"{settings.backend_url}/crm", f"Bearer {token}"
-
-    return "", ""
+    return None
 
 
 def post_json(api_root: str, api_key: str, path: str, payload: dict):

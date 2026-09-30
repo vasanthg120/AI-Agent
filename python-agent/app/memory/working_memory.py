@@ -32,6 +32,8 @@ _READ_ONLY_TOOLS = {
     "search_documents",
     "search_business_context",
     "web_search",
+    "gorilladash_lookup",
+    "crm_source_records",
 }
 
 # crm_contact and calendar_tool mix read and write actions in one tool

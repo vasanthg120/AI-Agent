@@ -3,8 +3,9 @@ import { useNavigate } from 'react-router-dom';
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { motion } from 'framer-motion';
 import clsx from 'clsx';
-import { FiAward, FiGrid, FiLayers, FiMail, FiPieChart, FiTarget, FiTruck, FiUsers } from 'react-icons/fi';
-import { Avatar, EmptyState, SectionCard, Skeleton, Tabs } from '@/components/ui';
+import { FiAward, FiGrid, FiLayers, FiMail, FiPieChart, FiSliders, FiTarget, FiTruck, FiUsers } from 'react-icons/fi';
+import { Avatar, Button, EmptyState, SectionCard, Skeleton, Tabs } from '@/components/ui';
+import { MetricGate, SourceLine } from '@/components/data-sources/MetricGate';
 import type { DateRange } from '@/components/ui';
 import { useAuthStore } from '@/stores/authStore';
 import { ROUTES } from '@/constants/routes';
@@ -32,6 +33,7 @@ import { DealStatusDistributionCard } from './components/DealStatusDistributionC
 import { TeamPerformanceSummaryCards } from './components/TeamPerformanceSummaryCards';
 import { EmailResponseSlaTable } from './components/EmailResponseSlaTable';
 import { SlaDashboardSection } from './components/SlaDashboardSection';
+import { CustomizeDashboardModal } from './components/CustomizeDashboardModal';
 import styles from './analytics-dashboard.module.css';
 
 // Local-calendar-date formatter — deliberately NOT `.toISOString().slice(0,10)`,
@@ -70,6 +72,15 @@ function defaultRange(): DateRange {
 // (all three are "what happened to this quote" questions). Vendor
 // Profitability stays as its own tab — genuinely different sensitivity
 // tier, not redundant with anything else here.
+// Which metrics each tab shows — for the "Source:" line under the tabs.
+const TAB_METRICS: Record<string, string[]> = {
+  overview: ['revenue', 'convertedDeals', 'activePipeline', 'outstandingDues'],
+  pipeline: ['activePipeline', 'totalDeals', 'quoteAcceptance'],
+  team: ['teamPerformance', 'emailsResponded'],
+  customers: ['customers', 'emailsSent', 'missedEmails'],
+  'bi-vendor': ['vendorProfitability'],
+};
+
 const TAB_ITEMS = [
   { id: 'overview', label: 'Overview', icon: <FiGrid /> },
   { id: 'pipeline', label: 'Pipeline & Quotes', icon: <FiLayers /> },
@@ -118,6 +129,7 @@ export function AnalyticsDashboardPage() {
   const dateFrom = range.dateFrom ?? defaultRange().dateFrom!;
   const dateTo = range.dateTo ?? defaultRange().dateTo!;
   const [activeTab, setActiveTab] = useState('overview');
+  const [customizeOpen, setCustomizeOpen] = useState(false);
   const [stores, setStores] = useState<{ id: string; name: string }[]>([]);
   const [drillDown, setDrillDown] = useState<DrillDownTarget | null>(null);
 
@@ -190,7 +202,11 @@ export function AnalyticsDashboardPage() {
       }
 
       const result = await quotesService.listFiltered(
-        { dateFrom, dateTo, ...(drillDown.clientApprovalStatus ? { clientApprovalStatus: drillDown.clientApprovalStatus } : {}) },
+        {
+          dateFrom,
+          dateTo,
+          ...(drillDown.clientApprovalStatus ? { clientApprovalStatus: drillDown.clientApprovalStatus } : {}),
+        },
         1,
         100,
       );
@@ -230,6 +246,18 @@ export function AnalyticsDashboardPage() {
         >
           {TAB_INTRO[activeTab]} <span className={styles.tabHint}>{CLICK_HINT}</span>
         </motion.p>
+        <div className={styles.sourceStrip}>
+          <SourceLine metrics={TAB_METRICS[activeTab] ?? []} />
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            leftIcon={<FiSliders />}
+            onClick={() => setCustomizeOpen(true)}
+          >
+            Customize
+          </Button>
+        </div>
       </div>
 
       {isLoading || !data ? (
@@ -258,45 +286,64 @@ export function AnalyticsDashboardPage() {
             {activeTab === 'overview' && (
               <div className={styles.tabContent}>
                 <SectionCard title="Key Business Overview" icon={FiTarget} glass>
-                  <p className={styles.sectionNote}>Sales targets are set per calendar month — this section reflects the month selected above.</p>
+                  <p className={styles.sectionNote}>
+                    Sales targets are set per calendar month — this section reflects the month selected above.
+                  </p>
                   <div className={styles.statsGrid}>
-                    <MonthlySalesPerformanceCard
-                      achieved={data.revenue.achieved}
-                      targetAmount={data.revenue.targetAmount}
-                      achievementPct={data.revenue.achievementPct}
-                      remaining={data.revenue.remaining}
-                      predictedMonthEnd={data.revenue.predictedMonthEnd}
-                      revenueTrend={data.revenueTrend}
-                      dateFrom={dateFrom}
-                      dateTo={dateTo}
-                      onClick={() =>
-                        setDrillDown({
-                          kind: 'deals',
-                          title: 'Won Deals (Revenue)',
-                          dealStatus: ['won'],
-                          // Total Revenue itself is summed by expectedClosingDate
-                          // (SalesAnalyticsService.getAchievement), not createdAt —
-                          // match that field here so the list reconciles with the
-                          // figure that was clicked, instead of showing a
-                          // createdAt-scoped set that can span unrelated months.
-                          dateField: 'expectedClosingDate',
-                        })
-                      }
-                    />
-                    <KeyStatsGrid
-                      deals={data.deals}
-                      businessHealthScore={data.revenue.businessHealthScore}
-                      revenueTrend={data.revenueTrend}
-                      dateFrom={dateFrom}
-                      dateTo={dateTo}
-                      storeId={canOverrideStore ? storeId : undefined}
-                      onDealsClick={() => setDrillDown({ kind: 'deals', title: 'Won Deals', dealStatus: ['won'], dateField: 'expectedClosingDate' })}
-                    />
+                    <MetricGate metric="revenue">
+                      <MonthlySalesPerformanceCard
+                        achieved={data.revenue.achieved}
+                        targetAmount={data.revenue.targetAmount}
+                        achievementPct={data.revenue.achievementPct}
+                        remaining={data.revenue.remaining}
+                        predictedMonthEnd={data.revenue.predictedMonthEnd}
+                        revenueTrend={data.revenueTrend}
+                        dateFrom={dateFrom}
+                        dateTo={dateTo}
+                        onClick={() =>
+                          setDrillDown({
+                            kind: 'deals',
+                            title: 'Won Deals (Revenue)',
+                            dealStatus: ['won'],
+                            // Total Revenue itself is summed by expectedClosingDate
+                            // (SalesAnalyticsService.getAchievement), not createdAt —
+                            // match that field here so the list reconciles with the
+                            // figure that was clicked, instead of showing a
+                            // createdAt-scoped set that can span unrelated months.
+                            dateField: 'expectedClosingDate',
+                          })
+                        }
+                      />
+                    </MetricGate>
+                    <MetricGate metric="convertedDeals">
+                      <KeyStatsGrid
+                        deals={data.deals}
+                        businessHealthScore={data.revenue.businessHealthScore}
+                        revenueTrend={data.revenueTrend}
+                        dateFrom={dateFrom}
+                        dateTo={dateTo}
+                        storeId={canOverrideStore ? storeId : undefined}
+                        onDealsClick={() =>
+                          setDrillDown({
+                            kind: 'deals',
+                            title: 'Won Deals',
+                            dealStatus: ['won'],
+                            dateField: 'expectedClosingDate',
+                          })
+                        }
+                      />
+                    </MetricGate>
                   </div>
                 </SectionCard>
 
                 <div className={styles.twoColumn}>
-                  <RevenueMomentumCard dateFrom={dateFrom} dateTo={dateTo} storeId={canOverrideStore ? storeId : undefined} />
+                  <MetricGate metric="revenue">
+                    <RevenueMomentumCard
+                      dateFrom={dateFrom}
+                      dateTo={dateTo}
+                      storeId={canOverrideStore ? storeId : undefined}
+                    />
+                  </MetricGate>
                   <ActionQueueCard
                     dateFrom={dateFrom}
                     dateTo={dateTo}
@@ -314,155 +361,234 @@ export function AnalyticsDashboardPage() {
                   />
                 </div>
 
-                <DealsNeedingDecisionTable
-                  dateFrom={dateFrom}
-                  dateTo={dateTo}
-                  storeId={canOverrideStore ? storeId : undefined}
-                  ownerNames={ownerNames}
-                />
+                <MetricGate metric="activePipeline">
+                  <DealsNeedingDecisionTable
+                    dateFrom={dateFrom}
+                    dateTo={dateTo}
+                    storeId={canOverrideStore ? storeId : undefined}
+                    ownerNames={ownerNames}
+                  />
+                </MetricGate>
               </div>
             )}
 
             {activeTab === 'pipeline' && (
               <div className={styles.tabContent}>
-                <PipelineHealthCard deals={data.deals} dateFrom={dateFrom} dateTo={dateTo} storeId={canOverrideStore ? storeId : undefined} />
+                <MetricGate metric="activePipeline">
+                  <PipelineHealthCard
+                    deals={data.deals}
+                    dateFrom={dateFrom}
+                    dateTo={dateTo}
+                    storeId={canOverrideStore ? storeId : undefined}
+                  />
+                </MetricGate>
 
                 <div className={styles.twoColumn}>
-                  <DealFunnelCard deals={data.deals} dateFrom={dateFrom} dateTo={dateTo} storeId={canOverrideStore ? storeId : undefined} />
-                  <DealStatusDistributionCard deals={data.deals} dateFrom={dateFrom} dateTo={dateTo} storeId={canOverrideStore ? storeId : undefined} />
+                  <MetricGate metric="totalDeals">
+                    <DealFunnelCard
+                      deals={data.deals}
+                      dateFrom={dateFrom}
+                      dateTo={dateTo}
+                      storeId={canOverrideStore ? storeId : undefined}
+                    />
+                  </MetricGate>
+                  <MetricGate metric="totalDeals">
+                    <DealStatusDistributionCard
+                      deals={data.deals}
+                      dateFrom={dateFrom}
+                      dateTo={dateTo}
+                      storeId={canOverrideStore ? storeId : undefined}
+                    />
+                  </MetricGate>
                 </div>
 
                 <div className={styles.twoColumn}>
-                  <SectionCard title="Deals: Won / Lost / Pipeline" icon={FiPieChart} glass>
-                    <DealSplitDonut
-                      totalLabel="deals in this range"
-                      segments={[
-                        { key: 'won', label: 'Won', value: data.deals.wonCount, color: 'var(--color-success)' },
-                        { key: 'lost', label: 'Lost', value: data.deals.lostCount, color: 'var(--color-danger)' },
-                        { key: 'open', label: 'Pipeline', value: data.deals.openCount, color: 'var(--brand-accent-primary)' },
-                      ]}
-                      onSelectSegment={(key) =>
-                        setDrillDown({
-                          kind: 'deals',
-                          title: key === 'won' ? 'Won Deals' : key === 'lost' ? 'Lost Deals' : 'Open Pipeline',
-                          dealStatus: [key as 'won' | 'lost' | 'open'],
-                          // Same fix as the Won vs Lost Revenue chart above —
-                          // this donut's own won/lost/open counts are now
-                          // expectedClosingDate-scoped, so the drill-down must
-                          // match or it shows every deal instead of this
-                          // period's.
-                          dateField: 'expectedClosingDate',
-                        })
-                      }
-                    />
-                  </SectionCard>
+                  <MetricGate metric="convertedDeals">
+                    <SectionCard title="Deals: Won / Lost / Pipeline" icon={FiPieChart} glass>
+                      <DealSplitDonut
+                        totalLabel="deals in this range"
+                        segments={[
+                          { key: 'won', label: 'Won', value: data.deals.wonCount, color: 'var(--color-success)' },
+                          { key: 'lost', label: 'Lost', value: data.deals.lostCount, color: 'var(--color-danger)' },
+                          {
+                            key: 'open',
+                            label: 'Pipeline',
+                            value: data.deals.openCount,
+                            color: 'var(--brand-accent-primary)',
+                          },
+                        ]}
+                        onSelectSegment={(key) =>
+                          setDrillDown({
+                            kind: 'deals',
+                            title: key === 'won' ? 'Won Deals' : key === 'lost' ? 'Lost Deals' : 'Open Pipeline',
+                            dealStatus: [key as 'won' | 'lost' | 'open'],
+                            // Same fix as the Won vs Lost Revenue chart above —
+                            // this donut's own won/lost/open counts are now
+                            // expectedClosingDate-scoped, so the drill-down must
+                            // match or it shows every deal instead of this
+                            // period's.
+                            dateField: 'expectedClosingDate',
+                          })
+                        }
+                      />
+                    </SectionCard>
+                  </MetricGate>
 
-                  <SectionCard title="Quotes: Accepted / Not Accepted" icon={FiPieChart} glass>
-                    <DealSplitDonut
-                      totalLabel="quotes in this range"
-                      segments={[
-                        { key: 'accepted', label: 'Accepted', value: data.quotes.acceptedCount, color: 'var(--color-success)' },
-                        { key: 'not-accepted', label: 'Not Accepted', value: data.quotes.notAcceptedCount, color: 'var(--brand-accent-primary)' },
-                      ]}
-                      onSelectSegment={(key) =>
-                        setDrillDown({
-                          kind: 'quotes',
-                          title: key === 'accepted' ? 'Accepted Quotes' : 'Quotes Not Yet Accepted',
-                          clientApprovalStatus: key === 'accepted' ? 'approved' : 'not-approved',
-                        })
-                      }
-                    />
-                  </SectionCard>
+                  <MetricGate metric="quoteAcceptance">
+                    <SectionCard title="Quotes: Accepted / Not Accepted" icon={FiPieChart} glass>
+                      <DealSplitDonut
+                        totalLabel="quotes in this range"
+                        segments={[
+                          {
+                            key: 'accepted',
+                            label: 'Accepted',
+                            value: data.quotes.acceptedCount,
+                            color: 'var(--color-success)',
+                          },
+                          {
+                            key: 'not-accepted',
+                            label: 'Not Accepted',
+                            value: data.quotes.notAcceptedCount,
+                            color: 'var(--brand-accent-primary)',
+                          },
+                        ]}
+                        onSelectSegment={(key) =>
+                          setDrillDown({
+                            kind: 'quotes',
+                            title: key === 'accepted' ? 'Accepted Quotes' : 'Quotes Not Yet Accepted',
+                            clientApprovalStatus: key === 'accepted' ? 'approved' : 'not-approved',
+                          })
+                        }
+                      />
+                    </SectionCard>
+                  </MetricGate>
                 </div>
               </div>
             )}
 
             {activeTab === 'team' && (
               <div className={styles.tabContent}>
-                <TeamPerformanceSummaryCards data={data} dateFrom={dateFrom} dateTo={dateTo} storeId={canOverrideStore ? storeId : undefined} />
+                <MetricGate metric="teamPerformance">
+                  <TeamPerformanceSummaryCards
+                    data={data}
+                    dateFrom={dateFrom}
+                    dateTo={dateTo}
+                    storeId={canOverrideStore ? storeId : undefined}
+                  />
+                </MetricGate>
 
-                <SectionCard title="Employee Leaderboard" icon={FiUsers} glass>
-                  {data.employeeLeaderboard.length === 0 ? (
-                    <EmptyState compact icon={FiUsers} title="No sales team members in scope for this period" />
-                  ) : (
-                    data.employeeLeaderboard.map((r, i) => (
-                      <motion.div
-                        key={r.userId}
-                        className={clsx(styles.listItem, styles.leaderRow)}
-                        initial={{ opacity: 0 }}
-                        animate={{ opacity: 1 }}
-                        transition={{ duration: 0.25, delay: Math.min(i, 10) * 0.035 }}
-                        role="button"
-                        tabIndex={0}
-                        onClick={() =>
-                          setDrillDown({
-                            kind: 'deals',
-                            title: `${r.userName}'s Won Deals`,
-                            dealStatus: ['won'],
-                            ownerId: [r.userId],
-                            // Leaderboard revenue is now expectedClosingDate-
-                            // scoped too (same getConsultantPerformance call,
-                            // fed the fixed dealMatch) — same fix as the two
-                            // drill-downs above, for the same reason.
-                            dateField: 'expectedClosingDate',
-                          })
-                        }
-                        onKeyDown={(e) => {
-                          if (e.key !== 'Enter' && e.key !== ' ') return;
-                          e.preventDefault();
-                          setDrillDown({
-                            kind: 'deals',
-                            title: `${r.userName}'s Won Deals`,
-                            dealStatus: ['won'],
-                            ownerId: [r.userId],
-                            dateField: 'expectedClosingDate',
-                          });
-                        }}
-                      >
-                        <span className={clsx(styles.rankBadge, i < 3 && r.revenue > 0 && styles[`rankBadge${i + 1}`])}>
-                          {i < 3 && r.revenue > 0 ? <FiAward /> : i + 1}
-                        </span>
-                        <Avatar name={r.userName} size="sm" />
-                        <div className={styles.listItemMain} style={{ flex: 1 }}>
-                          <span className={styles.listItemTitle}>{r.userName}</span>
-                          <div className={styles.leaderTrack}>
-                            <motion.div
-                              className={styles.leaderFill}
-                              initial={{ width: 0 }}
-                              animate={{ width: `${(r.revenue / Math.max(1, data.employeeLeaderboard[0]?.revenue ?? 1)) * 100}%` }}
-                              transition={{ duration: 0.8, ease: [0.16, 1, 0.3, 1], delay: 0.1 + Math.min(i, 10) * 0.035 }}
-                            />
-                          </div>
-                          <span className={styles.listItemMeta}>
-                            {r.wonCount} deal{r.wonCount === 1 ? '' : 's'} won
+                <MetricGate metric="teamPerformance">
+                  <SectionCard title="Employee Leaderboard" icon={FiUsers} glass>
+                    {data.employeeLeaderboard.length === 0 ? (
+                      <EmptyState compact icon={FiUsers} title="No sales team members in scope for this period" />
+                    ) : (
+                      data.employeeLeaderboard.map((r, i) => (
+                        <motion.div
+                          key={r.userId}
+                          className={clsx(styles.listItem, styles.leaderRow)}
+                          initial={{ opacity: 0 }}
+                          animate={{ opacity: 1 }}
+                          transition={{ duration: 0.25, delay: Math.min(i, 10) * 0.035 }}
+                          role="button"
+                          tabIndex={0}
+                          onClick={() =>
+                            setDrillDown({
+                              kind: 'deals',
+                              title: `${r.userName}'s Won Deals`,
+                              dealStatus: ['won'],
+                              ownerId: [r.userId],
+                              // Leaderboard revenue is now expectedClosingDate-
+                              // scoped too (same getConsultantPerformance call,
+                              // fed the fixed dealMatch) — same fix as the two
+                              // drill-downs above, for the same reason.
+                              dateField: 'expectedClosingDate',
+                            })
+                          }
+                          onKeyDown={(e) => {
+                            if (e.key !== 'Enter' && e.key !== ' ') return;
+                            e.preventDefault();
+                            setDrillDown({
+                              kind: 'deals',
+                              title: `${r.userName}'s Won Deals`,
+                              dealStatus: ['won'],
+                              ownerId: [r.userId],
+                              dateField: 'expectedClosingDate',
+                            });
+                          }}
+                        >
+                          <span
+                            className={clsx(styles.rankBadge, i < 3 && r.revenue > 0 && styles[`rankBadge${i + 1}`])}
+                          >
+                            {i < 3 && r.revenue > 0 ? <FiAward /> : i + 1}
                           </span>
-                        </div>
-                        <strong className={styles.leaderValue}>{money(r.revenue)}</strong>
-                      </motion.div>
-                    ))
-                  )}
-                </SectionCard>
+                          <Avatar name={r.userName} size="sm" />
+                          <div className={styles.listItemMain} style={{ flex: 1 }}>
+                            <span className={styles.listItemTitle}>{r.userName}</span>
+                            <div className={styles.leaderTrack}>
+                              <motion.div
+                                className={styles.leaderFill}
+                                initial={{ width: 0 }}
+                                animate={{
+                                  width: `${(r.revenue / Math.max(1, data.employeeLeaderboard[0]?.revenue ?? 1)) * 100}%`,
+                                }}
+                                transition={{
+                                  duration: 0.8,
+                                  ease: [0.16, 1, 0.3, 1],
+                                  delay: 0.1 + Math.min(i, 10) * 0.035,
+                                }}
+                              />
+                            </div>
+                            <span className={styles.listItemMeta}>
+                              {r.wonCount} deal{r.wonCount === 1 ? '' : 's'} won
+                            </span>
+                          </div>
+                          <strong className={styles.leaderValue}>{money(r.revenue)}</strong>
+                        </motion.div>
+                      ))
+                    )}
+                  </SectionCard>
+                </MetricGate>
 
                 {/* Work Completion & Productivity — a strict superset of the
                     old "Sales Work Breakdown" table (deals AND emails AND
                     quotes per employee, not deals alone), so that table was
                     retired rather than kept alongside a now-redundant view. */}
-                <ProductivitySection dateFrom={dateFrom} dateTo={dateTo} storeId={canOverrideStore ? storeId : undefined} />
+                <ProductivitySection
+                  dateFrom={dateFrom}
+                  dateTo={dateTo}
+                  storeId={canOverrideStore ? storeId : undefined}
+                />
 
-                <EmailResponseSlaTable dateFrom={dateFrom} dateTo={dateTo} storeId={canOverrideStore ? storeId : undefined} />
+                <MetricGate metric="emailsResponded">
+                  <EmailResponseSlaTable
+                    dateFrom={dateFrom}
+                    dateTo={dateTo}
+                    storeId={canOverrideStore ? storeId : undefined}
+                  />
+                </MetricGate>
 
                 <SlaDashboardSection userNames={ownerNames} />
               </div>
             )}
 
             {activeTab === 'customers' && (
-              <CustomersAndEmailSection dateFrom={dateFrom} dateTo={dateTo} storeId={canOverrideStore ? storeId : undefined} />
+              <CustomersAndEmailSection
+                dateFrom={dateFrom}
+                dateTo={dateTo}
+                storeId={canOverrideStore ? storeId : undefined}
+              />
             )}
 
-            {activeTab === 'bi-vendor' && <VendorProfitabilitySection dateFrom={dateFrom} dateTo={dateTo} />}
+            {activeTab === 'bi-vendor' && (
+              <MetricGate metric="vendorProfitability">
+                <VendorProfitabilitySection dateFrom={dateFrom} dateTo={dateTo} />
+              </MetricGate>
+            )}
           </motion.div>
         </>
       )}
+
+      <CustomizeDashboardModal open={customizeOpen} onClose={() => setCustomizeOpen(false)} />
 
       <DrillDownModal
         open={!!drillDown}

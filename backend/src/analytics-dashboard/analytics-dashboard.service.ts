@@ -1,7 +1,8 @@
 import { Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
-import { Model } from 'mongoose';
+import { Model, PipelineStage } from 'mongoose';
 import { JwtPayload } from '../auth/jwt-payload.interface';
+import { currentDataSourceScope } from '../data-sources/data-source-context';
 import { CustomerActivityService } from '../crm/customer-activity.service';
 import { DealPerformanceDashboardService } from '../crm/deal-performance-dashboard.service';
 import { QuotesService } from '../crm/quotes.service';
@@ -12,6 +13,21 @@ import { DashboardService } from '../dashboard/dashboard.service';
 import { EmailIntelligenceService } from '../email-intelligence/email-intelligence.service';
 import { OrganizationsService } from '../organizations/organizations.service';
 import { AiInsightItem, AnalyticsDashboardOverview, ScopeInfo } from './analytics-dashboard.types';
+
+// Unified view (two or more CRMs at once, only when explicitly chosen): the
+// same deal kept in two CRMs — same name, value and close date — counts once.
+function unifiedDealDedupe(): PipelineStage[] {
+  if ((currentDataSourceScope()?.sourceIds.length ?? 0) < 2) return [];
+  return [
+    {
+      $group: {
+        _id: { name: { $toLower: { $trim: { input: '$name' } } }, value: '$monetaryValue', closing: '$expectedClosingDate' },
+        dealStatus: { $first: '$dealStatus' },
+        monetaryValue: { $first: '$monetaryValue' },
+      },
+    },
+  ];
+}
 
 function round1(n: number): number {
   return Math.round(n * 10) / 10;
@@ -112,63 +128,54 @@ export class AnalyticsDashboardService {
       quoteDateMatch.dealId = { $in: scopedDeals.map((d) => d._id.toString()) };
     }
 
-    const [
-      dealRows,
-      quoteRows,
-      achievement,
-      workforceOverview,
-      consultantRows,
-      outstandingByOwner,
-      revenueTrend,
-      emailStats,
-      customerBreakdown,
-      storeName,
-    ] = await Promise.all([
-      this.dealModel
-        .aggregate<{ _id: string; count: number; value: number }>([
-          { $match: dealMatch },
-          { $group: { _id: '$dealStatus', count: { $sum: 1 }, value: { $sum: '$monetaryValue' } } },
-        ])
-        .exec(),
-      this.quoteModel
-        .aggregate<{ _id: boolean; count: number; value: number }>([
-          { $match: quoteDateMatch },
-          { $group: { _id: { $eq: ['$clientApprovalStatus', 'approved'] }, count: { $sum: 1 }, value: { $sum: '$quoteAmount' } } },
-        ])
-        .exec(),
-      // dateFrom is always the 1st of a single selected month (see this
-      // method's own leading comment) — its own "YYYY-MM" prefix IS that
-      // month's period, so achievement/target now honestly tracks whichever
-      // month is selected instead of always "now".
-      this.salesAnalyticsService.getAchievement(organizationId, scope.level, scopeId, dateFrom.slice(0, 7)),
-      this.dashboardService.getOverview(caller),
-      this.dealPerformanceDashboardService.getConsultantPerformance(
-        organizationId,
-        dealMatch,
-        scope.level === 'store' ? scope.storeId : undefined,
-        undefined,
-        includeAllUsers,
-      ),
-      this.quotesService.getOutstandingByOwner(organizationId),
-      // Trailing 6 months ending on the selected month (dateFrom's own
-      // "YYYY-MM"), same reasoning as achievement above.
-      this.dealPerformanceDashboardService.getRevenueProgress(organizationId, scope.level, scopeId, 6, dateFrom.slice(0, 7)),
-      this.emailIntelligenceService.getActivityStats(
-        organizationId,
-        start,
-        end,
-        scope.level === 'store' ? scope.storeId : undefined,
-        scope.level === 'user' ? scope.userId : undefined,
-      ),
-      this.customerActivityService.getCustomerBreakdownForRange(
-        organizationId,
-        start,
-        end,
-        scope.level === 'store' ? scope.storeId : undefined,
-        scope.level === 'user' ? scope.userId : undefined,
-      ),
-      scope.level === 'store' && scope.storeId ? this.resolveStoreName(organizationId, scope.storeId) : Promise.resolve(undefined),
-    ]);
+    const [dealRows, quoteRows, achievement, workforceOverview, consultantRows, outstandingByOwner, revenueTrend, emailStats, customerBreakdown, storeName] =
+      await Promise.all([
+        this.dealModel
+          .aggregate<{ _id: string; count: number; value: number }>([
+            { $match: dealMatch },
+            ...unifiedDealDedupe(),
+            { $group: { _id: '$dealStatus', count: { $sum: 1 }, value: { $sum: '$monetaryValue' } } },
+          ])
+          .exec(),
+        this.quoteModel
+          .aggregate<{ _id: boolean; count: number; value: number }>([
+            { $match: quoteDateMatch },
+            { $group: { _id: { $eq: ['$clientApprovalStatus', 'approved'] }, count: { $sum: 1 }, value: { $sum: '$quoteAmount' } } },
+          ])
+          .exec(),
+        // dateFrom is always the 1st of a single selected month (see this
+        // method's own leading comment) — its own "YYYY-MM" prefix IS that
+        // month's period, so achievement/target now honestly tracks whichever
+        // month is selected instead of always "now".
+        this.salesAnalyticsService.getAchievement(organizationId, scope.level, scopeId, dateFrom.slice(0, 7)),
+        this.dashboardService.getOverview(caller),
+        this.dealPerformanceDashboardService.getConsultantPerformance(
+          organizationId,
+          dealMatch,
+          scope.level === 'store' ? scope.storeId : undefined,
+          undefined,
+          includeAllUsers,
+        ),
+        this.quotesService.getOutstandingByOwner(organizationId),
+        // Trailing 6 months ending on the selected month (dateFrom's own
+        // "YYYY-MM"), same reasoning as achievement above.
+        this.dealPerformanceDashboardService.getRevenueProgress(organizationId, scope.level, scopeId, 6, dateFrom.slice(0, 7)),
+        this.emailIntelligenceService.getActivityStats(
+          organizationId,
+          start,
+          end,
+          scope.level === 'store' ? scope.storeId : undefined,
+          scope.level === 'user' ? scope.userId : undefined,
+        ),
+        this.customerActivityService.getCustomerBreakdownForRange(
+          organizationId,
+          start,
+          end,
+          scope.level === 'store' ? scope.storeId : undefined,
+          scope.level === 'user' ? scope.userId : undefined,
+        ),
+        scope.level === 'store' && scope.storeId ? this.resolveStoreName(organizationId, scope.storeId) : Promise.resolve(undefined),
+      ]);
 
     const byStatus = new Map(dealRows.map((r) => [r._id, r]));
     const wonCount = byStatus.get('won')?.count ?? 0;
@@ -181,8 +188,7 @@ export class AnalyticsDashboardService {
     const accepted = quoteRows.find((r) => r._id === true);
     const notAccepted = quoteRows.find((r) => r._id === false);
 
-    const overdueRatio =
-      workforceOverview.stats.totalTasks > 0 ? workforceOverview.stats.overdueCount / workforceOverview.stats.totalTasks : 0;
+    const overdueRatio = workforceOverview.stats.totalTasks > 0 ? workforceOverview.stats.overdueCount / workforceOverview.stats.totalTasks : 0;
     const achievementCapped = Math.min(achievement.achievementPct ?? 0, 100);
     // Same weighted composite as business-dashboard.service.ts's Owner
     // businessHealthScore (60% achievement, 40% follow-up health) — kept
@@ -196,8 +202,7 @@ export class AnalyticsDashboardService {
     // restricted the underlying deals to this one ownerId), so post-filter
     // to the caller's own row rather than adding a third scoping param to an
     // already-tested method.
-    const scopedConsultantRows =
-      scope.level === 'user' && scope.userId ? consultantRows.filter((r) => r.userId === scope.userId) : consultantRows;
+    const scopedConsultantRows = scope.level === 'user' && scope.userId ? consultantRows.filter((r) => r.userId === scope.userId) : consultantRows;
 
     const employeeLeaderboard = scopedConsultantRows
       .map((r) => ({
@@ -255,13 +260,7 @@ export class AnalyticsDashboardService {
   // alongside buildInsights() below (same four conditions, same copy) only
   // because aiInsight is still a field on the response — see that field's
   // own comment for why it's not removed.
-  private buildInsight(
-    achievementPct: number | null,
-    wonCount: number,
-    lostCount: number,
-    openCount: number,
-    missedCount: number,
-  ): string {
+  private buildInsight(achievementPct: number | null, wonCount: number, lostCount: number, openCount: number, missedCount: number): string {
     if (achievementPct !== null && achievementPct < 50) {
       return `Only ${round1(achievementPct)}% of this month's target achieved so far — review the open pipeline for deals that can be accelerated.`;
     }
@@ -283,13 +282,7 @@ export class AnalyticsDashboardService {
   // one. actionTabId points at AnalyticsDashboardPage's own TAB_ITEMS ids —
   // the frontend only ever switches tabs for these, never navigates
   // anywhere new. Still 100% deterministic/rule-based — no LLM call.
-  private buildInsights(
-    achievementPct: number | null,
-    wonCount: number,
-    lostCount: number,
-    openCount: number,
-    missedCount: number,
-  ): AiInsightItem[] {
+  private buildInsights(achievementPct: number | null, wonCount: number, lostCount: number, openCount: number, missedCount: number): AiInsightItem[] {
     const insights: AiInsightItem[] = [];
 
     if (achievementPct !== null && achievementPct < 50) {
