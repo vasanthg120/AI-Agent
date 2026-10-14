@@ -16,8 +16,7 @@ export class UsersController {
 
   @Get('me')
   async me(@CurrentUser() user: JwtPayload) {
-    const found = await this.usersService.findById(user.sub);
-    return found ? this.usersService.toPublic(found) : null;
+    return this.usersService.profile(user.sub);
   }
 
   // Self-service profile edit — any signed-in user, only their own record,
@@ -50,7 +49,7 @@ export class UsersController {
     if (id === caller.sub && (dto.active === false || (dto.role && dto.role !== 'admin'))) {
       throw new BadRequestException("Can't demote or disable your own account");
     }
-    return this.usersService.updateByAdmin(id, dto, caller.organizationId);
+    return this.usersService.updateByAdmin(id, dto, caller.organizationId, caller.sub);
   }
 
   @Delete(':id')

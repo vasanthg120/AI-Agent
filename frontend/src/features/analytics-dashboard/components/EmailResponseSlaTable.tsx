@@ -20,7 +20,7 @@ function urgencyCount(byUrgency: { value: string; count: number }[] | undefined)
 type DrillKind = 'sent' | 'replied' | 'missed';
 
 const DRILL_TITLE: Record<DrillKind, string> = {
-  sent: 'Sent (AI draft)',
+  sent: 'Replied with an AI draft',
   replied: 'Replied in Outlook',
   missed: 'Missed',
 };
@@ -53,7 +53,8 @@ export function EmailResponseSlaTable({ dateFrom, dateTo, storeId }: EmailRespon
 
   const { data: employeeDrillItems, isLoading: employeeDrillLoading } = useQuery({
     queryKey: ['dash-email-sla-employee-drill', dateFrom, dateTo, storeId, drillDown?.userId, drillDown?.kind],
-    queryFn: () => emailAnalyticsService.listEmails(drillDown!.kind, { ...filters, employeeId: [drillDown!.userId] }, 1, 100),
+    queryFn: () =>
+      emailAnalyticsService.listEmails(drillDown!.kind, { ...filters, employeeId: [drillDown!.userId] }, 1, 100),
     enabled: !!drillDown,
   });
 
@@ -73,17 +74,31 @@ export function EmailResponseSlaTable({ dateFrom, dateTo, storeId }: EmailRespon
   const rows = useMemo(() => {
     const byUser = new Map<
       string,
-      { userName: string; sent: number; replied: number; missed: number; urgent: number; b24: number; b48: number; b72: number }
+      {
+        userName: string;
+        outgoing: number;
+        sent: number;
+        replied: number;
+        missed: number;
+        urgent: number;
+        b24: number;
+        b48: number;
+        b72: number;
+      }
     >();
     const get = (userId: string, userName: string) => {
       const existing = byUser.get(userId);
       if (existing) return existing;
-      const created = { userName, sent: 0, replied: 0, missed: 0, urgent: 0, b24: 0, b48: 0, b72: 0 };
+      const created = { userName, outgoing: 0, sent: 0, replied: 0, missed: 0, urgent: 0, b24: 0, b48: 0, b72: 0 };
       byUser.set(userId, created);
       return created;
     };
     for (const r of sent?.rows ?? []) get(r.userId, r.userName).sent = r.count;
-    for (const r of replied?.rows ?? []) get(r.userId, r.userName).replied = r.count;
+    for (const r of replied?.rows ?? []) {
+      const row = get(r.userId, r.userName);
+      row.replied = r.count;
+      row.outgoing = r.outgoing ?? 0;
+    }
     for (const r of missed?.rows ?? []) {
       const row = get(r.userId, r.userName);
       row.missed = r.count;
@@ -94,7 +109,7 @@ export function EmailResponseSlaTable({ dateFrom, dateTo, storeId }: EmailRespon
     }
     return [...byUser.entries()]
       .map(([userId, v]) => ({ userId, ...v }))
-      .sort((a, b) => b.sent + b.replied + b.missed - (a.sent + a.replied + a.missed));
+      .sort((a, b) => b.outgoing + b.replied + b.missed - (a.outgoing + a.replied + a.missed));
   }, [sent, replied, missed]);
 
   const isLoading = sentLoading || repliedLoading || missedLoading;
@@ -114,7 +129,10 @@ export function EmailResponseSlaTable({ dateFrom, dateTo, storeId }: EmailRespon
   return (
     <Card className={styles.card}>
       <div className={styles.title}>Email response SLA</div>
-      <p className={styles.subtitle}>Sent (AI draft), replied (answered directly in Outlook), and missed — click a number to see the list.</p>
+      <p className={styles.subtitle}>
+        Emails sent is everything that went out of the mailbox. Of the customer emails received: replied in Outlook,
+        replied with an AI draft, and missed — click a number to see the list.
+      </p>
 
       {isLoading ? (
         <Skeleton height={120} />
@@ -126,8 +144,9 @@ export function EmailResponseSlaTable({ dateFrom, dateTo, storeId }: EmailRespon
             <thead>
               <tr>
                 <th>Employee</th>
-                <th>Sent</th>
+                <th>Emails sent</th>
                 <th>Replied</th>
+                <th>AI drafts sent</th>
                 <th>Missed</th>
                 <th>Urgent</th>
                 <th>24-48h</th>
@@ -147,17 +166,8 @@ export function EmailResponseSlaTable({ dateFrom, dateTo, storeId }: EmailRespon
                         {r.userName}
                       </span>
                     </td>
+                    <td className={r.outgoing === 0 ? styles.zero : undefined}>{r.outgoing}</td>
                     {/* Real buttons (not clickable <td>s) so each count opens by keyboard too. */}
-                    <td>
-                      <button
-                        type="button"
-                        className={clsx(styles.cellButton, r.sent === 0 && styles.zero)}
-                        onClick={openDrill(r.userId, r.userName, 'sent')}
-                        title={`See ${r.userName}'s sent emails`}
-                      >
-                        {r.sent}
-                      </button>
-                    </td>
                     <td>
                       <button
                         type="button"
@@ -166,6 +176,16 @@ export function EmailResponseSlaTable({ dateFrom, dateTo, storeId }: EmailRespon
                         title={`See ${r.userName}'s replied emails`}
                       >
                         {r.replied}
+                      </button>
+                    </td>
+                    <td>
+                      <button
+                        type="button"
+                        className={clsx(styles.cellButton, r.sent === 0 && styles.zero)}
+                        onClick={openDrill(r.userId, r.userName, 'sent')}
+                        title={`See ${r.userName}'s sent emails`}
+                      >
+                        {r.sent}
                       </button>
                     </td>
                     <td>

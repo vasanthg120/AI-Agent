@@ -6,6 +6,15 @@ export function formatINR(value: number | null): string {
   return `₹${value.toLocaleString('en-IN', { maximumFractionDigits: 0 })}`;
 }
 
+// For reports, where figures are added up in front of the reader (sales
+// excluding tax + tax = sales including tax; a royalty owed to the paisa):
+// paise are shown whenever an amount has them, never rounded away.
+export function formatINRExact(value: number | null): string {
+  if (value === null) return '—';
+  const whole = Math.abs(value - Math.round(value)) < 0.005;
+  return `₹${value.toLocaleString('en-IN', { minimumFractionDigits: whole ? 0 : 2, maximumFractionDigits: 2 })}`;
+}
+
 // Haive Credits billing (packages/payments) is NOT hardcoded to INR (see
 // backend/src/config/configuration.ts's billing.currency) — this formats
 // whatever currency code a given package/payment record actually carries,

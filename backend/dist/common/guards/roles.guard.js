@@ -12,6 +12,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.RolesGuard = void 0;
 const common_1 = require("@nestjs/common");
 const core_1 = require("@nestjs/core");
+const app_features_1 = require("../app-features");
 const roles_decorator_1 = require("../decorators/roles.decorator");
 let RolesGuard = class RolesGuard {
     constructor(reflector) {
@@ -26,10 +27,13 @@ let RolesGuard = class RolesGuard {
             return true;
         const user = context.switchToHttp().getRequest().user;
         const userRoles = user?.roles ?? [];
-        if (!required.some((r) => userRoles.includes(r))) {
-            throw new common_1.ForbiddenException('Insufficient role');
-        }
-        return true;
+        if (required.some((r) => userRoles.includes(r)))
+            return true;
+        const feature = this.reflector.getAllAndOverride(app_features_1.FEATURE_KEY, [context.getHandler(), context.getClass()]);
+        const routeHasOwnRoles = !!this.reflector.get(roles_decorator_1.ROLES_KEY, context.getHandler());
+        if (feature && !routeHasOwnRoles && (0, app_features_1.isAiRoleAccount)(userRoles) && user?.features?.includes(feature))
+            return true;
+        throw new common_1.ForbiddenException('Insufficient role');
     }
 };
 exports.RolesGuard = RolesGuard;

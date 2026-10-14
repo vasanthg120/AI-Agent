@@ -7,7 +7,8 @@ import { FiChevronDown } from 'react-icons/fi';
 import { useUiStore } from '@/stores/uiStore';
 import { useAuthStore } from '@/stores/authStore';
 import { NAV_GROUPS } from '@/constants/navigation';
-import { hasRole } from '@/utils/roles';
+import { canSeeNavItem } from '@/utils/access';
+import { authService } from '@/services/authService';
 import type { NavItem } from '@/types';
 import styles from './Sidebar.module.css';
 
@@ -50,9 +51,19 @@ export function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
   const hoverVisible = useRef(false);
   hoverVisible.current = hover !== null;
 
+  // What the account may use can change while it is signed in (an admin edits
+  // its AI role): refresh the profile when the app opens, so the menu matches
+  // what the server will allow.
+  useEffect(() => {
+    authService
+      .getMe()
+      .then((fresh) => useAuthStore.setState({ user: fresh }))
+      .catch(() => undefined);
+  }, []);
+
   const groups = NAV_GROUPS.map((group) => ({
     ...group,
-    items: group.items.filter((item) => !item.hideForRoles?.some((r) => hasRole(user, r))),
+    items: group.items.filter((item) => canSeeNavItem(user, item)),
   })).filter((group) => group.items.length > 0);
 
   // Navigating into a folded group (via a link, the command palette, the

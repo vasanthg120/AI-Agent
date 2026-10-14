@@ -73,6 +73,14 @@ export class EmailFollowUpReminder {
   @Prop()
   slaRecordId?: string;
 
+  // 'promised_follow_up' reminders (EmailHistoryService.maintainFollowUps):
+  // when we wrote "I'll get back to you…", and the words themselves.
+  @Prop()
+  promisedAt?: Date;
+
+  @Prop()
+  promiseExcerpt?: string;
+
   @Prop()
   dismissedAt?: Date;
 

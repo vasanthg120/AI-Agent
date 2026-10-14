@@ -1,0 +1,597 @@
+/* One customer in full: the next step, who they are, what was quoted, invoiced and paid, and what happened. */
+
+.sub {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 2px;
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+}
+
+.muted {
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+}
+
+.detail {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+  container: customer-detail / inline-size;
+}
+
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.section h3,
+.analysis h3 {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.named dt {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+}
+
+.named dd {
+  margin: 2px 0 0;
+  font-size: var(--text-sm);
+  color: var(--color-text-primary);
+  overflow-wrap: anywhere;
+}
+
+.named {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: 0;
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-surface-elevated);
+}
+
+.named dd {
+  white-space: pre-wrap;
+}
+
+.analysis {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-bg-surface-elevated);
+  font-size: var(--text-sm);
+  line-height: 1.6;
+  color: var(--color-text-secondary);
+}
+
+.analysis h3 svg {
+  color: var(--color-accent);
+}
+
+.analysis p {
+  margin: 0;
+}
+
+.suggestion {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-surface);
+  border: 1px solid var(--color-border);
+}
+
+.suggestion p {
+  white-space: pre-wrap;
+  color: var(--color-text-primary);
+}
+
+.suggestionHead,
+.analysisFoot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.summaryGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  margin: 0;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-bg-surface);
+  overflow: hidden;
+}
+
+/* Each cell draws its own right and bottom rule and overlaps the grid's edge by
+   a pixel, so a last row that isn't full leaves plain surface, not a grey block. */
+.summaryCell {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  margin: 0 -1px -1px 0;
+  padding: var(--space-3) var(--space-4);
+  border-right: 1px solid var(--color-border);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.summaryCell dt {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--color-text-muted);
+}
+
+.summaryCell dd {
+  margin: 0;
+  font-size: var(--text-md);
+  font-weight: 600;
+  color: var(--color-text-primary);
+  overflow-wrap: anywhere;
+}
+
+.summaryNote {
+  font-size: var(--text-xs);
+  line-height: 1.4;
+  color: var(--color-text-muted);
+}
+
+.actionBanner {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--color-border);
+  border-left-width: 4px;
+  border-radius: var(--radius-md);
+  background: var(--color-bg-surface-elevated);
+  font-size: var(--text-sm);
+  line-height: 1.5;
+  color: var(--color-text-secondary);
+}
+
+.actionBanner svg {
+  flex: none;
+  margin-top: 3px;
+}
+
+.actionBanner strong {
+  color: var(--color-text-primary);
+}
+
+.action_overdue {
+  border-left-color: var(--color-danger);
+}
+
+.action_overdue svg {
+  color: var(--color-danger);
+}
+
+.action_today {
+  border-left-color: var(--color-warning);
+}
+
+.action_today svg {
+  color: var(--color-warning);
+}
+
+.action_soon {
+  border-left-color: var(--color-accent);
+}
+
+.action_soon svg {
+  color: var(--color-accent);
+}
+
+.action_none {
+  border-left-color: var(--color-success);
+}
+
+.action_none svg {
+  color: var(--color-success);
+}
+
+.insightList {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: 0;
+  padding-left: var(--space-5);
+  font-size: var(--text-sm);
+  line-height: 1.5;
+  color: var(--color-text-secondary);
+}
+
+.compare {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-3) var(--space-5);
+  padding: var(--space-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-surface-elevated);
+  font-size: var(--text-sm);
+}
+
+.compare h4 {
+  margin: 0 0 var(--space-2);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--color-text-muted);
+}
+
+.compare dl {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px var(--space-4);
+  margin: 0;
+}
+
+.compare dt {
+  color: var(--color-text-muted);
+}
+
+.compare dd {
+  margin: 0;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text-primary);
+}
+
+.compare p {
+  grid-column: 1 / -1;
+  margin: 0;
+  line-height: 1.5;
+  color: var(--color-text-secondary);
+}
+
+.timeline {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.timelineItem {
+  position: relative;
+  display: flex;
+  gap: var(--space-3);
+  padding: 0 0 var(--space-4);
+}
+
+/* The line joining one event to the next. */
+.timelineItem:not(:last-child)::before {
+  content: '';
+  position: absolute;
+  left: 13px;
+  top: 28px;
+  bottom: 0;
+  width: 1px;
+  background: var(--color-border);
+}
+
+.timelineIcon {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  background: var(--color-bg-surface);
+  color: var(--color-text-muted);
+  font-size: 13px;
+}
+
+.timelineAttention .timelineIcon {
+  border-color: var(--color-warning);
+  color: var(--color-warning);
+}
+
+.timelineBody {
+  flex: 1;
+  min-width: 0;
+  padding-top: 3px;
+  font-size: var(--text-sm);
+}
+
+.timelineHead {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+  color: var(--color-text-secondary);
+}
+
+.timelineHead strong {
+  color: var(--color-text-primary);
+  font-weight: 600;
+}
+
+.timelineHead time {
+  margin-left: auto;
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  white-space: nowrap;
+}
+
+@container customer-detail (max-width: 560px) {
+  .summaryGrid {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .compare {
+    grid-template-columns: 1fr;
+  }
+
+  .timelineHead time {
+    margin-left: 0;
+    flex-basis: 100%;
+  }
+}
+
+.actionText {
+  flex: 1;
+  min-width: 0;
+}
+
+.contactBar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2) var(--space-3);
+  flex-wrap: wrap;
+}
+
+.contactLink {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 6px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  background: var(--color-bg-surface);
+  color: var(--color-text-primary);
+  font-size: var(--text-sm);
+  text-decoration: none;
+  overflow-wrap: anywhere;
+}
+
+.contactLink:hover {
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.chip {
+  padding: 2px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+}
+
+.sectionCount {
+  margin-left: auto;
+  font-size: var(--text-xs);
+  font-weight: 400;
+  color: var(--color-text-muted);
+}
+
+.cellSub {
+  margin-top: 3px;
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+}
+
+.badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.unknown {
+  font-size: var(--text-sm);
+  font-weight: 500;
+  color: var(--color-text-muted);
+}
+
+.subhead {
+  font-size: var(--text-sm);
+  color: var(--color-text-primary);
+}
+
+.docWrap {
+  overflow-x: auto;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.docTable {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--text-sm);
+}
+
+.docTable th {
+  padding: var(--space-2) var(--space-3);
+  text-align: left;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--color-text-muted);
+  background: var(--color-bg-surface-elevated);
+  border-bottom: 1px solid var(--color-border);
+  white-space: nowrap;
+}
+
+.docTable td {
+  padding: var(--space-2) var(--space-3);
+  vertical-align: top;
+  color: var(--color-text-secondary);
+  border-bottom: 1px solid var(--color-border);
+  white-space: nowrap;
+}
+
+.docTable td:first-child {
+  white-space: normal;
+  min-width: 140px;
+}
+
+.docTable tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.docTable strong {
+  color: var(--color-text-primary);
+}
+
+.docTable .num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Each tab's content: laid out like the panel itself, and arriving with a short fade. */
+.tabPanel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+  animation: tabIn var(--duration-normal) var(--ease-out) backwards;
+}
+
+@keyframes tabIn {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tabPanel {
+    animation: none;
+  }
+}
+
+/* ==== Fitting the screen (layout pass) ==== */
+
+/* A heading and the note beside it: side by side while there is room; the note under the heading when not. */
+.section h3 {
+  flex-wrap: wrap;
+  row-gap: 2px;
+}
+
+/* A table too wide for a phone becomes a list: each row a block, each value under its own name. */
+.stackOpen {
+  width: 28px;
+}
+
+@container customer-detail (max-width: 560px) {
+  .sectionCount {
+    margin-left: 0;
+  }
+
+  .stackTable,
+  .stackTable tbody {
+    display: block;
+  }
+
+  .stackTable thead {
+    display: none;
+  }
+
+  .stackTable tr {
+    position: relative;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--space-2) var(--space-4);
+    padding: var(--space-3);
+    border-bottom: 1px solid var(--color-border);
+  }
+
+  .stackTable tbody tr:last-child {
+    border-bottom: none;
+  }
+
+  .stackTable td,
+  .stackTable td.num {
+    display: block;
+    min-width: 0;
+    padding: 0;
+    border: none;
+    text-align: left;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+
+  /* What the row is, across the top — with room left for the arrow that opens it. */
+  .stackTable td:first-child {
+    grid-column: 1 / -1;
+    padding: 0 28px 0 0;
+  }
+
+  .stackTable td[data-label]::before {
+    content: attr(data-label);
+    display: block;
+    margin-bottom: 1px;
+    font-size: var(--text-xs);
+    font-variant-numeric: normal;
+    color: var(--color-text-muted);
+  }
+
+  .stackTable td.stackWide {
+    grid-column: 1 / -1;
+  }
+
+  .stackTable td.stackOpen {
+    position: absolute;
+    top: var(--space-3);
+    right: var(--space-3);
+    width: auto;
+  }
+}
+
+/* -- second round -- */
+
+/* Items: quantity, rate and total side by side. */
+@container customer-detail (max-width: 560px) {
+  .stackThree tr {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+/* Nine columns in a panel: the cells draw in before the table has to scroll. */
+@container customer-detail (max-width: 860px) {
+  .denseTable th,
+  .denseTable td {
+    padding-left: 6px;
+    padding-right: 6px;
+  }
+}

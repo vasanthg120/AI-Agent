@@ -22,6 +22,9 @@ export interface AdminUser {
   // stays automatically available regardless of this field; it only gates
   // the separate voice (Sarvam) feature. Defaults true.
   voiceAccessEnabled: boolean;
+  // Whether this person may use AI features on the organization's credits —
+  // enforced by the server on every AI request. Defaults true.
+  aiAccessEnabled?: boolean;
 }
 
 export interface CreateUserPayload {
@@ -32,6 +35,7 @@ export interface CreateUserPayload {
   storeId?: string;
   department?: string;
   voiceAccessEnabled?: boolean;
+  aiAccessEnabled?: boolean;
 }
 
 export interface CreateUserResult {
@@ -40,12 +44,14 @@ export interface CreateUserResult {
 }
 
 export interface UpdateUserPayload {
+  name?: string;
   role?: AssignableRole;
   assignedAgentId?: string;
   storeId?: string;
   active?: boolean;
   department?: string;
   voiceAccessEnabled?: boolean;
+  aiAccessEnabled?: boolean;
 }
 
 export const usersService = {

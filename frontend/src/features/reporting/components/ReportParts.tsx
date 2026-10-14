@@ -157,7 +157,8 @@ export function ReportTable<T>({
                   transition={{ duration: 0.25, delay: Math.min(i, 12) * 0.02 }}
                 >
                   {columns.map((c) => (
-                    <td key={c.key}>
+                    // The column's name travels with the cell: on a phone the table becomes a list, each value under it.
+                    <td key={c.key} data-label={c.label}>
                       {c.bar ? (
                         <span className={styles.barCell}>
                           <span className={styles.barTrack}>

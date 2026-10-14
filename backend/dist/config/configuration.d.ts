@@ -15,6 +15,20 @@ declare const _default: () => {
         apiBaseUrl: string;
         defaultCountryCode: string;
     };
+    dataSources: {
+        webhookBaseUrl: string;
+    };
+    chat: {
+        attachments: {
+            maxFileBytes: number;
+            maxPerMessage: number;
+            maxPerConversation: number;
+            retentionDays: number;
+        };
+    };
+    gorilladash: {
+        apiBaseUrl: string;
+    };
     jwt: {
         secret: string | undefined;
         expiresIn: string;
@@ -26,6 +40,7 @@ declare const _default: () => {
         user: string;
         password: string;
         from: string;
+        appUrl: string;
     };
     webPush: {
         publicKey: string;

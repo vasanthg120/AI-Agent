@@ -85,13 +85,20 @@ describe('ReservationService.settle — dynamic margin (real Mongo)', () => {
     transactionModel = moduleRef.get(getModelToken(WalletTransaction.name));
   });
 
+  let settingsBefore: Record<string, unknown> | null = null;
+  beforeAll(async () => {
+    settingsBefore = await settingsModel.collection.findOne({ singletonKey: 'default' });
+  });
+
   afterAll(async () => {
     await walletModel.deleteMany({ organizationId: { $regex: `^${TEST_PREFIX}` } });
     await transactionModel.deleteMany({ organizationId: { $regex: `^${TEST_PREFIX}` } });
     await reservationModel.deleteMany({ organizationId: { $regex: `^${TEST_PREFIX}` } });
     await executionModel.deleteMany({ requestId: { $regex: `^${TEST_PREFIX}` } });
     await pricingModel.deleteMany({ provider: { $regex: `^${TEST_PREFIX}` } });
-    await settingsModel.deleteMany({ singletonKey: 'default' });
+    // The billing settings are the app's one shared document: put back exactly what was there.
+    if (settingsBefore) await settingsModel.collection.replaceOne({ singletonKey: 'default' }, settingsBefore, { upsert: true });
+    else await settingsModel.deleteMany({ singletonKey: 'default' });
     await connection.close();
   });
 
@@ -235,5 +242,38 @@ describe('ReservationService.settle — dynamic margin (real Mongo)', () => {
 
     const reservation = await reservationModel.findOne({ requestId }).exec();
     expect(reservation?.status).toBe('released');
+  });
+
+  // A request holds at most the ceiling (500 in this spec) — and when the wallet
+  // has less than that, whatever is there. "Exhausted" means nothing is left,
+  // not "less than the ceiling": a 500-credit plan used once must keep working.
+  describe('reserve — a wallet with credits in it can spend them', () => {
+    const walletWith = (key: string, balanceCredits: number) => walletModel.create({ organizationId: `${TEST_PREFIX}-${key}`, balanceCredits, reservedCredits: 0 });
+
+    it('holds what is left when that is less than the ceiling', async () => {
+      await walletWith('partial', 497.88);
+      const result = await reservationService.reserve(`${TEST_PREFIX}-partial`, 'user-1', `${TEST_PREFIX}-partial-req`, 'conv');
+      expect(result.estimatedCredits).toBe(497.88);
+      expect(await walletModel.findOne({ organizationId: `${TEST_PREFIX}-partial` })).toMatchObject({ balanceCredits: 497.88, reservedCredits: 497.88 });
+      // Releasing gives back exactly what was held.
+      await reservationService.release(`${TEST_PREFIX}-partial-req`);
+      expect((await walletModel.findOne({ organizationId: `${TEST_PREFIX}-partial` }))!.reservedCredits).toBeCloseTo(0, 5);
+    });
+
+    it('holds only the ceiling when more than that is available', async () => {
+      await walletWith('full', 2000);
+      const result = await reservationService.reserve(`${TEST_PREFIX}-full`, 'user-1', `${TEST_PREFIX}-full-req`, 'conv');
+      expect(result.estimatedCredits).toBe(500);
+      expect(result.availableCredits).toBe(1500);
+    });
+
+    it('refuses only a wallet with nothing left', async () => {
+      await walletWith('empty', 0);
+      await expect(reservationService.reserve(`${TEST_PREFIX}-empty`, 'user-1', `${TEST_PREFIX}-empty-req`, 'conv')).rejects.toMatchObject({ status: 402 });
+      await walletWith('held', 10);
+      await reservationService.reserve(`${TEST_PREFIX}-held`, 'user-1', `${TEST_PREFIX}-held-req-1`, 'conv');
+      // Everything is held by the first request while it runs.
+      await expect(reservationService.reserve(`${TEST_PREFIX}-held`, 'user-1', `${TEST_PREFIX}-held-req-2`, 'conv')).rejects.toMatchObject({ status: 402 });
+    });
   });
 });

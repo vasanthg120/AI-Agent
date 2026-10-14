@@ -1,8 +1,8 @@
 import { HttpService } from '@nestjs/axios';
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectModel } from '@nestjs/mongoose';
-import { Model } from 'mongoose';
+import { Model, Types } from 'mongoose';
 import { firstValueFrom } from 'rxjs';
 import { EncryptionService } from '../common/encryption/encryption.service';
 import { UsersService } from '../users/users.service';
@@ -24,6 +24,8 @@ export interface OutlookAccountSummary {
   isActive: boolean;
   connectedAt: Date;
   status: 'connected' | 'needs_reauth';
+  /** The team member whose work this mailbox's email counts as (see the schema). */
+  handledByUserId?: string;
 }
 
 export interface OutlookOrgAccountSummary extends OutlookAccountSummary {
@@ -237,13 +239,36 @@ export class OutlookService {
     return { connected: Boolean(active), email: active?.email, canSend: !!active?.scope?.includes('Mail.Send') };
   }
 
+  /**
+   * Says whose work one of the caller's mailboxes is. `handlerUserId` must be
+   * an active account of the caller's own organization; null hands the mailbox
+   * back to the person who connected it.
+   */
+  async setHandler(userId: string, organizationId: string, email: string, handlerUserId: string | null): Promise<OutlookAccountSummary[]> {
+    const connection = await this.connectionModel.findOne({ userId, email }).exec();
+    if (!connection) throw new NotFoundException('That mailbox isn’t connected to your account.');
+    if (handlerUserId) {
+      const handler = /^[0-9a-f]{24}$/i.test(handlerUserId)
+        ? await this.connectionModel.db.collection('users').findOne({ _id: new Types.ObjectId(handlerUserId), organizationId }, { projection: { active: 1 } })
+        : null;
+      if (!handler) throw new BadRequestException('That person isn’t in your organization. Pick someone from the list.');
+      if (handler.active === false) throw new BadRequestException('That person is deactivated.');
+      connection.handledByUserId = handlerUserId;
+    } else {
+      connection.handledByUserId = undefined;
+    }
+    await connection.save();
+    return this.listAccounts(userId);
+  }
+
   async listAccounts(userId: string): Promise<OutlookAccountSummary[]> {
     const connections = await this.connectionModel
       .find({ userId })
-      .select({ email: 1, isActive: 1, createdAt: 1, status: 1 })
+      .select({ email: 1, isActive: 1, createdAt: 1, status: 1, handledByUserId: 1 })
       .sort({ createdAt: -1 });
     return connections.map((c) => ({
       email: c.email,
+      handledByUserId: c.handledByUserId,
       isActive: c.isActive,
       connectedAt: (c as unknown as { createdAt: Date }).createdAt,
       status: c.status ?? 'connected',

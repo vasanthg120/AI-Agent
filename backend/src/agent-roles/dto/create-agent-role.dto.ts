@@ -1,4 +1,5 @@
 import { IsArray, IsIn, IsOptional, IsString } from 'class-validator';
+import { APP_FEATURES, AppFeature } from '../../common/app-features';
 import { ROLE_CATEGORIES, RoleCategory } from '../schemas/agent-role.schema';
 
 // Agent Builder redesign — Manual and Template creation both post here
@@ -19,6 +20,8 @@ export class CreateAgentRoleDto {
   @IsOptional() @IsArray() @IsString({ each: true }) assignedDepartments?: string[];
   @IsOptional() @IsArray() @IsString({ each: true }) assignedUserIds?: string[];
   @IsOptional() @IsArray() @IsString({ each: true }) allowedTools?: string[];
+  // Which app features people assigned to this role can use (see common/app-features.ts).
+  @IsOptional() @IsArray() @IsIn(APP_FEATURES, { each: true }) features?: AppFeature[];
 
   @IsOptional() @IsIn(['fast', 'standard', null]) modelTier?: 'fast' | 'standard' | null;
 }

@@ -18,6 +18,7 @@ import { RELEVANT_EMAIL_INTENTS } from '../email-intelligence/email-intelligence
 import { needsResponseMatch } from '../email-intelligence/email-response-state';
 import { Deal, DealDocument } from './schemas/deal.schema';
 import { SalesAnalyticsService } from './sales-analytics.service';
+import { hasTeamRole, isOwner } from '../common/team-roster';
 
 export interface CalendarEvent {
   id: string;
@@ -31,7 +32,6 @@ interface CalendarEventsResponse {
   events: CalendarEvent[];
 }
 
-const SALES_ROLES = new Set(['manager', 'consultant']);
 
 interface RevenueRow {
   _id: string;
@@ -357,7 +357,8 @@ export class BusinessDashboardService {
   ) {
     const revenueByOwnerId = new Map(revenueRows.map((r) => [r._id, { revenue: r.revenue, wonCount: r.wonCount }]));
     return employees
-      .filter((u) => u.roles.some((r) => SALES_ROLES.has(r)))
+      // The team (common/team-roster.ts): a sales account type, or anyone with revenue or email activity of their own — never the owner.
+      .filter((u) => u.active !== false && !isOwner(u.roles) && (hasTeamRole(u.roles) || revenueByOwnerId.has(u._id.toString()) || activityByUser.has(u._id.toString())))
       .map((u) => {
         const id = u._id.toString();
         const stats = revenueByOwnerId.get(id);

@@ -4,7 +4,7 @@ import { BadRequestException, Injectable, Logger, NotFoundException } from '@nes
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { InjectModel } from '@nestjs/mongoose';
-import { Model } from 'mongoose';
+import { isValidObjectId, Model, Types } from 'mongoose';
 import { firstValueFrom } from 'rxjs';
 import { ReservationService } from '../billing/reservation.service';
 import { correlateSingleEmail, EmailCorrelationContext } from '../crm/customer-grouping.util';
@@ -12,10 +12,16 @@ import { EmailSlaService } from '../email-sla/email-sla.service';
 import { periodToDateRange } from '../common/period.util';
 import { classifyEmailDeterministically } from './email-preclassification.util';
 import {
+  deriveCategory,
+  EmailCategory,
   EmailResponseStatus,
   needsResponseMatch,
   responseStatusMatch,
+  THREAD_HEAD_MATCH,
+  unansweredOwedMatch,
 } from './email-response-state';
+import { normalizeAddress, replyAwaitsCustomer } from './email-thread.util';
+import type { ThreadMessage } from './email-conversation.service';
 import { CustomerActivityService, TodaysEmail } from '../crm/customer-activity.service';
 import { QuotesService } from '../crm/quotes.service';
 import { JwtPayload } from '../auth/jwt-payload.interface';
@@ -29,6 +35,29 @@ import {
 import { EmailIntelligenceItem, EmailIntelligenceItemDocument } from './schemas/email-intelligence-item.schema';
 
 const DUPLICATE_KEY_ERROR = 11000;
+
+/** How the owner of a mailbox wants its replies handled. Kept with the user, not the mailbox: it is their way of working. */
+export interface EmailInboxSettings {
+  /** The AI writes a draft for mail that is waiting for a reply and has none — without being asked each time. */
+  autoDraft: boolean;
+  /** Approving a reply sends it. Off: approving only saves it, and sending is a second step. */
+  sendOnApprove: boolean;
+}
+const DEFAULT_INBOX_SETTINGS: EmailInboxSettings = { autoDraft: false, sendOnApprove: true };
+
+/** Where the drafts stand for the mail waiting on a reply. */
+export interface EmailDraftSummary {
+  waiting: number;
+  withDraft: number;
+  /** Waiting, no draft, and never read by the AI — what "Draft with AI" would work through. */
+  withoutDraft: number;
+  /** The part of those recent enough for auto-draft to pick up. */
+  recentWithoutDraft: number;
+  autoDraftWindowDays: number;
+}
+
+/** Auto-draft leaves old mail alone: a drafted answer to a months-old email is rarely worth its credits. */
+export const AUTO_DRAFT_MAX_AGE_DAYS = 30;
 const EMAIL_HISTORY_LIMIT = 50;
 const SEVERITY_ORDER = ['low', 'medium', 'high', 'urgent'];
 const LIST_DEFAULT_LIMIT = 100;
@@ -80,6 +109,30 @@ export interface ListEmailsQuery {
   skip?: number;
 }
 
+/** What the mailbox sync knows about a message beyond the message itself. */
+export interface IngestExtras {
+  /** Every address of the mailbox (primary + aliases), lower-cased. */
+  ownAddresses?: string[];
+  /** The conversation so far, oldest first, for the AI to read. */
+  thread?: ThreadMessage[];
+  /** Set when a sent message already answers this email (see EmailConversationService.answeredFields). */
+  answered?: Record<string, unknown>;
+}
+
+export type EmailInboxCounts = Record<EmailResponseStatus, number> & { categories: Record<EmailCategory, number> };
+
+const CATEGORIES: EmailCategory[] = ['urgent', 'needs_response', 'waiting_for_customer', 'follow_up_required', 'responded', 'informational', 'completed'];
+// An approved draft's send is given this long before another attempt may start.
+const SEND_CLAIM_MS = 2 * 60_000;
+const MAX_ANALYSIS_ATTEMPTS = 4;
+
+/** Why the AI could not read an email, in words a person can act on. Never message content. */
+export function analysisFailureReason(err: unknown): string {
+  const status = (err as { status?: number; getStatus?: () => number }).getStatus?.() ?? (err as { response?: { status?: number } }).response?.status;
+  if (status === 402) return 'AI credits are used up — add credits to get an AI summary and a drafted reply.';
+  return 'The AI could not be reached — it will be tried again on the next sync.';
+}
+
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
@@ -99,12 +152,14 @@ interface RiskScoreInput {
 // (private, unexported) SALES_ROLES — Employee Productivity (Business
 // Intelligence section 3) composes email analytics with deals/quotes
 // per-employee, so all three must agree on who counts as "an employee".
-const EMAIL_ROSTER_ROLES = new Set(['manager', 'consultant']);
+// The roster itself is UsersService.findTeamRoster (common/team-roster.ts).
 
 export interface EmployeeEmailAnalyticsRow {
   userId: string;
   userName: string;
   count: number;
+  // With kind 'replied': every email sent from the mailbox(es) this person handles, in the range.
+  outgoing?: number;
   byPriority?: { value: string; count: number }[];
   byUrgency?: { value: string; count: number }[];
   ageBuckets?: { bucket: string; count: number }[];
@@ -123,6 +178,9 @@ const DRAFTABLE_INTENT_LABELS: Record<string, string> = {
 function intentLabel(intent: string): string {
   return DRAFTABLE_INTENT_LABELS[intent] ?? intent.replace(/_/g, ' ');
 }
+
+// A follow-up draft still "generating" after this long was interrupted, not slow.
+const STALE_DRAFT_MS = 3 * 60 * 1000;
 
 @Injectable()
 export class EmailIntelligenceService {
@@ -156,9 +214,77 @@ export class EmailIntelligenceService {
   // hitting Graph. "Open" is the shared needs-a-reply definition, so an
   // approved draft that hasn't gone out (or whose send failed) is checked too —
   // the user may well have answered it in Outlook instead.
+  /**
+   * Whether this message is already stored — by Outlook's id, or, when Outlook
+   * has re-issued the id because the message was moved to another folder, by
+   * its Message-ID (the stored id is then brought up to date so replying to it
+   * and opening it keep working). Also fills in the Message-ID on rows stored
+   * before it was captured.
+   */
+  async alreadyStored(userId: string, email: { id: string; internetMessageId?: string; isRead?: boolean }): Promise<boolean> {
+    const byId = await this.itemModel.findOne({ userId, externalMessageId: email.id }).select('_id internetMessageId').lean().exec();
+    if (byId) {
+      if (!byId.internetMessageId && email.internetMessageId) {
+        await this.itemModel
+          .updateOne({ _id: byId._id }, { $set: { internetMessageId: email.internetMessageId } })
+          .exec()
+          .catch(() => undefined); // another row already holds this Message-ID
+      }
+      return true;
+    }
+    if (!email.internetMessageId) return false;
+    const moved = await this.itemModel.findOne({ userId, internetMessageId: email.internetMessageId }).select('_id').lean().exec();
+    if (!moved) return false;
+    await this.itemModel
+      .updateOne({ _id: moved._id }, { $set: { externalMessageId: email.id, ...(email.isRead === undefined ? {} : { isRead: email.isRead }) } })
+      .exec()
+      .catch((err) => this.logger.warn(`Could not update the id of a moved message for user ${userId}: ${(err as Error).message}`));
+    return true;
+  }
+
+  /** Stored messages the AI has not managed to read yet and that still wait on a reply — oldest first. */
+  async listAwaitingAnalysis(userId: string, limit: number): Promise<EmailIntelligenceItemDocument[]> {
+    return this.itemModel
+      .find({ userId, analysisState: 'pending', analysisAttempts: { $lt: MAX_ANALYSIS_ATTEMPTS }, ...needsResponseMatch() })
+      .sort({ receivedAt: -1 })
+      .limit(limit)
+      .exec();
+  }
+
+  /** Conversations still waiting on a reply, least recently checked against the mailbox first. */
+  async listOpenForMailboxCheck(userId: string, limit: number) {
+    return this.itemModel
+      .find({ userId, ...needsResponseMatch() })
+      .sort({ mailboxCheckedAt: 1, receivedAt: 1 })
+      .limit(limit)
+      .select('_id externalMessageId internetMessageId')
+      .lean()
+      .exec();
+  }
+
+  /** Applies what Outlook says about where stored messages are now. Returns how many left the mailbox. */
+  async applyMailboxStates(userId: string, states: { id: string; state: string; newId?: string | null; isRead?: boolean | null }[]): Promise<number> {
+    if (states.length === 0) return 0;
+    const now = new Date();
+    let removed = 0;
+    const ops = states.flatMap((s) => {
+      const filter = { userId, externalMessageId: s.id };
+      const read = typeof s.isRead === 'boolean' ? { isRead: s.isRead } : {};
+      if (s.state === 'deleted' || s.state === 'gone') {
+        removed += 1;
+        return [{ updateOne: { filter, update: { $set: { mailboxRemovedAt: now, mailboxState: s.state, mailboxCheckedAt: now, ...read } } } }];
+      }
+      if (s.state === 'moved' && s.newId) return [{ updateOne: { filter, update: { $set: { externalMessageId: s.newId, mailboxCheckedAt: now, ...read } } } }];
+      if (s.state === 'present') return [{ updateOne: { filter, update: { $set: { mailboxCheckedAt: now, ...read } } } }];
+      return []; // 'unknown': Outlook could not say — change nothing
+    });
+    if (ops.length > 0) await this.itemModel.bulkWrite(ops, { ordered: false });
+    return removed;
+  }
+
   async getEarliestPendingReceivedAt(userId: string): Promise<Date | null> {
     const oldest = await this.itemModel
-      .findOne({ userId, conversationId: { $exists: true, $ne: '' }, ...needsResponseMatch() })
+      .findOne({ userId, ...unansweredOwedMatch() })
       .sort({ receivedAt: 1 })
       .select('receivedAt')
       .exec();
@@ -210,7 +336,7 @@ export class EmailIntelligenceService {
     const field = via === 'app' ? 'threadRespondedAt' : 'externalReplyDetectedAt';
 
     const candidates = await this.itemModel
-      .find({ userId, conversationId: { $in: [...replies.keys()] }, ...needsResponseMatch() })
+      .find({ userId, conversationId: { $in: [...replies.keys()] }, ...unansweredOwedMatch() })
       .select('_id organizationId conversationId receivedAt')
       .lean()
       .exec();
@@ -227,7 +353,7 @@ export class EmailIntelligenceService {
     const result = await this.itemModel.bulkWrite(
       [...openByConversation.entries()].map(([conversationId, rows]) => ({
         updateMany: {
-          filter: { _id: { $in: rows.map((r) => r._id) }, ...needsResponseMatch() },
+          filter: { _id: { $in: rows.map((r) => r._id) }, ...unansweredOwedMatch() },
           update: { $set: { [field]: replies.get(conversationId)! } },
         },
       })),
@@ -254,9 +380,15 @@ export class EmailIntelligenceService {
   // differs per gate and isn't needed here, only the boolean answer, so
   // mirroring these two simple conditions is a smaller, safer footprint than
   // restructuring production-critical branching logic.
-  wouldSkipLlmAnalysis(email: { from: string; subject: string; preview: string }, mailboxEmail: string): boolean {
-    if (email.from.trim().toLowerCase() === mailboxEmail.trim().toLowerCase()) return true;
+  wouldSkipLlmAnalysis(email: { from: string; subject: string; preview: string }, mailboxEmail: string, ownAddresses: string[] = []): boolean {
+    if (this.isOwnAddress(email.from, mailboxEmail, ownAddresses)) return true;
     return !!classifyEmailDeterministically({ from: email.from, subject: email.subject, preview: email.preview });
+  }
+
+  /** Sent by the mailbox itself — under its sign-in address or any of its aliases. */
+  private isOwnAddress(address: string, mailboxEmail: string, ownAddresses: string[] = []): boolean {
+    const from = normalizeAddress(address);
+    return from === normalizeAddress(mailboxEmail) || ownAddresses.some((own) => normalizeAddress(own) === from);
   }
 
   // Correlates the email, calls python-agent for classification+draft,
@@ -269,6 +401,7 @@ export class EmailIntelligenceService {
     mailboxEmail: string,
     email: TodaysEmail,
     context: EmailCorrelationContext,
+    extras: IngestExtras = {},
   ): Promise<EmailIntelligenceItemDocument | null> {
     const { correlation, matchedBusinessSummary } = this.correlate(email, context);
 
@@ -278,9 +411,14 @@ export class EmailIntelligenceService {
       mailboxEmail,
       externalMessageId: email.id,
       conversationId: email.conversationId || undefined,
+      internetMessageId: email.internetMessageId || undefined,
+      inReplyTo: email.inReplyTo || undefined,
+      references: email.references?.length ? email.references : undefined,
       receivedAt: new Date(email.receivedAt),
       subject: email.subject,
       fromAddress: email.from,
+      fromName: email.fromName || undefined,
+      ccAddresses: email.cc?.length ? email.cc : undefined,
       toAddresses: email.to,
       bodyPreview: email.preview,
       isRead: email.isRead,
@@ -298,7 +436,7 @@ export class EmailIntelligenceService {
       // to; skip the (costly) LLM call entirely rather than asking the model
       // to work this out from raw from/to text, which is exactly what
       // produced customer/vendor-voiced drafts before this fix.
-      if (email.from.trim().toLowerCase() === mailboxEmail.trim().toLowerCase()) {
+      if (this.isOwnAddress(email.from, mailboxEmail, extras.ownAddresses)) {
         return await this.itemModel.create({
           ...baseFields,
           intent: 'internal',
@@ -338,9 +476,72 @@ export class EmailIntelligenceService {
         });
       }
 
+      // Already answered in Outlook before HaiVE ever saw it: the conversation
+      // is settled, so there is nothing for the AI to triage or draft. Stored
+      // as answered, without spending an AI call or raising a notification.
+      if (extras.answered) {
+        return await this.itemModel.create({
+          ...baseFields,
+          ...extras.answered,
+          intent: correlation ? 'existing_customer' : 'other',
+          priority: 'medium',
+          urgency: 'medium',
+          sentiment: 'neutral',
+          recommendedAction: 'Already answered in Outlook — nothing to do unless the customer writes again.',
+          shouldDraft: false,
+          fromRole: correlation ? 'customer' : 'external_other',
+          expectedNextAction: 'company_reply',
+          reason: 'You had already replied to this email in Outlook when HaiVE picked it up.',
+          deterministicInput: { skippedLlmCall: true, reasonForSkip: 'already answered in Outlook' },
+          result: {},
+        });
+      }
+
       const salesperson = await this.usersService.findById(userId);
-      const deterministicInput = this.buildAnalysisPayload(email, correlation, matchedBusinessSummary, mailboxEmail, salesperson?.name);
-      const result = await this.callAnalyze(organizationId, userId, deterministicInput);
+      const deterministicInput = this.buildAnalysisPayload(email, correlation, matchedBusinessSummary, mailboxEmail, salesperson?.name, extras.thread);
+      let result: Record<string, unknown>;
+      try {
+        result = await this.callAnalyze(organizationId, userId, deterministicInput);
+      } catch (err) {
+        // The AI is an enrichment, not the gatekeeper: an email it could not
+        // read (no credits, an outage) is still a customer waiting for an
+        // answer. It is stored and tracked as such, flagged as not yet read by
+        // the AI, and retried on later syncs — never dropped.
+        const reason = analysisFailureReason(err);
+        this.logger.warn(`AI analysis unavailable for a message of user ${userId} (${(err as Error).message}) — stored without it`);
+        const stored = await this.itemModel.create({
+          ...baseFields,
+          intent: correlation ? 'existing_customer' : 'other',
+          priority: email.importance === 'high' ? 'high' : 'medium',
+          urgency: email.importance === 'high' ? 'high' : 'medium',
+          sentiment: 'neutral',
+          recommendedAction: 'Reply to this email. ' + reason,
+          shouldDraft: false,
+          fromRole: correlation ? 'customer' : 'external_other',
+          expectedNextAction: 'company_reply',
+          reason,
+          analysisState: 'pending',
+          analysisAttempts: 1,
+          analysisError: reason,
+          deterministicInput: { skippedLlmCall: true, reasonForSkip: 'AI analysis unavailable' },
+          result: {},
+        });
+        await this.notificationsService
+          .create(
+            userId,
+            {
+              kind: 'system',
+              title: 'New email needs a reply',
+              description: `${email.subject || '(no subject)'} — not yet read by the AI`,
+              source: 'email-intelligence',
+              entityType: 'email',
+              entityId: stored._id.toString(),
+            },
+            organizationId,
+          )
+          .catch(() => undefined);
+        return stored;
+      }
       const decision = this.applyPerspectiveValidation(email.id, email.from, result.intent as string, result);
 
       const created = await this.itemModel.create({
@@ -494,8 +695,13 @@ export class EmailIntelligenceService {
     matchedBusinessSummary: ReturnType<EmailIntelligenceService['correlate']>['matchedBusinessSummary'],
     mailboxEmail: string,
     salespersonName?: string,
+    thread?: ThreadMessage[],
   ) {
     return {
+      // The earlier messages of this conversation, both directions, oldest
+      // first — so the email is judged (and any reply drafted) as the next
+      // turn of a conversation, not as a message out of nowhere.
+      ...(thread?.length ? { thread } : {}),
       // Phase 17 — the single missing signal that let drafts get written in
       // the wrong voice: without this, the model had no way to know which
       // address is "us" versus the external party. Never remove without a
@@ -705,8 +911,14 @@ export class EmailIntelligenceService {
     const relevantFilter = {
       intent: intent && RELEVANT_EMAIL_INTENTS.includes(intent) ? intent : { $in: RELEVANT_EMAIL_INTENTS },
     };
+    // An email that was actually answered is work done, whatever category it
+    // was filed under — mail brought in from mailbox history, or stored while
+    // the AI was unavailable, has no real category ('other') and used to be
+    // left out of the counts even though someone had replied to it. Only mail
+    // from our own organization and spam stay out.
+    const answeredFilter = intent && RELEVANT_EMAIL_INTENTS.includes(intent) ? { intent } : { intent: { $nin: ['internal', 'spam'] } };
     if (kind === 'sent') {
-      return { organizationId, ...userFilter, ...relevantFilter, sentAt: { $gte: start, $lt: end } };
+      return { organizationId, ...userFilter, ...answeredFilter, sentAt: { $gte: start, $lt: end } };
     }
     // A reply sent directly in the mailbox owner's real Outlook client —
     // never routed through this app's own approve/send flow (that's 'sent'
@@ -717,7 +929,7 @@ export class EmailIntelligenceService {
     // Outlook" both stay visible, even though both count as genuinely
     // handled for 'missed' purposes below.
     if (kind === 'replied') {
-      return { organizationId, ...userFilter, ...relevantFilter, externalReplyDetectedAt: { $gte: start, $lt: end } };
+      return { organizationId, ...userFilter, ...answeredFilter, externalReplyDetectedAt: { $gte: start, $lt: end } };
     }
     if (kind === 'missed') {
       const missedCutoff = new Date(Date.now() - 24 * 60 * 60 * 1000);
@@ -756,8 +968,8 @@ export class EmailIntelligenceService {
     filters: { employeeId?: string[]; storeId?: string[] },
   ): Promise<{ rows: EmployeeEmailAnalyticsRow[]; totalCount: number }> {
     const roster = await this.resolveEmailRoster(organizationId, filters);
-    const rosterIds = roster.map((u) => u._id.toString());
-    const match = { ...this.buildActivityKindMatch(organizationId, kind, start, end, {}), userId: { $in: rosterIds } };
+    const attribution = await this.mailboxAttribution(roster.map((u) => u._id.toString()));
+    const match = { ...this.buildActivityKindMatch(organizationId, kind, start, end, {}), userId: { $in: attribution.mailboxOwnerIds } };
 
     // 'replied' is the same simple "count per user" shape as 'sent' — only
     // 'missed' needs the priority/urgency/age-bucket breakdown below.
@@ -765,9 +977,28 @@ export class EmailIntelligenceService {
       const rows = await this.itemModel
         .aggregate<{ _id: string; count: number }>([{ $match: match }, { $group: { _id: '$userId', count: { $sum: 1 } } }])
         .exec();
-      const byUser = new Map(rows.map((r) => [r._id, r.count]));
+      const byUser = attribution.countsByEmployee(rows);
+      // Alongside "replied": everything that went out of the mailbox in the
+      // range (Outlook's Sent Items) — replies, quotations sent, new emails.
+      const outgoing =
+        kind === 'replied'
+          ? attribution.countsByEmployee(
+              await this.itemModel.db
+                .collection('email_sent_items')
+                .aggregate<{ _id: string; count: number }>([
+                  { $match: { organizationId, userId: { $in: attribution.mailboxOwnerIds }, sentAt: { $gte: start, $lt: end } } },
+                  { $group: { _id: '$userId', count: { $sum: 1 } } },
+                ])
+                .toArray(),
+            )
+          : undefined;
       const result = roster
-        .map((u) => ({ userId: u._id.toString(), userName: u.name, count: byUser.get(u._id.toString()) ?? 0 }))
+        .map((u) => ({
+          userId: u._id.toString(),
+          userName: u.name,
+          count: byUser.get(u._id.toString()) ?? 0,
+          ...(outgoing ? { outgoing: outgoing.get(u._id.toString()) ?? 0 } : {}),
+        }))
         .sort((a, b) => b.count - a.count);
       return { rows: result, totalCount: result.reduce((sum, r) => sum + r.count, 0) };
     }
@@ -780,7 +1011,7 @@ export class EmailIntelligenceService {
     const items = await this.itemModel.find(match).select('userId priority urgency receivedAt').exec();
     const byUser = new Map<string, EmailIntelligenceItemDocument[]>();
     for (const item of items) {
-      const uid = item.userId;
+      const uid = attribution.employeeOf(item.userId);
       if (!byUser.has(uid)) byUser.set(uid, []);
       byUser.get(uid)!.push(item);
     }
@@ -840,10 +1071,9 @@ export class EmailIntelligenceService {
     organizationId: string,
     filters: { employeeId?: string[]; storeId?: string[] },
   ): Promise<UserDocument[]> {
-    const users = await this.usersService.findAll(organizationId);
+    const users = await this.usersService.findTeamRoster(organizationId);
     return users.filter(
       (u) =>
-        u.roles.some((r) => EMAIL_ROSTER_ROLES.has(r)) &&
         (!filters.storeId?.length || (u.storeId && filters.storeId.includes(u.storeId))) &&
         (!filters.employeeId?.length || filters.employeeId.includes(u._id.toString())),
     );
@@ -853,11 +1083,51 @@ export class EmailIntelligenceService {
   // filters (the BI global filter bar's multi-select) — left resolveMonthlyUserFilter
   // itself untouched since AnalyticsDashboardService's already-verified
   // getActivityStats/listActivity callers still pass single-value constraints.
+  /**
+   * Whose work a mailbox's email is. Email is stored under the account that
+   * connected the mailbox; a shared mailbox (enquiries@) connected by the owner
+   * and answered by a salesperson is marked as handled by that salesperson
+   * (OutlookConnection.handledByUserId), and every per-employee email number
+   * follows that. Given the employees being reported on, returns the mailbox
+   * owners whose email counts as theirs, and how to fold results back.
+   */
+  private async mailboxAttribution(employeeIds: string[]) {
+    const wanted = new Set(employeeIds);
+    const handled = employeeIds.length
+      ? await this.itemModel.db
+          .collection('outlook_connections')
+          .find({ handledByUserId: { $in: employeeIds }, isActive: true }, { projection: { userId: 1, handledByUserId: 1 } })
+          .toArray()
+      : [];
+    // A mailbox someone else handles is not also its connecting user's own work.
+    const handedOver = employeeIds.length
+      ? await this.itemModel.db
+          .collection('outlook_connections')
+          .find({ userId: { $in: employeeIds }, isActive: true, handledByUserId: { $exists: true, $nin: [null, ''] } }, { projection: { userId: 1, handledByUserId: 1 } })
+          .toArray()
+      : [];
+    const employeeByOwner = new Map<string, string>();
+    for (const id of employeeIds) employeeByOwner.set(id, id);
+    for (const c of handedOver) if (String(c.handledByUserId) !== String(c.userId)) employeeByOwner.delete(String(c.userId));
+    for (const c of handled) if (wanted.has(String(c.handledByUserId))) employeeByOwner.set(String(c.userId), String(c.handledByUserId));
+    const employeeOf = (ownerId: string) => employeeByOwner.get(ownerId) ?? ownerId;
+    return {
+      mailboxOwnerIds: [...employeeByOwner.keys()],
+      employeeOf,
+      countsByEmployee: (rows: { _id: string; count: number }[]) => {
+        const counts = new Map<string, number>();
+        for (const row of rows) counts.set(employeeOf(row._id), (counts.get(employeeOf(row._id)) ?? 0) + row.count);
+        return counts;
+      },
+    };
+  }
+
   private async resolveEmployeeUserFilter(
     organizationId: string,
     filters: { employeeId?: string[]; storeId?: string[] },
   ): Promise<Record<string, unknown>> {
-    if (filters.employeeId?.length) return { userId: { $in: filters.employeeId } };
+    // An employee's list is the email of every mailbox they handle.
+    if (filters.employeeId?.length) return { userId: { $in: (await this.mailboxAttribution(filters.employeeId)).mailboxOwnerIds } };
     if (filters.storeId?.length) {
       const users = await this.usersService.findAll(organizationId);
       const ids = users.filter((u) => u.storeId && filters.storeId!.includes(u.storeId)).map((u) => u._id.toString());
@@ -913,14 +1183,20 @@ export class EmailIntelligenceService {
     filters: { employeeId?: string[]; storeId?: string[] },
   ): Promise<{ userId: string; userName: string; assigned: number; completed: number; pending: number; overdue: number }[]> {
     const roster = await this.resolveEmailRoster(organizationId, filters);
-    const rosterIds = roster.map((u) => u._id.toString());
-    const rosterFilter = { userId: { $in: rosterIds } };
+    const attribution = await this.mailboxAttribution(roster.map((u) => u._id.toString()));
+    const rosterFilter = { userId: { $in: attribution.mailboxOwnerIds } };
     const missedCutoff = new Date(Date.now() - 24 * 60 * 60 * 1000);
 
+    // Relevant mail — or mail that was answered, which proves it was (see buildActivityKindMatch).
     const assignedMatch = {
       organizationId,
       ...rosterFilter,
-      intent: { $in: RELEVANT_EMAIL_INTENTS },
+      $or: [
+        { intent: { $in: RELEVANT_EMAIL_INTENTS } },
+        { intent: { $nin: ['internal', 'spam'] }, sentAt: { $exists: true } },
+        { intent: { $nin: ['internal', 'spam'] }, externalReplyDetectedAt: { $exists: true } },
+        { intent: { $nin: ['internal', 'spam'] }, threadRespondedAt: { $exists: true } },
+      ],
       receivedAt: { $gte: start, $lt: end },
     };
     // The same needs-response definition as buildActivityKindMatch's 'missed'
@@ -938,7 +1214,7 @@ export class EmailIntelligenceService {
     const completedMatch = {
       organizationId,
       ...rosterFilter,
-      intent: { $in: RELEVANT_EMAIL_INTENTS },
+      intent: { $nin: ['internal', 'spam'] },
       $or: [
         { sentAt: { $gte: start, $lt: end } },
         { externalReplyDetectedAt: { $gte: start, $lt: end } },
@@ -959,7 +1235,7 @@ export class EmailIntelligenceService {
       groupByUser(overdueMatch),
     ]);
 
-    const toMap = (rows: { _id: string; count: number }[]) => new Map(rows.map((r) => [r._id, r.count]));
+    const toMap = (rows: { _id: string; count: number }[]) => attribution.countsByEmployee(rows);
     const assigned = toMap(assignedRows);
     const completed = toMap(completedRows);
     const pending = toMap(pendingRows);
@@ -1015,10 +1291,17 @@ export class EmailIntelligenceService {
   // the rows under it. Combined with $and because the response-state matches
   // carry their own $and/$or.
   private buildListMatch(userId: string, q: ListEmailsQuery): Record<string, unknown> {
-    const clauses: Record<string, unknown>[] = [{ userId }];
+    // One row per conversation: its newest customer message (older messages of
+    // the same conversation are reachable through the row's thread).
+    const clauses: Record<string, unknown>[] = [{ userId }, THREAD_HEAD_MATCH];
     if (q.status) clauses.push({ status: q.status });
     if (q.view) clauses.push(responseStatusMatch(q.view));
-    if (q.intents?.length) clauses.push({ intent: { $in: q.intents } });
+    // Mail the AI has not read yet has no real type ("other" is only a placeholder), so a mail-type
+    // filter must not hide it: mail that arrived while the AI was unavailable, and mail brought in
+    // from mailbox history that is from someone outside and may be owed a reply.
+    if (q.intents?.length) {
+      clauses.push({ $or: [{ intent: { $in: q.intents } }, { analysisState: 'pending' }, { 'deterministicInput.skippedLlmCall': true, expectedNextAction: 'company_reply' }] });
+    }
     // receivedAt is a real Date field (unlike TimelineEvent.occurredAt's plain
     // string) — `to` must be pushed to the end of that calendar day, otherwise
     // a date-only value (e.g. "2026-08-05" from DateRangeControl) means
@@ -1080,12 +1363,53 @@ export class EmailIntelligenceService {
   async counts(
     userId: string,
     q: Pick<ListEmailsQuery, 'from' | 'to' | 'intents' | 'search'> = {},
-  ): Promise<Record<EmailResponseStatus, number>> {
+  ): Promise<EmailInboxCounts> {
     const views: EmailResponseStatus[] = ['needs_response', 'responded', 'resolved'];
-    const totals = await Promise.all(
-      views.map((view) => this.itemModel.countDocuments(this.buildListMatch(userId, { ...q, view })).exec()),
-    );
-    return { needs_response: totals[0], responded: totals[1], resolved: totals[2] };
+    const [totals, groups] = await Promise.all([
+      Promise.all(views.map((view) => this.itemModel.countDocuments(this.buildListMatch(userId, { ...q, view })).exec())),
+      // The finer categories, counted with the very function that labels a row
+      // (deriveCategory): rows are grouped by the handful of facts it reads.
+      this.itemModel
+        .aggregate<{ _id: Record<string, unknown>; count: number }>([
+          { $match: this.buildListMatch(userId, q) },
+          {
+            $group: {
+              _id: {
+                status: '$status',
+                shouldDraft: '$shouldDraft',
+                expectedNextAction: '$expectedNextAction',
+                aiStatus: '$aiStatus',
+                urgent: { $or: [{ $eq: ['$urgency', 'urgent'] }, { $eq: ['$priority', 'urgent'] }] },
+                awaits: { $eq: ['$replyAwaitsCustomer', true] },
+                removed: { $gt: ['$mailboxRemovedAt', null] },
+                // Day the reply went out — enough to tell "waiting" from "follow-up due".
+                respondedDay: {
+                  $dateToString: { format: '%Y-%m-%dT%H:00:00.000Z', date: { $ifNull: ['$sentAt', { $ifNull: ['$externalReplyDetectedAt', '$threadRespondedAt'] }] } },
+                },
+              },
+              count: { $sum: 1 },
+            },
+          },
+        ])
+        .exec(),
+    ]);
+    const categories = Object.fromEntries(CATEGORIES.map((c) => [c, 0])) as Record<EmailCategory, number>;
+    for (const group of groups) {
+      const g = group._id;
+      const respondedAt = typeof g.respondedDay === 'string' ? new Date(g.respondedDay) : undefined;
+      const category = deriveCategory({
+        status: g.status as string | undefined,
+        shouldDraft: g.shouldDraft as boolean | undefined,
+        expectedNextAction: (g.expectedNextAction as string | null) ?? undefined,
+        aiStatus: (g.aiStatus as string | null) ?? undefined,
+        externalReplyDetectedAt: respondedAt,
+        urgency: g.urgent ? 'urgent' : undefined,
+        replyAwaitsCustomer: g.awaits === true,
+        mailboxRemovedAt: g.removed ? new Date(0) : undefined,
+      });
+      categories[category] += group.count;
+    }
+    return { needs_response: totals[0], responded: totals[1], resolved: totals[2], categories };
   }
 
   // The stored messages of one conversation, oldest first — each with its own
@@ -1104,7 +1428,7 @@ export class EmailIntelligenceService {
       .sort({ receivedAt: 1, _id: 1 })
       .limit(100)
       .select(
-        'subject fromAddress receivedAt bodyPreview isRead intent priority status shouldDraft expectedNextAction aiStatus sendError sentAt externalReplyDetectedAt threadRespondedAt',
+        'subject fromAddress fromName receivedAt bodyPreview isRead intent priority urgency status shouldDraft expectedNextAction aiStatus sendError sentAt externalReplyDetectedAt threadRespondedAt threadHead mailboxRemovedAt replyAwaitsCustomer replyPreview',
       )
       .exec();
     return { conversationId: item.conversationId ?? null, messages };
@@ -1116,9 +1440,93 @@ export class EmailIntelligenceService {
     return item;
   }
 
+  // ---- how the mailbox owner wants replies handled ------------------------------
+
+  async getInboxSettings(userId: string): Promise<EmailInboxSettings> {
+    if (!isValidObjectId(userId)) return { ...DEFAULT_INBOX_SETTINGS };
+    const user = await this.itemModel.db.collection('users').findOne({ _id: new Types.ObjectId(userId) }, { projection: { 'preferences.emailInbox': 1 } });
+    const saved = ((user?.preferences as Record<string, unknown> | undefined)?.emailInbox ?? {}) as Partial<EmailInboxSettings>;
+    return {
+      autoDraft: typeof saved.autoDraft === 'boolean' ? saved.autoDraft : DEFAULT_INBOX_SETTINGS.autoDraft,
+      sendOnApprove: typeof saved.sendOnApprove === 'boolean' ? saved.sendOnApprove : DEFAULT_INBOX_SETTINGS.sendOnApprove,
+    };
+  }
+
+  async updateInboxSettings(userId: string, patch: Partial<EmailInboxSettings>): Promise<EmailInboxSettings> {
+    if (!isValidObjectId(userId)) throw new BadRequestException('Settings can’t be saved for this account.');
+    const set: Record<string, boolean> = {};
+    if (typeof patch.autoDraft === 'boolean') set['preferences.emailInbox.autoDraft'] = patch.autoDraft;
+    if (typeof patch.sendOnApprove === 'boolean') set['preferences.emailInbox.sendOnApprove'] = patch.sendOnApprove;
+    if (Object.keys(set).length > 0) await this.itemModel.db.collection('users').updateOne({ _id: new Types.ObjectId(userId) }, { $set: set });
+    return this.getInboxSettings(userId);
+  }
+
+  // ---- mail waiting for a reply that has no draft yet ------------------------------
+
+  // Waiting on a reply, nothing drafted, and the AI has never read it: imported
+  // from mailbox history, or it arrived while the AI was unavailable. Mail the
+  // AI did read and chose not to draft for is not in here — asking again would
+  // only cost a second call for the same answer.
+  private withoutDraftMatch(userId: string, maxAgeDays?: number): Record<string, unknown> {
+    return {
+      userId,
+      status: 'pending',
+      ...(maxAgeDays ? { receivedAt: { $gte: new Date(Date.now() - maxAgeDays * 24 * 60 * 60_000) } } : {}),
+      $and: [
+        ...(needsResponseMatch().$and as Record<string, unknown>[]),
+        { $or: [{ draftReply: { $exists: false } }, { draftReply: null }, { draftReply: '' }] },
+        { $or: [{ 'deterministicInput.skippedLlmCall': true }, { analysisState: 'pending' }] },
+      ],
+    };
+  }
+
+  /** Newest first: the mail most worth answering is the mail that just came in. */
+  listWithoutDraft(userId: string, limit: number, maxAgeDays?: number): Promise<EmailIntelligenceItemDocument[]> {
+    return this.itemModel.find(this.withoutDraftMatch(userId, maxAgeDays)).sort({ receivedAt: -1 }).limit(limit).exec();
+  }
+
+  countWithoutDraft(userId: string, maxAgeDays?: number): Promise<number> {
+    return this.itemModel.countDocuments(this.withoutDraftMatch(userId, maxAgeDays)).exec();
+  }
+
+  async draftSummary(userId: string): Promise<EmailDraftSummary> {
+    const waiting = needsResponseMatch().$and as Record<string, unknown>[];
+    const [total, withDraft, withoutDraft, recentWithoutDraft] = await Promise.all([
+      this.itemModel.countDocuments({ userId, $and: waiting }).exec(),
+      this.itemModel.countDocuments({ userId, $and: [...waiting, { draftReply: { $exists: true, $nin: [null, ''] } }] }).exec(),
+      this.countWithoutDraft(userId),
+      this.countWithoutDraft(userId, AUTO_DRAFT_MAX_AGE_DAYS),
+    ]);
+    return { waiting: total, withDraft, withoutDraft, recentWithoutDraft, autoDraftWindowDays: AUTO_DRAFT_MAX_AGE_DAYS };
+  }
+
+  /**
+   * Approves the reply and sends it, in one step — what "Approve & send" does. The text is the
+   * reply: the AI's draft as it stands, an edited one, or one written by hand for an email the AI
+   * drafted nothing for. If the send fails the reply stays approved and unsent, with the reason, so
+   * it can simply be sent again; the email stays in "needs a reply" until something really goes out.
+   */
+  async reply(userId: string, id: string, text: string): Promise<EmailIntelligenceItemDocument> {
+    if (!text?.trim()) throw new BadRequestException('Write the reply before sending it.');
+    const item = await this.getOne(userId, id);
+    if (item.sentAt) throw new BadRequestException('This item has already been sent');
+    if (item.externalReplyDetectedAt || item.threadRespondedAt) {
+      throw new BadRequestException('This email has already been replied to — sending another reply would duplicate it.');
+    }
+    await this.approve(userId, id, text);
+    return this.send(userId, id);
+  }
+
   async approve(userId: string, id: string, finalDraftReply?: string): Promise<EmailIntelligenceItemDocument> {
     const item = await this.getOne(userId, id);
-    const resolvedFinal = item.shouldDraft ? (finalDraftReply?.trim() || item.draftReply) : undefined;
+    const written = finalDraftReply?.trim();
+    // A reply written by a person for an email the AI drafted nothing for: they have decided it
+    // gets an answer, so it is an email with a reply now — not one approved as "no reply needed".
+    if (written && !item.shouldDraft) {
+      item.shouldDraft = true;
+      item.expectedNextAction = 'company_reply';
+    }
+    const resolvedFinal = item.shouldDraft ? written || item.draftReply : undefined;
     item.finalDraftReply = resolvedFinal;
     item.wasEdited = !!resolvedFinal && resolvedFinal !== item.draftReply;
     item.status = 'approved';
@@ -1145,6 +1553,27 @@ export class EmailIntelligenceService {
     }
     if (!item.finalDraftReply) throw new BadRequestException('No draft text to send');
 
+    // Claim the send before dispatching. Two clicks, two tabs or a retried
+    // request all pass the checks above at the same moment; only one of them
+    // can win this write, so the customer can never get the same reply twice.
+    const claimedAt = new Date();
+    const claim = await this.itemModel
+      .updateOne(
+        {
+          _id: item._id,
+          userId,
+          status: 'approved',
+          sentAt: { $exists: false },
+          externalReplyDetectedAt: { $exists: false },
+          threadRespondedAt: { $exists: false },
+          $or: [{ sendingAt: { $exists: false } }, { sendingAt: { $lt: new Date(claimedAt.getTime() - SEND_CLAIM_MS) } }],
+        },
+        { $set: { sendingAt: claimedAt } },
+      )
+      .exec();
+    if (claim.modifiedCount !== 1) throw new BadRequestException('This reply is already being sent.');
+    item.sendingAt = claimedAt;
+
     const token = this.jwt.sign({ sub: userId }, { expiresIn: '5m' });
     try {
       await firstValueFrom(
@@ -1157,12 +1586,16 @@ export class EmailIntelligenceService {
     } catch (err) {
       const message = (err as { response?: { data?: { detail?: string } }; message?: string }).response?.data?.detail ?? (err as Error).message;
       item.sendError = message;
+      item.sendingAt = undefined;
       await item.save();
       throw new BadRequestException(`Failed to send reply: ${message}`);
     }
 
     item.sentAt = new Date();
     item.sendError = undefined;
+    item.sendingAt = undefined;
+    item.replyPreview = item.finalDraftReply.slice(0, 240);
+    item.replyAwaitsCustomer = replyAwaitsCustomer(item.finalDraftReply);
     await item.save();
 
     // The reply answers the whole conversation so far, not just the message it
@@ -1368,7 +1801,12 @@ export class EmailIntelligenceService {
   // itself gathers the Outlook thread + Business Knowledge context using
   // already-existing primitives (see routes/email_intelligence.py's
   // sla_breach_followup_draft). Mutates `reminder` in place; caller saves it.
-  private async draftSlaBreachReply(reminder: EmailFollowUpReminderDocument, sourceItem: EmailIntelligenceItemDocument): Promise<void> {
+  private async draftSlaBreachReply(
+    reminder: EmailFollowUpReminderDocument,
+    sourceItem: EmailIntelligenceItemDocument,
+    // Asked for by a person (Regenerate): a wallet with no credits is told to them, not swallowed.
+    options: { askedByPerson?: boolean } = {},
+  ): Promise<void> {
     let crmContext: string | undefined;
     const businessKey = sourceItem.resolvedGroupKey ?? sourceItem.matchedBusinessKey;
     if (businessKey) {
@@ -1384,13 +1822,10 @@ export class EmailIntelligenceService {
     }
 
     const requestId = randomUUID();
+    const reserve = () => this.reservations.reserve(this.reservations.resolveTenantKey(reminder.organizationId, reminder.userId), reminder.userId, requestId, 'email-ai-followup');
+    if (options.askedByPerson) await reserve();
     try {
-      await this.reservations.reserve(
-        this.reservations.resolveTenantKey(reminder.organizationId, reminder.userId),
-        reminder.userId,
-        requestId,
-        'email-ai-followup',
-      );
+      if (!options.askedByPerson) await reserve();
       const token = this.jwt.sign({ sub: reminder.userId, organizationId: reminder.organizationId }, { expiresIn: '5m' });
       const { data } = await firstValueFrom(
         this.http.post<{ draftReply: string; usedThreadMessages: number; usedCrmContext: boolean; usedBusinessKnowledge: boolean }>(
@@ -1447,7 +1882,12 @@ export class EmailIntelligenceService {
     });
   }
 
-  listFollowUps(userId: string) {
+  async listFollowUps(userId: string) {
+    // A draft that has been "generating" for minutes was interrupted (a restart, a dropped
+    // connection). Say so, so it can be asked for again instead of sitting there for ever.
+    await this.followUpModel
+      .updateMany({ userId, status: 'pending', draftStatus: 'generating', updatedAt: { $lt: new Date(Date.now() - STALE_DRAFT_MS) } }, { $set: { draftStatus: 'failed' } })
+      .exec();
     return this.followUpModel.find({ userId, status: 'pending' }).sort({ dueDate: 1 }).exec();
   }
 
@@ -1484,18 +1924,23 @@ export class EmailIntelligenceService {
   // the frontend requires its own explicit approve/send clicks, same
   // human-in-the-loop discipline as approve()/send() above. ----
 
+  /**
+   * Writes (or rewrites) the draft for one follow-up because a person asked for it — the "Draft
+   * follow-up" / "Generate draft" / "Regenerate" buttons. Always available: someone clicking is the
+   * permission. (AI_FOLLOWUP_ACTIONS_ENABLED governs only the drafts written with no click at all —
+   * createSlaBreachFollowUp, from the scheduler.) Billed like every other button-triggered AI action:
+   * credits are reserved first — no credits is said plainly, before anything changes — then settled
+   * on success and released on failure. A failed draft leaves the reminder at 'failed', never throws.
+   */
   async generateFollowUpDraft(userId: string, id: string): Promise<EmailFollowUpReminderDocument> {
-    if (!(this.config.get<boolean>('emailSla.aiFollowupActionsEnabled') ?? false)) {
-      throw new BadRequestException('AI follow-up draft generation is not enabled for this environment.');
-    }
     const reminder = await this.followUpModel.findOne({ _id: id, userId }).exec();
     if (!reminder) throw new NotFoundException('Follow-up reminder not found');
+    if (reminder.sentAt) throw new BadRequestException('This follow-up has already been sent.');
 
     const sourceItem = await this.itemModel.findOne({ _id: reminder.emailIntelligenceItemId, userId }).exec();
     if (!sourceItem) throw new NotFoundException('Source email for this follow-up no longer exists');
 
-    reminder.draftStatus = 'generating';
-    await reminder.save();
+    const before = reminder.draftStatus;
 
     // SLA-breach reminders need a genuinely different draft (answer the
     // customer's actual message, not a "just checking in" nudge — see
@@ -1504,31 +1949,49 @@ export class EmailIntelligenceService {
     // doubles as this reminder type's "Regenerate" action — same method,
     // fresh context gathered every call.
     if (reminder.reminderType === 'sla_breach') {
-      await this.draftSlaBreachReply(reminder, sourceItem);
+      reminder.draftStatus = 'generating';
+      await reminder.save();
+      try {
+        await this.draftSlaBreachReply(reminder, sourceItem, { askedByPerson: true });
+      } catch (err) {
+        // No credits: nothing was written, so the reminder goes back to how it was.
+        reminder.draftStatus = before;
+        await reminder.save();
+        throw err;
+      }
       await reminder.save();
       return reminder;
     }
 
+    const requestId = randomUUID();
+    await this.reservations.reserve(this.reservations.resolveTenantKey(reminder.organizationId, userId), userId, requestId, 'email-ai-followup');
+    reminder.draftStatus = 'generating';
+    await reminder.save();
     try {
       const token = this.jwt.sign({ sub: userId, organizationId: reminder.organizationId }, { expiresIn: '5m' });
       const { data } = await firstValueFrom(
         this.http.post<{ draftReply: string }>(
           `${this.pythonAgentUrl}/business-intelligence/followups/draft`,
           {
+            request_id: requestId,
             organizationId: reminder.organizationId,
             businessName: reminder.businessName,
             originalSubject: sourceItem.subject,
             originalBodyPreview: sourceItem.bodyPreview,
-            ourPreviousReply: sourceItem.finalDraftReply ?? sourceItem.draftReply,
+            // For a promised follow-up, what we said we'd do is the thing to follow up on.
+            ourPreviousReply: reminder.promiseExcerpt ?? sourceItem.finalDraftReply ?? sourceItem.draftReply,
             daysSinceSent: sourceItem.sentAt ? Math.floor((Date.now() - sourceItem.sentAt.getTime()) / 86_400_000) : undefined,
           },
-          { headers: { Authorization: `Bearer ${token}` } },
+          { headers: { Authorization: `Bearer ${token}` }, timeout: 90_000 },
         ),
       );
+      if (!data.draftReply?.trim()) throw new Error('the AI returned an empty draft');
+      await this.reservations.settle(requestId);
       reminder.draftReply = data.draftReply;
       reminder.draftStatus = 'pending_review';
       reminder.draftGeneratedAt = new Date();
     } catch (err) {
+      await this.reservations.release(requestId);
       reminder.draftStatus = 'failed';
       this.logger.error(`Follow-up draft generation failed for reminder ${id}: ${(err as Error).message}`);
     }
@@ -1611,7 +2074,7 @@ export class EmailIntelligenceService {
     return item;
   }
 
-  async regenerate(userId: string, id: string, context: EmailCorrelationContext): Promise<EmailIntelligenceItemDocument> {
+  async regenerate(userId: string, id: string, context: EmailCorrelationContext, extras: IngestExtras = {}): Promise<EmailIntelligenceItemDocument> {
     const item = await this.getOne(userId, id);
     if (item.status === 'approved') throw new BadRequestException('Cannot regenerate an already-approved item');
 
@@ -1636,7 +2099,7 @@ export class EmailIntelligenceService {
     const preFilterMatch = classifyEmailDeterministically({ from: email.from, subject: email.subject, preview: email.preview });
 
     // Phase 17, Layer 1 — same deterministic pre-gate as analyzeAndCreate.
-    if (item.fromAddress.trim().toLowerCase() === item.mailboxEmail.trim().toLowerCase()) {
+    if (this.isOwnAddress(item.fromAddress, item.mailboxEmail, extras.ownAddresses)) {
       item.intent = 'internal';
       item.priority = 'low';
       item.urgency = 'low';
@@ -1671,8 +2134,16 @@ export class EmailIntelligenceService {
       item.result = {};
     } else {
       const salesperson = await this.usersService.findById(userId);
-      const deterministicInput = this.buildAnalysisPayload(email, correlation, matchedBusinessSummary, item.mailboxEmail, salesperson?.name);
-      const result = await this.callAnalyze(item.organizationId, userId, deterministicInput);
+      const deterministicInput = this.buildAnalysisPayload(email, correlation, matchedBusinessSummary, item.mailboxEmail, salesperson?.name, extras.thread);
+      let result: Record<string, unknown>;
+      try {
+        result = await this.callAnalyze(item.organizationId, userId, deterministicInput);
+      } catch (err) {
+        if (item.analysisState === 'pending') {
+          await this.itemModel.updateOne({ _id: item._id }, { $inc: { analysisAttempts: 1 }, $set: { analysisError: analysisFailureReason(err) } }).exec();
+        }
+        throw err;
+      }
       const decision = this.applyPerspectiveValidation(item._id.toString(), email.from, result.intent as string, result);
 
       item.intent = result.intent as string;
@@ -1691,6 +2162,9 @@ export class EmailIntelligenceService {
       item.result = result;
     }
 
+    // The AI has read it now (or it turned out never to need the AI).
+    item.analysisState = undefined;
+    item.analysisError = undefined;
     item.regeneratedCount += 1;
     item.lastRegeneratedAt = new Date();
     if (item.status === 'rejected') item.status = 'pending';

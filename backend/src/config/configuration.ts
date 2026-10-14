@@ -25,6 +25,26 @@ export default () => ({
     apiBaseUrl: (process.env.TWILIO_API_BASE_URL ?? 'https://api.twilio.com').trim().replace(/\/+$/, ''),
     defaultCountryCode: process.env.PLIVO_DEFAULT_COUNTRY_CODE ?? '91',
   },
+  // The backend's public address, for webhook data sources (records pushed
+  // from Zapier). Empty: the app shows the address it talks to itself.
+  dataSources: {
+    webhookBaseUrl: (process.env.PUBLIC_API_BASE_URL ?? process.env.CALLING_PUBLIC_BASE_URL ?? process.env.PLIVO_PUBLIC_BASE_URL ?? '')
+      .trim()
+      .replace(/\/+$/, ''),
+  },
+  // Documents attached in the AI chat (ChatAttachmentsService). Only the
+  // extracted text is kept, encrypted, for `retentionDays` after it was sent.
+  chat: {
+    attachments: {
+      maxFileBytes: parseInt(process.env.CHAT_ATTACHMENT_MAX_MB ?? '25', 10) * 1024 * 1024,
+      maxPerMessage: parseInt(process.env.CHAT_ATTACHMENT_MAX_PER_MESSAGE ?? '5', 10),
+      maxPerConversation: parseInt(process.env.CHAT_ATTACHMENT_MAX_PER_CONVERSATION ?? '10', 10),
+      retentionDays: parseInt(process.env.CHAT_ATTACHMENT_RETENTION_DAYS ?? '30', 10),
+    },
+  },
+  gorilladash: {
+    apiBaseUrl: (process.env.GORILLADASH_API_BASE_URL ?? 'https://api.gorilladash.com').trim().replace(/\/+$/, ''),
+  },
   jwt: {
     secret: process.env.JWT_SECRET,
     expiresIn: process.env.JWT_EXPIRES_IN ?? '1d',
@@ -40,6 +60,10 @@ export default () => ({
     // Falls back to SMTP_USER since most providers require the From address
     // to match (or be an alias of) the authenticated account anyway.
     from: process.env.MAIL_FROM || process.env.SMTP_USER || '',
+    // Where the buttons in emails lead: the address people open HaiVE at. Falls back to the
+    // first CORS origin. An address on this machine (localhost) is never put in an email —
+    // the email then says where to go in words instead (see mail/templates.ts's publicAppUrl).
+    appUrl: process.env.APP_URL || (process.env.CORS_ORIGIN ?? '').split(',')[0].trim(),
   },
   // Web Push (Settings > Notifications' Desktop/Mobile toggles) — one-time
   // generated via web-push's generateVAPIDKeys(), see backend/.env's own
@@ -129,7 +153,10 @@ export default () => ({
     // until the LLM responds (it may take several tool-calling rounds), so
     // this is a deliberately generous upper bound checked before any LLM
     // call is made, not an attempt to estimate the real cost in advance.
-    reservationCeilingCredits: parseInt(process.env.RESERVATION_CEILING_CREDITS ?? '500', 10),
+    // The most one AI request may hold while it runs. A real request costs a
+    // few credits; this used to be 500 — a whole plan's worth — so a wallet
+    // with 497 credits left was reported as exhausted.
+    reservationCeilingCredits: parseInt(process.env.RESERVATION_CEILING_CREDITS ?? '25', 10),
     reservationTimeoutMinutes: parseInt(process.env.RESERVATION_TIMEOUT_MINUTES ?? '10', 10),
     lowBalanceThresholdCredits: parseInt(process.env.LOW_BALANCE_THRESHOLD_CREDITS ?? '200', 10),
     // What credit packages are actually priced/charged in — provider/margin
@@ -222,6 +249,9 @@ export default () => ({
   emailSla: {
     enabled: (process.env.EMAIL_SLA_ENABLED ?? 'false').toLowerCase() === 'true',
     escalationEnabled: (process.env.EMAIL_SLA_ESCALATION_ENABLED ?? 'false').toLowerCase() === 'true',
+    // Drafts written with nobody asking: when an email breaches its SLA, the AI drafts the reply
+    // by itself (a billed AI call per breached email). Off unless set. Drafting a follow-up on a
+    // click — "Draft follow-up", "Generate draft", "Regenerate" — does not depend on this.
     aiFollowupActionsEnabled: (process.env.AI_FOLLOWUP_ACTIONS_ENABLED ?? 'false').toLowerCase() === 'true',
   },
 });

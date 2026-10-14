@@ -6,6 +6,7 @@ import { extractErrorMessage } from '@/utils/errors';
 import { dayjs } from '@/utils/date';
 import { organizationsService, type Store } from '@/services/organizationsService';
 import { usersService, type AdminUser } from '@/services/usersService';
+import { isSalesperson, SALES_ROLE_LABEL } from '@/utils/access';
 import { salesTargetsService, type SalesTarget, type TargetScope } from '@/services/salesTargetsService';
 import { SettingsField, SettingsSection } from '../components/SettingsSection';
 import styles from './SalesTargetsSettings.module.css';
@@ -61,7 +62,10 @@ export function SalesTargetsSettings() {
   // ('store', ...)), not user-scoped, so a manager never actually reads a
   // 'user'-scope target the way a consultant does. Only consultants are
   // assignable.
-  const employees = useMemo(() => users.filter((u) => u.roles.includes('consultant')), [users]);
+  // Team members (accounts tied to an AI role) are assignable too: they are
+  // the kind of user most organizations create, and they own deals like a
+  // consultant does.
+  const employees = useMemo(() => users.filter((u) => isSalesperson(u) && !u.roles.includes('manager')), [users]);
 
   const currentValue = (scope: TargetScope, id?: string): string => drafts[rowKey(scope, id)] ?? '';
   const existingTarget = (scope: TargetScope, id?: string): SalesTarget | undefined =>
@@ -104,9 +108,10 @@ export function SalesTargetsSettings() {
 
   return (
     <>
-      <SettingsSection icon={<FiTarget />}
+      <SettingsSection
+        icon={<FiTarget />}
         title="Sales Targets"
-        description="Set the monthly sales target (in ₹) for each store and each consultant. Dashboards compute achievement % and forecasts against these."
+        description="Set the monthly sales target (in ₹) for each store and each person. Dashboards compute achievement % and forecasts against these."
       >
         <SettingsField label="Month">
           <input
@@ -142,9 +147,7 @@ export function SalesTargetsSettings() {
                         min={0}
                         leftIcon="₹"
                         value={currentValue('store', s._id)}
-                        onChange={(e) =>
-                          setDrafts((prev) => ({ ...prev, [rowKey('store', s._id)]: e.target.value }))
-                        }
+                        onChange={(e) => setDrafts((prev) => ({ ...prev, [rowKey('store', s._id)]: e.target.value }))}
                         placeholder="Target amount"
                       />
                     </div>
@@ -162,17 +165,21 @@ export function SalesTargetsSettings() {
             )}
           </SettingsSection>
 
-          <SettingsSection icon={<FiUsers />}
+          <SettingsSection
+            icon={<FiUsers />}
             title="Employee Targets"
-            description="Target per consultant for this month — this drives their personal dashboard."
+            description="Target per person for this month — team members and consultants. Achievement is measured from the deals assigned to them."
           >
             {employees.length === 0 ? (
-              <p>No consultants yet — create one from the Users tab first.</p>
+              <p>No team members yet — create one from the Users tab first.</p>
             ) : (
               <div className={styles.targetList}>
                 {employees.map((u) => (
                   <div key={u.id} className={styles.targetRow}>
-                    <span className={styles.targetName}>{u.name}</span>
+                    <span className={styles.targetName}>
+                      {u.name}
+                      <small> · {SALES_ROLE_LABEL[u.roles.find((r) => r in SALES_ROLE_LABEL) ?? ''] ?? ''}</small>
+                    </span>
                     <div className={styles.amountField}>
                       <Input
                         type="number"

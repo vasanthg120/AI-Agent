@@ -79,6 +79,12 @@ export class AgentRole {
   @Prop({ enum: ['fast', 'standard'] })
   modelTier?: 'fast' | 'standard';
 
+  // The app features people assigned to this AI role can use, beyond the
+  // basics (see common/app-features.ts). Unset on roles created before this
+  // existed — treated as DEFAULT_ROLE_FEATURES.
+  @Prop({ type: [String], default: undefined })
+  features?: string[];
+
   @Prop({ default: '#6b7280' }) avatarColor: string;
 
   // Audit trail only — no RBAC gating exists in this app yet (see plan notes).

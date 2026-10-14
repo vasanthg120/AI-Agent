@@ -31,4 +31,11 @@ __decorate([
     (0, class_validator_1.IsString)(),
     __metadata("design:type", String)
 ], SendMessageDto.prototype, "agentId", void 0);
+__decorate([
+    (0, class_validator_1.IsOptional)(),
+    (0, class_validator_1.IsArray)(),
+    (0, class_validator_1.ArrayMaxSize)(10),
+    (0, class_validator_1.IsMongoId)({ each: true }),
+    __metadata("design:type", Array)
+], SendMessageDto.prototype, "attachmentIds", void 0);
 //# sourceMappingURL=send-message.dto.js.map

@@ -35,6 +35,20 @@ export type EmailResponseStatus =
 
 export type EmailRespondedVia = 'app' | 'outlook' | 'thread';
 
+// One label per conversation, finer than the three views above and never two at
+// once: what the row is, read from the same stored facts.
+export type EmailCategory =
+  | 'urgent' // needs a reply, and soon
+  | 'needs_response'
+  | 'waiting_for_customer' // we replied and asked them something
+  | 'follow_up_required' // …and they have been silent for a while
+  | 'responded' // we replied; nothing is pending either way
+  | 'informational' // no reply was ever needed
+  | 'completed'; // closed by a person: dismissed, or the email was deleted in Outlook
+
+/** How long a customer may leave our question unanswered before the conversation is flagged for a follow-up. */
+export const FOLLOW_UP_AFTER_DAYS = 3;
+
 export interface ResponseStateFields {
   status?: string;
   shouldDraft?: boolean;
@@ -43,6 +57,16 @@ export interface ResponseStateFields {
   sentAt?: Date;
   externalReplyDetectedAt?: Date;
   threadRespondedAt?: Date;
+  // False on an older message of a conversation in which the customer has
+  // since written again: the conversation is represented by its newest
+  // message, so the older one neither needs nor shows its own reply state.
+  threadHead?: boolean;
+  // The message was deleted in Outlook (or is no longer in the mailbox).
+  mailboxRemovedAt?: Date;
+  priority?: string;
+  urgency?: string;
+  // Our reply asked the customer for something (see replyAwaitsCustomer).
+  replyAwaitsCustomer?: boolean;
 }
 
 /** Mongo: nobody has answered this message. */
@@ -70,6 +94,10 @@ export const ANSWERED_MATCH: Record<string, unknown> = {
  */
 export const REPLY_OWED_MATCH: Record<string, unknown> = {
   status: { $ne: 'rejected' },
+  // Only the newest customer message of a conversation can be owed a reply, and
+  // not one the user has deleted from the mailbox.
+  threadHead: { $ne: false },
+  mailboxRemovedAt: { $exists: false },
   $and: [
     {
       $or: [
@@ -94,8 +122,22 @@ export function responseStatusMatch(view: EmailResponseStatus): Record<string, u
   return { $and: [UNANSWERED_MATCH, { $nor: [REPLY_OWED_MATCH] }] };
 }
 
+/**
+ * Mongo: nobody has answered this message and one was owed — including the
+ * older messages of a conversation (see `threadHead`). Used to mark a whole
+ * conversation answered, never to count what is waiting.
+ */
+export function unansweredOwedMatch(): Record<string, unknown> {
+  const { threadHead: _head, ...owed } = REPLY_OWED_MATCH;
+  return { $and: [UNANSWERED_MATCH, owed] };
+}
+
+/** Mongo: one row per conversation — its newest customer message. */
+export const THREAD_HEAD_MATCH: Record<string, unknown> = { threadHead: { $ne: false } };
+
 function isReplyOwed(item: ResponseStateFields): boolean {
   if (item.status === 'rejected') return false;
+  if (item.threadHead === false || item.mailboxRemovedAt) return false;
   // Strictly `false`, mirroring the Mongo `shouldDraft: false` in REPLY_OWED_MATCH.
   if (item.status === 'approved' && item.shouldDraft === false) return false;
   return (
@@ -116,4 +158,18 @@ export function deriveRespondedInfo(item: ResponseStateFields): { respondedAt?: 
   if (item.externalReplyDetectedAt) return { respondedAt: item.externalReplyDetectedAt, respondedVia: 'outlook' };
   if (item.threadRespondedAt) return { respondedAt: item.threadRespondedAt, respondedVia: 'thread' };
   return {};
+}
+
+/** The single category of a conversation's newest message (see EmailCategory). */
+export function deriveCategory(item: ResponseStateFields, now: Date = new Date()): EmailCategory {
+  const status = deriveResponseStatus(item);
+  if (status === 'needs_response') return item.urgency === 'urgent' || item.priority === 'urgent' ? 'urgent' : 'needs_response';
+  if (status === 'responded') {
+    if (!item.replyAwaitsCustomer) return 'responded';
+    const respondedAt = deriveRespondedInfo(item).respondedAt;
+    const waitedMs = respondedAt ? now.getTime() - new Date(respondedAt).getTime() : 0;
+    return waitedMs >= FOLLOW_UP_AFTER_DAYS * 24 * 60 * 60 * 1000 ? 'follow_up_required' : 'waiting_for_customer';
+  }
+  const closedByPerson = item.status === 'rejected' || (item.status === 'approved' && item.shouldDraft === false) || !!item.mailboxRemovedAt;
+  return closedByPerson ? 'completed' : 'informational';
 }

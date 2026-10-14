@@ -9,6 +9,7 @@ import { AxiosError } from 'axios';
 import { RedisCacheService } from '../common/redis/redis-cache.service';
 import { AgentRole, AgentRoleDocument } from '../agent-roles/schemas/agent-role.schema';
 import { CHAT_AGENTS } from './agents';
+import { ChatAttachmentsService } from './chat-attachments.service';
 import { Conversation, ConversationDocument } from './schemas/conversation.schema';
 import { JwtPayload } from '../auth/jwt-payload.interface';
 
@@ -84,6 +85,7 @@ export class ChatService {
     private config: ConfigService,
     private cache: RedisCacheService,
     private jwt: JwtService,
+    private attachments: ChatAttachmentsService,
   ) {
     this.agentUrl = this.config.get<string>('pythonAgentUrl') ?? 'http://localhost:8000';
   }
@@ -187,6 +189,7 @@ export class ChatService {
   async deleteConversation(userId: string, conversationId: string): Promise<void> {
     const result = await this.conversationModel.deleteOne({ _id: conversationId, userId }).exec();
     if (result.deletedCount === 0) throw new NotFoundException('Conversation not found');
+    await this.attachments.removeForConversation(userId, conversationId);
     await this.cache.del(`chat:conversations:${userId}`, `chat:conversation:${userId}:${conversationId}`);
   }
 
@@ -197,18 +200,14 @@ export class ChatService {
     message: string,
     conversationId?: string,
     agentId?: string,
+    attachmentIds?: string[],
   ) {
     const conversation = await this.getOrCreateConversation(userId, organizationId, message, conversationId, agentId);
     const resolvedAgentId = this.resolveConversationAgent(conversation, agentId);
 
-    conversation.messages.push({
-      role: 'user',
-      content: message,
-      toolsUsed: [],
-      createdAt: new Date(),
-    });
+    conversation.messages.push(await this.userTurn(conversation, message, attachmentIds));
 
-    const agentReply = await this.callAgent(userId, userJwt, conversation._id.toString(), message, resolvedAgentId);
+    const agentReply = await this.callAgent(userId, userJwt, conversation._id.toString(), message, resolvedAgentId, attachmentIds);
 
     return this.finishTurn(conversation, agentReply);
   }
@@ -234,17 +233,13 @@ export class ChatService {
     // right conversation to cancel — without this, the client only learns
     // the real id from the terminal result, by which point it's too late.
     onConversationId?: (id: string) => void,
+    attachmentIds?: string[],
   ) {
     const conversation = await this.getOrCreateConversation(userId, organizationId, message, conversationId, agentId);
     onConversationId?.(conversation._id.toString());
     const resolvedAgentId = this.resolveConversationAgent(conversation, agentId);
 
-    conversation.messages.push({
-      role: 'user',
-      content: message,
-      toolsUsed: [],
-      createdAt: new Date(),
-    });
+    conversation.messages.push(await this.userTurn(conversation, message, attachmentIds));
 
     const agentReply = await this.callAgentStreaming(
       userId,
@@ -253,6 +248,7 @@ export class ChatService {
       message,
       onEvent,
       resolvedAgentId,
+      attachmentIds,
     );
 
     return this.finishTurn(conversation, agentReply);
@@ -284,6 +280,29 @@ export class ChatService {
     });
 
     return this.finishTurn(conversation, { reply: replyText, tools_used: [] });
+  }
+
+  /** The user's message for this turn. Documents sent with it are linked to
+   * the conversation first — python-agent reads a conversation's documents
+   * from chat_attachments on every turn, so they must be there before the
+   * agent is called. */
+  private async userTurn(conversation: ConversationDocument, message: string, attachmentIds?: string[]) {
+    const attachments = await this.attachments
+      .attach(conversation.userId, conversation.organizationId, conversation._id.toString(), attachmentIds)
+      .catch(async (err) => {
+        // Refused on the very first message: don't leave an empty conversation behind.
+        if (conversation.messages.length === 0) await this.conversationModel.deleteOne({ _id: conversation._id }).exec();
+        throw err;
+      });
+    return {
+      role: 'user' as const,
+      content: message,
+      toolsUsed: [],
+      ...(attachments.length > 0
+        ? { attachments: attachments.map((a) => ({ id: a.id, name: a.name, mimeType: a.mimeType, sizeBytes: a.sizeBytes })) }
+        : {}),
+      createdAt: new Date(),
+    };
   }
 
   private async getOrCreateConversation(
@@ -353,12 +372,13 @@ export class ChatService {
     conversationId: string,
     message: string,
     agentId?: string,
+    attachmentIds?: string[],
   ): Promise<AgentReply> {
     try {
       const response = await firstValueFrom(
         this.http.post<AgentReply>(
           `${this.agentUrl}/chat`,
-          { user_id: userId, conversation_id: conversationId, message, agent_id: agentId },
+          { user_id: userId, conversation_id: conversationId, message, agent_id: agentId, attachment_ids: attachmentIds ?? [] },
           { headers: { Authorization: `Bearer ${userJwt}` } },
         ),
       );
@@ -384,12 +404,13 @@ export class ChatService {
     message: string,
     onEvent: (event: StreamEvent) => void,
     agentId?: string,
+    attachmentIds?: string[],
   ): Promise<AgentReply> {
     try {
       const response = await firstValueFrom(
         this.http.post(
           `${this.agentUrl}/chat/stream`,
-          { user_id: userId, conversation_id: conversationId, message, agent_id: agentId },
+          { user_id: userId, conversation_id: conversationId, message, agent_id: agentId, attachment_ids: attachmentIds ?? [] },
           { headers: { Authorization: `Bearer ${userJwt}` }, responseType: 'stream' },
         ),
       );

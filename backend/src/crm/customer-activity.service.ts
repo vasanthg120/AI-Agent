@@ -48,6 +48,13 @@ export interface TodaysEmail {
   // this field, and never needs it (only analyzeAndCreate's persistence
   // path does).
   conversationId?: string;
+  // Sender's display name, Cc recipients and RFC threading headers — captured
+  // by the mailbox sync (see python-agent's routes/outlook.py); absent elsewhere.
+  fromName?: string;
+  cc?: string[];
+  internetMessageId?: string;
+  inReplyTo?: string;
+  references?: string[];
 }
 
 export interface CorrelatedEmail extends TodaysEmail {
@@ -327,7 +334,7 @@ export class CustomerActivityService {
         type: 'quote' as const,
         id: q._id.toString(),
         name: q.quoteName ?? q.quoteNumber ?? 'Untitled quote',
-        businessName: q.clientDetails?.companyName ?? groups.get(quoteGroupKey(q, deals))?.businessName ?? q.quoteName ?? 'Unknown',
+        businessName: q.clientDetails?.companyName ?? groups.get(quoteGroupKey(q, deals, accountNameById))?.businessName ?? q.quoteName ?? 'Unknown',
         daysSinceLastUpdate: daysSince(activityDate(q)),
       }));
 
@@ -349,7 +356,7 @@ export class CustomerActivityService {
     // (see plan §5b): computed over the set of businesses actioned today.
     const actionedGroupKeys = new Set([
       ...actionedDealsToday.map((d) => groupKeyFor(d, accountNameById).key),
-      ...actionedQuotesToday.map((q) => quoteGroupKey(q, deals)),
+      ...actionedQuotesToday.map((q) => quoteGroupKey(q, deals, accountNameById)),
     ]);
     let existingCount = 0;
     let newCount = 0;
@@ -552,7 +559,7 @@ export class CustomerActivityService {
       if (!q.clientDetails?.email) continue;
       const email = q.clientDetails.email.toLowerCase();
       exactEmails.add(email);
-      emailToGroupKey.set(email, quoteGroupKey(q, deals));
+      emailToGroupKey.set(email, quoteGroupKey(q, deals, accountNameById));
     }
 
     const domains = new Set<string>();

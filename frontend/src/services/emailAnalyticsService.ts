@@ -27,6 +27,8 @@ export interface EmployeeEmailAnalyticsRow {
   userId: string;
   userName: string;
   count: number;
+  // With kind 'replied': every email sent from the mailbox(es) this person handles, in the range.
+  outgoing?: number;
   byPriority?: { value: string; count: number }[];
   byUrgency?: { value: string; count: number }[];
   ageBuckets?: { bucket: string; count: number }[];

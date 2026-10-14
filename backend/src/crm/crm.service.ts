@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
+import { currentDataSourceScope } from '../data-sources/data-source-context';
 import { Account, AccountDocument } from './schemas/account.schema';
 import { Contact, ContactDocument } from './schemas/contact.schema';
 import { Deal, DealDocument } from './schemas/deal.schema';
@@ -43,34 +44,29 @@ export class CrmService {
     if (phone !== undefined) update.phone = phone;
     if (data.tags !== undefined) update.tags = data.tags;
 
+    // This is the HaiVE workspace's own contact store (the AI tools' native
+    // CRM). It must never match — and overwrite — a contact synced from a
+    // connected CRM that happens to share an email or phone number.
+    const nativeSourceId = currentDataSourceScope()?.nativeSourceId;
+    const ownSource = nativeSourceId ? { dataSourceId: nativeSourceId } : {};
     const filter = contactId
-      ? { _id: contactId, organizationId }
-      : { organizationId, $or: [...(email ? [{ email }] : []), ...(phone ? [{ phone }] : [])] };
+      ? { _id: contactId, organizationId, ...ownSource }
+      : { organizationId, ...ownSource, $or: [...(email ? [{ email }] : []), ...(phone ? [{ phone }] : [])] };
 
-    const saved = await this.contactModel
-      .findOneAndUpdate(filter, { $set: { organizationId, ...update } }, { upsert: true, new: true })
-      .exec();
+    const saved = await this.contactModel.findOneAndUpdate(filter, { $set: { organizationId, ...ownSource, ...update } }, { upsert: true, new: true }).exec();
     return { contact: saved };
   }
 
   async searchContactsByIds(organizationId: string, ids: string[]) {
-    const contacts = await this.contactModel
-      .find({ organizationId, _id: { $in: ids } })
-      .exec();
+    const contacts = await this.contactModel.find({ organizationId, _id: { $in: ids } }).exec();
     return { contacts };
   }
 
   /** Returns {count, data} — RAG business sync consumes this shape directly. */
-  async listContacts(
-    organizationId: string,
-    opts: { searchAfter?: number; limit?: number; searchText?: string },
-  ) {
+  async listContacts(organizationId: string, opts: { searchAfter?: number; limit?: number; searchText?: string }) {
     const filter: Record<string, unknown> = { organizationId };
     if (opts.searchText) {
-      filter.$or = [
-        { name: { $regex: opts.searchText, $options: 'i' } },
-        { email: { $regex: opts.searchText, $options: 'i' } },
-      ];
+      filter.$or = [{ name: { $regex: opts.searchText, $options: 'i' } }, { email: { $regex: opts.searchText, $options: 'i' } }];
     }
     const limit = opts.limit ?? 50;
     const skip = opts.searchAfter ?? 0;
@@ -84,10 +80,7 @@ export class CrmService {
   // ---- deals ----
 
   /** Returns {total, deal} — matches crm_deal_tool.py's docstring contract. */
-  async listDeals(
-    organizationId: string,
-    opts: { page?: number; offset?: number; pageLimit?: number; search?: string; pipelineId?: string },
-  ) {
+  async listDeals(organizationId: string, opts: { page?: number; offset?: number; pageLimit?: number; search?: string; pipelineId?: string }) {
     const filter: Record<string, unknown> = { organizationId };
     if (opts.pipelineId) filter.pipelineId = opts.pipelineId;
     if (opts.search) filter.name = { $regex: opts.search, $options: 'i' };

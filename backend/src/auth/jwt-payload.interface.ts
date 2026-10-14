@@ -5,6 +5,10 @@ export interface JwtPayload {
   organizationId: string;
   storeId?: string;
   assignedAgentId?: string;
+  // For an account tied to an AI role: the app features that role includes
+  // (see common/app-features.ts). Resolved from the database on every
+  // request by JwtStrategy — never read from the token itself.
+  features?: string[];
   department?: string;
   // Provider/model-availability control, NOT an AI on/off switch — chat
   // (Anthropic) stays automatically available regardless of this field; it

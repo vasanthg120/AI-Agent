@@ -11,6 +11,8 @@ import { CallCopilotService } from './call-copilot.service';
 import { SearchCallSessionsQueryDto } from './dto/search-call-sessions-query.dto';
 import { UploadCallRecordingDto } from './dto/upload-call-recording.dto';
 import { VoiceScriptDto } from './dto/voice-script.dto';
+import { Feature } from '../common/app-features';
+import { FeatureGuard } from '../common/guards/feature.guard';
 
 // Covers exactly the formats UploadRecordingModal.tsx's file input accepts
 // ("audio/*,video/mp4,.m4a") — a small local map rather than pulling in the
@@ -42,7 +44,8 @@ function contentTypeFromFilename(filename: string | undefined): string {
 // dynamic 'sessions/:id', same rule business-knowledge-documents.controller.ts's
 // own comment documents for its 'query' segment — otherwise Express would
 // treat "search"/"stats"/"upload" as an :id value.
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, FeatureGuard)
+@Feature('call_copilot')
 @Controller('call-copilot')
 export class CallCopilotController {
   constructor(

@@ -4,8 +4,10 @@ export declare class OutlookConnection {
     userId: string;
     organizationId?: string;
     email: string;
+    addresses?: string[];
     microsoftTenantId?: string;
     microsoftUserId?: string;
+    handledByUserId?: string;
     accessToken: string;
     refreshToken: string;
     expiresAt: Date;

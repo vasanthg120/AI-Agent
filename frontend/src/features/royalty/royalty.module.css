@@ -136,3 +136,62 @@
   color: var(--color-text-primary);
   font: inherit;
 }
+
+/* ==== quotations table ==== */
+
+/* Amounts line up on the right. */
+.reportTable th.num,
+.reportTable td.num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* The totals under a table wrap rather than run off a narrow screen. */
+.tableSummaryFooter {
+  flex-wrap: wrap;
+  row-gap: var(--space-1);
+}
+
+/* A phone has no room for eight columns: each quotation becomes a block, each value under its own name. */
+@media (max-width: 640px) {
+  .linesTable,
+  .linesTable tbody {
+    display: block;
+  }
+
+  .linesTable thead {
+    display: none;
+  }
+
+  .linesTable tr {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--space-2) var(--space-4);
+    padding: var(--space-3) 0;
+    border-bottom: 1px solid var(--color-border);
+  }
+
+  .linesTable tr:last-child {
+    border-bottom: none;
+  }
+
+  .linesTable td,
+  .linesTable td.num {
+    display: block;
+    min-width: 0;
+    padding: 0;
+    border: none;
+    text-align: left;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+
+  .linesTable td::before {
+    content: attr(data-label);
+    display: block;
+    margin-bottom: 1px;
+    font-size: var(--text-xs);
+    color: var(--color-text-muted);
+  }
+}

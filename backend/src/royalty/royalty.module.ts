@@ -14,6 +14,8 @@ import { RoyaltyRulesService } from './royalty-rules.service';
 import { RoyaltyReportController } from './royalty-report.controller';
 import { RoyaltyReportService } from './royalty-report.service';
 import { RoyaltyReportExportService } from './royalty-report-export.service';
+import { QuotationSalesService } from '../reporting/quotation-sales.service';
+import { SalesReportService } from '../reporting/sales-report.service';
 
 // Top-level module, not folded into CrmModule — mirrors FinanceModule's own
 // standing as a separate "money" domain despite also being CRM-adjacent.
@@ -25,11 +27,16 @@ import { RoyaltyReportExportService } from './royalty-report-export.service';
 // the caller, not derived server-side from a live Deal/Quote lookup.
 //
 // Deal/Quote ARE re-registered here read-only via their own
-// MongooseModule.forFeature entries (RoyaltyReportService's real data
-// source) — the same "re-register the schema in a second module rather than
-// import the owning module" precedent EmailIntelligenceModule already
-// established for OutlookConnection in Phase 14b, chosen for the identical
-// reason: avoids a real cross-module dependency for a read-only query.
+// MongooseModule.forFeature entries — the same "re-register the schema in a
+// second module rather than import the owning module" precedent
+// EmailIntelligenceModule already established for OutlookConnection in
+// Phase 14b.
+//
+// The Royalty report counts the quotations sent in a period — the same ones
+// the Sales and Gross Margin reports count — so the two small stateless
+// services that define and group them (reporting/quotation-sales.service.ts,
+// reporting/sales-report.service.ts) are listed in this module's providers
+// too, rather than importing ReportingModule for them.
 @Module({
   imports: [
     MongooseModule.forFeature([
@@ -43,7 +50,7 @@ import { RoyaltyReportExportService } from './royalty-report-export.service';
     UsersModule,
   ],
   controllers: [InvoicesController, RoyaltyRulesController, RoyaltyReportController],
-  providers: [InvoicesService, RoyaltyRulesService, RoyaltyReportService, RoyaltyReportExportService],
+  providers: [InvoicesService, RoyaltyRulesService, RoyaltyReportService, RoyaltyReportExportService, QuotationSalesService, SalesReportService],
   exports: [InvoicesService, RoyaltyRulesService],
 })
 export class RoyaltyModule {}

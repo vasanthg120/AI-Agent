@@ -4,7 +4,7 @@ import { planStatus } from '@/features/chat/agentLabels';
 import { useAuthStore } from '@/stores/authStore';
 import { generateId } from '@/utils/id';
 import { commandCenterService } from './commandCenterService';
-import type { ChatAgent, ChatMessage, Conversation, ConversationDetails } from '@/types';
+import type { ChatAgent, ChatMessage, Conversation, ConversationDetails, MessageAttachment } from '@/types';
 
 interface BackendConversationSummary {
   _id: string;
@@ -19,11 +19,41 @@ interface BackendConversationSummary {
   messages?: BackendMessage[];
 }
 
+interface BackendAttachment {
+  id: string;
+  name: string;
+  mimeType: string;
+  sizeBytes: number;
+}
+
 interface BackendMessage {
   role: 'user' | 'assistant';
   content: string;
   toolsUsed: string[];
+  attachments?: BackendAttachment[];
   createdAt: string;
+}
+
+// What may be attached in the chat (GET /chat/attachments/limits). The server
+// enforces all of it again; this only lets the input refuse a file up front.
+export interface ChatAttachmentLimits {
+  extensions: string[];
+  maxFileBytes: number;
+  maxPerMessage: number;
+  maxPerConversation: number;
+  retentionDays: number;
+}
+
+export const DEFAULT_ATTACHMENT_LIMITS: ChatAttachmentLimits = {
+  extensions: ['.pdf', '.docx', '.xlsx', '.xls', '.pptx', '.png', '.jpg', '.jpeg', '.webp', '.csv', '.txt', '.md', '.html', '.htm'],
+  maxFileBytes: 25 * 1024 * 1024,
+  maxPerMessage: 5,
+  maxPerConversation: 10,
+  retentionDays: 30,
+};
+
+function toAttachment(a: BackendAttachment): MessageAttachment {
+  return { id: a.id, name: a.name, size: a.sizeBytes, type: a.mimeType, kind: a.mimeType.startsWith('image/') ? 'image' : 'document' };
 }
 
 interface BackendConversation extends BackendConversationSummary {
@@ -64,6 +94,7 @@ function toMessage(m: BackendMessage, conversationId: string, index: number): Ch
     status: 'complete',
     createdAt: m.createdAt,
     toolsUsed: m.toolsUsed?.length ? m.toolsUsed : undefined,
+    attachments: m.attachments?.length ? m.attachments.map(toAttachment) : undefined,
   };
 }
 
@@ -121,6 +152,30 @@ export const chatService = {
     };
   },
 
+  async getAttachmentLimits(): Promise<ChatAttachmentLimits> {
+    const { data } = await axiosClient.get<ChatAttachmentLimits>('/chat/attachments/limits');
+    return data;
+  },
+
+  /** Uploads one document for the next message. The server checks it, reads
+   * its text and keeps that (encrypted) — the id returned is what gets sent
+   * with the message. */
+  async uploadAttachment(file: File, onProgress?: (percent: number) => void, signal?: AbortSignal): Promise<MessageAttachment> {
+    const form = new FormData();
+    form.append('file', file);
+    const { data } = await axiosClient.post<BackendAttachment>('/chat/attachments', form, {
+      signal,
+      // Reading a long document (or an image, by the vision model) takes a while after the bytes are up.
+      timeout: 300_000,
+      onUploadProgress: (event) => onProgress?.(event.total ? Math.round((event.loaded / event.total) * 100) : 0),
+    });
+    return toAttachment(data);
+  },
+
+  async deleteAttachment(id: string): Promise<void> {
+    await axiosClient.delete(`/chat/attachments/${id}`);
+  },
+
   async renameConversation(id: string, title: string): Promise<void> {
     await axiosClient.patch(`/chat/conversations/${id}`, { title });
   },
@@ -139,6 +194,7 @@ export const chatService = {
     callbacks: StreamCallbacks,
     isNewConversation: boolean,
     agentId?: string,
+    attachmentIds?: string[],
   ): StreamController {
     const token = useAuthStore.getState().accessToken ?? '';
     const socket = getSocket(token);
@@ -234,6 +290,7 @@ export const chatService = {
       message: prompt,
       conversationId: isNewConversation ? undefined : conversationId,
       agentId,
+      attachmentIds: attachmentIds?.length ? attachmentIds : undefined,
     });
 
     return {

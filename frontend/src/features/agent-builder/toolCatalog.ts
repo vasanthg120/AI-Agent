@@ -14,7 +14,7 @@ export interface ToolCatalogItem {
   // Which org-level connection this depends on, if any — used by the
   // Access step to show real connection status (undefined = always
   // available, no external account required).
-  provider?: 'outlook' | 'gmail' | 'crm';
+  provider?: 'outlook' | 'gmail' | 'crm' | 'gorilladash' | 'zapier';
 }
 
 export interface ToolSystem {
@@ -59,7 +59,26 @@ export const TOOL_SYSTEMS: ToolSystem[] = [
       { name: 'crm_product', label: 'Products', provider: 'crm' },
       { name: 'crm_note', label: 'Notes', provider: 'crm' },
       { name: 'crm_tag', label: 'Tags', provider: 'crm' },
+      // Reads HaiVE's own copy of one data source's records (any CRM, incl. apps sent from Zapier).
+      { name: 'crm_source_records', label: 'Records by data source' },
     ],
+  },
+  {
+    id: 'gorilladash',
+    label: 'Gorilla Dash',
+    description:
+      'Leads, people, locations, reviews and articles in Gorilla Dash — and creating or updating leads and emailing people (always confirmed with you first).',
+    tools: [
+      { name: 'gorilladash_lookup', label: 'Look up leads, people & locations', provider: 'gorilladash' },
+      { name: 'gorilladash_action', label: 'Create & update leads, email people', provider: 'gorilladash', sensitive: true },
+    ],
+  },
+  {
+    id: 'zapier',
+    label: 'Zapier apps',
+    description:
+      'The apps connected in your Zapier account (e.g. Hoops, Gorilla Dash): see what each offers and run the actions an admin enabled — anything that changes data is always confirmed with you first.',
+    tools: [{ name: 'zapier', label: 'Use Zapier app actions', provider: 'zapier', sensitive: true }],
   },
   {
     id: 'knowledge',

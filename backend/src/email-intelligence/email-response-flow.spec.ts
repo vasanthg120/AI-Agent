@@ -110,7 +110,7 @@ describe('AI Email Inbox — reply lifecycle (real Mongo)', () => {
 
     await model.updateOne({ _id: email._id }, { isRead: true }); // opened
     expect(ids(await view('needs_response'))).toEqual(ids([email]));
-    expect(await service.counts(userId)).toEqual({ needs_response: 1, responded: 0, resolved: 0 });
+    expect(await service.counts(userId)).toMatchObject({ needs_response: 1, responded: 0, resolved: 0 });
   });
 
   it('3-4. replying through the app moves it out of Needs Response at once, and it stays out on re-read', async () => {
@@ -121,7 +121,7 @@ describe('AI Email Inbox — reply lifecycle (real Mongo)', () => {
     expect((sent.toJSON() as unknown as Record<string, unknown>).responseStatus).toBe('responded');
     expect(await view('needs_response')).toHaveLength(0);
     expect(ids(await view('responded'))).toEqual(ids([email]));
-    expect(await service.counts(userId)).toEqual({ needs_response: 0, responded: 1, resolved: 0 });
+    expect(await service.counts(userId)).toMatchObject({ needs_response: 0, responded: 1, resolved: 0 });
 
     // "page refresh / log out and back in" — a brand-new read of the same data
     const reloaded = await service.getOne(userId, email._id.toString());
@@ -254,12 +254,12 @@ describe('AI Email Inbox — reply lifecycle (real Mongo)', () => {
     await approveAndSend(a._id.toString());
 
     const counts = await service.counts(userId);
-    expect(counts).toEqual({ needs_response: 1, responded: 1, resolved: 1 });
+    expect(counts).toMatchObject({ needs_response: 1, responded: 1, resolved: 1 });
     for (const v of ['needs_response', 'responded', 'resolved'] as const) {
       expect(await view(v)).toHaveLength(counts[v]);
     }
     // the same filters narrow both
-    expect(await service.counts(userId, { intents: ['complaint'] })).toEqual({ needs_response: 1, responded: 0, resolved: 0 });
+    expect(await service.counts(userId, { intents: ['complaint'] })).toMatchObject({ needs_response: 1, responded: 0, resolved: 0 });
     expect(ids(await service.list(userId, { view: 'needs_response', intents: ['complaint'] }))).toEqual(ids([b]));
     expect(ids(await service.list(userId, { search: 'late deliv' }))).toEqual(ids([b]));
   });

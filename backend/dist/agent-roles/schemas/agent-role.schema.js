@@ -68,6 +68,10 @@ __decorate([
     __metadata("design:type", String)
 ], AgentRole.prototype, "modelTier", void 0);
 __decorate([
+    (0, mongoose_1.Prop)({ type: [String], default: undefined }),
+    __metadata("design:type", Array)
+], AgentRole.prototype, "features", void 0);
+__decorate([
     (0, mongoose_1.Prop)({ default: '#6b7280' }),
     __metadata("design:type", String)
 ], AgentRole.prototype, "avatarColor", void 0);

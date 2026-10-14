@@ -1,7 +1,16 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { Document, Types } from 'mongoose';
+import { Document, SchemaTypes, Types } from 'mongoose';
 
 export type ConversationDocument = Conversation & Document<Types.ObjectId>;
+
+// What a message shows for a document sent with it (the text itself lives,
+// encrypted, in chat_attachments).
+export interface MessageAttachment {
+  id: string;
+  name: string;
+  mimeType: string;
+  sizeBytes: number;
+}
 
 @Schema({ _id: false })
 export class ChatMessage {
@@ -13,6 +22,9 @@ export class ChatMessage {
 
   @Prop({ type: [String], default: [] })
   toolsUsed: string[];
+
+  @Prop({ type: [SchemaTypes.Mixed], default: undefined })
+  attachments?: MessageAttachment[];
 
   @Prop({ default: () => new Date() })
   createdAt: Date;

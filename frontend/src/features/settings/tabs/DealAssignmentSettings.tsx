@@ -20,6 +20,7 @@ import { extractErrorMessage } from '@/utils/errors';
 import { formatINR } from '@/utils/currency';
 import { useDebouncedValue } from '@/hooks/useDebouncedValue';
 import { usersService } from '@/services/usersService';
+import { isSalesperson } from '@/utils/access';
 import { dealsService, type AssignmentDealRow, type DealFilters, type ExternalOwnerRow } from '@/services/dealsService';
 import { SettingsSection } from '../components/SettingsSection';
 import styles from './DealAssignmentSettings.module.css';
@@ -75,7 +76,7 @@ export function DealAssignmentSettings() {
 
   const { data: employees = [] } = useQuery({
     queryKey: ['deal-assignment-employees'],
-    queryFn: async () => (await usersService.list()).filter((u) => u.roles.includes('manager') || u.roles.includes('consultant')),
+    queryFn: async () => (await usersService.list()).filter(isSalesperson),
   });
 
   const listKey = ['deal-assignment', view, filters, page] as const;
@@ -159,15 +160,26 @@ export function DealAssignmentSettings() {
     if (!bulkOwner || selected.size === 0) return;
     setBulkBusy(true);
     const ids = [...selected];
-    const results = await Promise.allSettled(ids.map((id) => dealsService.assign(id, bulkOwner)));
-    const failed = results.filter((r) => r.status === 'rejected').length;
-    ids.forEach((id, i) => results[i].status === 'fulfilled' && applyOwner(id, bulkOwner));
-    if (failed === 0) toast.success(`${ids.length} deal${ids.length === 1 ? '' : 's'} assigned to ${employeeName(bulkOwner)}`);
-    else toast.error(`${failed} of ${ids.length} couldn't be assigned — try those again`);
-    setSelected(new Set());
-    setBulkOwner('');
-    setBulkBusy(false);
-    refreshCounts();
+    try {
+      // One request for the whole selection.
+      const result = await dealsService.assignMany(ids, bulkOwner);
+      ids.forEach((id) => applyOwner(id, bulkOwner));
+      if (result.assigned === result.requested) {
+        toast.success(`${result.assigned} deal${result.assigned === 1 ? '' : 's'} assigned to ${employeeName(bulkOwner)}`);
+      } else {
+        // Some no longer exist (deleted, or re-synced from the CRM since the list loaded).
+        toast(`${result.assigned} of ${result.requested} assigned to ${employeeName(bulkOwner)} — the rest are no longer in the list.`, { duration: 8_000 });
+        void queryClient.invalidateQueries({ queryKey: ['deal-assignment'] });
+      }
+      setSelected(new Set());
+      setBulkOwner('');
+    } catch (err) {
+      // Nothing was changed: the selection is kept so it can be tried again as it is.
+      toast.error(`The deals couldn’t be assigned: ${extractErrorMessage(err)}`, { duration: 8_000 });
+    } finally {
+      setBulkBusy(false);
+      refreshCounts();
+    }
   };
 
   const handleLinkOwner = async (row: ExternalOwnerRow, ownerId: string) => {

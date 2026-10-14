@@ -1,0 +1,932 @@
+/* The customer panel: what is new beside the page's own detail styles (customer-detail.module.css). */
+
+.panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+  container: customer-detail / inline-size;
+  animation: panelIn var(--duration-normal) var(--ease-out) backwards;
+}
+
+@keyframes panelIn {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+
+.headCompany {
+  display: block;
+  font-weight: 600;
+  color: var(--color-accent);
+}
+
+/* The six steps under the name: one row; on a narrow screen it scrolls sideways rather than piling up. */
+.stageRow {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: var(--space-2);
+}
+
+/* Each status is a menu. The row never clips: a menu must be free to open below it. */
+.stageMenu {
+  display: block;
+  min-width: 0;
+}
+
+.stageMenu > span {
+  display: block;
+}
+
+.stageButton {
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: none;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.stageButton:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 3px;
+}
+
+.stageButton:disabled {
+  opacity: 0.6;
+  cursor: progress;
+}
+
+/* The colour an option will give the chip. */
+.optionDot {
+  flex: none;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--tone, color-mix(in srgb, var(--color-text-muted) 45%, var(--color-bg-surface)));
+}
+
+.stageHint {
+  margin: calc(var(--space-1) * -1) 0 0;
+  font-size: var(--text-xs);
+  line-height: 1.4;
+  color: var(--color-text-muted);
+}
+
+/* On a phone: two rows of three, so every status keeps room for its words. */
+@media (max-width: 640px) {
+  .stageRow {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+/* ---- customer information ---- */
+
+.infoCard {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-bg-surface-elevated);
+}
+
+.infoGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: var(--space-3) var(--space-4);
+  margin: 0;
+}
+
+.infoGrid dt,
+.documentMeta dt,
+.totals dt {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+}
+
+.infoGrid dd,
+.documentMeta dd {
+  margin: 2px 0 0;
+  font-size: var(--text-sm);
+  color: var(--color-text-primary);
+  overflow-wrap: anywhere;
+}
+
+.infoWide {
+  grid-column: 1 / -1;
+}
+
+.people {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: 0;
+  padding: var(--space-3) 0 0;
+  border-top: 1px solid var(--color-border);
+  list-style: none;
+}
+
+.people li {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2) var(--space-3);
+  flex-wrap: wrap;
+}
+
+.personName {
+  flex: 0 0 170px;
+  min-width: 0;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--color-text-primary);
+  overflow-wrap: anywhere;
+}
+
+.personReach {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.iconLink {
+  flex: none;
+  display: inline-grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  transition:
+    color var(--duration-fast) var(--ease-out),
+    background-color var(--duration-fast) var(--ease-out);
+}
+
+.iconLink:hover {
+  color: var(--color-accent);
+  background: var(--color-bg-hover);
+}
+
+.iconLink:focus-visible,
+.textButton:focus-visible,
+.backLink:focus-visible,
+.stepLink:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+.textButton {
+  align-self: flex-start;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--color-accent);
+  font: inherit;
+  font-size: var(--text-sm);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+/* ---- how the records connect ---- */
+
+.journeys {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.journey {
+  display: flex;
+  align-items: stretch;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  margin: 0;
+  padding: var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-bg-surface-elevated);
+  list-style: none;
+}
+
+.journeyItem {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.journeyArrow {
+  flex: none;
+  color: var(--color-text-muted);
+}
+
+/* In a document: the same steps, one under the other. */
+.journeyStacked {
+  flex-direction: column;
+  padding: 0;
+  border: none;
+  background: none;
+}
+
+.journeyStacked .journeyItem,
+.journeyStacked .step {
+  width: 100%;
+}
+
+.step {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  min-width: 0;
+  max-width: 230px;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-surface);
+  font: inherit;
+  text-align: left;
+}
+
+.journeyStacked .step {
+  max-width: none;
+}
+
+.stepLink {
+  cursor: pointer;
+  transition:
+    border-color var(--duration-fast) var(--ease-out),
+    box-shadow var(--duration-fast) var(--ease-out);
+}
+
+.stepLink:hover {
+  border-color: var(--color-accent);
+  box-shadow: var(--shadow-sm);
+}
+
+.stepDot {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  color: #17130e;
+  background: var(--tone, color-mix(in srgb, var(--color-text-muted) 22%, var(--color-bg-surface)));
+  font-size: 13px;
+}
+
+.tone_done {
+  --tone: var(--color-success);
+}
+
+.tone_progress {
+  --tone: var(--color-info);
+}
+
+.tone_waiting {
+  --tone: var(--color-warning);
+}
+
+.tone_attention {
+  --tone: var(--color-danger);
+}
+
+.stepText {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+  font-size: var(--text-xs);
+  line-height: 1.4;
+  color: var(--color-text-muted);
+}
+
+.stepText strong {
+  font-size: var(--text-sm);
+  color: var(--color-text-primary);
+}
+
+.stepText span {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  color: var(--color-text-secondary);
+  overflow-wrap: anywhere;
+}
+
+/* ---- a quotation or an invoice, as a document ---- */
+
+.docRow {
+  cursor: pointer;
+  outline: none;
+  transition: background-color var(--duration-fast) var(--ease-out);
+}
+
+.docRow:hover td,
+.docRow:focus-visible td {
+  background: var(--color-bg-hover);
+}
+
+.docOpen {
+  width: 28px;
+  color: var(--color-text-muted);
+  text-align: right;
+}
+
+.backLink {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--color-accent);
+  font: inherit;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.document {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+  padding: var(--space-5);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-bg-surface);
+  box-shadow: var(--shadow-sm);
+}
+
+.documentHead {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+}
+
+.documentKind {
+  font-size: var(--text-xs);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+}
+
+.documentNumber {
+  margin: 2px 0 0;
+  font-size: var(--text-2xl);
+  font-weight: 700;
+  line-height: 1.2;
+  color: var(--color-text-primary);
+  overflow-wrap: anywhere;
+}
+
+.documentTitle {
+  margin: 4px 0 0;
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+}
+
+.documentAmount {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: var(--space-2);
+  text-align: right;
+}
+
+.documentAmount > div {
+  min-width: 120px;
+  text-align: left;
+}
+
+.documentAmount strong {
+  font-size: var(--text-xl);
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text-primary);
+}
+
+.documentMeta {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: var(--space-3) var(--space-4);
+  margin: 0;
+  padding: var(--space-3) 0;
+  border-top: 1px solid var(--color-border);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.documentBlock {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.documentBlock h4 {
+  margin: 0;
+  font-size: var(--text-xs);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+}
+
+.party {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+}
+
+.party strong {
+  font-size: var(--text-lg);
+  color: var(--color-text-primary);
+}
+
+.party a {
+  align-self: flex-start;
+  color: var(--color-accent);
+  text-decoration: none;
+  overflow-wrap: anywhere;
+}
+
+.party a:hover {
+  text-decoration: underline;
+}
+
+.totals {
+  align-self: flex-end;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 220px;
+  margin: 0;
+  font-size: var(--text-sm);
+}
+
+.totals > div {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-4);
+}
+
+.totals dd {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text-primary);
+}
+
+.totalMain {
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--color-border);
+  font-weight: 700;
+}
+
+.totalMain dt {
+  font-size: var(--text-sm);
+  color: var(--color-text-primary);
+}
+
+/* When the items and what is added to them are listed above it, the total is ruled off from them. */
+.totals > div + .totalMain {
+  margin-top: 2px;
+  padding-top: 6px;
+  border-top: 1px solid var(--color-border);
+}
+
+/* Beside a block's heading: a quiet word on where its content comes from. */
+.blockNote {
+  margin-left: var(--space-2);
+  font-weight: 400;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+/* More about an item: a few lines at most; the rest on hover. */
+.lineDetail {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  max-width: 44ch;
+  overflow: hidden;
+  white-space: normal;
+}
+
+/* The items don't come to the document's amount: said plainly, beside them. */
+.linesNote {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  margin: 0;
+  padding: var(--space-3);
+  border-radius: var(--radius-md);
+  background: var(--color-warning-soft);
+  font-size: var(--text-sm);
+  line-height: 1.5;
+  color: var(--color-text-secondary);
+}
+
+.linesNote svg {
+  flex: none;
+  margin-top: 3px;
+  color: var(--color-warning-ink);
+}
+
+.payments {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+}
+
+.payments li {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.payments strong {
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text-primary);
+}
+
+.documentFoot {
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+}
+
+/* ---- lists: emails, follow-ups, tasks, files ---- */
+
+.mailSummary {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+}
+
+.list {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-surface);
+  list-style: none;
+  overflow: hidden;
+}
+
+.listRow,
+.task {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  border-bottom: 1px solid var(--color-border);
+  transition: background-color var(--duration-fast) var(--ease-out);
+}
+
+.listRow:last-child,
+.task:last-child {
+  border-bottom: none;
+}
+
+.listRow:hover,
+.task:hover {
+  background: var(--color-bg-hover);
+}
+
+/* Something is owed on it: an unanswered email, a follow-up whose day has come. */
+.listRowDue {
+  box-shadow: inset 3px 0 0 var(--color-danger);
+}
+
+.listIcon {
+  flex: none;
+  color: var(--color-text-muted);
+}
+
+.listMain {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+}
+
+.listMain strong {
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--color-text-primary);
+  overflow-wrap: anywhere;
+}
+
+.task input[type='checkbox'] {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  accent-color: var(--color-accent);
+  cursor: pointer;
+}
+
+.taskDone .listMain strong {
+  color: var(--color-text-muted);
+  text-decoration: line-through;
+}
+
+/* ---- writing: a comment, a task ---- */
+
+.composer {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.composer textarea,
+.field {
+  width: 100%;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-input);
+  color: var(--color-text-primary);
+  font: inherit;
+  font-size: var(--text-sm);
+  transition: border-color var(--duration-fast) var(--ease-out);
+}
+
+.composer textarea {
+  min-height: 84px;
+  line-height: 1.5;
+  resize: vertical;
+}
+
+.field {
+  height: 38px;
+}
+
+.composer textarea:focus-visible,
+.field:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 1px;
+  border-color: var(--color-accent);
+}
+
+.composerFoot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+}
+
+.hint {
+  margin: calc(var(--space-3) * -1) 0 0;
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+}
+
+.notes {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.note {
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-surface-elevated);
+}
+
+.noteHead {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+}
+
+.noteHead strong {
+  font-size: var(--text-sm);
+  color: var(--color-text-primary);
+}
+
+.noteHead time {
+  margin-right: auto;
+}
+
+.note p {
+  margin: 4px 0 0;
+  font-size: var(--text-sm);
+  line-height: 1.55;
+  color: var(--color-text-secondary);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.taskForm {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 150px 160px auto;
+  align-items: end;
+  gap: var(--space-2);
+}
+
+.fieldLabel {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+}
+
+/* ---- files ---- */
+
+.dropZone {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  border: 1px dashed var(--color-border-strong);
+  border-radius: var(--radius-lg);
+  background: var(--color-bg-surface-elevated);
+  transition:
+    border-color var(--duration-fast) var(--ease-out),
+    background-color var(--duration-fast) var(--ease-out);
+}
+
+.dropZone > svg {
+  flex: none;
+  font-size: 22px;
+  color: var(--color-accent);
+}
+
+.dropZone > div {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+}
+
+.dropZone strong {
+  font-size: var(--text-sm);
+  color: var(--color-text-primary);
+}
+
+.dropZoneOver {
+  border-color: var(--color-accent);
+  background: var(--color-bg-active);
+}
+
+/* Above an open document: the way back, and — on a quotation — its job. */
+.documentBar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2) var(--space-3);
+  flex-wrap: wrap;
+}
+
+/* Under a quotation's number in the list: the job it became. */
+.docJob {
+  margin-top: 4px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .panel {
+    animation: none;
+  }
+}
+
+@container customer-detail (max-width: 560px) {
+  .personName {
+    flex-basis: 100%;
+  }
+
+  .journey {
+    flex-direction: column;
+  }
+
+  .journeyItem,
+  .step {
+    width: 100%;
+    max-width: none;
+  }
+
+  .journeyArrow {
+    display: none;
+  }
+
+  .taskForm {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .taskForm > :first-child,
+  .taskForm > button {
+    grid-column: 1 / -1;
+  }
+
+  .dropZone {
+    flex-wrap: wrap;
+  }
+
+  .document {
+    padding: var(--space-4);
+  }
+
+  .documentAmount {
+    align-items: flex-start;
+    text-align: left;
+  }
+
+  .totals {
+    align-self: stretch;
+  }
+}
+
+/* ==== Fitting the screen (layout pass) ==== */
+
+/* A row of a list: its title keeps a readable width, and what follows it — a tag, a date, the buttons —
+   drops under the title together when there is no room beside it. */
+.listRow,
+.task {
+  flex-wrap: wrap;
+  row-gap: var(--space-2);
+}
+
+.listMain {
+  flex: 1 1 220px;
+}
+
+.listEnd {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  min-width: 0;
+  margin-left: auto;
+}
+
+.noteHead {
+  flex-wrap: wrap;
+}
+
+/* On the smallest phones: two statuses across, so each still has room for its words. */
+@media (max-width: 360px) {
+  .stageRow {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+/* ==== Moving smoothly ==== */
+
+/* While a panel's own data is on its way, its header holds its shape — a status is a title and a chip, the
+   line under the name is a line — so nothing jumps when the data arrives. */
+.ghost {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+/* One line of the text it stands for, whatever that line's height is. */
+.ghostLine {
+  display: flex;
+  align-items: center;
+  height: 17px;
+  height: 1lh;
+}

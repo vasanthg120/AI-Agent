@@ -1,28 +1,40 @@
 import { axiosClient } from '@/api/axiosClient';
 
+export type SalesGroupBy = 'customer' | 'user' | 'quoteOwner';
+
 export interface SalesReportGroupRow {
   groupKey: string;
   groupLabel: string;
-  totalSalesExTax: number;
+  quotations: number;
+  salesExTax: number;
+  tax: number;
+  salesIncTax: number;
+  // This group's share of the period's sales (excluding tax).
   percentOfSales: number;
 }
 
 export interface SalesReportSummary {
   dateFrom: string;
   dateTo: string;
-  groupBy: 'customer' | 'user' | 'quoteOwner';
-  totalSalesForPeriod: number;
+  groupBy: SalesGroupBy;
+  // Quotations sent in the period, and how many of them the customer has accepted.
+  quotations: number;
+  accepted: number;
+  totalSalesExTax: number;
+  totalTax: number;
+  totalSalesIncTax: number;
   groups: SalesReportGroupRow[];
   dataSourceNote: string;
 }
 
-// Computed from real won-deal revenue — no per-item product/decoration cost
-// breakdown exists anywhere in this system, so unlike the reference report
-// this only shows one combined "Total Sales" figure (see the service's own
-// dataSourceNote for the live caveat on "Quote Owner" grouping).
+// Sales = every quotation sent in the period, with the value and the tax the
+// quotation itself carries (backend/src/reporting/quotation-sales.service.ts).
+// The Gross Margin and Royalty reports count the same quotations.
 export const salesReportService = {
-  async generate(dateFrom: string, dateTo: string, groupBy: 'customer' | 'user' | 'quoteOwner'): Promise<SalesReportSummary> {
-    const { data } = await axiosClient.get<SalesReportSummary>('/reporting/sales', { params: { dateFrom, dateTo, groupBy } });
+  async generate(dateFrom: string, dateTo: string, groupBy: SalesGroupBy): Promise<SalesReportSummary> {
+    const { data } = await axiosClient.get<SalesReportSummary>('/reporting/sales', {
+      params: { dateFrom, dateTo, groupBy },
+    });
     return data;
   },
 };

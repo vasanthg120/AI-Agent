@@ -68,7 +68,13 @@ export function buildDealMatchStage(
   if (includeDateRange && (filters.dateFrom || filters.dateTo)) {
     if (filters.dateField === 'expectedClosingDate') {
       const period = (filters.dateFrom ?? filters.dateTo)!.slice(0, 7);
-      match.expectedClosingDate = { $regex: `^${period}` };
+      const lastPeriod = (filters.dateTo ?? filters.dateFrom)!.slice(0, 7);
+      // A range inside one month is that whole month (as described above). A
+      // range across several months — "last 90 days", a quarter — is every
+      // whole month it touches; it used to count the first month only, so a
+      // longer range could show FEWER deals than a shorter one. The dates are
+      // "YYYY-MM-DD" strings, which compare correctly as text.
+      match.expectedClosingDate = lastPeriod > period ? { $gte: `${period}-01`, $lte: `${lastPeriod}-31` } : { $regex: `^${period}` };
     } else {
       // Explicit 'Z' (UTC) end-of-day, not `.setHours(23,59,59,999)` — that
       // mutates in the server process's LOCAL timezone, so on any server not

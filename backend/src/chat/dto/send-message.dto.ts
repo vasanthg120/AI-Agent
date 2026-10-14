@@ -1,4 +1,4 @@
-import { IsNotEmpty, IsOptional, IsString, MaxLength } from 'class-validator';
+import { ArrayMaxSize, IsArray, IsMongoId, IsNotEmpty, IsOptional, IsString, MaxLength } from 'class-validator';
 
 // 8000 chars comfortably covers a real pasted email thread/document excerpt
 // (this app's actual chat use cases) while still bounding the per-call LLM
@@ -19,4 +19,12 @@ export class SendMessageDto {
   @IsOptional()
   @IsString()
   agentId?: string;
+
+  // Documents uploaded through POST /chat/attachments to send with this
+  // message (ChatAttachmentsService.attach checks they are the caller's own).
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(10)
+  @IsMongoId({ each: true })
+  attachmentIds?: string[];
 }

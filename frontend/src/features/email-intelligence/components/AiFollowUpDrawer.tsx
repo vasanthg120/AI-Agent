@@ -11,7 +11,12 @@ import styles from '../email-intelligence.module.css';
 
 // Same priority colors as EmailIntelligenceDetailModal.tsx/EmailIntelligenceList.tsx
 // — reused exactly, never a second priority palette.
-const PRIORITY_VARIANT: Record<string, BadgeVariant> = { urgent: 'danger', high: 'warning', medium: 'info', low: 'neutral' };
+const PRIORITY_VARIANT: Record<string, BadgeVariant> = {
+  urgent: 'danger',
+  high: 'warning',
+  medium: 'info',
+  low: 'neutral',
+};
 
 // The AI Follow-up Agent's review screen — the one place an employee
 // actually acts on an SLA-breached email. Deliberately a focused Modal (this
@@ -24,7 +29,13 @@ const PRIORITY_VARIANT: Record<string, BadgeVariant> = { urgent: 'danger', high:
 // AI generates the draft; the employee stays fully in control — Send always
 // requires an explicit click here, exactly like the existing approve()/
 // send() flow on a regular email reply. No auto-send anywhere in this file.
-export function AiFollowUpDrawer({ reminder, onClose }: { reminder: EmailFollowUpReminder | null; onClose: () => void }) {
+export function AiFollowUpDrawer({
+  reminder,
+  onClose,
+}: {
+  reminder: EmailFollowUpReminder | null;
+  onClose: () => void;
+}) {
   const queryClient = useQueryClient();
   const [draftText, setDraftText] = useState('');
   const [regenerateNote, setRegenerateNote] = useState('');
@@ -77,7 +88,8 @@ export function AiFollowUpDrawer({ reminder, onClose }: { reminder: EmailFollowU
       setShowRegenerateNote(false);
       setRegenerateNote('');
       await invalidate();
-      if (updated.draftStatus === 'failed') toast.error('AI draft could not be generated. You can still reply manually.');
+      if (updated.draftStatus === 'failed')
+        toast.error('AI draft could not be generated. You can still reply manually.');
       else toast.success('Draft regenerated');
     } catch (err) {
       toast.error(extractErrorMessage(err));
@@ -87,7 +99,8 @@ export function AiFollowUpDrawer({ reminder, onClose }: { reminder: EmailFollowU
   };
 
   const handleSend = async () => {
-    if (!window.confirm(`Send this reply to ${sourceEmail?.fromAddress ?? 'the customer'}? This cannot be undone.`)) return;
+    if (!window.confirm(`Send this reply to ${sourceEmail?.fromAddress ?? 'the customer'}? This cannot be undone.`))
+      return;
     setBusy('send');
     try {
       await emailIntelligenceService.approveFollowUpDraft(reminder._id, draftText);
@@ -120,7 +133,11 @@ export function AiFollowUpDrawer({ reminder, onClose }: { reminder: EmailFollowU
   };
 
   const priority = sourceEmail?.priority;
-  const contextItems: { key: keyof NonNullable<EmailFollowUpReminder['contextUsed']>; label: string; icon: IconType }[] = [
+  const contextItems: {
+    key: keyof NonNullable<EmailFollowUpReminder['contextUsed']>;
+    label: string;
+    icon: IconType;
+  }[] = [
     { key: 'thread', label: 'Email conversation', icon: FiMail },
     { key: 'crm', label: 'CRM information', icon: FiCheckCircle },
     { key: 'businessKnowledge', label: 'Business Knowledge', icon: FiCheckCircle },
@@ -158,9 +175,16 @@ export function AiFollowUpDrawer({ reminder, onClose }: { reminder: EmailFollowU
               <Spinner size={16} /> Generating draft…
             </div>
           ) : reminder.draftStatus === 'failed' ? (
-            <div className={styles.emptyState}>AI draft could not be generated. You can reply manually, or try Regenerate.</div>
+            <div className={styles.emptyState}>
+              AI draft could not be generated. You can reply manually, or try Regenerate.
+            </div>
           ) : (
-            <textarea className={styles.textarea} value={draftText} onChange={(e) => setDraftText(e.target.value)} rows={10} />
+            <textarea
+              className={styles.textarea}
+              value={draftText}
+              onChange={(e) => setDraftText(e.target.value)}
+              rows={10}
+            />
           )}
         </div>
 
@@ -176,7 +200,9 @@ export function AiFollowUpDrawer({ reminder, onClose }: { reminder: EmailFollowU
                 </div>
               ))}
             {!contextItems.some((c) => reminder.contextUsed?.[c.key]) && (
-              <span className={styles.listItemMeta}>No additional context was available — draft based on the email alone.</span>
+              <span className={styles.listItemMeta}>
+                No additional context was available — draft based on the email alone.
+              </span>
             )}
           </div>
         )}
@@ -216,7 +242,12 @@ export function AiFollowUpDrawer({ reminder, onClose }: { reminder: EmailFollowU
         )}
 
         <div className={styles.footer}>
-          <Button variant="secondary" leftIcon={<FiX />} onClick={() => setShowDismissConfirm(true)} disabled={busy !== null}>
+          <Button
+            variant="secondary"
+            leftIcon={<FiX />}
+            onClick={() => setShowDismissConfirm(true)}
+            disabled={busy !== null}
+          >
             Dismiss
           </Button>
           <Button

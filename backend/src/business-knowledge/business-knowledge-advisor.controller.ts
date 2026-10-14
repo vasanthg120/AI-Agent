@@ -8,6 +8,7 @@ import { AskBusinessKnowledgeDto } from './dto/ask-business-knowledge.dto';
 import { UpdateRecommendationStatusDto } from './dto/update-recommendation-status.dto';
 import { BusinessKnowledgeChatService } from './business-knowledge-chat.service';
 import { BusinessKnowledgeInsightsService } from './business-knowledge-insights.service';
+import { Feature } from '../common/app-features';
 
 // Same read tier as the rest of business-knowledge (owner/admin/manager) —
 // see business-profile.controller.ts's own comment for why. Recommendation
@@ -17,6 +18,7 @@ import { BusinessKnowledgeInsightsService } from './business-knowledge-insights.
 // the tighter owner/admin-only override the profile PUT route uses.
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Roles('owner', 'admin', 'manager')
+@Feature('business_knowledge')
 @Controller('business-knowledge')
 export class BusinessKnowledgeAdvisorController {
   constructor(

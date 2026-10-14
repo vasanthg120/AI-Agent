@@ -90,6 +90,9 @@ let OutlookController = OutlookController_1 = class OutlookController {
     setActive(user, email) {
         return this.outlookService.setActive(user.sub, decodeURIComponent(email));
     }
+    setHandler(user, email, body) {
+        return this.outlookService.setHandler(user.sub, user.organizationId, decodeURIComponent(email), body?.userId || null);
+    }
     disconnectAccount(user, email) {
         return this.outlookService.disconnect(user.sub, decodeURIComponent(email));
     }
@@ -191,6 +194,16 @@ __decorate([
     __metadata("design:paramtypes", [Object, String]),
     __metadata("design:returntype", void 0)
 ], OutlookController.prototype, "setActive", null);
+__decorate([
+    (0, common_1.UseGuards)(jwt_auth_guard_1.JwtAuthGuard),
+    (0, common_1.Put)('accounts/:email/handler'),
+    __param(0, (0, current_user_decorator_1.CurrentUser)()),
+    __param(1, (0, common_1.Param)('email')),
+    __param(2, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, String, Object]),
+    __metadata("design:returntype", void 0)
+], OutlookController.prototype, "setHandler", null);
 __decorate([
     (0, common_1.UseGuards)(jwt_auth_guard_1.JwtAuthGuard),
     (0, common_1.Delete)('accounts/:email'),

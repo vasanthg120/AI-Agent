@@ -12,6 +12,9 @@ export interface PhoneNumberFieldProps {
   // Country shown first (ISO code, e.g. "IN").
   defaultCountry?: string;
   disabled?: boolean;
+  // A number to start from (digits with country code) — e.g. when a step form
+  // brings people back to a field they already filled in.
+  initialValue?: string;
   // The full number as digits with its country code ('' while incomplete), and
   // the country it was dialled for.
   onChange: (digits: string, country: Country) => void;
@@ -33,10 +36,20 @@ export function toFullNumber(country: Country, national: string): string {
 // A phone number with its country: a flag-and-code picker next to the number.
 // Pasting a full international number ("+44 7700 900123" or "0044…") switches
 // the country by itself, so people never have to work out which part is which.
-export function PhoneNumberField({ label, hint, defaultCountry = 'IN', disabled, onChange }: PhoneNumberFieldProps) {
+export function PhoneNumberField({
+  label,
+  hint,
+  defaultCountry = 'IN',
+  disabled,
+  initialValue,
+  onChange,
+}: PhoneNumberFieldProps) {
   const id = useId();
-  const [country, setCountry] = useState<Country>(() => findCountry(defaultCountry));
-  const [national, setNational] = useState('');
+  const initialCountry = initialValue ? countryOfNumber(initialValue.replace(/\D/g, '')) : null;
+  const [country, setCountry] = useState<Country>(() => initialCountry ?? findCountry(defaultCountry));
+  const [national, setNational] = useState(() =>
+    initialValue && initialCountry ? initialValue.replace(/\D/g, '').slice(initialCountry.dialCode.length) : '',
+  );
 
   const emit = (nextCountry: Country, nextNational: string) =>
     onChange(toFullNumber(nextCountry, nextNational), nextCountry);

@@ -275,7 +275,9 @@
 .listItem {
   position: relative;
   overflow: hidden;
-  transition: border-color var(--duration-normal) var(--ease-out), box-shadow var(--duration-normal) var(--ease-out),
+  transition:
+    border-color var(--duration-normal) var(--ease-out),
+    box-shadow var(--duration-normal) var(--ease-out),
     transform var(--duration-normal) var(--ease-out);
 }
 
@@ -469,4 +471,617 @@
 
 .listItem > .listItemMain {
   flex: 1;
+}
+
+/* ---- follow-up analysis, sent mail, mailbox history ---- */
+
+.followUpRow {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-surface);
+}
+
+.followUpHead {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+
+.followUpReason,
+.followUpAction {
+  margin: 0;
+  font-size: var(--text-sm);
+  line-height: 1.55;
+  color: var(--color-text-secondary);
+}
+
+.followUpFacts {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: var(--space-3);
+  margin: 0;
+}
+
+.followUpFacts dt {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+}
+
+.followUpFacts dd {
+  margin: 2px 0 0;
+  font-size: var(--text-sm);
+  color: var(--color-text-primary);
+}
+
+.followUpQuote {
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  border-left: 3px solid var(--color-border-strong);
+  font-size: var(--text-sm);
+  line-height: 1.5;
+  color: var(--color-text-muted);
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.followUpDraft {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-3);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-surface-elevated);
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+}
+
+.followUpDraft p {
+  margin: 0;
+  white-space: pre-wrap;
+  color: var(--color-text-primary);
+}
+
+.historyBar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-surface-elevated);
+}
+
+.sentRow {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-3) 0;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.sentRow:last-child {
+  border-bottom: none;
+}
+
+.sentPreview {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 70ch;
+}
+
+/* The page scrolls as a whole: nothing in it gives up height to fit the screen. */
+.page > * {
+  flex-shrink: 0;
+}
+
+/* ---- compact inbox: one filter bar, three-line rows ---- */
+
+.filterBar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.filterBar .searchBox {
+  flex: 1 1 240px;
+  width: auto;
+  min-width: 200px;
+}
+
+.filterCount {
+  margin-left: auto;
+  white-space: nowrap;
+}
+
+.inboxList {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-bg-surface);
+  overflow: hidden;
+}
+
+.inboxRow {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--color-border);
+  font-size: var(--text-sm);
+  cursor: pointer;
+  transition: background var(--duration-fast) var(--ease-out);
+}
+
+.inboxRow:last-child {
+  border-bottom: none;
+}
+
+.inboxRow:hover,
+.inboxRow:focus-visible {
+  background: var(--color-bg-hover);
+  outline: none;
+}
+
+.inboxRow:focus-visible {
+  box-shadow: inset 0 0 0 2px var(--color-accent);
+}
+
+.inboxMain {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.inboxTop {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.inboxSender {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--color-text-primary);
+  font-weight: 500;
+}
+
+.inboxRowUnread .inboxSender,
+.inboxRowUnread .inboxSubject {
+  font-weight: 700;
+}
+
+.inboxCompany,
+.inboxCount,
+.inboxTime,
+.inboxIntent {
+  flex: none;
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  white-space: nowrap;
+}
+
+.inboxCompany {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.inboxCount {
+  padding: 0 6px;
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+}
+
+.inboxTime {
+  margin-left: auto;
+  padding-left: var(--space-2);
+}
+
+.inboxSubject,
+.inboxPreview {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.inboxSubject {
+  color: var(--color-text-primary);
+}
+
+.inboxPreview {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+}
+
+.inboxBadges {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  width: 250px;
+  align-self: center;
+}
+
+.inboxIntent {
+  text-transform: capitalize;
+  flex-basis: 100%;
+  text-align: right;
+}
+
+.followUpDetails {
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+}
+
+.followUpDetails summary {
+  cursor: pointer;
+  font-size: var(--text-xs);
+}
+
+.followUpDetails[open] summary {
+  margin-bottom: var(--space-2);
+}
+
+.followUpDetails > * + * {
+  margin-top: var(--space-2);
+}
+
+@media (max-width: 760px) {
+  .inboxRow {
+    flex-wrap: wrap;
+    padding: var(--space-3);
+  }
+
+  .inboxBadges {
+    width: 100%;
+    justify-content: flex-start;
+    padding-left: calc(32px + var(--space-3));
+  }
+
+  .inboxIntent {
+    flex-basis: auto;
+    margin-left: auto;
+  }
+
+  .inboxCompany {
+    display: none;
+  }
+
+  .filterBar .select,
+  .filterBar .searchBox {
+    flex: 1 1 100%;
+  }
+
+  .filterBar .select {
+    flex-basis: 45%;
+  }
+}
+
+/* ---- the reply assistant: drafts ready, "Draft with AI", and the owner's two choices ---- */
+
+.assistBar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3) var(--space-5);
+  flex-wrap: wrap;
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-bg-surface);
+  animation: assistIn var(--duration-slow) var(--ease-out) backwards;
+}
+
+.assistMain {
+  flex: 1 1 380px;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.assistIcon {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border-radius: var(--radius-md);
+  background: var(--color-bg-hover);
+  color: var(--color-accent);
+}
+
+.assistText {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  font-size: var(--text-xs);
+  line-height: 1.45;
+  color: var(--color-text-muted);
+}
+
+.assistText strong {
+  font-size: var(--text-sm);
+  color: var(--color-text-primary);
+}
+
+.assistSettings {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2) var(--space-5);
+  flex-wrap: wrap;
+}
+
+.assistSetting {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  cursor: pointer;
+}
+
+.assistSetting > span {
+  display: flex;
+  flex-direction: column;
+  font-size: 11px;
+  line-height: 1.35;
+  color: var(--color-text-muted);
+}
+
+.assistSetting strong {
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+@keyframes assistIn {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+
+/* ---- one email and its reply ---- */
+
+.detail {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.detailSection {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.senderRow {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+
+.senderText {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  font-size: var(--text-sm);
+  color: var(--color-text-primary);
+  overflow-wrap: anywhere;
+}
+
+/* The customer's own words, set apart from everything said about them. */
+.customerMessage {
+  margin: 0;
+  padding: var(--space-3) var(--space-4);
+  border-left: 3px solid var(--color-border-strong);
+  border-radius: 0 var(--radius-md) var(--radius-md) 0;
+  background: var(--color-bg-hover);
+  font-size: var(--text-sm);
+  line-height: 1.6;
+  color: var(--color-text-primary);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.replyHead {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.replyHead .fieldLabel {
+  margin: 0 auto 0 0;
+  color: var(--color-text-primary);
+}
+
+.replyHint {
+  margin: 0;
+  font-size: var(--text-xs);
+  line-height: 1.5;
+  color: var(--color-text-muted);
+  overflow-wrap: anywhere;
+}
+
+.replyHint strong {
+  font-weight: 600;
+  color: var(--color-text-secondary);
+}
+
+.sentReply {
+  margin: 0;
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  font-size: var(--text-sm);
+  line-height: 1.6;
+  color: var(--color-text-secondary);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.closeBox {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  animation: assistIn var(--duration-normal) var(--ease-out) backwards;
+}
+
+.bannerFailed {
+  background: rgba(248, 113, 113, 0.12);
+}
+
+.bannerFailed > svg {
+  color: var(--color-danger);
+}
+
+.bannerClosed {
+  background: var(--color-bg-hover);
+}
+
+.bannerClosed > svg {
+  color: var(--color-text-muted);
+}
+
+.textarea {
+  line-height: 1.6;
+  transition:
+    border-color var(--duration-fast) var(--ease-out),
+    box-shadow var(--duration-fast) var(--ease-out);
+}
+
+.textarea:focus-visible {
+  outline: none;
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 3px var(--color-accent-muted);
+}
+
+.textarea:disabled {
+  opacity: 0.65;
+}
+
+/* The actions stay in reach however long the email is: pinned to the bottom of
+   the panel, over whatever scrolls beneath. (The negative offsets are the
+   panel's own padding — see Modal.module.css.) */
+.detailFooter {
+  position: sticky;
+  bottom: calc(var(--space-6) * -1);
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  margin: 0 calc(var(--space-6) * -1) calc(var(--space-6) * -1);
+  padding: var(--space-3) var(--space-6);
+  border-top: 1px solid var(--color-border);
+  border-radius: 0 0 var(--radius-xl) var(--radius-xl);
+  background: var(--color-bg-surface);
+}
+
+.footerSpacer {
+  flex: 1;
+}
+
+.inboxRow {
+  transition:
+    background var(--duration-normal) var(--ease-out),
+    box-shadow var(--duration-normal) var(--ease-out);
+}
+
+@media (max-width: 760px) {
+  .assistBar {
+    padding: var(--space-3);
+  }
+
+  .assistMain {
+    flex-basis: 100%;
+    flex-wrap: wrap;
+  }
+
+  /* The button drops under the text and takes the full width: an easy target. */
+  .assistMain > button {
+    flex: 1 1 100%;
+  }
+
+  .assistSettings {
+    width: 100%;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: var(--space-3);
+    padding-top: var(--space-3);
+    border-top: 1px solid var(--color-border);
+  }
+
+  .senderRow .badgeRow {
+    flex-basis: 100%;
+  }
+}
+
+@media (max-width: 640px) {
+  .detailFooter {
+    bottom: calc(var(--space-4) * -1);
+    margin: 0 calc(var(--space-4) * -1) calc(var(--space-4) * -1);
+    padding: var(--space-3) var(--space-4);
+    border-radius: 0 0 var(--radius-lg) var(--radius-lg);
+  }
+
+  /* The one thing to do is the widest thing on the screen. */
+  .detailFooter > button:last-child {
+    flex: 1;
+  }
+
+  .footerSpacer {
+    display: none;
+  }
+
+  .textarea {
+    min-height: 180px;
+    /* 16px keeps a phone from zooming the page when the box is tapped. */
+    font-size: 16px;
+  }
+}
+
+@media (max-width: 420px) {
+  .assistSettings {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .assistBar,
+  .closeBox {
+    animation: none;
+  }
 }

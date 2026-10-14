@@ -58,3 +58,24 @@ export interface AnalyticsDashboardOverview {
   // observation, not just the first match.
   insights: AiInsightItem[];
 }
+
+export interface PipelineMonth {
+  /** "YYYY-MM": the month the deals are expected to close in. */
+  period: string;
+  count: number;
+  value: number;
+}
+
+// The open pipeline of every month at once. The rest of the dashboard follows
+// the one month chosen at the top; this is what stays open whichever month it
+// was expected to close in — so it is deliberately not date-scoped.
+export interface PipelineByMonth {
+  scope: ScopeInfo;
+  /** Every open deal in scope, dated or not. */
+  totalCount: number;
+  totalValue: number;
+  /** One entry per month, oldest first, from the earliest to the latest month that has an open deal; a month between them with none is included at zero. */
+  months: PipelineMonth[];
+  /** Open deals with no expected closing date: in the total, in no month. */
+  undated: { count: number; value: number };
+}

@@ -24,6 +24,7 @@ const mongoose_2 = require("mongoose");
 const redis_cache_service_1 = require("../common/redis/redis-cache.service");
 const agent_role_schema_1 = require("../agent-roles/schemas/agent-role.schema");
 const agents_1 = require("./agents");
+const chat_attachments_service_1 = require("./chat-attachments.service");
 const conversation_schema_1 = require("./schemas/conversation.schema");
 class AgentUserFacingError extends Error {
 }
@@ -44,13 +45,14 @@ function stripAssignment(agent) {
     return rest;
 }
 let ChatService = ChatService_1 = class ChatService {
-    constructor(conversationModel, agentRoleModel, http, config, cache, jwt) {
+    constructor(conversationModel, agentRoleModel, http, config, cache, jwt, attachments) {
         this.conversationModel = conversationModel;
         this.agentRoleModel = agentRoleModel;
         this.http = http;
         this.config = config;
         this.cache = cache;
         this.jwt = jwt;
+        this.attachments = attachments;
         this.logger = new common_1.Logger(ChatService_1.name);
         this.agentUrl = this.config.get('pythonAgentUrl') ?? 'http://localhost:8000';
     }
@@ -123,31 +125,22 @@ let ChatService = ChatService_1 = class ChatService {
         const result = await this.conversationModel.deleteOne({ _id: conversationId, userId }).exec();
         if (result.deletedCount === 0)
             throw new common_1.NotFoundException('Conversation not found');
+        await this.attachments.removeForConversation(userId, conversationId);
         await this.cache.del(`chat:conversations:${userId}`, `chat:conversation:${userId}:${conversationId}`);
     }
-    async sendMessage(userId, organizationId, userJwt, message, conversationId, agentId) {
+    async sendMessage(userId, organizationId, userJwt, message, conversationId, agentId, attachmentIds) {
         const conversation = await this.getOrCreateConversation(userId, organizationId, message, conversationId, agentId);
         const resolvedAgentId = this.resolveConversationAgent(conversation, agentId);
-        conversation.messages.push({
-            role: 'user',
-            content: message,
-            toolsUsed: [],
-            createdAt: new Date(),
-        });
-        const agentReply = await this.callAgent(userId, userJwt, conversation._id.toString(), message, resolvedAgentId);
+        conversation.messages.push(await this.userTurn(conversation, message, attachmentIds));
+        const agentReply = await this.callAgent(userId, userJwt, conversation._id.toString(), message, resolvedAgentId, attachmentIds);
         return this.finishTurn(conversation, agentReply);
     }
-    async sendMessageStreaming(userId, organizationId, userJwt, message, conversationId, onEvent, agentId, onConversationId) {
+    async sendMessageStreaming(userId, organizationId, userJwt, message, conversationId, onEvent, agentId, onConversationId, attachmentIds) {
         const conversation = await this.getOrCreateConversation(userId, organizationId, message, conversationId, agentId);
         onConversationId?.(conversation._id.toString());
         const resolvedAgentId = this.resolveConversationAgent(conversation, agentId);
-        conversation.messages.push({
-            role: 'user',
-            content: message,
-            toolsUsed: [],
-            createdAt: new Date(),
-        });
-        const agentReply = await this.callAgentStreaming(userId, userJwt, conversation._id.toString(), message, onEvent, resolvedAgentId);
+        conversation.messages.push(await this.userTurn(conversation, message, attachmentIds));
+        const agentReply = await this.callAgentStreaming(userId, userJwt, conversation._id.toString(), message, onEvent, resolvedAgentId, attachmentIds);
         return this.finishTurn(conversation, agentReply);
     }
     async createSystemConversationRecord(userId, organizationId, agentId, title, promptText, replyText) {
@@ -159,6 +152,24 @@ let ChatService = ChatService_1 = class ChatService {
             createdAt: new Date(),
         });
         return this.finishTurn(conversation, { reply: replyText, tools_used: [] });
+    }
+    async userTurn(conversation, message, attachmentIds) {
+        const attachments = await this.attachments
+            .attach(conversation.userId, conversation.organizationId, conversation._id.toString(), attachmentIds)
+            .catch(async (err) => {
+            if (conversation.messages.length === 0)
+                await this.conversationModel.deleteOne({ _id: conversation._id }).exec();
+            throw err;
+        });
+        return {
+            role: 'user',
+            content: message,
+            toolsUsed: [],
+            ...(attachments.length > 0
+                ? { attachments: attachments.map((a) => ({ id: a.id, name: a.name, mimeType: a.mimeType, sizeBytes: a.sizeBytes })) }
+                : {}),
+            createdAt: new Date(),
+        };
     }
     async getOrCreateConversation(userId, organizationId, message, conversationId, agentId) {
         const existing = conversationId
@@ -198,9 +209,9 @@ let ChatService = ChatService_1 = class ChatService {
             suggestions: agentReply.suggestions ?? [],
         };
     }
-    async callAgent(userId, userJwt, conversationId, message, agentId) {
+    async callAgent(userId, userJwt, conversationId, message, agentId, attachmentIds) {
         try {
-            const response = await (0, rxjs_1.firstValueFrom)(this.http.post(`${this.agentUrl}/chat`, { user_id: userId, conversation_id: conversationId, message, agent_id: agentId }, { headers: { Authorization: `Bearer ${userJwt}` } }));
+            const response = await (0, rxjs_1.firstValueFrom)(this.http.post(`${this.agentUrl}/chat`, { user_id: userId, conversation_id: conversationId, message, agent_id: agentId, attachment_ids: attachmentIds ?? [] }, { headers: { Authorization: `Bearer ${userJwt}` } }));
             return response.data;
         }
         catch (err) {
@@ -212,9 +223,9 @@ let ChatService = ChatService_1 = class ChatService {
             };
         }
     }
-    async callAgentStreaming(userId, userJwt, conversationId, message, onEvent, agentId) {
+    async callAgentStreaming(userId, userJwt, conversationId, message, onEvent, agentId, attachmentIds) {
         try {
-            const response = await (0, rxjs_1.firstValueFrom)(this.http.post(`${this.agentUrl}/chat/stream`, { user_id: userId, conversation_id: conversationId, message, agent_id: agentId }, { headers: { Authorization: `Bearer ${userJwt}` }, responseType: 'stream' }));
+            const response = await (0, rxjs_1.firstValueFrom)(this.http.post(`${this.agentUrl}/chat/stream`, { user_id: userId, conversation_id: conversationId, message, agent_id: agentId, attachment_ids: attachmentIds ?? [] }, { headers: { Authorization: `Bearer ${userJwt}` }, responseType: 'stream' }));
             return await new Promise((resolve, reject) => {
                 let buffer = '';
                 let settled = false;
@@ -291,6 +302,7 @@ exports.ChatService = ChatService = ChatService_1 = __decorate([
         axios_1.HttpService,
         config_1.ConfigService,
         redis_cache_service_1.RedisCacheService,
-        jwt_1.JwtService])
+        jwt_1.JwtService,
+        chat_attachments_service_1.ChatAttachmentsService])
 ], ChatService);
 //# sourceMappingURL=chat.service.js.map

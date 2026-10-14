@@ -1,8 +1,10 @@
 import { randomBytes } from 'crypto';
-import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
+import { APP_FEATURES, DEFAULT_ROLE_FEATURES, isAiRoleAccount } from '../common/app-features';
+import { hasTeamRole, isOwner } from '../common/team-roster';
 import * as bcrypt from 'bcrypt';
-import { Model } from 'mongoose';
+import { Model, Types, isValidObjectId } from 'mongoose';
 import { AgentRole, AgentRoleDocument } from '../agent-roles/schemas/agent-role.schema';
 import { CHAT_AGENTS } from '../chat/agents';
 import { CreateUserDto } from './dto/create-user.dto';
@@ -23,6 +25,9 @@ const SALT_ROUNDS = 12;
 // PushSubscriptionEntry's own comments in user.schema.ts).
 const MAX_SESSIONS = 10;
 const MAX_PUSH_SUBSCRIPTIONS = 20;
+
+// Roles whose dashboards are scoped to one store (see update-user.dto.ts).
+const STORE_SCOPED_ROLES = new Set(['manager', 'consultant']);
 
 @Injectable()
 export class UsersService {
@@ -59,6 +64,25 @@ export class UsersService {
     return this.userModel.find({ organizationId }).exec();
   }
 
+  /**
+   * The people the team dashboards report on (see common/team-roster.ts):
+   * active accounts with a sales account type, plus anyone active who has a
+   * connected mailbox or deals assigned to them — never the owner.
+   */
+  async findTeamRoster(organizationId: string): Promise<UserDocument[]> {
+    // Never the owner: they run the workspace and are not one of its employees.
+    const users = (await this.findAll(organizationId)).filter((u) => u.active !== false && !isOwner(u.roles));
+    const ids = users.map((u) => u._id.toString());
+    if (ids.length === 0) return [];
+    const db = this.userModel.db;
+    const [mailboxOwners, dealOwners] = await Promise.all([
+      db.collection('outlook_connections').distinct('userId', { userId: { $in: ids }, isActive: true }),
+      db.collection('crm_deals').distinct('ownerId', { organizationId, ownerId: { $in: ids } }),
+    ]);
+    const working = new Set<string>([...mailboxOwners, ...dealOwners].map(String));
+    return users.filter((u) => hasTeamRole(u.roles) || working.has(u._id.toString()));
+  }
+
   create(data: {
     email: string;
     passwordHash?: string;
@@ -80,58 +104,143 @@ export class UsersService {
       .exec();
   }
 
+  /** A role's own requirements, checked against this organization's data:
+   * an Agent User must be locked to one of the organization's active agents,
+   * and a Manager/Consultant must belong to one of the organization's own
+   * stores (never another organization's, even with a valid id). */
+  private async assertRoleRequirements(organizationId: string, role: string, assignedAgentId?: string, storeId?: string): Promise<void> {
+    if (role === 'agent_user') {
+      if (!assignedAgentId) throw new BadRequestException('Choose which AI agent this Agent User is locked to.');
+      if (!(await this.resolveValidAgentIds(organizationId)).has(assignedAgentId)) {
+        throw new BadRequestException('That AI agent no longer exists or isn’t active. Pick another one.');
+      }
+    }
+    if (STORE_SCOPED_ROLES.has(role)) {
+      if (!storeId) throw new BadRequestException('Choose the store this Manager/Consultant belongs to.');
+      const store = isValidObjectId(storeId)
+        ? await this.userModel.db.collection('stores').findOne({ _id: new Types.ObjectId(storeId), organizationId }, { projection: { _id: 1 } })
+        : null;
+      if (!store) throw new BadRequestException('That store doesn’t belong to your organization. Pick one from the list.');
+    }
+  }
+
+  /**
+   * The app features an account gets from its AI role — undefined for accounts
+   * that aren't tied to one (their fixed role decides instead). An AI role that
+   * has been deleted or switched back to draft gives nothing beyond the basics.
+   */
+  async resolveFeatures(user: { roles: string[]; organizationId: string; assignedAgentId?: string }): Promise<string[] | undefined> {
+    if (!isAiRoleAccount(user.roles)) return undefined;
+    if (!user.assignedAgentId) return [];
+    const role = await this.userModel.db
+      .collection('agent_roles')
+      .findOne({ organizationId: user.organizationId, slug: user.assignedAgentId, status: 'active' }, { projection: { features: 1 } });
+    if (!role) return [];
+    const features = Array.isArray(role.features) ? (role.features as string[]) : DEFAULT_ROLE_FEATURES;
+    return features.filter((f) => (APP_FEATURES as readonly string[]).includes(f));
+  }
+
+  /** The signed-in user's own profile, with what their AI role lets them use. */
+  async profile(userId: string) {
+    const user = await this.findById(userId);
+    if (!user) return null;
+    const features = await this.resolveFeatures(user);
+    let aiRoleName: string | undefined;
+    if (features !== undefined && user.assignedAgentId) {
+      const role = await this.userModel.db
+        .collection('agent_roles')
+        .findOne({ organizationId: user.organizationId, slug: user.assignedAgentId }, { projection: { name: 1 } });
+      aiRoleName = typeof role?.name === 'string' ? role.name : undefined;
+    }
+    return { ...this.toPublic(user), features, aiRoleName };
+  }
+
   async createByAdmin(dto: CreateUserDto, organizationId: string) {
-    if (dto.role === 'agent_user') {
-      if (!dto.assignedAgentId) {
-        throw new BadRequestException('assignedAgentId is required for agent_user role');
-      }
-      if (!(await this.resolveValidAgentIds(organizationId)).has(dto.assignedAgentId)) {
-        throw new BadRequestException('assignedAgentId is not a known agent');
-      }
+    const email = dto.email.trim().toLowerCase();
+    const name = dto.name.trim();
+    if (!name) throw new BadRequestException('Enter the person’s name.');
+    await this.assertRoleRequirements(organizationId, dto.role, dto.assignedAgentId, dto.storeId);
+    // Email addresses are unique across HaiVE (one account per address, whichever organization it's in).
+    if (await this.userModel.exists({ email })) {
+      throw new ConflictException('An account with this email address already exists.');
     }
 
     const tempPassword = randomBytes(9).toString('base64url');
     const passwordHash = await bcrypt.hash(tempPassword, SALT_ROUNDS);
-    const user = await this.userModel.create({
-      email: dto.email,
-      passwordHash,
-      name: dto.name,
-      organizationId,
-      storeId: dto.storeId,
-      roles: [dto.role],
-      assignedAgentId: dto.role === 'agent_user' ? dto.assignedAgentId : undefined,
-      department: dto.department,
-      active: true,
-      voiceAccessEnabled: dto.voiceAccessEnabled ?? true,
-      aiAccessEnabled: dto.aiAccessEnabled ?? true,
-    });
-    return { user: this.toPublic(user), tempPassword };
+    try {
+      const user = await this.userModel.create({
+        email,
+        passwordHash,
+        name,
+        organizationId,
+        storeId: STORE_SCOPED_ROLES.has(dto.role) ? dto.storeId : undefined,
+        roles: [dto.role],
+        assignedAgentId: dto.role === 'agent_user' ? dto.assignedAgentId : undefined,
+        department: dto.department?.trim() || undefined,
+        active: true,
+        voiceAccessEnabled: dto.voiceAccessEnabled ?? true,
+        aiAccessEnabled: dto.aiAccessEnabled ?? true,
+      });
+      return { user: this.toPublic(user), tempPassword };
+    } catch (err) {
+      // Two admins creating the same address at the same moment: the unique index decides.
+      if ((err as { code?: number }).code === 11000) throw new ConflictException('An account with this email address already exists.');
+      throw err;
+    }
   }
 
-  async updateByAdmin(id: string, dto: UpdateUserDto, organizationId: string) {
-    if (dto.assignedAgentId && !(await this.resolveValidAgentIds(organizationId)).has(dto.assignedAgentId)) {
-      throw new BadRequestException('assignedAgentId is not a known agent');
-    }
-
-    // The org owner is a single, special account with no transfer flow in
-    // this codebase — without this check, any other 'admin' (a role any
-    // owner can grant) could strip or disable the real owner via this same
-    // route the owner uses to manage everyone else.
-    await this.assertNotOwner(id, organizationId);
-
-    const update: Record<string, unknown> = {};
-    if (dto.role) update.roles = [dto.role];
-    if (dto.assignedAgentId !== undefined) update.assignedAgentId = dto.assignedAgentId;
-    if (dto.storeId !== undefined) update.storeId = dto.storeId;
-    if (dto.active !== undefined) update.active = dto.active;
-    if (dto.department !== undefined) update.department = dto.department;
-    if (dto.voiceAccessEnabled !== undefined) update.voiceAccessEnabled = dto.voiceAccessEnabled;
-    if (dto.aiAccessEnabled !== undefined) update.aiAccessEnabled = dto.aiAccessEnabled;
-
+  async updateByAdmin(id: string, dto: UpdateUserDto, organizationId: string, callerId?: string) {
     // Scoped by organizationId, not just _id — an admin from org A must
     // never be able to modify a user in org B, even by guessing/enumerating
     // a valid Mongo _id.
-    const updated = await this.userModel.findOneAndUpdate({ _id: id, organizationId }, update, { new: true }).exec();
+    const target = isValidObjectId(id) ? await this.userModel.findOne({ _id: id, organizationId }).exec() : null;
+    if (!target) throw new NotFoundException('User not found');
+
+    // The org owner is a single, special account with no transfer flow in
+    // this codebase — no other admin may change it, and nobody (the owner
+    // included) can change its role or switch it off. The owner can still
+    // edit their own name, department and AI/voice settings here.
+    if (target.roles.includes('owner')) {
+      if (callerId !== id) throw new ForbiddenException("The organization owner's account can't be modified or deleted by another admin");
+      if (dto.role !== undefined || dto.active !== undefined || dto.assignedAgentId !== undefined || dto.storeId !== undefined) {
+        throw new BadRequestException("The owner's role and status can't be changed.");
+      }
+    }
+
+    // The role the account will have after this change decides what it needs
+    // — so changing only the role is checked against the agent/store the
+    // account already has, and vice versa.
+    const role = dto.role ?? target.roles[0];
+    const assignedAgentId = dto.assignedAgentId ?? target.assignedAgentId;
+    const storeId = dto.storeId ?? target.storeId;
+    if (dto.role !== undefined || dto.assignedAgentId !== undefined || dto.storeId !== undefined) {
+      await this.assertRoleRequirements(organizationId, role, assignedAgentId, storeId);
+    }
+
+    const set: Record<string, unknown> = {};
+    const unset: Record<string, ''> = {};
+    if (dto.name !== undefined) {
+      const name = dto.name.trim();
+      if (!name) throw new BadRequestException('Enter the person’s name.');
+      set.name = name;
+    }
+    if (dto.role) set.roles = [dto.role];
+    // An agent / store only means something for the roles that use it — never
+    // left behind (and silently applied again later) after a role change.
+    if (role === 'agent_user') set.assignedAgentId = assignedAgentId;
+    else if (target.assignedAgentId) unset.assignedAgentId = '';
+    if (STORE_SCOPED_ROLES.has(role)) set.storeId = storeId;
+    else if (dto.role !== undefined && target.storeId && !target.roles.includes('owner')) unset.storeId = '';
+    if (dto.active !== undefined) set.active = dto.active;
+    if (dto.department !== undefined) set.department = dto.department.trim();
+    if (dto.voiceAccessEnabled !== undefined) set.voiceAccessEnabled = dto.voiceAccessEnabled;
+    if (dto.aiAccessEnabled !== undefined) set.aiAccessEnabled = dto.aiAccessEnabled;
+    // Switching an account off signs it out everywhere (its sessions are also refused by JwtStrategy while inactive).
+    if (dto.active === false) set.sessions = [];
+
+    const updated = await this.userModel
+      .findOneAndUpdate({ _id: id, organizationId }, { ...(Object.keys(set).length ? { $set: set } : {}), ...(Object.keys(unset).length ? { $unset: unset } : {}) }, { new: true })
+      .exec();
     if (!updated) throw new NotFoundException('User not found');
     return this.toPublic(updated);
   }

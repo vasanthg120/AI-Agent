@@ -16,7 +16,7 @@ from app.agent.orchestrator import run as run_agent
 from app.agent.personas import Persona, resolve_persona
 from app.billing import client as billing_client
 from app.billing.client import InsufficientCreditsError
-from app.memory import mem0_client
+from app.memory import chat_attachment_store, mem0_client
 from app.memory.conversation_store import get_recent_messages
 from app.models.schemas import ChatRequest, ChatResponse
 from app.observability.guardrails import redact_secrets
@@ -55,6 +55,17 @@ def _system_prompt_with_memory(persona: Persona, message: str, user_id: str) -> 
     return f"{base_prompt}\n\nRelevant memories about this user:\n{memory_block}"
 
 
+def _with_attachments(system_prompt: str | None, payload: ChatRequest, organization_id: str | None) -> str | None:
+    """Adds the documents attached in this conversation (if any) to the system
+    prompt — on every turn, so follow-up questions still see them."""
+    block = chat_attachment_store.context_block(
+        payload.conversation_id, payload.user_id, organization_id, payload.message, payload.attachment_ids
+    )
+    if not block:
+        return system_prompt
+    return f"{system_prompt or SYSTEM_PROMPT}\n\n{block}"
+
+
 def _extract_memory_in_background(user_id: str, message: str, reply: str) -> None:
     # Fire-and-forget on a daemon thread — Mem0's own extraction call is
     # LLM-backed, and must never add latency to the user-visible reply,
@@ -84,6 +95,7 @@ def chat(payload: ChatRequest, user: dict = Depends(get_current_user)):
     persona = resolve_persona(payload.agent_id, organization_id)
     stage_started_at = time.monotonic()
     system_prompt = _system_prompt_with_memory(persona, payload.message, payload.user_id)
+    system_prompt = _with_attachments(system_prompt, payload, organization_id)
     _perf(request_id, "memory", stage_started_at)
 
     stage_started_at = time.monotonic()
@@ -99,6 +111,7 @@ def chat(payload: ChatRequest, user: dict = Depends(get_current_user)):
                 "organization_id": organization_id,
                 "conversation_id": payload.conversation_id,
                 "system_prompt": system_prompt,
+                "has_attachments": system_prompt is not None and "<document name=" in system_prompt,
                 "allowed_tools": persona.allowed_tools,
                 "model_tier": persona.model_tier,
                 "request_id": request_id,
@@ -163,6 +176,7 @@ def chat_stream(payload: ChatRequest, user: dict = Depends(get_current_user)):
             try:
                 memory_started_at = time.monotonic()
                 system_prompt = _system_prompt_with_memory(persona, payload.message, payload.user_id)
+                system_prompt = _with_attachments(system_prompt, payload, organization_id)
                 _perf(request_id, "memory", memory_started_at)
 
                 run_agent_started_at = time.monotonic()
@@ -178,6 +192,7 @@ def chat_stream(payload: ChatRequest, user: dict = Depends(get_current_user)):
                         "conversation_id": payload.conversation_id,
                         "on_event": q.put,
                         "system_prompt": system_prompt,
+                        "has_attachments": system_prompt is not None and "<document name=" in system_prompt,
                         "allowed_tools": persona.allowed_tools,
                         "model_tier": persona.model_tier,
                         "request_id": request_id,

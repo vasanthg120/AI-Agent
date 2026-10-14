@@ -130,13 +130,34 @@ let OutlookService = class OutlookService {
         const active = await this.connectionModel.findOne({ userId, isActive: true }).select({ email: 1, scope: 1 });
         return { connected: Boolean(active), email: active?.email, canSend: !!active?.scope?.includes('Mail.Send') };
     }
+    async setHandler(userId, organizationId, email, handlerUserId) {
+        const connection = await this.connectionModel.findOne({ userId, email }).exec();
+        if (!connection)
+            throw new common_1.NotFoundException('That mailbox isn’t connected to your account.');
+        if (handlerUserId) {
+            const handler = /^[0-9a-f]{24}$/i.test(handlerUserId)
+                ? await this.connectionModel.db.collection('users').findOne({ _id: new mongoose_2.Types.ObjectId(handlerUserId), organizationId }, { projection: { active: 1 } })
+                : null;
+            if (!handler)
+                throw new common_1.BadRequestException('That person isn’t in your organization. Pick someone from the list.');
+            if (handler.active === false)
+                throw new common_1.BadRequestException('That person is deactivated.');
+            connection.handledByUserId = handlerUserId;
+        }
+        else {
+            connection.handledByUserId = undefined;
+        }
+        await connection.save();
+        return this.listAccounts(userId);
+    }
     async listAccounts(userId) {
         const connections = await this.connectionModel
             .find({ userId })
-            .select({ email: 1, isActive: 1, createdAt: 1, status: 1 })
+            .select({ email: 1, isActive: 1, createdAt: 1, status: 1, handledByUserId: 1 })
             .sort({ createdAt: -1 });
         return connections.map((c) => ({
             email: c.email,
+            handledByUserId: c.handledByUserId,
             isActive: c.isActive,
             connectedAt: c.createdAt,
             status: c.status ?? 'connected',

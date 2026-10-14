@@ -123,6 +123,12 @@ export class WalletService {
    * succeeds if `balanceCredits - reservedCredits >= amountCredits` at the
    * moment the write executes; two concurrent callers can never both
    * succeed past the point where doing so would overspend the wallet. */
+  /** What the wallet can still spend: its balance less what running requests hold. */
+  async availableCredits(walletId: string): Promise<number> {
+    const wallet = await this.walletModel.findById(walletId).select('balanceCredits reservedCredits').lean().exec();
+    return wallet ? wallet.balanceCredits - wallet.reservedCredits : 0;
+  }
+
   async tryReserve(walletId: string, amountCredits: number): Promise<boolean> {
     const result = await this.walletModel.updateOne(
       {

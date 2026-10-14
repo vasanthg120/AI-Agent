@@ -26,17 +26,45 @@ export function EmailThreadTimeline({ itemId }: { itemId: string }) {
       </div>
     );
   }
-  if (!data || data.messages.length < 2) return null;
+  const sent = data?.sent ?? [];
+  if (!data || data.messages.length + sent.length < 2) return null;
+
+  // Both sides of the conversation in the order things happened: what they
+  // wrote, and what we wrote back (from Outlook's Sent Items).
+  const timeline = [
+    ...data.messages.map((message) => ({ kind: 'received' as const, at: message.receivedAt, message })),
+    ...sent.map((reply) => ({ kind: 'sent' as const, at: reply.sentAt, reply })),
+  ].sort((a, b) => new Date(a.at).getTime() - new Date(b.at).getTime());
 
   return (
     <div className={styles.card}>
-      <div className={styles.fieldLabel}>Conversation · {data.messages.length} messages</div>
+      <div className={styles.fieldLabel}>Conversation · {timeline.length} messages</div>
       <ol className={styles.thread}>
-        {data.messages.map((message) => {
+        {timeline.map((entry) => {
+          if (entry.kind === 'sent') {
+            const { reply } = entry;
+            return (
+              <li key={`sent-${reply.id}`} className={styles.threadItem}>
+                <div className={styles.threadHeader}>
+                  <span className={styles.threadFrom}>You → {reply.to.join(', ') || 'recipient'}</span>
+                  <span className={styles.listItemMeta}>{formatWhen(reply.sentAt)}</span>
+                </div>
+                {reply.preview && <div className={styles.threadPreview}>{reply.preview}</div>}
+                <div className={styles.badgeRow}>
+                  <Badge variant="success">Your reply</Badge>
+                </div>
+              </li>
+            );
+          }
+          const { message } = entry;
           const badge = responseBadge(message);
           const current = message._id === itemId;
           return (
-            <li key={message._id} className={clsx(styles.threadItem, current && styles.threadCurrent)} aria-current={current || undefined}>
+            <li
+              key={message._id}
+              className={clsx(styles.threadItem, current && styles.threadCurrent)}
+              aria-current={current || undefined}
+            >
               <div className={styles.threadHeader}>
                 <span className={styles.threadFrom}>{message.fromAddress}</span>
                 <span className={styles.listItemMeta}>{formatWhen(message.receivedAt)}</span>

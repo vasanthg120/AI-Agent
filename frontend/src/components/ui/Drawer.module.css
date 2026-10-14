@@ -1,0 +1,126 @@
+.backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-modal);
+  display: flex;
+  justify-content: flex-end;
+  background: rgba(9, 7, 9, 0.45);
+}
+
+.drawer {
+  display: flex;
+  flex-direction: column;
+  width: min(var(--drawer-width, 760px), 100%);
+  height: 100%;
+  background: var(--color-bg-surface);
+  border-left: 1px solid var(--color-border-strong);
+  box-shadow: var(--shadow-lg);
+}
+
+/* The name, the panel's actions and the way out: always in view. */
+.headRow {
+  flex: none;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-5) var(--space-6) 0;
+}
+
+.heading {
+  min-width: 0;
+}
+
+.title {
+  margin: 0;
+  font-size: var(--text-xl);
+  font-weight: 700;
+  line-height: 1.25;
+  color: var(--color-text-primary);
+  overflow-wrap: anywhere;
+}
+
+.description {
+  margin-top: 4px;
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+  overflow-wrap: anywhere;
+}
+
+.headActions {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+/* Everything under the name. On a wide screen the header and the tabs stay put and only the body scrolls. */
+.scroller {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.header {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-6) 0;
+}
+
+/* The line under the header — and the tabs, when the panel has them. */
+.tabs {
+  flex: none;
+  padding: var(--space-3) var(--space-6) 0;
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-bg-surface);
+}
+
+.body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: var(--space-5) var(--space-6) var(--space-6);
+}
+
+/* On a phone the panel is the screen: what is under the name scrolls as one, so the content gets the room,
+   and the tabs stay at the top while it does. */
+@media (max-width: 640px) {
+  .drawer {
+    width: 100%;
+    border-left: none;
+  }
+
+  .headRow {
+    padding: var(--space-4) var(--space-4) 0;
+  }
+
+  .scroller {
+    display: block;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+
+  .header {
+    padding: var(--space-3) var(--space-4) 0;
+  }
+
+  .tabs {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    padding: var(--space-2) var(--space-4) 0;
+  }
+
+  .body {
+    overflow: visible;
+    padding: var(--space-4);
+  }
+
+  .title {
+    font-size: var(--text-lg);
+  }
+}

@@ -46,7 +46,7 @@ describe('ChatController — per-user AI access control', () => {
     (chatService.sendMessage as jest.Mock).mockResolvedValue({ ok: true });
 
     controller.sendMessage(user, fakeRequest(), { message: 'hi' } as any);
-    expect(chatService.sendMessage).toHaveBeenCalledWith('user-1', 'org-1', 'test-token', 'hi', undefined, undefined);
+    expect(chatService.sendMessage).toHaveBeenCalledWith('user-1', 'org-1', 'test-token', 'hi', undefined, undefined, undefined);
   });
 
   it('treats aiAccessEnabled undefined as allowed (only an explicit false blocks)', () => {

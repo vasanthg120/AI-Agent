@@ -5,7 +5,10 @@ import { RedisCacheService } from '../common/redis/redis-cache.service';
 import { AuthModule } from '../auth/auth.module';
 import { UsersModule } from '../users/users.module';
 import { AgentRole, AgentRoleSchema } from '../agent-roles/schemas/agent-role.schema';
+import { ChatAttachment, ChatAttachmentSchema } from './schemas/chat-attachment.schema';
 import { Conversation, ConversationSchema } from './schemas/conversation.schema';
+import { ChatAttachmentsController } from './chat-attachments.controller';
+import { ChatAttachmentsService } from './chat-attachments.service';
 import { ChatController } from './chat.controller';
 import { ChatGateway } from './chat.gateway';
 import { ChatService } from './chat.service';
@@ -14,6 +17,7 @@ import { ChatService } from './chat.service';
   imports: [
     MongooseModule.forFeature([
       { name: Conversation.name, schema: ConversationSchema },
+      { name: ChatAttachment.name, schema: ChatAttachmentSchema },
       // Independent local registration (not imported from AgentRolesModule) —
       // Mongoose's core connection module is global, so any module can bind
       // its own model to the same 'agent_roles' collection. Used to merge
@@ -35,8 +39,9 @@ import { ChatService } from './chat.service';
     // imports nothing from this module or AuthModule.
     UsersModule,
   ],
-  controllers: [ChatController],
-  providers: [ChatService, ChatGateway, RedisCacheService],
+  // Attachments first: its 'chat/attachments' routes must not be read as a conversation id.
+  controllers: [ChatAttachmentsController, ChatController],
+  providers: [ChatService, ChatAttachmentsService, ChatGateway, RedisCacheService],
   // StoreSettingsModule (via DashboardService.recordDailyReport) calls
   // ChatService.createSystemConversationRecord() to give every roster user a
   // copy of the scheduled morning to-do / EOD report in their own Chat

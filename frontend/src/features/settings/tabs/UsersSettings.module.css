@@ -89,3 +89,81 @@
   font-size: var(--text-sm);
   color: var(--color-text-muted);
 }
+
+.userRow {
+  flex-wrap: wrap;
+}
+
+.youTag {
+  font-weight: 400;
+  color: var(--color-text-muted);
+}
+
+.formProblem {
+  margin: 0;
+  padding: var(--space-3);
+  border-radius: var(--radius-md);
+  background: rgba(251, 191, 36, 0.12);
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+}
+
+.permissionList {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: var(--space-2) 0 0;
+  padding: 0;
+  list-style: none;
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+}
+
+.permissionCan::before {
+  content: '✓ ';
+  color: var(--color-success);
+}
+
+.permissionCannot {
+  color: var(--color-text-muted);
+}
+
+.permissionCannot::before {
+  content: '✕ ';
+  color: var(--color-danger);
+}
+
+.roleCard {
+  padding: var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.roleCardHead {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+}
+
+.moreOptions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  font-size: var(--text-sm);
+}
+
+.moreOptions summary {
+  cursor: pointer;
+  color: var(--color-text-muted);
+}
+
+.moreOptions[open] summary {
+  margin-bottom: var(--space-3);
+}
+
+.moreOptions > * + * {
+  margin-top: var(--space-3);
+}

@@ -167,7 +167,16 @@ describe('Invoices (real Mongo)', () => {
     transactionModel = moduleRef.get(getModelToken(WalletTransaction.name));
   });
 
+  // The billing settings are one shared document — the same one the real app
+  // stamps onto real invoices. Whatever a test writes into it is put back.
+  let settingsBefore: Record<string, unknown> | null = null;
+  beforeAll(async () => {
+    settingsBefore = await settingsModel.collection.findOne({ singletonKey: 'default' });
+  });
+
   afterAll(async () => {
+    if (settingsBefore) await settingsModel.collection.replaceOne({ singletonKey: 'default' }, settingsBefore);
+    else await settingsModel.collection.updateOne({ singletonKey: 'default' }, { $unset: { companyName: '', invoiceFooterText: '' } });
     await packageModel.deleteMany({ _id: { $in: createdPackageIds } });
     await invoiceModel.deleteMany({ organizationId: { $regex: `^${TEST_PREFIX}` } });
     await templateModel.deleteMany({ _id: { $in: createdTemplateIds } });

@@ -30,6 +30,17 @@ export class DealsService {
     return updated;
   }
 
+  /** Gives many deals the same owner (or none) in one write. Returns how many
+   * of the requested deals were found — a deal from another organization (or,
+   * for a manager, another store) is simply not among them. */
+  async assignOwnerBulk(ids: string[], organizationId: string, ownerId: string | null, storeId?: string): Promise<{ requested: number; assigned: number }> {
+    const unique = [...new Set(ids)];
+    const filter = { _id: { $in: unique }, organizationId, ...(storeId ? { storeId } : {}) };
+    const update = ownerId ? { $set: { ownerId } } : { $unset: { ownerId: '' } };
+    const result = await this.dealModel.updateMany(filter, update).exec();
+    return { requested: unique.length, assigned: result.matchedCount };
+  }
+
   create(organizationId: string, dto: CreateDealDto, storeConstraint?: string) {
     return this.dealModel.create({ organizationId, ...dto, storeId: storeConstraint ?? dto.storeId });
   }

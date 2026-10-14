@@ -1,3 +1,5 @@
+/* Shared by every signed-out page (sign in, sign up, forgot/reset password, 2FA). */
+
 .form {
   display: flex;
   flex-direction: column;
@@ -6,7 +8,7 @@
 
 .row2 {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: var(--space-3);
 }
 
@@ -14,14 +16,32 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+
+.checkboxLabel,
+.checkboxRow {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
   font-size: var(--text-sm);
+  line-height: 1.5;
+  color: var(--color-text-secondary);
+  cursor: pointer;
 }
 
 .checkboxLabel {
-  display: flex;
   align-items: center;
-  gap: var(--space-2);
-  color: var(--color-text-secondary);
+}
+
+.checkboxLabel input,
+.checkboxRow input {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  margin-top: 1px;
+  accent-color: var(--brand-accent-primary);
   cursor: pointer;
 }
 
@@ -29,25 +49,64 @@
   color: var(--color-accent);
   font-weight: 600;
   text-decoration: none;
+  cursor: pointer;
 }
+
 .link:hover {
   text-decoration: underline;
 }
 
-.footerText {
-  margin-top: var(--space-6);
-  text-align: center;
-  font-size: var(--text-sm);
+.link:focus-visible,
+.passwordToggle:focus-visible,
+.socialButton:focus-visible,
+.textButton:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+.passwordToggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
   color: var(--color-text-muted);
+  cursor: pointer;
+}
+
+.passwordToggle:hover {
+  color: var(--color-text-primary);
+}
+
+.capsLock {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: calc(-1 * var(--space-2));
+  font-size: var(--text-xs);
+  color: var(--color-warning);
+}
+
+.fieldError {
+  font-size: var(--text-xs);
+  color: var(--color-danger);
 }
 
 .divider {
   display: flex;
   align-items: center;
   gap: var(--space-3);
-  margin: var(--space-5) 0;
-  color: var(--color-text-muted);
+  margin: var(--space-6) 0 var(--space-4);
   font-size: var(--text-xs);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
 }
 
 .divider::before,
@@ -60,110 +119,216 @@
 
 .socialRow {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  gap: var(--space-2);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-3);
 }
 
 .socialButton {
-  display: flex;
+  display: inline-flex;
   align-items: center;
   justify-content: center;
-  height: 42px;
-  border-radius: var(--radius-md);
+  gap: var(--space-2);
+  height: 46px;
   border: 1px solid var(--color-border-strong);
-  background: var(--color-bg-surface-elevated);
-  color: var(--color-text-secondary);
-  font-size: 18px;
+  border-radius: var(--radius-md);
+  background: var(--color-bg-surface);
+  color: var(--color-text-primary);
+  font: inherit;
+  font-size: var(--text-sm);
+  font-weight: 600;
   cursor: pointer;
+  transition:
+    border-color var(--duration-fast) var(--ease-out),
+    background var(--duration-fast) var(--ease-out);
 }
 
-.socialButton:hover {
+.socialButton:hover:not(:disabled) {
+  border-color: var(--color-accent);
   background: var(--color-bg-hover);
+}
+
+.socialButton:disabled {
+  opacity: 0.6;
+  cursor: progress;
+}
+
+.socialButton svg {
+  font-size: 16px;
+}
+
+.footerText {
+  margin: var(--space-6) 0 0;
+  font-size: var(--text-sm);
+  text-align: center;
+  color: var(--color-text-muted);
+}
+
+.hintBox {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-hover);
+  border: 1px solid var(--color-border);
+  font-size: var(--text-sm);
+  line-height: 1.55;
+  color: var(--color-text-secondary);
+}
+
+.hintBox > svg {
+  flex: none;
+  margin-top: 3px;
+  color: var(--color-accent);
+}
+
+.hintBox strong {
   color: var(--color-text-primary);
 }
 
-.passwordToggle {
+.textButton {
+  padding: 0;
+  border: 0;
   background: none;
-  border: none;
-  cursor: pointer;
-  display: flex;
-  color: var(--color-text-muted);
-  pointer-events: all;
-}
-
-.checkboxRow {
-  display: flex;
-  align-items: flex-start;
-  gap: var(--space-2);
+  color: var(--color-accent);
+  font: inherit;
   font-size: var(--text-sm);
-  color: var(--color-text-secondary);
+  font-weight: 600;
+  cursor: pointer;
 }
 
-.checkboxRow input {
-  margin-top: 3px;
+.textButton:disabled {
+  color: var(--color-text-muted);
+  cursor: default;
 }
+
+.inlineRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+}
+
+/* ---- steps (sign-up, password reset) ---- */
+
+.stepBody {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.stepActions {
+  display: flex;
+  gap: var(--space-3);
+  margin-top: var(--space-2);
+}
+
+.stepActions > :last-child {
+  flex: 1;
+}
+
+.stepHeading {
+  margin: 0;
+  font-size: var(--text-lg);
+  font-weight: 700;
+  color: var(--color-text-primary);
+}
+
+.stepLead {
+  margin: calc(-1 * var(--space-3)) 0 0;
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+}
+
+/* ---- password strength ---- */
 
 .strengthMeter {
-  display: flex;
-  gap: 4px;
-  margin-top: -6px;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
 }
 
 .strengthBar {
-  height: 4px;
-  flex: 1;
+  height: 5px;
   border-radius: var(--radius-full);
   background: var(--color-border);
+  transition: background var(--duration-normal) var(--ease-out);
 }
 
 .strengthLabel {
+  margin-top: 6px;
+  font-size: var(--text-xs);
+  font-weight: 600;
+  color: var(--color-text-muted);
+}
+
+.checklist {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px var(--space-3);
+  margin: var(--space-2) 0 0;
+  padding: 0;
+  list-style: none;
   font-size: var(--text-xs);
   color: var(--color-text-muted);
-  margin-top: -4px;
+}
+
+.checklist li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  transition: color var(--duration-fast) var(--ease-out);
+}
+
+.checkMet {
+  color: var(--color-success);
+}
+
+/* ---- success ---- */
+
+.success {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-3);
+  text-align: center;
 }
 
 .successIcon {
-  display: flex;
+  display: inline-flex;
   align-items: center;
   justify-content: center;
   width: 64px;
   height: 64px;
-  margin: 0 auto var(--space-4);
-  border-radius: 50%;
-  background: rgba(74, 222, 128, 0.14);
+  border-radius: var(--radius-full);
+  background: rgba(52, 211, 153, 0.15);
   color: var(--color-success);
-  font-size: 28px;
+  font-size: 30px;
 }
 
-.otpRow {
-  display: flex;
-  gap: var(--space-2);
-  justify-content: center;
-}
-
-.otpDigit {
-  width: 44px;
-  height: 52px;
-  text-align: center;
+.successTitle {
+  margin: 0;
   font-size: var(--text-xl);
-  font-weight: 700;
-  border-radius: var(--radius-md);
-  border: 1px solid var(--color-border-strong);
-  background: var(--color-bg-input);
+  font-weight: 800;
   color: var(--color-text-primary);
 }
 
-.otpDigit:focus {
-  outline: none;
-  border-color: var(--color-accent);
-  box-shadow: 0 0 0 3px var(--color-accent-muted);
+.successText {
+  margin: 0 0 var(--space-3);
+  font-size: var(--text-sm);
+  line-height: 1.6;
+  color: var(--color-text-muted);
 }
 
-.hintBox {
-  padding: var(--space-3);
-  border-radius: var(--radius-md);
-  background: var(--color-accent-muted);
-  color: var(--color-accent);
-  font-size: var(--text-xs);
-  text-align: center;
+@media (max-width: 480px) {
+  .row2 {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .checklist {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }

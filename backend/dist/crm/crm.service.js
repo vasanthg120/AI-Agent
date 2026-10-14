@@ -16,6 +16,7 @@ exports.CrmService = void 0;
 const common_1 = require("@nestjs/common");
 const mongoose_1 = require("@nestjs/mongoose");
 const mongoose_2 = require("mongoose");
+const data_source_context_1 = require("../data-sources/data-source-context");
 const account_schema_1 = require("./schemas/account.schema");
 const contact_schema_1 = require("./schemas/contact.schema");
 const deal_schema_1 = require("./schemas/deal.schema");
@@ -48,27 +49,22 @@ let CrmService = class CrmService {
             update.phone = phone;
         if (data.tags !== undefined)
             update.tags = data.tags;
+        const nativeSourceId = (0, data_source_context_1.currentDataSourceScope)()?.nativeSourceId;
+        const ownSource = nativeSourceId ? { dataSourceId: nativeSourceId } : {};
         const filter = contactId
-            ? { _id: contactId, organizationId }
-            : { organizationId, $or: [...(email ? [{ email }] : []), ...(phone ? [{ phone }] : [])] };
-        const saved = await this.contactModel
-            .findOneAndUpdate(filter, { $set: { organizationId, ...update } }, { upsert: true, new: true })
-            .exec();
+            ? { _id: contactId, organizationId, ...ownSource }
+            : { organizationId, ...ownSource, $or: [...(email ? [{ email }] : []), ...(phone ? [{ phone }] : [])] };
+        const saved = await this.contactModel.findOneAndUpdate(filter, { $set: { organizationId, ...ownSource, ...update } }, { upsert: true, new: true }).exec();
         return { contact: saved };
     }
     async searchContactsByIds(organizationId, ids) {
-        const contacts = await this.contactModel
-            .find({ organizationId, _id: { $in: ids } })
-            .exec();
+        const contacts = await this.contactModel.find({ organizationId, _id: { $in: ids } }).exec();
         return { contacts };
     }
     async listContacts(organizationId, opts) {
         const filter = { organizationId };
         if (opts.searchText) {
-            filter.$or = [
-                { name: { $regex: opts.searchText, $options: 'i' } },
-                { email: { $regex: opts.searchText, $options: 'i' } },
-            ];
+            filter.$or = [{ name: { $regex: opts.searchText, $options: 'i' } }, { email: { $regex: opts.searchText, $options: 'i' } }];
         }
         const limit = opts.limit ?? 50;
         const skip = opts.searchAfter ?? 0;

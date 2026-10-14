@@ -3,7 +3,7 @@ import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
-import { FiMail, FiLock, FiEye, FiEyeOff } from 'react-icons/fi';
+import { FiArrowRight, FiMail } from 'react-icons/fi';
 import { FaGoogle, FaMicrosoft } from 'react-icons/fa';
 import { Input, Button } from '@/components/ui';
 import { useAuthStore } from '@/stores/authStore';
@@ -11,6 +11,7 @@ import { authService } from '@/services/authService';
 import { extractErrorMessage } from '@/utils/errors';
 import { ROUTES } from '@/constants/routes';
 import type { OAuthProvider } from '@/types';
+import { PasswordField } from './components/PasswordField';
 import { TwoFactorChallengeForm } from './components/TwoFactorChallengeForm';
 import { loginSchema, type LoginFormValues } from './schemas';
 import styles from './AuthForm.module.css';
@@ -18,8 +19,8 @@ import styles from './AuthForm.module.css';
 type Step = 'credentials' | 'twoFactor';
 
 export function LoginPage() {
-  const [showPassword, setShowPassword] = useState(false);
   const [step, setStep] = useState<Step>('credentials');
+  const [oauthBusy, setOauthBusy] = useState<OAuthProvider | null>(null);
   // Never written to authStore/localStorage — held here only, for exactly
   // as long as the 2FA step is on screen. This is what guarantees it can
   // never be attached as a Bearer header by axiosClient's interceptor
@@ -37,7 +38,12 @@ export function LoginPage() {
     formState: { errors, isSubmitting },
   } = useForm<LoginFormValues>({
     resolver: zodResolver(loginSchema),
-    defaultValues: { email: '', password: '', rememberMe: true },
+    // Coming back from a password reset, the email is already known.
+    defaultValues: {
+      email: (location.state as { email?: string } | null)?.email ?? '',
+      password: '',
+      rememberMe: true,
+    },
   });
 
   const goToChat = () => {
@@ -88,43 +94,56 @@ export function LoginPage() {
   // instead of mailbox delegation. The backend's callback redirects back to
   // /oauth/callback with a session token once it completes.
   const handleOAuth = async (provider: OAuthProvider) => {
+    setOauthBusy(provider);
     try {
       const url = await authService.getOAuthUrl(provider);
       window.location.href = url;
     } catch (error) {
       toast.error(extractErrorMessage(error));
+      setOauthBusy(null);
     }
   };
 
   return (
     <>
-      <form className={styles.form} onSubmit={handleSubmit(onSubmit)} noValidate>
-        <div className={styles.hintBox}>Sign in with your account, or create one below.</div>
+      <div className={styles.socialRow}>
+        <button
+          type="button"
+          className={styles.socialButton}
+          onClick={() => void handleOAuth('google')}
+          disabled={!!oauthBusy}
+        >
+          <FaGoogle aria-hidden /> {oauthBusy === 'google' ? 'Opening Google…' : 'Google'}
+        </button>
+        <button
+          type="button"
+          className={styles.socialButton}
+          onClick={() => void handleOAuth('microsoft')}
+          disabled={!!oauthBusy}
+        >
+          <FaMicrosoft aria-hidden /> {oauthBusy === 'microsoft' ? 'Opening Microsoft…' : 'Microsoft'}
+        </button>
+      </div>
 
+      <div className={styles.divider}>or sign in with email</div>
+
+      <form className={styles.form} onSubmit={handleSubmit(onSubmit)} noValidate>
         <Input
-          label="Email"
+          label="Work email"
           type="email"
           placeholder="you@company.com"
+          autoComplete="email"
+          inputMode="email"
+          autoFocus
           leftIcon={<FiMail />}
           error={errors.email?.message}
           {...register('email')}
         />
 
-        <Input
+        <PasswordField
           label="Password"
-          type={showPassword ? 'text' : 'password'}
-          placeholder="••••••••"
-          leftIcon={<FiLock />}
-          rightIcon={
-            <button
-              type="button"
-              className={styles.passwordToggle}
-              onClick={() => setShowPassword((prev) => !prev)}
-              aria-label={showPassword ? 'Hide password' : 'Show password'}
-            >
-              {showPassword ? <FiEyeOff /> : <FiEye />}
-            </button>
-          }
+          placeholder="Your password"
+          autoComplete="current-password"
           error={errors.password?.message}
           {...register('password')}
         />
@@ -132,37 +151,22 @@ export function LoginPage() {
         <div className={styles.optionsRow}>
           <label className={styles.checkboxLabel}>
             <input type="checkbox" {...register('rememberMe')} />
-            Remember me
+            Keep me signed in
           </label>
           <Link className={styles.link} to={ROUTES.forgotPassword}>
             Forgot password?
           </Link>
         </div>
 
-        <Button type="submit" size="lg" fullWidth loading={isSubmitting}>
-          Sign In
+        <Button type="submit" size="lg" fullWidth loading={isSubmitting} rightIcon={<FiArrowRight />}>
+          Sign in
         </Button>
       </form>
 
-      <div className={styles.divider}>or continue with</div>
-      <div className={styles.socialRow}>
-        <button type="button" className={styles.socialButton} onClick={() => handleOAuth('google')} aria-label="Continue with Google">
-          <FaGoogle />
-        </button>
-        <button
-          type="button"
-          className={styles.socialButton}
-          onClick={() => handleOAuth('microsoft')}
-          aria-label="Continue with Microsoft"
-        >
-          <FaMicrosoft />
-        </button>
-      </div>
-
       <p className={styles.footerText}>
-        Don't have an account?{' '}
+        New to HaiVE?{' '}
         <Link className={styles.link} to={ROUTES.register}>
-          Create one
+          Create your workspace
         </Link>
       </p>
     </>

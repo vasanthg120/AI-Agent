@@ -1,13 +1,18 @@
 import { useState } from 'react';
+import toast from 'react-hot-toast';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { FiAlertTriangle } from 'react-icons/fi';
 import { Badge, Button, Modal, Skeleton } from '@/components/ui';
 import { emailIntelligenceService, type EmailFollowUpReminder } from '@/services/emailIntelligenceService';
 import { integrationsService } from '@/services/integrationsService';
+import { extractErrorMessage } from '@/utils/errors';
 import { AiFollowUpDrawer } from './AiFollowUpDrawer';
 import styles from '../email-intelligence.module.css';
 
-const DRAFT_STATUS_BADGE: Record<EmailFollowUpReminder['draftStatus'], { label: string; variant: 'neutral' | 'accent' | 'success' | 'warning' | 'danger' }> = {
+const DRAFT_STATUS_BADGE: Record<
+  EmailFollowUpReminder['draftStatus'],
+  { label: string; variant: 'neutral' | 'accent' | 'success' | 'warning' | 'danger' }
+> = {
   none: { label: 'No draft', variant: 'neutral' },
   generating: { label: 'Generating…', variant: 'accent' },
   pending_review: { label: 'Draft ready', variant: 'warning' },
@@ -42,59 +47,85 @@ export function FollowUpsSection() {
     staleTime: 60_000,
   });
 
-  const invalidate = () => queryClient.invalidateQueries({ queryKey: ['email-intelligence-follow-ups'] });
+  // The rows above (who is due a follow-up) read the same reminders: a draft written, approved or
+  // sent here must show there too, or they would offer to draft the same follow-up twice.
+  const invalidate = () =>
+    Promise.all([
+      queryClient.invalidateQueries({ queryKey: ['email-intelligence-follow-ups'] }),
+      queryClient.invalidateQueries({ queryKey: ['email-intelligence-follow-up-analysis'] }),
+    ]);
 
-  const handleGenerateDraft = async (reminder: EmailFollowUpReminder) => {
-    setBusyId(reminder._id);
+  // Every action says what happened: a failure is shown, never just a button that stops spinning.
+  const run = async (reminderId: string, action: () => Promise<void>) => {
+    setBusyId(reminderId);
     try {
+      await action();
+    } catch (err) {
+      toast.error(extractErrorMessage(err), { duration: 8_000 });
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const handleGenerateDraft = (reminder: EmailFollowUpReminder) =>
+    run(reminder._id, async () => {
       const updated = await emailIntelligenceService.generateFollowUpDraft(reminder._id);
       await invalidate();
       if (updated.draftStatus === 'pending_review') {
+        // Straight into review: nothing is sent until it is approved and sent by hand.
         setDraftText(updated.draftReply ?? '');
         setReviewing(updated);
+      } else {
+        toast.error('The draft couldn’t be written. Try again in a minute.');
       }
-    } finally {
-      setBusyId(null);
-    }
-  };
+    });
 
-  const handleApprove = async () => {
+  const handleApprove = () => {
     if (!reviewing) return;
-    setBusyId(reviewing._id);
-    try {
+    if (!draftText.trim()) {
+      toast.error('The draft is empty — write the message before approving it.');
+      return;
+    }
+    return run(reviewing._id, async () => {
       await emailIntelligenceService.approveFollowUpDraft(reviewing._id, draftText);
       await invalidate();
       setReviewing(null);
-    } finally {
-      setBusyId(null);
-    }
+      toast.success('Draft approved — press Send when you’re ready. Nothing has been sent yet.');
+    });
   };
 
-  const handleSend = async (reminder: EmailFollowUpReminder) => {
-    setBusyId(reminder._id);
-    try {
+  const handleSend = (reminder: EmailFollowUpReminder) => {
+    if (!window.confirm('Send this follow-up to the customer now? This cannot be undone.')) return;
+    return run(reminder._id, async () => {
       await emailIntelligenceService.sendFollowUp(reminder._id);
       await invalidate();
-    } finally {
-      setBusyId(null);
-    }
+      toast.success('Follow-up sent.');
+    });
   };
+
+  const handleDone = (reminder: EmailFollowUpReminder) =>
+    run(reminder._id, async () => {
+      await emailIntelligenceService.markFollowUpDone(reminder._id);
+      await invalidate();
+    });
 
   if (isLoading || !data) return <Skeleton height={80} />;
 
   if (data.length === 0) {
-    let message = 'No pending follow-ups. Follow-ups are created automatically 3 days after you send a reply to a customer.';
+    let message =
+      'No pending follow-ups. Follow-ups are created automatically 3 days after you send a reply to a customer.';
     if (outlookStatus && !outlookStatus.connected) {
-      message = 'No pending follow-ups yet — connect Outlook in Integrations to start sending replies and generating follow-ups.';
+      message =
+        'No pending follow-ups yet — connect Outlook in Integrations to start sending replies and generating follow-ups.';
     } else if (outlookStatus && outlookStatus.connected && !outlookStatus.canSend) {
       message =
-        'No pending follow-ups yet. Your connected Outlook account can\'t send email yet — reconnect it in Integrations to grant permission to send, then follow-ups will start appearing after you send a reply.';
+        "No pending follow-ups yet. Your connected Outlook account can't send email yet — reconnect it in Integrations to grant permission to send, then follow-ups will start appearing after you send a reply.";
     }
     return <div className={styles.emptyState}>{message}</div>;
   }
 
   return (
-    <div className={styles.formGrid}>
+    <div className={styles.formGrid} id="follow-up-drafts">
       {data.map((reminder) => {
         const badge = DRAFT_STATUS_BADGE[reminder.draftStatus] ?? DRAFT_STATUS_BADGE.none;
         const isBusy = busyId === reminder._id;
@@ -137,8 +168,13 @@ export function FollowUpsSection() {
             <div className={styles.badgeRow}>
               <Badge variant={badge.variant}>{badge.label}</Badge>
               {reminder.draftStatus === 'none' || reminder.draftStatus === 'failed' ? (
-                <Button variant="secondary" size="sm" loading={isBusy} onClick={() => handleGenerateDraft(reminder)}>
-                  Generate Draft
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  loading={isBusy}
+                  onClick={() => void handleGenerateDraft(reminder)}
+                >
+                  {reminder.draftStatus === 'failed' ? 'Try again' : 'Generate Draft'}
                 </Button>
               ) : null}
               {reminder.draftStatus === 'pending_review' ? (
@@ -154,19 +190,24 @@ export function FollowUpsSection() {
                 </Button>
               ) : null}
               {reminder.draftStatus === 'approved' ? (
-                <Button variant="primary" size="sm" loading={isBusy} onClick={() => handleSend(reminder)}>
-                  Send
-                </Button>
+                <>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => {
+                      setDraftText(reminder.draftReply ?? '');
+                      setReviewing(reminder);
+                    }}
+                  >
+                    Edit
+                  </Button>
+                  <Button variant="primary" size="sm" loading={isBusy} onClick={() => void handleSend(reminder)}>
+                    Send
+                  </Button>
+                </>
               ) : null}
               {reminder.status === 'pending' ? (
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  onClick={async () => {
-                    await emailIntelligenceService.markFollowUpDone(reminder._id);
-                    void invalidate();
-                  }}
-                >
+                <Button variant="secondary" size="sm" disabled={isBusy} onClick={() => void handleDone(reminder)}>
                   Mark Done
                 </Button>
               ) : null}
@@ -175,7 +216,12 @@ export function FollowUpsSection() {
         );
       })}
 
-      <Modal open={!!reviewing} onClose={() => setReviewing(null)} title="Review follow-up draft" description={reviewing?.businessName}>
+      <Modal
+        open={!!reviewing}
+        onClose={() => setReviewing(null)}
+        title="Review follow-up draft"
+        description={reviewing?.businessName}
+      >
         <label className={styles.fieldLabel} htmlFor="follow-up-draft-text">
           Draft reply
         </label>
@@ -189,7 +235,7 @@ export function FollowUpsSection() {
           <Button variant="secondary" onClick={() => setReviewing(null)}>
             Cancel
           </Button>
-          <Button variant="primary" loading={busyId === reviewing?._id} onClick={handleApprove}>
+          <Button variant="primary" loading={busyId === reviewing?._id} onClick={() => void handleApprove()}>
             Approve
           </Button>
         </div>

@@ -21,6 +21,7 @@ const axios_1 = require("@nestjs/axios");
 const common_1 = require("@nestjs/common");
 const config_1 = require("@nestjs/config");
 const mongoose_1 = require("@nestjs/mongoose");
+const app_features_1 = require("../common/app-features");
 const form_data_1 = __importDefault(require("form-data"));
 const mongoose_2 = require("mongoose");
 const rxjs_1 = require("rxjs");
@@ -103,6 +104,7 @@ let AgentRolesService = AgentRolesService_1 = class AgentRolesService {
             assignedDepartments: dto.assignedDepartments ?? [],
             assignedUserIds: dto.assignedUserIds ?? [],
             allowedTools: dto.allowedTools ?? [],
+            features: dto.features ?? app_features_1.DEFAULT_ROLE_FEATURES,
             modelTier: dto.modelTier ?? undefined,
             status: 'draft',
             avatarColor,
@@ -134,6 +136,10 @@ let AgentRolesService = AgentRolesService_1 = class AgentRolesService {
         const existing = await this.roleModel.findOne({ _id: id, organizationId }).exec();
         if (!existing)
             throw new common_1.NotFoundException('Role not found');
+        const locked = await this.roleModel.db.collection('users').countDocuments({ organizationId, assignedAgentId: existing.slug, roles: 'agent_user' });
+        if (locked > 0) {
+            throw new common_1.BadRequestException(`${locked} Agent User account${locked === 1 ? ' is' : 's are'} locked to “${existing.name}”. Assign ${locked === 1 ? 'it' : 'them'} another agent (Settings → Users) before deleting this one.`);
+        }
         if (existing.sourceDocumentId) {
             await (0, rxjs_1.firstValueFrom)(this.http
                 .post(`${this.agentUrl}/roles/discard-source`, { documentId: existing.sourceDocumentId }, { headers: { Authorization: `Bearer ${userJwt}` } })

@@ -11,6 +11,7 @@ import {
   type RoyaltySlidingTier,
 } from '@/services/royaltyRulesService';
 import { SettingsField, SettingsSection } from '../components/SettingsSection';
+import { GrossMarginSetting } from './GrossMarginSetting';
 import styles from './RoyaltyRulesSettings.module.css';
 
 const CAP_TYPE_LABEL: Record<RoyaltyCapType, string> = {
@@ -72,7 +73,8 @@ export function RoyaltyRulesSettings() {
             toValue: t.toValue !== undefined ? String(t.toValue) : '',
             percentage: String(t.percentage),
           })),
-          marketingFeeAmount: currentRule.marketingFeeAmount !== undefined ? String(currentRule.marketingFeeAmount) : '',
+          marketingFeeAmount:
+            currentRule.marketingFeeAmount !== undefined ? String(currentRule.marketingFeeAmount) : '',
           otherFeeAmount: currentRule.otherFeeAmount !== undefined ? String(currentRule.otherFeeAmount) : '',
           excludeTax: currentRule.excludeTax,
           excludeShipping: currentRule.excludeShipping,
@@ -98,7 +100,10 @@ export function RoyaltyRulesSettings() {
     }));
   };
   const addTier = () =>
-    setDraft((prev) => ({ ...prev, slidingTiers: [...prev.slidingTiers, { fromValue: '', toValue: '', percentage: '' }] }));
+    setDraft((prev) => ({
+      ...prev,
+      slidingTiers: [...prev.slidingTiers, { fromValue: '', toValue: '', percentage: '' }],
+    }));
   const removeTier = (index: number) =>
     setDraft((prev) => ({ ...prev, slidingTiers: prev.slidingTiers.filter((_, i) => i !== index) }));
 
@@ -153,15 +158,19 @@ export function RoyaltyRulesSettings() {
 
   if (loading) {
     return (
-      <SettingsSection title="Loading…">
-        <p>Loading royalty rules…</p>
-      </SettingsSection>
+      <>
+        <SettingsSection title="Loading…">
+          <p>Loading royalty rules…</p>
+        </SettingsSection>
+        <GrossMarginSetting />
+      </>
     );
   }
 
   return (
     <>
-      <SettingsSection icon={<FiPercent />}
+      <SettingsSection
+        icon={<FiPercent />}
         title="Current Royalty Rule"
         description={
           current
@@ -307,6 +316,9 @@ export function RoyaltyRulesSettings() {
           </div>
         </SettingsField>
       </SettingsSection>
+
+      {/* Set once, used by the Gross Margin report: it has nothing to do with the royalty versions above. */}
+      <GrossMarginSetting />
 
       <SettingsSection
         icon={<FiRotateCcw />}

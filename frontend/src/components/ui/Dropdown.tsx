@@ -73,6 +73,20 @@ export function Dropdown({
     return () => document.removeEventListener('mousedown', listener);
   }, [open, usePortal]);
 
+  // Escape closes the open menu — and only the menu. Heard on the way down
+  // (capture) and stopped there, so a dialog or panel the menu sits in, which
+  // listens for Escape on the document too, stays open.
+  useEffect(() => {
+    if (!open) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      event.stopPropagation();
+      setOpen(false);
+    };
+    document.addEventListener('keydown', onKeyDown, true);
+    return () => document.removeEventListener('keydown', onKeyDown, true);
+  }, [open]);
+
   // Layout effect, not effect: the position is measured before the browser
   // paints, so the menu never shows for a frame at the wrong spot (or not at
   // all) and then jumps into place.

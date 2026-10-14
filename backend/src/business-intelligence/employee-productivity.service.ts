@@ -6,12 +6,8 @@ import { QuotesService } from '../crm/quotes.service';
 import { EmailIntelligenceService } from '../email-intelligence/email-intelligence.service';
 import { UsersService } from '../users/users.service';
 
-// Same roster-eligibility set as EmailIntelligenceService's own (private)
-// EMAIL_ROSTER_ROLES and deal-performance-dashboard.service.ts's own
-// (private) SALES_ROLES — all three must agree on who counts as "an
-// employee" or this page's three domain columns would zero-fill against
-// different rosters.
-const PRODUCTIVITY_ROSTER_ROLES = new Set(['manager', 'consultant']);
+// Who is listed: UsersService.findTeamRoster (common/team-roster.ts) — the same
+// roster the email and deal columns use, so the three never disagree.
 
 interface DomainBucket {
   assigned: number;
@@ -119,11 +115,10 @@ export class EmployeeProductivityService {
     organizationId: string,
     filters: { employeeId?: string[]; storeId?: string[] },
   ): Promise<{ userId: string; userName: string }[]> {
-    const users = await this.usersService.findAll(organizationId);
+    const users = await this.usersService.findTeamRoster(organizationId);
     return users
       .filter(
         (u) =>
-          u.roles.some((r) => PRODUCTIVITY_ROSTER_ROLES.has(r)) &&
           (!filters.storeId?.length || (u.storeId && filters.storeId.includes(u.storeId))) &&
           (!filters.employeeId?.length || filters.employeeId.includes(u._id.toString())),
       )

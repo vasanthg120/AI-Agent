@@ -34,21 +34,27 @@ export function normalizeKey(name: string): string {
   return name.trim().toLowerCase().replace(/\s+/g, ' ');
 }
 
-export function groupKeyFor(
-  deal: DealDocument,
-  accountNameById: Map<string, string>,
-): { key: string; businessName: string; source: BusinessNameSource } {
+export function groupKeyFor(deal: DealDocument, accountNameById: Map<string, string>): { key: string; businessName: string; source: BusinessNameSource } {
   if (deal.accountId && accountNameById.has(deal.accountId)) {
-    return { key: deal.accountId, businessName: accountNameById.get(deal.accountId)!, source: 'account' };
+    // Keyed by the account's name, not its id: account ids belong to one CRM,
+    // so the same company kept in two connected CRMs would otherwise count as
+    // two customers in the unified view.
+    const accountName = accountNameById.get(deal.accountId)!;
+    return { key: normalizeKey(accountName), businessName: accountName, source: 'account' };
   }
   const name = heuristicBusinessName(deal.name);
   return { key: normalizeKey(name), businessName: name, source: 'deal_name_heuristic' };
 }
 
-export function quoteGroupKey(quote: QuoteDocument, deals: DealDocument[]): string {
+export function quoteGroupKey(quote: QuoteDocument, deals: DealDocument[], accountNameById?: Map<string, string>): string {
   if (quote.dealId) {
     const deal = deals.find((d) => d._id.toString() === quote.dealId);
-    if (deal) return deal.accountId ?? normalizeKey(heuristicBusinessName(deal.name));
+    if (deal) {
+      // Same key groupKeyFor gives the deal, so a quote lands with its deal.
+      const accountName = deal.accountId ? accountNameById?.get(deal.accountId) : undefined;
+      if (accountName) return normalizeKey(accountName);
+      return deal.accountId ?? normalizeKey(heuristicBusinessName(deal.name));
+    }
   }
   if (quote.clientDetails?.email) return `email:${quote.clientDetails.email.toLowerCase()}`;
   if (quote.clientDetails?.companyName) return normalizeKey(quote.clientDetails.companyName);
@@ -78,7 +84,7 @@ export function buildBusinessGroups(
   }
 
   for (const quote of quotes) {
-    const key = quoteGroupKey(quote, deals);
+    const key = quoteGroupKey(quote, deals, accountNameById);
     let group = groups.get(key);
     if (!group) {
       group = {
@@ -138,10 +144,7 @@ export interface EmailMatch {
   resolvedGroupKey: string | null;
 }
 
-export function correlateSingleEmail(
-  email: { from: string; to: string[]; subject: string },
-  ctx: EmailCorrelationContext,
-): EmailMatch | null {
+export function correlateSingleEmail(email: { from: string; to: string[]; subject: string }, ctx: EmailCorrelationContext): EmailMatch | null {
   const parties = [email.from, ...email.to].filter(Boolean).map((a) => a.toLowerCase());
 
   const exactHit = parties.find((a) => ctx.exactEmails.has(a));
