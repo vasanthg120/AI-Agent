@@ -5,7 +5,6 @@ import { AnimatePresence, MotionConfig, motion } from 'framer-motion';
 import { useMediaQuery } from '@/hooks/useMediaQuery';
 import { useNotificationsStore } from '@/stores/notificationsStore';
 import { useUiStore } from '@/stores/uiStore';
-import { useDataSourceStore } from '@/stores/dataSourceStore';
 import { CommandPalette } from '@/components/common/CommandPalette';
 import { FloatingAssistant } from '@/components/assistant/FloatingAssistant';
 import { ROUTES } from '@/constants/routes';
@@ -24,9 +23,6 @@ const ENTRANCE_MS = 700;
 function PageTransition({ scrollRef }: { scrollRef: RefObject<HTMLElement | null> }) {
   const location = useLocation();
   const section = location.pathname.split('/')[1] ?? '';
-  // Switching the CRM data source reloads the page from scratch, so nothing
-  // from the previous source (fetched into component state) can linger.
-  const sourceVersion = useDataSourceStore((state) => state.version);
 
   // The staggered block entrance (AppLayout.module.css) runs only while the
   // page is opening; blocks that appear later just appear.
@@ -41,7 +37,7 @@ function PageTransition({ scrollRef }: { scrollRef: RefObject<HTMLElement | null
 
   return (
     <motion.div
-      key={`${section}:${sourceVersion}`}
+      key={section}
       className={styles.page}
       data-entering={entering || undefined}
       // Opacity only — the upward movement comes from the per-block stagger
