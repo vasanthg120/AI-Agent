@@ -1,4 +1,4 @@
-import { Controller, Delete, Get, Logger, Param, Post, Query, Redirect, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Logger, Param, Post, Put, Query, Redirect, UseGuards } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
@@ -133,6 +133,14 @@ export class OutlookController {
   @Post('accounts/:email/activate')
   setActive(@CurrentUser() user: JwtPayload, @Param('email') email: string) {
     return this.outlookService.setActive(user.sub, decodeURIComponent(email));
+  }
+
+  // Whose work this mailbox's email counts as on the team dashboards — for a
+  // shared mailbox connected by one person and answered by another.
+  @UseGuards(JwtAuthGuard)
+  @Put('accounts/:email/handler')
+  setHandler(@CurrentUser() user: JwtPayload, @Param('email') email: string, @Body() body: { userId?: string | null }) {
+    return this.outlookService.setHandler(user.sub, user.organizationId, decodeURIComponent(email), body?.userId || null);
   }
 
   @UseGuards(JwtAuthGuard)

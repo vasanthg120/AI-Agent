@@ -1,6 +1,6 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { Document, Types } from 'mongoose';
-import { deriveRespondedInfo, deriveResponseStatus, EmailRespondedVia, EmailResponseStatus } from '../email-response-state';
+import { deriveCategory, deriveRespondedInfo, deriveResponseStatus, EmailCategory, EmailRespondedVia, EmailResponseStatus } from '../email-response-state';
 
 export type EmailIntelligenceItemDocument = EmailIntelligenceItem & Document<Types.ObjectId>;
 
@@ -52,6 +52,20 @@ export class EmailIntelligenceItem {
   @Prop({ index: true })
   conversationId?: string;
 
+  // The message's own RFC Message-ID. Unlike externalMessageId (Outlook's id,
+  // which changes when a message is moved to another folder) it never changes,
+  // so it is what recognises a moved message as one already stored, and what a
+  // reply's In-Reply-To / References headers point at.
+  @Prop()
+  internetMessageId?: string;
+
+  // The Message-IDs this message replies to / refers back to.
+  @Prop()
+  inReplyTo?: string;
+
+  @Prop({ type: [String], default: undefined })
+  references?: string[];
+
   @Prop({ required: true, index: true })
   receivedAt: Date;
 
@@ -61,8 +75,15 @@ export class EmailIntelligenceItem {
   @Prop({ required: true })
   fromAddress: string;
 
+  // The sender's display name as Outlook shows it.
+  @Prop()
+  fromName?: string;
+
   @Prop({ type: [String], default: [] })
   toAddresses: string[];
+
+  @Prop({ type: [String], default: undefined })
+  ccAddresses?: string[];
 
   @Prop({ default: '' })
   bodyPreview: string;
@@ -212,6 +233,63 @@ export class EmailIntelligenceItem {
   @Prop()
   threadRespondedAt?: Date;
 
+  // ---- conversation state, maintained by EmailConversationService ----
+  // False on an older message of a conversation in which the customer has
+  // since written again. A conversation is one row — its newest customer
+  // message — so three emails from one customer are one thing to answer, not
+  // three. Absent / true: this message represents its conversation.
+  @Prop()
+  threadHead?: boolean;
+
+  // How many customer messages the conversation holds (kept on its newest one).
+  @Prop()
+  threadMessageCount?: number;
+
+  // How the answering message was recognised ('reference' | 'conversation' |
+  // 'recipient_subject', see email-thread.util.ts), and which sent message it was.
+  @Prop()
+  replyMatchedVia?: string;
+
+  @Prop()
+  replyMessageId?: string;
+
+  // The opening words of what we last wrote back, and whether that asked the
+  // customer for something (so the conversation is now waiting on them).
+  @Prop()
+  replyPreview?: string;
+
+  @Prop()
+  replyAwaitsCustomer?: boolean;
+
+  // Set when the message was deleted in Outlook or is no longer in the
+  // mailbox: nobody is going to answer an email they deleted, so it stops
+  // counting as waiting. 'deleted' = in Deleted Items / Junk, 'gone' = removed.
+  @Prop()
+  mailboxRemovedAt?: Date;
+
+  @Prop({ enum: ['deleted', 'gone'] })
+  mailboxState?: 'deleted' | 'gone';
+
+  @Prop()
+  mailboxCheckedAt?: Date;
+
+  // 'pending': stored and tracked, but the AI has not read it yet (no credits,
+  // or the AI was unavailable) — retried on later syncs. Absent on items the AI
+  // analysed or that never needed it.
+  @Prop({ enum: ['pending', 'failed'] })
+  analysisState?: 'pending' | 'failed';
+
+  @Prop({ default: 0 })
+  analysisAttempts: number;
+
+  @Prop()
+  analysisError?: string;
+
+  // A send in flight. Claimed atomically before the reply is dispatched so a
+  // double click or a retry can never send the same reply twice.
+  @Prop()
+  sendingAt?: Date;
+
   @Prop()
   rejectedAt?: Date;
 
@@ -243,6 +321,9 @@ export class EmailIntelligenceItem {
   responseStatus: EmailResponseStatus;
   respondedAt?: Date;
   respondedVia?: EmailRespondedVia;
+  category: EmailCategory;
+  /** False for mail the AI has not read: brought in from mailbox history, or it arrived while the AI was unavailable. */
+  aiRead: boolean;
 }
 
 export const EmailIntelligenceItemSchema = SchemaFactory.createForClass(EmailIntelligenceItem);
@@ -255,6 +336,12 @@ EmailIntelligenceItemSchema.virtual('respondedAt').get(function (this: EmailInte
 });
 EmailIntelligenceItemSchema.virtual('respondedVia').get(function (this: EmailIntelligenceItemDocument) {
   return deriveRespondedInfo(this).respondedVia;
+});
+EmailIntelligenceItemSchema.virtual('category').get(function (this: EmailIntelligenceItemDocument) {
+  return deriveCategory(this);
+});
+EmailIntelligenceItemSchema.virtual('aiRead').get(function (this: EmailIntelligenceItemDocument) {
+  return this.analysisState !== 'pending' && (this.deterministicInput as { skippedLlmCall?: boolean } | undefined)?.skippedLlmCall !== true;
 });
 // Virtuals are opt-in for JSON; without this the derived fields would exist on
 // the document but never reach a response. `id` (mongoose's default string
@@ -277,3 +364,11 @@ EmailIntelligenceItemSchema.index({ userId: 1, status: 1, conversationId: 1 });
 // Thread lookups — coverThread (a reply answers every earlier message in its
 // conversation) and the detail view's conversation timeline.
 EmailIntelligenceItemSchema.index({ userId: 1, conversationId: 1, receivedAt: 1 });
+// One stored row per real message per mailbox, even when Outlook has re-issued
+// its id (a move between folders) or two syncs race: the Message-ID decides.
+EmailIntelligenceItemSchema.index(
+  { userId: 1, internetMessageId: 1 },
+  { unique: true, partialFilterExpression: { internetMessageId: { $type: 'string' } } },
+);
+// The inbox list: one mailbox's conversations, newest first.
+EmailIntelligenceItemSchema.index({ userId: 1, threadHead: 1, receivedAt: -1 });

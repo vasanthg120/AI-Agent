@@ -1,9 +1,20 @@
 import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { LayoutGroup, motion } from 'framer-motion';
 import clsx from 'clsx';
 import { FiAward, FiCalendar, FiPercent, FiPieChart, FiTrendingUp } from 'react-icons/fi';
-import { ChoiceCards, DateRangeControl, EmptyState, PageHeader, SectionCard, Skeleton, type DateRange } from '@/components/ui';
+import {
+  ChoiceCards,
+  DateRangeControl,
+  EmptyState,
+  PageHeader,
+  SectionCard,
+  Skeleton,
+  type DateRange,
+} from '@/components/ui';
+import { ROUTES } from '@/constants/routes';
+import { useAuthStore } from '@/stores/authStore';
 import { dayjs } from '@/utils/date';
 import { salesReportService } from '@/services/salesReportService';
 import { grossMarginReportService } from '@/services/grossMarginReportService';
@@ -16,10 +27,22 @@ type ReportType = 'sales' | 'grossMargin' | 'royalty';
 
 // Each report explains itself on its picker card, so someone who has never
 // opened this page knows which one answers their question.
+// All three count the same thing — the quotations sent in the period, with the
+// value and the tax each quotation carries — so their totals always agree.
 const REPORT_TYPES: { id: ReportType; label: string; description: string; icon: typeof FiTrendingUp }[] = [
-  { id: 'sales', label: 'Sales', description: 'Won-deal revenue by customer, user or quote owner', icon: FiTrendingUp },
-  { id: 'grossMargin', label: 'Gross Margin', description: 'What you earned versus what it cost', icon: FiPercent },
-  { id: 'royalty', label: 'Royalty', description: 'Royalties owed on invoices in a period', icon: FiAward },
+  {
+    id: 'sales',
+    label: 'Sales',
+    description: 'Quotations sent — excluding tax, tax and including tax',
+    icon: FiTrendingUp,
+  },
+  {
+    id: 'grossMargin',
+    label: 'Gross Margin',
+    description: 'Your margin % applied to sales excluding tax',
+    icon: FiPercent,
+  },
+  { id: 'royalty', label: 'Royalty', description: 'Royalty owed on sales excluding tax', icon: FiAward },
 ];
 
 const GROUP_OPTIONS: Record<'sales' | 'grossMargin', { value: string; label: string }[]> = {
@@ -29,10 +52,8 @@ const GROUP_OPTIONS: Record<'sales' | 'grossMargin', { value: string; label: str
     { value: 'quoteOwner', label: 'Per Quote Owner' },
   ],
   grossMargin: [
-    { value: 'salesCustomer', label: 'Sales / Customer' },
-    { value: 'salesUser', label: 'Sales / User' },
-    { value: 'quotesCustomer', label: 'Quotes / Customer' },
-    { value: 'quotesUser', label: 'Quotes / User' },
+    { value: 'customer', label: 'Per Customer' },
+    { value: 'user', label: 'Per User' },
   ],
 };
 
@@ -60,6 +81,11 @@ const REPORT_ICON = { sales: FiTrendingUp, grossMargin: FiPercent, royalty: FiAw
 // shared with the dedicated Royalty page; nothing here should duplicate or
 // visually crowd it.
 export function ReportingPage() {
+  const navigate = useNavigate();
+  // The margin percentage is org-wide financial configuration: owners and administrators set it.
+  const canSetMargin = useAuthStore((state) =>
+    (state.user?.roles ?? []).some((role) => role === 'owner' || role === 'admin'),
+  );
   const [reportType, setReportType] = useState<ReportType>('sales');
   const [range, setRange] = useState<DateRange>(() => ({
     dateFrom: dayjs().startOf('month').format('YYYY-MM-DD'),
@@ -77,27 +103,26 @@ export function ReportingPage() {
 
   const { data: salesReport, isFetching: salesFetching } = useQuery({
     queryKey: ['reporting-sales', range.dateFrom, range.dateTo, groupBy],
-    queryFn: () => salesReportService.generate(range.dateFrom!, range.dateTo!, groupBy as 'customer' | 'user' | 'quoteOwner'),
+    queryFn: () =>
+      salesReportService.generate(range.dateFrom!, range.dateTo!, groupBy as 'customer' | 'user' | 'quoteOwner'),
     enabled: reportType === 'sales' && hasRange,
     placeholderData: keepPreviousData,
   });
 
   const { data: grossMarginReport, isFetching: gmFetching } = useQuery({
     queryKey: ['reporting-gross-margin', range.dateFrom, range.dateTo, groupBy],
-    queryFn: () =>
-      grossMarginReportService.generate(
-        range.dateFrom!,
-        range.dateTo!,
-        groupBy as 'salesCustomer' | 'salesUser' | 'quotesCustomer' | 'quotesUser',
-      ),
+    queryFn: () => grossMarginReportService.generate(range.dateFrom!, range.dateTo!, groupBy as 'customer' | 'user'),
     enabled: reportType === 'grossMargin' && hasRange,
     placeholderData: keepPreviousData,
   });
 
-  const loading = (reportType === 'sales' && salesFetching && !salesReport) || (reportType === 'grossMargin' && gmFetching && !grossMarginReport);
+  const loading =
+    (reportType === 'sales' && salesFetching && !salesReport) ||
+    (reportType === 'grossMargin' && gmFetching && !grossMarginReport);
   // Refetching over data that's already on screen (new range / grouping) —
   // keep showing it, dimmed, with a progress line, instead of a skeleton flash.
-  const refreshing = !loading && ((reportType === 'sales' && salesFetching) || (reportType === 'grossMargin' && gmFetching));
+  const refreshing =
+    !loading && ((reportType === 'sales' && salesFetching) || (reportType === 'grossMargin' && gmFetching));
   const ReportIcon = REPORT_ICON[reportType];
 
   return (
@@ -116,7 +141,7 @@ export function ReportingPage() {
       />
 
       <motion.div
-        key={reportType === 'royalty' ? 'royalty' : 'aggregate'}
+        key={reportType === 'royalty' ? reportType : 'aggregate'}
         className={styles.reportArea}
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
@@ -166,21 +191,30 @@ export function ReportingPage() {
               <div className={clsx(styles.results, refreshing && styles.resultsRefreshing)}>
                 {refreshing && <span className={styles.refreshBar} aria-label="Updating" />}
                 {!hasRange && (
-                  <EmptyState icon={FiCalendar} title="Pick a period" description="Choose a start date and an end date to run the report." />
+                  <EmptyState
+                    icon={FiCalendar}
+                    title="Pick a period"
+                    description="Choose a start date and an end date to run the report."
+                  />
                 )}
                 {loading && (
                   <div className={styles.loadingBlock}>
                     <div className={styles.kpiRow}>
-                      {[0, 1, 2].map((i) => (
+                      {[0, 1, 2, 3].map((i) => (
                         <Skeleton key={i} height={104} />
                       ))}
                     </div>
                     <Skeleton height={260} />
                   </div>
                 )}
-                {!loading && hasRange && reportType === 'sales' && salesReport && <SalesReportView report={salesReport} />}
+                {!loading && hasRange && reportType === 'sales' && salesReport && (
+                  <SalesReportView report={salesReport} />
+                )}
                 {!loading && hasRange && reportType === 'grossMargin' && grossMarginReport && (
-                  <GrossMarginReportView report={grossMarginReport} />
+                  <GrossMarginReportView
+                    report={grossMarginReport}
+                    onSetMargin={canSetMargin ? () => navigate(ROUTES.settingsRoyaltyRules) : undefined}
+                  />
                 )}
               </div>
             </SectionCard>

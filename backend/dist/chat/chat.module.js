@@ -14,7 +14,10 @@ const redis_cache_service_1 = require("../common/redis/redis-cache.service");
 const auth_module_1 = require("../auth/auth.module");
 const users_module_1 = require("../users/users.module");
 const agent_role_schema_1 = require("../agent-roles/schemas/agent-role.schema");
+const chat_attachment_schema_1 = require("./schemas/chat-attachment.schema");
 const conversation_schema_1 = require("./schemas/conversation.schema");
+const chat_attachments_controller_1 = require("./chat-attachments.controller");
+const chat_attachments_service_1 = require("./chat-attachments.service");
 const chat_controller_1 = require("./chat.controller");
 const chat_gateway_1 = require("./chat.gateway");
 const chat_service_1 = require("./chat.service");
@@ -26,14 +29,15 @@ exports.ChatModule = ChatModule = __decorate([
         imports: [
             mongoose_1.MongooseModule.forFeature([
                 { name: conversation_schema_1.Conversation.name, schema: conversation_schema_1.ConversationSchema },
+                { name: chat_attachment_schema_1.ChatAttachment.name, schema: chat_attachment_schema_1.ChatAttachmentSchema },
                 { name: agent_role_schema_1.AgentRole.name, schema: agent_role_schema_1.AgentRoleSchema },
             ]),
             axios_1.HttpModule.register({ timeout: 300_000 }),
             auth_module_1.AuthModule,
             users_module_1.UsersModule,
         ],
-        controllers: [chat_controller_1.ChatController],
-        providers: [chat_service_1.ChatService, chat_gateway_1.ChatGateway, redis_cache_service_1.RedisCacheService],
+        controllers: [chat_attachments_controller_1.ChatAttachmentsController, chat_controller_1.ChatController],
+        providers: [chat_service_1.ChatService, chat_attachments_service_1.ChatAttachmentsService, chat_gateway_1.ChatGateway, redis_cache_service_1.RedisCacheService],
         exports: [chat_service_1.ChatService, chat_gateway_1.ChatGateway],
     })
 ], ChatModule);

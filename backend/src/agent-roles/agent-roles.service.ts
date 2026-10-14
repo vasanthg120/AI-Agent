@@ -1,7 +1,8 @@
 import { HttpService } from '@nestjs/axios';
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectModel } from '@nestjs/mongoose';
+import { DEFAULT_ROLE_FEATURES } from '../common/app-features';
 import FormData from 'form-data';
 import { Model } from 'mongoose';
 import { catchError, firstValueFrom, of } from 'rxjs';
@@ -140,6 +141,7 @@ export class AgentRolesService {
       assignedDepartments: dto.assignedDepartments ?? [],
       assignedUserIds: dto.assignedUserIds ?? [],
       allowedTools: dto.allowedTools ?? [],
+      features: dto.features ?? DEFAULT_ROLE_FEATURES,
       modelTier: dto.modelTier ?? undefined,
       status: 'draft',
       avatarColor,
@@ -186,6 +188,15 @@ export class AgentRolesService {
   async remove(id: string, userJwt: string, organizationId: string) {
     const existing = await this.roleModel.findOne({ _id: id, organizationId }).exec();
     if (!existing) throw new NotFoundException('Role not found');
+
+    // Agent User accounts are locked to exactly one agent: deleting it would
+    // leave them signed in to nothing. Move or remove those accounts first.
+    const locked = await this.roleModel.db.collection('users').countDocuments({ organizationId, assignedAgentId: existing.slug, roles: 'agent_user' });
+    if (locked > 0) {
+      throw new BadRequestException(
+        `${locked} Agent User account${locked === 1 ? ' is' : 's are'} locked to “${existing.name}”. Assign ${locked === 1 ? 'it' : 'them'} another agent (Settings → Users) before deleting this one.`,
+      );
+    }
 
     // Best-effort — don't block deleting the role's metadata on Qdrant
     // cleanup. Skipped entirely for a Manual/Template/Describe-created role,

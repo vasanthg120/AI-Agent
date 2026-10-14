@@ -11,6 +11,9 @@ export interface NavItem {
   badge?: number;
   // Only agent_user ever populates this — admin/legacy user roles always see everything.
   hideForRoles?: string[];
+  // An app feature an AI role can include (see utils/access.ts). For an account
+  // tied to an AI role, this — not hideForRoles — decides whether it is shown.
+  feature?: string;
 }
 
 // One section of the sidebar's application nav — see constants/navigation.ts.

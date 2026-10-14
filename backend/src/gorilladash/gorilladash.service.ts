@@ -7,6 +7,7 @@ import { ConnectIntegrationDto } from '../integrations/dto/connect-integration.d
 import { IntegrationsService } from '../integrations/integrations.service';
 
 const PROVIDER = 'gorilladash';
+const PROVIDER_NAMES = [PROVIDER, 'gorilla_dash', 'gorilla-dash'];
 
 export interface GorillaDashStatus {
   connected: boolean;
@@ -40,10 +41,29 @@ export class GorillaDashService {
   // Gorilla Dash answers successful calls with 201, not 200.
   private accept = (status: number) => status >= 200 && status < 300;
 
+  /** The integration name Gorilla Dash is saved under — also "gorilla_dash" /
+   * "gorilla-dash" when it was connected from the generic Integrations page. */
+  private async savedAs(organizationId: string): Promise<string | null> {
+    for (const name of PROVIDER_NAMES) {
+      if (await this.integrations.resolveAuth(organizationId, name)) return name;
+    }
+    return null;
+  }
+
   private async credentials(organizationId: string): Promise<{ key: string; secret: string } | null> {
-    const auth = await this.integrations.resolveAuth(organizationId, PROVIDER);
-    if (!auth || auth.authType !== 'basic' || !auth.credentials.username || !auth.credentials.password) return null;
-    return { key: auth.credentials.username, secret: auth.credentials.password };
+    const name = await this.savedAs(organizationId);
+    const auth = name ? await this.integrations.resolveAuth(organizationId, name) : null;
+    if (!auth) return null;
+    if (auth.authType === 'basic') {
+      return auth.credentials.username && auth.credentials.password ? { key: auth.credentials.username, secret: auth.credentials.password } : null;
+    }
+    if (auth.authType === 'customHeaders') {
+      const headers = Object.fromEntries(Object.entries(auth.credentials.headers ?? {}).map(([k, v]) => [k.toLowerCase(), String(v)]));
+      const key = headers['gorilladash-api-key'];
+      const secret = headers['gorilladash-api-secret'];
+      return key && secret ? { key, secret } : null;
+    }
+    return null;
   }
 
   private mask(key: string): string {
@@ -82,7 +102,7 @@ export class GorillaDashService {
     return { connected: true, keyMasked: this.mask(creds.key), keyScope: await this.keyScope(creds.key, creds.secret) };
   }
 
-  async connect(organizationId: string, key: string, secret: string): Promise<GorillaDashStatus> {
+  async connect(organizationId: string, key: string, secret: string, options: { skipSync?: boolean } = {}): Promise<GorillaDashStatus> {
     try {
       await firstValueFrom(this.http.get(`${this.baseUrl}/api/v1/ping`, { headers: this.headers(key, secret), timeout: 15_000, validateStatus: this.accept }));
     } catch (err) {
@@ -99,16 +119,21 @@ export class GorillaDashService {
     }
     // Saving it as a CRM integration also creates its data source and starts
     // the first sync (IntegrationsService -> DataSourcesService.reconcile).
-    await this.integrations.connectWithAuth(organizationId, PROVIDER, {
-      authType: 'basic',
-      credentials: { username: key, password: secret },
-      baseUrl: this.baseUrl,
-    } as ConnectIntegrationDto);
+    await this.integrations.connectWithAuth(
+      organizationId,
+      PROVIDER,
+      {
+        authType: 'basic',
+        credentials: { username: key, password: secret },
+        baseUrl: this.baseUrl,
+      } as ConnectIntegrationDto,
+      options,
+    );
     this.logger.log(`Gorilla Dash connected for org ${organizationId}`);
     return { connected: true, keyMasked: this.mask(key), keyScope: await this.keyScope(key, secret) };
   }
 
-  disconnect(organizationId: string): Promise<void> {
-    return this.integrations.disconnect(organizationId, PROVIDER);
+  async disconnect(organizationId: string): Promise<void> {
+    await this.integrations.disconnect(organizationId, (await this.savedAs(organizationId)) ?? PROVIDER);
   }
 }

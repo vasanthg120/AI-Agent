@@ -1,5 +1,6 @@
 import type { AgentRole, CreateAgentRolePayload, RoleCategory } from '@/services/agentRolesService';
 import { normalizeRoleCategory } from '@/services/agentRolesService';
+import { DEFAULT_ROLE_FEATURES } from '@/utils/access';
 
 // One flat object for the whole wizard — every step reads/writes into this
 // directly, so switching steps (or clicking back to an earlier one) never
@@ -18,6 +19,8 @@ export interface FormState {
   assignedDepartments: string[];
   assignedUserIds: string[];
   allowedTools: string[];
+  // The app features people assigned to this role can use.
+  features: string[];
   modelTier: 'fast' | 'standard' | null;
   status: 'draft' | 'active';
   sourceDocumentName?: string;
@@ -32,6 +35,7 @@ export function blankFormState(): FormState {
     assignedDepartments: [],
     assignedUserIds: [],
     allowedTools: [],
+    features: [...DEFAULT_ROLE_FEATURES],
     modelTier: null,
     status: 'draft',
   };
@@ -47,6 +51,7 @@ export function roleToFormState(role: AgentRole): FormState {
     assignedDepartments: role.assignedDepartments ?? [],
     assignedUserIds: role.assignedUserIds ?? [],
     allowedTools: role.allowedTools ?? [],
+    features: role.features ?? [...DEFAULT_ROLE_FEATURES],
     modelTier: role.modelTier ?? null,
     status: role.status,
     sourceDocumentName: role.sourceDocumentName,
@@ -69,6 +74,7 @@ export function formStateToPayload(form: FormState): CreateAgentRolePayload {
     assignedDepartments: form.assignedDepartments,
     assignedUserIds: form.assignedUserIds,
     allowedTools: form.allowedTools,
+    features: form.features,
     modelTier: form.modelTier,
   };
 }

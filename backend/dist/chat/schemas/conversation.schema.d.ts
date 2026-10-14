@@ -1,9 +1,16 @@
 import { Document, Types } from 'mongoose';
 export type ConversationDocument = Conversation & Document<Types.ObjectId>;
+export interface MessageAttachment {
+    id: string;
+    name: string;
+    mimeType: string;
+    sizeBytes: number;
+}
 export declare class ChatMessage {
     role: 'user' | 'assistant';
     content: string;
     toolsUsed: string[];
+    attachments?: MessageAttachment[];
     createdAt: Date;
 }
 export declare class Conversation {

@@ -1,100 +1,122 @@
-import { FiCalendar, FiCheckCircle, FiInfo, FiPercent, FiShoppingCart, FiTrendingUp } from 'react-icons/fi';
-import { EmptyState } from '@/components/ui';
+import { FiCalendar, FiDollarSign, FiInfo, FiPercent, FiPieChart, FiTrendingUp } from 'react-icons/fi';
+import { Button, EmptyState } from '@/components/ui';
 import { dayjs } from '@/utils/date';
-import { formatINR } from '@/utils/currency';
+import { formatINRExact as formatINR } from '@/utils/currency';
 import type { GrossMarginReportGroupRow, GrossMarginReportSummary } from '@/services/grossMarginReportService';
 import { KpiRow, ReportTable, type ReportColumn } from './ReportParts';
 import styles from '../reporting.module.css';
 
-// groupBy is "metric + dimension" combined (matches the reference report's
-// 4 radios: Sales/Quotes crossed with Customer/User) — split back apart
-// here purely for display.
-const METRIC_LABEL: Record<string, string> = { sales: 'Sales', quotes: 'Quotes' };
+const GROUP_LABEL: Record<string, 'Customer' | 'User'> = { customer: 'Customer', user: 'User' };
 
-function splitGroupBy(groupBy: string): { metric: string; dimension: 'Customer' | 'User' } {
-  const metric = groupBy.startsWith('sales') ? 'sales' : 'quotes';
-  const dimension = groupBy.endsWith('Customer') ? 'Customer' : 'User';
-  return { metric, dimension };
-}
-
-// Renders real numbers once `hasCostData` is true (computed from
-// Invoice.costAmount — a manually-entered field, see the Royalty Invoices
-// edit form's "Cost" input). Otherwise shows `report.note` as an honest
-// empty state instead of a fabricated $0.00/100% table, matching this app's
-// established "never fabricate a financial figure" convention.
-export function GrossMarginReportView({ report }: { report: GrossMarginReportSummary }) {
-  const { metric, dimension } = splitGroupBy(report.groupBy);
-  const metricLabel = METRIC_LABEL[metric];
+// Gross margin for a period. No cost is recorded for what is sold, so the margin
+// is the organization's own percentage — set once in Settings — applied to sales
+// excluding tax, and always called an estimate. Until a percentage is set the
+// sales are shown and the margin is left blank, never guessed.
+export function GrossMarginReportView({
+  report,
+  onSetMargin,
+}: {
+  report: GrossMarginReportSummary;
+  // Opens where the percentage is set — offered to those who may set it.
+  onSetMargin?: () => void;
+}) {
+  const notSet = <span className={styles.rowMuted}>Not set</span>;
+  const dimension = GROUP_LABEL[report.groupBy];
   const range = `${dayjs(report.dateFrom).format('D MMM YYYY')} – ${dayjs(report.dateTo).format('D MMM YYYY')}`;
-  const marginTone = report.marginPct >= 30 ? 'success' : report.marginPct >= 10 ? 'warning' : 'danger';
+  const hasMargin = report.marginPct !== null;
 
   const columns: ReportColumn<GrossMarginReportGroupRow>[] = [
-    { key: 'label', label: dimension, value: (r) => r.groupLabel, render: (r) => <span className={styles.rowLabel}>{r.groupLabel}</span> },
-    { key: 'cost', label: 'Total cost', numeric: true, value: (r) => r.totalCost, render: (r) => formatINR(r.totalCost) },
-    { key: 'income', label: 'Total income', numeric: true, value: (r) => r.totalIncome, render: (r) => formatINR(r.totalIncome) },
-    { key: 'margin', label: 'Gross margin', numeric: true, value: (r) => r.marginAmount, render: (r) => formatINR(r.marginAmount) },
     {
-      key: 'marginPct',
-      label: 'Margin %',
+      key: 'label',
+      label: dimension,
+      value: (r) => r.groupLabel,
+      render: (r) => <span className={styles.rowLabel}>{r.groupLabel}</span>,
+    },
+    { key: 'quotations', label: 'Quotations', numeric: true, value: (r) => r.quotations, render: (r) => r.quotations },
+    {
+      key: 'exTax',
+      label: 'Sales (ex tax)',
       numeric: true,
-      value: (r) => r.marginPct,
-      bar: (r) => r.marginPct,
-      render: (r) => `${r.marginPct}%`,
+      value: (r) => r.salesExTax,
+      render: (r) => formatINR(r.salesExTax),
+    },
+    { key: 'tax', label: 'Tax', numeric: true, value: (r) => r.tax, render: (r) => formatINR(r.tax) },
+    {
+      key: 'incTax',
+      label: 'Sales (inc tax)',
+      numeric: true,
+      value: (r) => r.salesIncTax,
+      render: (r) => formatINR(r.salesIncTax),
+    },
+    {
+      key: 'margin',
+      label: hasMargin ? `Gross margin (${report.marginPct}%)` : 'Gross margin',
+      numeric: true,
+      value: (r) => r.grossMargin ?? 0,
+      render: (r) => (r.grossMargin === null ? notSet : formatINR(r.grossMargin)),
     },
   ];
 
   return (
     <div className={styles.reportBody}>
       <div className={styles.reportIntro}>
-        <div className={styles.reportTitle}>
-          Gross margin — {metricLabel.toLowerCase()} per {dimension.toLowerCase()}
-        </div>
+        <div className={styles.reportTitle}>Gross margin per {dimension.toLowerCase()}</div>
         <div className={styles.reportDescription}>
-          <FiCalendar aria-hidden /> {range} · What you earned versus what it cost.
+          <FiCalendar aria-hidden /> {range} ·{' '}
+          {hasMargin
+            ? `Estimated at ${report.marginPct}% of sales excluding tax.`
+            : 'Set your gross margin percentage to see it here.'}
         </div>
       </div>
 
-      {!report.hasCostData ? (
-        <EmptyState icon={FiPercent} title="No cost data yet" description={report.note} />
-      ) : (
-        <>
-          <KpiRow
-            items={[
-              { label: 'Total income', value: formatINR(report.totalIncome), icon: FiTrendingUp, tone: 'success' },
-              { label: 'Total cost', value: formatINR(report.totalCost), icon: FiShoppingCart },
-              {
-                label: 'Gross margin',
-                value: formatINR(report.marginAmount),
-                hint: `${report.marginPct}% of income`,
-                icon: FiPercent,
-                tone: marginTone,
-              },
-              {
-                label: 'Invoice coverage',
-                value: `${report.coveragePct}%`,
-                hint: `${report.invoicesWithCost} of ${report.totalInvoicesInRange} invoices have a cost`,
-                icon: FiCheckCircle,
-                tone: report.coveragePct >= 80 ? 'success' : 'warning',
-              },
-            ]}
-          />
+      <KpiRow
+        items={[
+          {
+            label: 'Sales (ex tax)',
+            value: formatINR(report.totalSalesExTax),
+            icon: FiDollarSign,
+            hint: `${report.quotations} quotation${report.quotations === 1 ? '' : 's'} sent`,
+          },
+          { label: 'Tax', value: formatINR(report.totalTax), icon: FiPercent, hint: 'On those quotations' },
+          {
+            label: 'Sales (inc tax)',
+            value: formatINR(report.totalSalesIncTax),
+            icon: FiTrendingUp,
+            hint: 'Including tax',
+          },
+          {
+            label: 'Gross margin (estimate)',
+            value: report.grossMargin === null ? 'Not set' : formatINR(report.grossMargin),
+            hint: hasMargin ? `${report.marginPct}% of sales excluding tax` : 'Needs your margin %',
+            icon: FiPieChart,
+            tone: hasMargin ? 'success' : 'warning',
+          },
+        ]}
+      />
 
-          {report.note && (
-            <div className={styles.note}>
-              <FiInfo aria-hidden />
-              <span>{report.note}</span>
-            </div>
+      {report.note && (
+        <div className={styles.note}>
+          <FiInfo aria-hidden />
+          <span>{report.note}</span>
+          {onSetMargin && (
+            <Button type="button" size="sm" variant="secondary" onClick={onSetMargin}>
+              {hasMargin ? 'Change margin %' : 'Set margin %'}
+            </Button>
           )}
+        </div>
+      )}
 
-          <ReportTable
-            columns={columns}
-            rows={report.groups}
-            rowKey={(r) => r.groupKey}
-            defaultSort={{ key: 'margin', dir: 'desc' }}
-            searchPlaceholder={`Search ${dimension.toLowerCase()}s`}
-            filename={`gross-margin-${report.groupBy}-${report.dateFrom}-to-${report.dateTo}.csv`}
-          />
-        </>
+      {report.groups.length === 0 ? (
+        <EmptyState icon={FiPercent} title="No quotations sent in this period" description="Try a wider date range." />
+      ) : (
+        <ReportTable
+          columns={columns}
+          rows={report.groups}
+          rowKey={(r) => r.groupKey}
+          defaultSort={{ key: 'exTax', dir: 'desc' }}
+          searchPlaceholder={`Search ${dimension.toLowerCase()}s`}
+          filename={`gross-margin-per-${report.groupBy}-${report.dateFrom}-to-${report.dateTo}.csv`}
+        />
       )}
     </div>
   );

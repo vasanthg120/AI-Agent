@@ -7,8 +7,8 @@ import { UsersService } from '../users/users.service';
 import { SalesAnalyticsService } from './sales-analytics.service';
 import { DealPerformanceOverviewQueryDto } from './dto/deal-performance-overview-query.dto';
 import { buildDealMatchStage } from './deal-filter.util';
+import { isOwner } from '../common/team-roster';
 
-const SALES_ROLES = new Set(['manager', 'consultant']);
 const PRODUCT_BREAKDOWN_CAP = 8;
 
 function currentPeriod(): string {
@@ -265,7 +265,11 @@ export class DealPerformanceDashboardService {
     const scopeStoreIds = storeConstraint ? [storeConstraint] : storeFilter;
 
     const [users, rows] = await Promise.all([
-      this.usersService.findAll(organizationId),
+      // The shared team roster (common/team-roster.ts), unless the caller wants every account.
+      // "Every account" still means every employee: the owner is never listed as one.
+      includeAllRoles
+        ? this.usersService.findAll(organizationId).then((all) => all.filter((u) => !isOwner(u.roles)))
+        : this.usersService.findTeamRoster(organizationId),
       this.dealModel
         .aggregate<{ _id: { ownerId: string; status: string }; count: number; value: number }>([
           { $match: { ...match, ownerId: { $exists: true, $ne: null } } },
@@ -276,7 +280,6 @@ export class DealPerformanceDashboardService {
 
     const employees = users.filter(
       (u) =>
-        (includeAllRoles || u.roles.some((r) => SALES_ROLES.has(r))) &&
         (!scopeStoreIds?.length || (u.storeId && scopeStoreIds.includes(u.storeId))),
     );
 

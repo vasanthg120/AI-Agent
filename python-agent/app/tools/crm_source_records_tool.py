@@ -8,8 +8,8 @@ from app.memory.mongo_client import get_db
 SPEC = {
     "name": "crm_source_records",
     "description": (
-        "Read the CRM records HaiVE holds for ONE specific data source — e.g. 'Hoops' (records sent from Zapier), "
-        "'Gorilla Dash', 'Customized Haive CRM', 'HubSpot'. Every record comes from that source only; nothing is "
+        "Read the CRM records HaiVE holds for ONE specific data source — e.g. 'Hoops CRM', "
+        "'Gorilla Dash', 'Pantheras CRM', 'Hoops CRM', 'HubSpot'. Every record comes from that source only; nothing is "
         "borrowed from another. 'sources' lists the organization's data sources, what each one holds and which modules "
         "it has — call it first when unsure. Modules: deals (a source may call them opportunities, enquiries or jobs), "
         "contacts, accounts (companies/customers), quotes. To compare two sources, call 'records' once per source."

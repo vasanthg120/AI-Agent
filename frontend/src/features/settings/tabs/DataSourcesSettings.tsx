@@ -22,7 +22,6 @@ import {
 import { Badge, Button, Input, Skeleton, StringListEditor, Switch, Tabs } from '@/components/ui';
 import { timeAgo } from '@/components/data-sources/timeAgo';
 import { ROUTES } from '@/constants/routes';
-import { useDataSources } from '@/hooks/useDataSources';
 import {
   dataSourcesService,
   MODULE_LABEL,
@@ -36,7 +35,6 @@ import {
 } from '@/services/dataSourcesService';
 import { extractErrorMessage } from '@/utils/errors';
 import { SettingsSection } from '../components/SettingsSection';
-import { ConnectGorillaDashModal } from './data-sources/ConnectGorillaDashModal';
 import { WebhookSourceModal } from './data-sources/WebhookSourceModal';
 import { ZapierModal } from './data-sources/ZapierModal';
 import styles from './DataSourcesSettings.module.css';
@@ -125,7 +123,7 @@ function SyncLine({ source }: { source: DataSourceAdminView }) {
 export function DataSourcesSettings() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const { data: overview } = useDataSources();
+  const { data: overview } = useQuery({ queryKey: ['data-sources', 'overview'], queryFn: dataSourcesService.getOverview });
   const {
     data: sources,
     isLoading,
@@ -148,7 +146,6 @@ export function DataSourcesSettings() {
   const [draft, setDraft] = useState<Draft | null>(null);
   const [saving, setSaving] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
-  const [gorillaOpen, setGorillaOpen] = useState(false);
   const [zapierOpen, setZapierOpen] = useState(false);
   const [webhookSourceId, setWebhookSourceId] = useState<string | null>(null);
 
@@ -253,7 +250,7 @@ export function DataSourcesSettings() {
       <SettingsSection
         icon={<FiDatabase />}
         title="Data sources"
-        description="Each CRM you connect is kept separate — its data is never mixed with another CRM’s unless someone picks the Unified view. The default source is what dashboards show until people choose another in the top bar."
+        description="Each CRM you connect is kept separate — its data is never mixed with another CRM’s. The dashboards show the default source; the AI can answer about any of them by name."
         actions={
           <div className={styles.headerActions}>
             <Button
@@ -274,15 +271,6 @@ export function DataSourcesSettings() {
               onClick={() => navigate(ROUTES.settingsIntegrations)}
             >
               Connect a CRM
-            </Button>
-            <Button
-              type="button"
-              variant="secondary"
-              size="sm"
-              leftIcon={<FiLink2 />}
-              onClick={() => setGorillaOpen(true)}
-            >
-              Gorilla Dash
             </Button>
             <Button
               type="button"
@@ -759,7 +747,6 @@ export function DataSourcesSettings() {
         </SettingsSection>
       )}
 
-      <ConnectGorillaDashModal open={gorillaOpen} onClose={() => setGorillaOpen(false)} />
       <ZapierModal
         open={zapierOpen}
         onClose={() => setZapierOpen(false)}

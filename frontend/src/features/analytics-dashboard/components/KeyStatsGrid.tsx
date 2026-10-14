@@ -5,30 +5,21 @@ import { AreaChart, Area, ResponsiveContainer } from 'recharts';
 import { AnimatedNumber, Card } from '@/components/ui';
 import { formatINR as money } from '@/utils/currency';
 import { dealsService } from '@/services/dealsService';
-import { customerQuotePaymentService } from '@/services/customerQuotePaymentService';
 import { DrillDownModal, type DrillDownRow } from './DrillDownModal';
 import styles from './KeyStatsGrid.module.css';
 
-type OpenDrilldown = 'conversion' | 'outstanding' | 'health' | null;
+type OpenDrilldown = 'conversion' | 'pipeline' | 'health' | null;
 
-const BUCKET_LABELS: Record<string, string> = {
-  noDueDate: 'no due date',
-  current: 'current',
-  '1-30': '1–30 days overdue',
-  '31-60': '31–60 days overdue',
-  '60+': '60+ days overdue',
-};
-
-function describeBuckets(buckets: { bucket: string; amount: number }[], total: number): string {
-  const top = [...buckets].filter((b) => b.amount > 0).sort((a, b) => b.amount - a.amount)[0];
-  if (!top || total <= 0) return 'Nothing outstanding right now.';
-  const label = BUCKET_LABELS[top.bucket] ?? top.bucket;
-  const pct = Math.round((top.amount / total) * 100);
-  return pct >= 95 ? `All in the ${label} bucket` : `${pct}% in the ${label} bucket`;
+// The chosen dates as the Pipeline box names them: one month ("Oct 2026"),
+// or the dates themselves when they run over more than one.
+function periodName(dateFrom: string, dateTo: string): string {
+  const from = dayjs(dateFrom);
+  const to = dayjs(dateTo);
+  return from.isSame(to, 'month') ? from.format('MMM YYYY') : `${from.format('D MMM')} – ${to.format('D MMM YYYY')}`;
 }
 
 export interface KeyStatsGridProps {
-  deals: { wonCount: number; lostCount: number; openCount: number };
+  deals: { wonCount: number; lostCount: number; openCount: number; openValue: number };
   businessHealthScore: number | null;
   revenueTrend: { period: string; achieved: number }[];
   dateFrom: string;
@@ -37,12 +28,19 @@ export interface KeyStatsGridProps {
   onDealsClick?: () => void;
 }
 
-// Deals Won / Conversion / Business Health mirror data the Overview tab
-// already fetches (AnalyticsDashboardOverview.deals/revenue/revenueTrend) —
-// Outstanding and the overdue/pending split under Deals Won are the two sub-
-// figures that don't exist in that payload, so this fetches its own two
-// small real datasets (same real endpoints the Pipeline & Quotes and
-// Customers & Email tabs already use) rather than inventing numbers.
+// Deals Won / Conversion / Business Health / Pipeline mirror data the
+// Overview tab already fetches (AnalyticsDashboardOverview.deals/revenue/
+// revenueTrend). How many of the month's open deals are past their closing
+// date is the one thing that payload doesn't carry, so this reads those
+// deals itself (the same real endpoint the Pipeline & Quotes tab uses)
+// rather than inventing numbers.
+//
+// The fourth box used to be "Outstanding": every quotation created in the
+// period, minus what was paid. No payment is recorded against a quotation
+// that comes from the CRM and none carries a due date, so it showed
+// everything quoted as though it were owed. It is now the pipeline of the
+// chosen period — open deals expected to close in it — which is the same
+// figure the "Overall Pipeline — All Months" section shows for that month.
 export function KeyStatsGrid({ deals, businessHealthScore, revenueTrend, dateFrom, dateTo, storeId, onDealsClick }: KeyStatsGridProps) {
   const [openDrilldown, setOpenDrilldown] = useState<OpenDrilldown>(null);
 
@@ -57,12 +55,6 @@ export function KeyStatsGrid({ deals, businessHealthScore, revenueTrend, dateFro
     enabled: openDrilldown === 'conversion',
   });
 
-  const { data: outstandingQuotesResult, isLoading: outstandingQuotesLoading } = useQuery({
-    queryKey: ['analytics-outstanding-quotes', dateFrom, dateTo, storeId],
-    queryFn: () => customerQuotePaymentService.listQuotes({ dateFrom, dateTo, employeeId: [], storeId: storeId ? [storeId] : [] }, 1, 100),
-    enabled: openDrilldown === 'outstanding',
-  });
-
   const { data: openDeals } = useQuery({
     queryKey: ['analytics-open-deals-aging', dateFrom, dateTo, storeId],
     queryFn: () =>
@@ -73,30 +65,34 @@ export function KeyStatsGrid({ deals, businessHealthScore, revenueTrend, dateFro
       ),
   });
 
-  const { data: paymentSummary } = useQuery({
-    queryKey: ['analytics-quote-payment-summary', dateFrom, dateTo, storeId],
-    queryFn: () => customerQuotePaymentService.getSummary({ dateFrom, dateTo, ...(storeId ? { storeId: [storeId] } : {}) }),
-  });
-
-  const { overdueCount, pendingCount } = useMemo(() => {
-    if (!openDeals) return { overdueCount: 0, pendingCount: 0 };
+  const { overdueCount, pendingCount, overdueValue } = useMemo(() => {
+    if (!openDeals) return { overdueCount: 0, pendingCount: 0, overdueValue: 0 };
     const today = dayjs().format('YYYY-MM-DD');
     let overdue = 0;
+    let value = 0;
     for (const d of openDeals.items) {
-      if (d.expectedClosingDate && d.expectedClosingDate < today) overdue += 1;
+      if (d.expectedClosingDate && d.expectedClosingDate < today) {
+        overdue += 1;
+        value += d.monetaryValue ?? 0;
+      }
     }
-    return { overdueCount: overdue, pendingCount: openDeals.items.length - overdue };
+    return { overdueCount: overdue, pendingCount: openDeals.items.length - overdue, overdueValue: value };
   }, [openDeals]);
 
   const totalDeals = deals.wonCount + deals.lostCount + deals.openCount;
   const closedDeals = deals.wonCount + deals.lostCount;
   const conversionPct = closedDeals > 0 ? Math.round((deals.wonCount / closedDeals) * 100) : null;
 
-  const totalOutstanding = paymentSummary?.totalOutstanding ?? null;
-  const bucketSentence = paymentSummary ? describeBuckets(paymentSummary.agingBuckets, paymentSummary.totalOutstanding) : null;
-  const overdueOutstanding = paymentSummary
-    ? paymentSummary.agingBuckets.filter((b) => b.bucket !== 'noDueDate' && b.bucket !== 'current').reduce((s, b) => s + b.amount, 0)
-    : 0;
+  const period = periodName(dateFrom, dateTo);
+  const hasPipeline = deals.openCount > 0;
+  // The deals come a page at a time: what is past its date is only said when every one of them was read.
+  const pipelineFooter = !openDeals
+    ? 'Loading…'
+    : openDeals.items.length < openDeals.total
+      ? 'Open the list to see which are past due'
+      : overdueCount > 0
+        ? `${money(overdueValue)} past due`
+        : 'Nothing past due';
 
   const closedDealRows: DrillDownRow[] = (closedDealsResult?.items ?? []).map((d) => ({
     id: d._id,
@@ -106,11 +102,13 @@ export function KeyStatsGrid({ deals, businessHealthScore, revenueTrend, dateFro
     value: d.monetaryValue,
   }));
 
-  const outstandingRows: DrillDownRow[] = (outstandingQuotesResult?.items ?? [])
-    .map((q) => ({ id: q._id, title: q.clientDetails?.companyName ?? q.quoteName ?? 'Untitled quote', subtitle: `Quote #${q.quoteNumber ?? q._id.slice(-4)}`, outstanding: q.quoteAmount - q.paidAmount }))
-    .filter((r) => r.outstanding > 0)
-    .sort((a, b) => b.outstanding - a.outstanding)
-    .map((r) => ({ id: r.id, title: r.title, subtitle: r.subtitle, value: r.outstanding }));
+  const pipelineRows: DrillDownRow[] = (openDeals?.items ?? []).map((d) => ({
+    id: d._id,
+    title: d.name,
+    subtitle: d.dealStatus,
+    meta: d.expectedClosingDate,
+    value: d.monetaryValue,
+  }));
 
   const trendRows: DrillDownRow[] = revenueTrend.map((t, i) => ({ id: `${t.period}-${i}`, title: t.period, value: t.achieved }));
 
@@ -153,16 +151,16 @@ export function KeyStatsGrid({ deals, businessHealthScore, revenueTrend, dateFro
         )}
       </Card>
 
-      <Card className={styles.cell} interactive onClick={() => setOpenDrilldown('outstanding')}>
-        <div className={styles.label}>Outstanding</div>
+      <Card className={styles.cell} interactive={hasPipeline} onClick={hasPipeline ? () => setOpenDrilldown('pipeline') : undefined}>
+        <div className={styles.label}>Pipeline · {period}</div>
         <div className={styles.value}>
-          {totalOutstanding !== null ? <AnimatedNumber value={totalOutstanding} format={money} /> : '—'}
+          <AnimatedNumber value={deals.openValue} format={money} />
         </div>
-        <div className={styles.caption}>{bucketSentence ?? 'Loading…'}</div>
+        <div className={styles.caption}>
+          {hasPipeline ? `${deals.openCount} open ${deals.openCount === 1 ? 'deal' : 'deals'} expected to close` : 'No open deals expected to close'}
+        </div>
         <div className={styles.divider} />
-        <div className={overdueOutstanding > 0 ? styles.footerWarn : styles.footerOk}>
-          {overdueOutstanding > 0 ? `${money(overdueOutstanding)} overdue` : 'No overdue payments'}
-        </div>
+        <div className={openDeals && overdueCount > 0 ? styles.footerWarn : styles.footerOk}>{pipelineFooter}</div>
       </Card>
 
       <DrillDownModal
@@ -173,11 +171,11 @@ export function KeyStatsGrid({ deals, businessHealthScore, revenueTrend, dateFro
         rows={closedDealRows}
       />
       <DrillDownModal
-        open={openDrilldown === 'outstanding'}
+        open={openDrilldown === 'pipeline'}
         onClose={() => setOpenDrilldown(null)}
-        title="Outstanding Quotes"
-        isLoading={outstandingQuotesLoading}
-        rows={outstandingRows}
+        title={`Open Pipeline — ${period}`}
+        isLoading={!openDeals}
+        rows={pipelineRows}
       />
       <DrillDownModal
         open={openDrilldown === 'health'}

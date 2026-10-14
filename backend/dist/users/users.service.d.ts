@@ -1,4 +1,4 @@
-import { Model } from 'mongoose';
+import { Model, Types } from 'mongoose';
 import { AgentRoleDocument } from '../agent-roles/schemas/agent-role.schema';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
@@ -8,18 +8,19 @@ export declare class UsersService {
     private userModel;
     private agentRoleModel;
     constructor(userModel: Model<UserDocument>, agentRoleModel: Model<AgentRoleDocument>);
-    findByEmail(email: string): Promise<(import("mongoose").Document<unknown, {}, UserDocument, {}, {}> & User & import("mongoose").Document<import("mongoose").Types.ObjectId, any, any, Record<string, any>, {}> & Required<{
-        _id: import("mongoose").Types.ObjectId;
+    findByEmail(email: string): Promise<(import("mongoose").Document<unknown, {}, UserDocument, {}, {}> & User & import("mongoose").Document<Types.ObjectId, any, any, Record<string, any>, {}> & Required<{
+        _id: Types.ObjectId;
     }> & {
         __v: number;
     }) | null>;
-    findById(id: string): Promise<(import("mongoose").Document<unknown, {}, UserDocument, {}, {}> & User & import("mongoose").Document<import("mongoose").Types.ObjectId, any, any, Record<string, any>, {}> & Required<{
-        _id: import("mongoose").Types.ObjectId;
+    findById(id: string): Promise<(import("mongoose").Document<unknown, {}, UserDocument, {}, {}> & User & import("mongoose").Document<Types.ObjectId, any, any, Record<string, any>, {}> & Required<{
+        _id: Types.ObjectId;
     }> & {
         __v: number;
     }) | null>;
     findIdsByOrgAndStore(organizationId: string, storeId: string): Promise<string[]>;
     findAll(organizationId: string): Promise<UserDocument[]>;
+    findTeamRoster(organizationId: string): Promise<UserDocument[]>;
     create(data: {
         email: string;
         passwordHash?: string;
@@ -27,21 +28,46 @@ export declare class UsersService {
         organizationId: string;
         storeId?: string;
         roles?: string[];
-    }): Promise<import("mongoose").Document<unknown, {}, UserDocument, {}, {}> & User & import("mongoose").Document<import("mongoose").Types.ObjectId, any, any, Record<string, any>, {}> & Required<{
-        _id: import("mongoose").Types.ObjectId;
+    }): Promise<import("mongoose").Document<unknown, {}, UserDocument, {}, {}> & User & import("mongoose").Document<Types.ObjectId, any, any, Record<string, any>, {}> & Required<{
+        _id: Types.ObjectId;
     }> & {
         __v: number;
     }>;
-    findByOAuthId(provider: 'google' | 'microsoft' | 'github', providerId: string): Promise<(import("mongoose").Document<unknown, {}, UserDocument, {}, {}> & User & import("mongoose").Document<import("mongoose").Types.ObjectId, any, any, Record<string, any>, {}> & Required<{
-        _id: import("mongoose").Types.ObjectId;
+    findByOAuthId(provider: 'google' | 'microsoft' | 'github', providerId: string): Promise<(import("mongoose").Document<unknown, {}, UserDocument, {}, {}> & User & import("mongoose").Document<Types.ObjectId, any, any, Record<string, any>, {}> & Required<{
+        _id: Types.ObjectId;
     }> & {
         __v: number;
     }) | null>;
-    linkOAuthProvider(userId: string, provider: 'google' | 'microsoft' | 'github', providerId: string): Promise<(import("mongoose").Document<unknown, {}, UserDocument, {}, {}> & User & import("mongoose").Document<import("mongoose").Types.ObjectId, any, any, Record<string, any>, {}> & Required<{
-        _id: import("mongoose").Types.ObjectId;
+    linkOAuthProvider(userId: string, provider: 'google' | 'microsoft' | 'github', providerId: string): Promise<(import("mongoose").Document<unknown, {}, UserDocument, {}, {}> & User & import("mongoose").Document<Types.ObjectId, any, any, Record<string, any>, {}> & Required<{
+        _id: Types.ObjectId;
     }> & {
         __v: number;
     }) | null>;
+    private assertRoleRequirements;
+    resolveFeatures(user: {
+        roles: string[];
+        organizationId: string;
+        assignedAgentId?: string;
+    }): Promise<string[] | undefined>;
+    profile(userId: string): Promise<{
+        features: string[] | undefined;
+        aiRoleName: string | undefined;
+        id: string;
+        email: string;
+        name: string;
+        organizationId: string;
+        storeId: string | undefined;
+        roles: string[];
+        assignedAgentId: string | undefined;
+        department: string | undefined;
+        active: boolean;
+        voiceAccessEnabled: boolean;
+        aiAccessEnabled: boolean;
+        phone: string | undefined;
+        timezone: string | undefined;
+        language: string | undefined;
+        createdAt: Date | undefined;
+    } | null>;
     createByAdmin(dto: CreateUserDto, organizationId: string): Promise<{
         user: {
             id: string;
@@ -62,7 +88,7 @@ export declare class UsersService {
         };
         tempPassword: string;
     }>;
-    updateByAdmin(id: string, dto: UpdateUserDto, organizationId: string): Promise<{
+    updateByAdmin(id: string, dto: UpdateUserDto, organizationId: string, callerId?: string): Promise<{
         id: string;
         email: string;
         name: string;
@@ -115,23 +141,23 @@ export declare class UsersService {
         language: string | undefined;
         createdAt: Date | undefined;
     };
-    setVerifyOtp(userId: string, otpHash: string, expiresAt: Date): Promise<(import("mongoose").Document<unknown, {}, UserDocument, {}, {}> & User & import("mongoose").Document<import("mongoose").Types.ObjectId, any, any, Record<string, any>, {}> & Required<{
-        _id: import("mongoose").Types.ObjectId;
+    setVerifyOtp(userId: string, otpHash: string, expiresAt: Date): Promise<(import("mongoose").Document<unknown, {}, UserDocument, {}, {}> & User & import("mongoose").Document<Types.ObjectId, any, any, Record<string, any>, {}> & Required<{
+        _id: Types.ObjectId;
     }> & {
         __v: number;
     }) | null>;
-    markEmailVerified(userId: string): Promise<(import("mongoose").Document<unknown, {}, UserDocument, {}, {}> & User & import("mongoose").Document<import("mongoose").Types.ObjectId, any, any, Record<string, any>, {}> & Required<{
-        _id: import("mongoose").Types.ObjectId;
+    markEmailVerified(userId: string): Promise<(import("mongoose").Document<unknown, {}, UserDocument, {}, {}> & User & import("mongoose").Document<Types.ObjectId, any, any, Record<string, any>, {}> & Required<{
+        _id: Types.ObjectId;
     }> & {
         __v: number;
     }) | null>;
-    setResetOtp(userId: string, otpHash: string, expiresAt: Date): Promise<(import("mongoose").Document<unknown, {}, UserDocument, {}, {}> & User & import("mongoose").Document<import("mongoose").Types.ObjectId, any, any, Record<string, any>, {}> & Required<{
-        _id: import("mongoose").Types.ObjectId;
+    setResetOtp(userId: string, otpHash: string, expiresAt: Date): Promise<(import("mongoose").Document<unknown, {}, UserDocument, {}, {}> & User & import("mongoose").Document<Types.ObjectId, any, any, Record<string, any>, {}> & Required<{
+        _id: Types.ObjectId;
     }> & {
         __v: number;
     }) | null>;
-    resetPassword(userId: string, passwordHash: string): Promise<(import("mongoose").Document<unknown, {}, UserDocument, {}, {}> & User & import("mongoose").Document<import("mongoose").Types.ObjectId, any, any, Record<string, any>, {}> & Required<{
-        _id: import("mongoose").Types.ObjectId;
+    resetPassword(userId: string, passwordHash: string): Promise<(import("mongoose").Document<unknown, {}, UserDocument, {}, {}> & User & import("mongoose").Document<Types.ObjectId, any, any, Record<string, any>, {}> & Required<{
+        _id: Types.ObjectId;
     }> & {
         __v: number;
     }) | null>;
@@ -145,8 +171,8 @@ export declare class UsersService {
         desktopPush: boolean;
         mobilePush: boolean;
         email: boolean;
-    }>): Promise<(import("mongoose").Document<unknown, {}, UserDocument, {}, {}> & User & import("mongoose").Document<import("mongoose").Types.ObjectId, any, any, Record<string, any>, {}> & Required<{
-        _id: import("mongoose").Types.ObjectId;
+    }>): Promise<(import("mongoose").Document<unknown, {}, UserDocument, {}, {}> & User & import("mongoose").Document<Types.ObjectId, any, any, Record<string, any>, {}> & Required<{
+        _id: Types.ObjectId;
     }> & {
         __v: number;
     }) | null>;
@@ -155,23 +181,23 @@ export declare class UsersService {
         voiceId?: string | null;
         personality?: string | null;
     }): Promise<UserVoicePreferences>;
-    setPendingTwoFactorSecret(userId: string, secretEncrypted: string, expiresAt: Date): Promise<(import("mongoose").Document<unknown, {}, UserDocument, {}, {}> & User & import("mongoose").Document<import("mongoose").Types.ObjectId, any, any, Record<string, any>, {}> & Required<{
-        _id: import("mongoose").Types.ObjectId;
+    setPendingTwoFactorSecret(userId: string, secretEncrypted: string, expiresAt: Date): Promise<(import("mongoose").Document<unknown, {}, UserDocument, {}, {}> & User & import("mongoose").Document<Types.ObjectId, any, any, Record<string, any>, {}> & Required<{
+        _id: Types.ObjectId;
     }> & {
         __v: number;
     }) | null>;
-    confirmTwoFactor(userId: string, secretEncrypted: string, backupCodes: TwoFactorBackupCode[]): Promise<(import("mongoose").Document<unknown, {}, UserDocument, {}, {}> & User & import("mongoose").Document<import("mongoose").Types.ObjectId, any, any, Record<string, any>, {}> & Required<{
-        _id: import("mongoose").Types.ObjectId;
+    confirmTwoFactor(userId: string, secretEncrypted: string, backupCodes: TwoFactorBackupCode[]): Promise<(import("mongoose").Document<unknown, {}, UserDocument, {}, {}> & User & import("mongoose").Document<Types.ObjectId, any, any, Record<string, any>, {}> & Required<{
+        _id: Types.ObjectId;
     }> & {
         __v: number;
     }) | null>;
-    clearTwoFactor(userId: string): Promise<(import("mongoose").Document<unknown, {}, UserDocument, {}, {}> & User & import("mongoose").Document<import("mongoose").Types.ObjectId, any, any, Record<string, any>, {}> & Required<{
-        _id: import("mongoose").Types.ObjectId;
+    clearTwoFactor(userId: string): Promise<(import("mongoose").Document<unknown, {}, UserDocument, {}, {}> & User & import("mongoose").Document<Types.ObjectId, any, any, Record<string, any>, {}> & Required<{
+        _id: Types.ObjectId;
     }> & {
         __v: number;
     }) | null>;
-    setBackupCodes(userId: string, backupCodes: TwoFactorBackupCode[]): Promise<(import("mongoose").Document<unknown, {}, UserDocument, {}, {}> & User & import("mongoose").Document<import("mongoose").Types.ObjectId, any, any, Record<string, any>, {}> & Required<{
-        _id: import("mongoose").Types.ObjectId;
+    setBackupCodes(userId: string, backupCodes: TwoFactorBackupCode[]): Promise<(import("mongoose").Document<unknown, {}, UserDocument, {}, {}> & User & import("mongoose").Document<Types.ObjectId, any, any, Record<string, any>, {}> & Required<{
+        _id: Types.ObjectId;
     }> & {
         __v: number;
     }) | null>;

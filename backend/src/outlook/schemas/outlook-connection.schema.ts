@@ -19,6 +19,12 @@ export class OutlookConnection {
   @Prop({ required: true })
   email: string;
 
+  // Every address this mailbox receives and sends as (primary, sign-in name,
+  // aliases), lower-cased — learned from Outlook on each sync. A mailbox often
+  // sends from an alias, so "is this from us?" is decided against all of them.
+  @Prop({ type: [String], default: undefined })
+  addresses?: string[];
+
   // The customer's own Azure AD tenant and the connecting user's own
   // Microsoft object id — decoded from the access token's `tid`/`oid`
   // claims (standard Graph v2.0 access-token claims, present without
@@ -30,6 +36,14 @@ export class OutlookConnection {
 
   @Prop()
   microsoftUserId?: string;
+
+  // The team member who actually works this mailbox, when that isn't the
+  // person who connected it — a shared enquiries@ / sales@ mailbox connected
+  // by the owner and answered by a salesperson. The team dashboards count the
+  // mailbox's email as this person's work. Unset: it counts as the connecting
+  // user's own.
+  @Prop()
+  handledByUserId?: string;
 
   @Prop({ required: true })
   accessToken: string;

@@ -71,6 +71,7 @@ let ChatGateway = ChatGateway_1 = class ChatGateway {
         }
         const agentId = body.agentId ?? (user.roles?.includes('agent_user') ? user.assignedAgentId : undefined);
         let conversationId = body.conversationId;
+        const attachmentIds = Array.isArray(body.attachmentIds) && body.attachmentIds.every((id) => typeof id === 'string') ? body.attachmentIds.slice(0, 10) : undefined;
         client.emit('typing', { typing: true });
         try {
             const result = await this.chatService.sendMessageStreaming(user.sub, user.organizationId, token, body.message, body.conversationId, (event) => {
@@ -95,14 +96,15 @@ let ChatGateway = ChatGateway_1 = class ChatGateway {
             }, agentId, (resolvedId) => {
                 conversationId = resolvedId;
                 client.emit('conversationId', { conversationId: resolvedId });
-            });
+            }, attachmentIds);
             client.emit('typing', { typing: false });
             client.emit('message', result);
         }
         catch (err) {
             this.logger.error(`onMessage failed for conversation ${conversationId}: ${err.message}`);
             client.emit('typing', { typing: false });
-            client.emit('error', { message: "Something went wrong generating that reply. Please try again." });
+            const message = err instanceof common_1.BadRequestException ? err.message : 'Something went wrong generating that reply. Please try again.';
+            client.emit('error', { message });
         }
     }
     async onCancel(client, body) {

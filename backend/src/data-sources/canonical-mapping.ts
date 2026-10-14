@@ -130,7 +130,36 @@ const GUESSES: Record<string, string[]> = {
   closeDate: ['closedate', 'closingdate', 'expectedclosedate', 'duedate', 'completedat', 'completiondate', 'enddate'],
   owner: ['owner', 'ownerid', 'assignedto', 'assignee', 'salesperson', 'user'],
   createdAt: ['createdat', 'created', 'datecreated', 'createdtime', 'createddate', 'createdon'],
+  // Quotes.
+  approvalStatus: ['approvalstatus', 'clientapprovalstatus', 'customerapproval', 'accepted', 'approved'],
+  currency: ['currency', 'currencycode'],
+  number: ['number', 'quotenumber', 'docnumber', 'reference', 'ticketnumber'],
+  dealRef: ['deal', 'dealid', 'jobid', 'opportunityid'],
+  ownerName: ['ownername', 'salespersonname', 'assignedtoname'],
+  customerCompany: ['customercompany', 'companyname', 'company', 'businessname'],
+  customerName: ['customername', 'clientname', 'contactname'],
+  customerEmail: ['customeremail', 'clientemail', 'email'],
+  customerPhone: ['customerphone', 'clientphone', 'phone', 'mobile'],
+  expirationDate: ['expirationdate', 'expirydate', 'validuntil', 'expiresat'],
 };
+
+/** How well a CRM field's name fits a HaiVE field, 0-95: an exact match on a
+ * known name scores highest (a little less for a nested field), a name that
+ * contains one scores as "probably", anything else 0. Names only — whether
+ * the field's values look right is the caller's to add (see
+ * MappingIntelligenceService). */
+export function nameScore(canonicalKey: string, path: string): number {
+  const guesses = GUESSES[canonicalKey] ?? [];
+  const segments = path.split('.');
+  const last = normalizeKey(segments[segments.length - 1] ?? '');
+  if (!last) return 0;
+  const depthPenalty = (segments.length - 1) * 4;
+  const exact = guesses.indexOf(last);
+  if (exact >= 0) return Math.max(60, 95 - exact * 2 - depthPenalty);
+  if (last === normalizeKey(canonicalKey)) return 93 - depthPenalty;
+  const partial = guesses.find((g) => g.length >= 4 && (last.includes(g) || (last.length >= 4 && g.includes(last))));
+  return partial ? Math.max(50, 72 - depthPenalty) : 0;
+}
 
 /** A first field mapping from one sample record: for each canonical field of
  * the module, the record's field whose name looks like it (top-level fields

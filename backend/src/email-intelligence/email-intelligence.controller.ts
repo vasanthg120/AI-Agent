@@ -1,13 +1,18 @@
-import { BadRequestException, Body, Controller, Get, Param, Post, Query, UseGuards } from '@nestjs/common';
+import { BadRequestException, Body, Controller, ForbiddenException, Get, Logger, Param, Post, Put, Query, UseGuards } from '@nestjs/common';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
 import { CustomerActivityService } from '../crm/customer-activity.service';
+import { Throttle } from '@nestjs/throttler';
 import { JwtPayload } from '../auth/jwt-payload.interface';
-import { EmailIntelligenceSyncService } from './email-intelligence-sync.service';
+import { EmailConversationService } from './email-conversation.service';
+import { EmailHistoryService } from './email-history.service';
+import { AUTO_DRAFT_BATCH, EmailIntelligenceSyncService } from './email-intelligence-sync.service';
 import { EmailResponseStatus } from './email-response-state';
-import { EmailIntelligenceService, ListEmailsQuery } from './email-intelligence.service';
+import { AUTO_DRAFT_MAX_AGE_DAYS, EmailIntelligenceService, ListEmailsQuery } from './email-intelligence.service';
+import { Feature } from '../common/app-features';
+import { FeatureGuard } from '../common/guards/feature.guard';
 
 const APPROVAL_STATUSES = ['pending', 'approved', 'rejected'] as const;
 const RESPONSE_VIEWS: EmailResponseStatus[] = ['needs_response', 'responded', 'resolved'];
@@ -49,14 +54,19 @@ function parseListQuery(raw: Record<string, string | undefined>): ListEmailsQuer
 // user, self-scoped via their own JWT sub. Each item belongs to exactly one
 // mailbox owner; there is no org-wide oversight view in this pass (see
 // Phase 14b plan notes).
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, FeatureGuard)
+@Feature('email_inbox')
 @Controller('email-intelligence')
 export class EmailIntelligenceController {
   constructor(
     private emailIntelligenceService: EmailIntelligenceService,
     private customerActivityService: CustomerActivityService,
     private emailIntelligenceSyncService: EmailIntelligenceSyncService,
+    private emailHistory: EmailHistoryService,
+    private conversations: EmailConversationService,
   ) {}
+
+  private readonly logger = new Logger(EmailIntelligenceController.name);
 
   // Phase 21 — cheap, LLM-free count of how many messages-since-lookback are
   // new, so the frontend can show a real confirm-before-spend operation
@@ -76,6 +86,21 @@ export class EmailIntelligenceController {
   @Post('sync')
   sync(@CurrentUser() user: JwtPayload) {
     return this.emailIntelligenceSyncService.syncMyMailbox(user.sub, 'user');
+  }
+
+  // The cheap reply check: has anything waiting been answered in Outlook?
+  // Reads the caller's Sent Items only — no new mail, no AI — so the inbox
+  // page can call it whenever it is open. Rate-limited per mailbox server-side.
+  @Post('sync/replies')
+  refreshReplies(@CurrentUser() user: JwtPayload) {
+    return this.emailIntelligenceSyncService.refreshReplies(user.sub);
+  }
+
+  // When the caller's mailbox was last synced, whether a sync is running now,
+  // and how many stored emails are still waiting for an AI reading.
+  @Get('sync/state')
+  syncState(@CurrentUser() user: JwtPayload) {
+    return this.emailIntelligenceSyncService.syncState(user.sub);
   }
 
   // Phase 21 — recent sync-job history for the caller's own mailbox. Static
@@ -173,6 +198,89 @@ export class EmailIntelligenceController {
     return [start, end];
   }
 
+  // ---- mailbox history, sent mail, follow-up analysis (EmailHistoryService).
+  // Static segments — declared before the ':id' routes below. All self-scoped
+  // to the caller's own connected mailbox, like the rest of this controller.
+
+  // How much of the mailbox HaiVE holds and how far back it goes.
+  @Get('history/status')
+  historyStatus(@CurrentUser() user: JwtPayload) {
+    return this.emailHistory.status(user.sub);
+  }
+
+  // Loads older inbox + sent mail (no AI calls). Can take a while for a large mailbox.
+  @Post('history/import')
+  @Throttle({ default: { limit: 4, ttl: 60_000 } })
+  importHistory(@CurrentUser() user: JwtPayload, @Body() body: { days?: number }) {
+    return this.emailHistory.importHistory(user.sub, Number(body?.days));
+  }
+
+  @Get('sent')
+  listSent(@CurrentUser() user: JwtPayload, @Query() query: Record<string, string | undefined>) {
+    return this.emailHistory.listSent(user.sub, {
+      search: query.search,
+      from: query.from,
+      to: query.to,
+      skip: query.skip ? Number(query.skip) : undefined,
+      limit: query.limit ? Number(query.limit) : undefined,
+    });
+  }
+
+  // ---- replies: the owner's settings, and AI drafts for mail waiting without one ----
+  // Static segments, declared before the ':id' routes below.
+
+  @Get('settings')
+  inboxSettings(@CurrentUser() user: JwtPayload) {
+    return this.emailIntelligenceService.getInboxSettings(user.sub);
+  }
+
+  @Put('settings')
+  async updateInboxSettings(@CurrentUser() user: JwtPayload, @Body() body: { autoDraft?: boolean; sendOnApprove?: boolean }) {
+    if (body?.autoDraft === true && user.aiAccessEnabled === false) {
+      throw new ForbiddenException('AI access has been disabled for your account by an administrator.');
+    }
+    const before = await this.emailIntelligenceService.getInboxSettings(user.sub);
+    const settings = await this.emailIntelligenceService.updateInboxSettings(user.sub, body ?? {});
+    // Just switched on: start on what is already waiting now, instead of at the next sync.
+    if (settings.autoDraft && !before.autoDraft)
+      this.emailIntelligenceSyncService.startDraftRun(user.sub, { limit: AUTO_DRAFT_BATCH, maxAgeDays: AUTO_DRAFT_MAX_AGE_DAYS });
+    return settings;
+  }
+
+  // How many waiting emails have a draft, how many don't, and whether drafts are being written now.
+  @Get('drafts/summary')
+  async draftSummary(@CurrentUser() user: JwtPayload) {
+    const [summary, settings] = await Promise.all([
+      this.emailIntelligenceService.draftSummary(user.sub),
+      this.emailIntelligenceService.getInboxSettings(user.sub),
+    ]);
+    return { ...summary, settings, ...this.emailIntelligenceSyncService.draftRunState(user.sub) };
+  }
+
+  // "Draft with AI" for the mail waiting without a draft: real, billed AI calls — same
+  // per-employee switch as the chat. Runs in the background; the summary above reports progress.
+  @Post('drafts/run')
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
+  runDrafts(@CurrentUser() user: JwtPayload, @Body() body: { limit?: number }) {
+    if (user.aiAccessEnabled === false) {
+      throw new ForbiddenException('AI access has been disabled for your account by an administrator.');
+    }
+    const started = this.emailIntelligenceSyncService.startDraftRun(user.sub, { limit: Number(body?.limit) || AUTO_DRAFT_BATCH });
+    return { started, alreadyRunning: !started };
+  }
+
+  // Responded / Not responded / Follow-up required / Overdue follow-up, read from the threads.
+  @Get('follow-up-analysis')
+  followUpAnalysis(@CurrentUser() user: JwtPayload) {
+    return this.emailHistory.followUpAnalysis(user.sub);
+  }
+
+  // Makes a follow-up row a real reminder so it can be drafted, approved and sent.
+  @Post('follow-up-analysis/:emailId/reminder')
+  ensureFollowUpReminder(@CurrentUser() user: JwtPayload, @Param('emailId') emailId: string) {
+    return this.emailHistory.ensureReminder(user.sub, emailId);
+  }
+
   // Phase 14e — static segment, must be declared before the ':id' GET route
   // below or it would be swallowed as an id param.
   @Get('follow-ups')
@@ -186,10 +294,15 @@ export class EmailIntelligenceController {
   }
 
   // AI Follow-up action layer (additive) — generate -> review -> approve ->
-  // send, gated behind AI_FOLLOWUP_ACTIONS_ENABLED (see
-  // email-intelligence.service.ts's generateFollowUpDraft).
+  // send. Drafting on a click is always available; a real, billed AI call —
+  // same per-employee switch as the chat. (AI_FOLLOWUP_ACTIONS_ENABLED only
+  // governs drafts written automatically when an SLA is breached.)
   @Post('follow-ups/:id/draft')
+  @Throttle({ default: { limit: 20, ttl: 60_000 } })
   generateFollowUpDraft(@CurrentUser() user: JwtPayload, @Param('id') id: string) {
+    if (user.aiAccessEnabled === false) {
+      throw new ForbiddenException('AI access has been disabled for your account by an administrator.');
+    }
     return this.emailIntelligenceService.generateFollowUpDraft(user.sub, id);
   }
 
@@ -216,8 +329,14 @@ export class EmailIntelligenceController {
   // The stored messages of this email's conversation, with what has been
   // answered — for the detail view's thread timeline.
   @Get(':id/thread')
-  thread(@CurrentUser() user: JwtPayload, @Param('id') id: string) {
-    return this.emailIntelligenceService.thread(user.sub, id);
+  async thread(@CurrentUser() user: JwtPayload, @Param('id') id: string) {
+    const thread = await this.emailIntelligenceService.thread(user.sub, id);
+    // Both sides of the conversation: what we sent back, as stored from Sent Items.
+    const sent = await this.conversations.sentInConversation(user.sub, thread.conversationId ?? undefined);
+    return {
+      ...thread,
+      sent: sent.map((m) => ({ id: m._id.toString(), subject: m.subject, to: m.toAddresses, sentAt: m.sentAt, preview: m.bodyPreview })),
+    };
   }
 
   @Post(':id/approve')
@@ -236,8 +355,31 @@ export class EmailIntelligenceController {
   // deliberate human-in-the-loop step (see plan notes: approve and send are
   // two separate explicit actions, never combined).
   @Post(':id/send')
-  send(@CurrentUser() user: JwtPayload, @Param('id') id: string) {
-    return this.emailIntelligenceService.send(user.sub, id);
+  async send(@CurrentUser() user: JwtPayload, @Param('id') id: string) {
+    const item = await this.emailIntelligenceService.send(user.sub, id);
+    this.confirmFromMailbox(user.sub);
+    return item;
+  }
+
+  // "Approve & send": the reply as the person left it — the AI's draft, an edited one, or one they
+  // wrote themselves — approved and dispatched in one step. The button says what it does; there is
+  // no second click. A failed send leaves it approved and unsent, with the reason, to be sent again.
+  @Post(':id/reply')
+  async reply(@CurrentUser() user: JwtPayload, @Param('id') id: string, @Body() body: { text?: string }) {
+    const item = await this.emailIntelligenceService.reply(user.sub, id, body?.text ?? '');
+    this.confirmFromMailbox(user.sub);
+    return item;
+  }
+
+  // Shortly after a send, read the reply back from Outlook's Sent Items so the sent message itself
+  // is on record against the conversation (the email is already marked answered — this only
+  // confirms it from the mailbox).
+  private confirmFromMailbox(userId: string): void {
+    setTimeout(() => {
+      this.emailIntelligenceSyncService
+        .refreshReplies(userId, { force: true })
+        .catch((err) => this.logger.warn(`Post-send mailbox check failed for user ${userId}: ${(err as Error).message}`));
+    }, 15_000).unref();
   }
 
   @Post(':id/regenerate')
@@ -246,6 +388,12 @@ export class EmailIntelligenceController {
     // context for this one on-demand action, same cost/effort as one poll
     // tick's per-org gather (not run in a loop here, just once).
     const context = await this.customerActivityService.gatherCorrelationContext(user.organizationId);
-    return this.emailIntelligenceService.regenerate(user.sub, id, context);
+    // The AI reads the whole conversation so far, not just this one message.
+    const item = await this.emailIntelligenceService.getOne(user.sub, id);
+    const [thread, ownAddresses] = await Promise.all([
+      this.conversations.threadContext(user.sub, item.conversationId, item.receivedAt, id),
+      this.conversations.ownAddresses(user.sub),
+    ]);
+    return this.emailIntelligenceService.regenerate(user.sub, id, context, { thread, ownAddresses });
   }
 }

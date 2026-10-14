@@ -11,6 +11,7 @@ import {
   FiMic,
   FiPieChart,
   FiSun,
+  FiUsers,
 } from 'react-icons/fi';
 import { ROUTES } from './routes';
 import type { NavGroup } from '@/types';
@@ -55,6 +56,7 @@ export const NAV_GROUPS: NavGroup[] = [
         hint: 'What the AI knows about your business',
         // Owner/admin/manager only, matching CRM-dashboard-tier visibility.
         hideForRoles: ['agent_user', 'user', 'consultant'],
+        feature: 'business_knowledge',
       },
       {
         id: 'email-intelligence',
@@ -66,6 +68,18 @@ export const NAV_GROUPS: NavGroup[] = [
         // benefits, hidden only for agent_user (an AI-persona account, not a
         // real salesperson mailbox).
         hideForRoles: ['agent_user'],
+        feature: 'email_inbox',
+      },
+      {
+        id: 'customers',
+        label: 'Customers',
+        path: ROUTES.customers,
+        icon: FiUsers,
+        hint: 'Inquiries, quotes, invoices and email for every customer, in one view',
+        // Owner/admin/manager, like the other sales pages (enforced by the API too). The
+        // feature key predates the page: it was "New Inquiries" before this view replaced it.
+        hideForRoles: ['agent_user', 'user', 'consultant'],
+        feature: 'inquiries',
       },
       {
         id: 'call-copilot',
@@ -76,6 +90,7 @@ export const NAV_GROUPS: NavGroup[] = [
         // Same reasoning as AI Email Inbox above — a live sales-call tool for
         // a real salesperson on the phone, not relevant to an AI-persona account.
         hideForRoles: ['agent_user'],
+        feature: 'call_copilot',
       },
       {
         id: 'chat-history',

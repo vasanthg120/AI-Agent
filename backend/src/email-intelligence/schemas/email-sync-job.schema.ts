@@ -27,8 +27,10 @@ export class EmailSyncJob {
   // CANCELLED states: this stays a fully synchronous, click-and-wait
   // operation, not a queue, so those states wouldn't correspond to anything
   // real yet (see Phase 21 follow-up plan notes for why that was scoped out).
-  @Prop({ required: true, enum: ['completed', 'completed_with_errors', 'failed'] })
-  status: 'completed' | 'completed_with_errors' | 'failed';
+  // 'running' is the mailbox's sync lock: at most one sync per mailbox at a time
+  // (see the unique index below), across every backend process.
+  @Prop({ required: true, enum: ['running', 'completed', 'completed_with_errors', 'failed'] })
+  status: 'running' | 'completed' | 'completed_with_errors' | 'failed';
 
   @Prop({ required: true, default: 0 })
   scannedCount: number;
@@ -53,9 +55,38 @@ export class EmailSyncJob {
   @Prop({ required: true })
   startedAt: Date;
 
-  @Prop({ required: true })
-  completedAt: Date;
+  // Absent while the sync is still running.
+  @Prop()
+  completedAt?: Date;
+
+  // New mail stored without an AI reading (no credits / AI unavailable) — it is
+  // tracked and retried, not lost.
+  @Prop({ default: 0 })
+  deferredCount: number;
+
+  // Emails this run found had been answered in Outlook.
+  @Prop({ default: 0 })
+  answeredCount: number;
+
+  // More mail was in the window than one run reads; the next run continues.
+  @Prop({ default: false })
+  truncated: boolean;
+
+  // Why the run failed, in one line (never message content).
+  @Prop()
+  error?: string;
+
+  // The start of the mailbox window this run read.
+  @Prop()
+  windowStart?: Date;
+
+  // Set on a run that left messages unstored (failedCount > 0) once a later
+  // run has read its window again cleanly. Until then every sync re-reads it.
+  @Prop()
+  failuresRecovered?: boolean;
 }
 
 export const EmailSyncJobSchema = SchemaFactory.createForClass(EmailSyncJob);
 EmailSyncJobSchema.index({ userId: 1, createdAt: -1 });
+// Named explicitly: the plain `userId` index above already owns the default name.
+EmailSyncJobSchema.index({ userId: 1 }, { name: 'one_running_sync_per_user', unique: true, partialFilterExpression: { status: 'running' } });

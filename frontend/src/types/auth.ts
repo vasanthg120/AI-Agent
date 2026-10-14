@@ -6,6 +6,9 @@ export interface User {
   company?: string;
   roles: string[];
   assignedAgentId?: string;
+  // For an account tied to an AI role: that role's name and the app features it includes.
+  aiRoleName?: string;
+  features?: string[];
   avatarUrl?: string;
   timezone?: string;
   language?: string;

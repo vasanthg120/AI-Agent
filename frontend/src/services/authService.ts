@@ -34,6 +34,8 @@ interface BackendUserProfile {
   name: string;
   roles: string[];
   assignedAgentId?: string;
+  aiRoleName?: string;
+  features?: string[];
   department?: string;
   // Self-editable profile fields (PATCH /users/me). Absent until the user
   // first saves them — timezone/language then fall back to the device's.
@@ -52,6 +54,8 @@ function toUser(profile: BackendUserProfile): User {
     lastName: rest.join(' '),
     roles: profile.roles ?? [],
     assignedAgentId: profile.assignedAgentId,
+    aiRoleName: profile.aiRoleName,
+    features: profile.features,
     department: profile.department,
     phone: profile.phone,
     timezone: profile.timezone ?? Intl.DateTimeFormat().resolvedOptions().timeZone,

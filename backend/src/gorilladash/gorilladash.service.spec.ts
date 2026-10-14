@@ -30,11 +30,17 @@ describe('GorillaDashService', () => {
     expect(options.validateStatus(201)).toBe(true);
     expect(options.validateStatus(200)).toBe(true);
     expect(options.validateStatus(401)).toBe(false);
-    expect(integrations.connectWithAuth).toHaveBeenCalledWith('org-1', 'gorilladash', {
-      authType: 'basic',
-      credentials: { username: 'key-12345678', password: 'secret-12345678' },
-      baseUrl: 'https://api.gorilladash.com',
-    });
+    expect(integrations.connectWithAuth).toHaveBeenCalledWith(
+      'org-1',
+      'gorilladash',
+      {
+        authType: 'basic',
+        credentials: { username: 'key-12345678', password: 'secret-12345678' },
+        baseUrl: 'https://api.gorilladash.com',
+      },
+      // No options: the first sync starts straight away (the setup wizard passes skipSync instead).
+      {},
+    );
     expect(result).toEqual({ connected: true, keyMasked: expect.stringMatching(/^key-.*78$/), keyScope: 'organization' });
     expect(result.keyMasked).not.toContain('12345');
   });

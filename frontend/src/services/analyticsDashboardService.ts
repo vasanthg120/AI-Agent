@@ -60,7 +60,26 @@ export interface AnalyticsDashboardOverview {
   insights: AiInsightItem[];
 }
 
+// The open pipeline of every month at once (not scoped to the dashboard's chosen month).
+export interface PipelineByMonth {
+  scope: { level: 'org' | 'store' | 'user'; storeId?: string; storeName?: string; userId?: string };
+  // Every open deal in scope, dated or not.
+  totalCount: number;
+  totalValue: number;
+  // Oldest first, from the earliest to the latest month that has an open deal; a month between them with none is there at zero.
+  months: { period: string; count: number; value: number }[];
+  // Open deals with no expected closing date: in the total, in no month.
+  undated: { count: number; value: number };
+}
+
 export const analyticsDashboardService = {
+  async getPipelineByMonth(storeId?: string): Promise<PipelineByMonth> {
+    const { data } = await axiosClient.get<PipelineByMonth>('/analytics-dashboard/pipeline-by-month', {
+      params: storeId ? { storeId } : undefined,
+    });
+    return data;
+  },
+
   async getOverview(
     dateFrom: string,
     dateTo: string,

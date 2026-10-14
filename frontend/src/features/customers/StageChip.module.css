@@ -1,0 +1,133 @@
+/* A step of the work: a block of colour, and one quiet line under it. */
+.stage {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.title {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+}
+
+.chip {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 28px;
+  padding: 0 var(--chip-pad, 8px);
+  border-radius: var(--radius-sm);
+  /* Dark ink on a bright fill: readable on all four colours, in either theme. */
+  color: #17130e;
+  background: var(--tone);
+  font-size: var(--chip-font, 11px);
+  font-weight: 700;
+  line-height: 28px;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  overflow: hidden;
+  transition:
+    filter var(--duration-fast) var(--ease-out),
+    box-shadow var(--duration-fast) var(--ease-out),
+    background-color 220ms var(--ease-out),
+    color 220ms var(--ease-out);
+}
+
+.chipLabel {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.chipWrap {
+  position: relative;
+  display: block;
+  min-width: 0;
+}
+
+/* The mark of a status the team set by hand: a small pencil on the chip's corner. */
+.byHand {
+  position: absolute;
+  top: -6px;
+  right: -5px;
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  border: 1px solid var(--color-border-strong);
+  border-radius: 50%;
+  background: var(--color-bg-surface);
+  color: var(--color-text-secondary);
+  font-size: 9px;
+  box-shadow: var(--shadow-sm);
+}
+
+.chevron {
+  flex: none;
+  font-size: 12px;
+  opacity: 0.7;
+  transition: transform var(--duration-fast) var(--ease-out);
+}
+
+/* A chip that opens a list of statuses: it answers the pointer. The arrow sits tight to the edge, so a
+   twelve-letter status still fits beside it on a phone. */
+.asMenu .chip {
+  gap: 2px;
+  padding-right: 5px;
+  cursor: pointer;
+}
+
+.asMenu:hover .chip {
+  filter: brightness(0.95);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-text-primary) 14%, transparent);
+}
+
+.asMenu:hover .chevron {
+  opacity: 1;
+}
+
+.done {
+  --tone: var(--color-success);
+}
+
+.progress {
+  --tone: var(--color-info);
+}
+
+.waiting {
+  --tone: var(--color-warning);
+}
+
+.attention {
+  --tone: var(--color-danger);
+}
+
+/* A fact with nothing to do about it ("Not recorded", "Rejected"). */
+.muted .chip {
+  color: var(--color-text-secondary);
+  background: color-mix(in srgb, var(--color-text-muted) 26%, var(--color-bg-surface));
+}
+
+/* Nothing there: an empty slot that still says what is missing. */
+.none .chip {
+  color: var(--color-text-muted);
+  background: color-mix(in srgb, var(--color-text-muted) 9%, var(--color-bg-surface));
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.detail {
+  font-size: var(--text-xs);
+  line-height: 1.35;
+  color: var(--color-text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}

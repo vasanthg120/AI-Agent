@@ -10,6 +10,7 @@ import { UPLOAD_FILE_INTERCEPTOR_OPTIONS } from '../common/upload-limits';
 import { BusinessKnowledgeDocumentListQueryDto } from './dto/business-knowledge-document-list-query.dto';
 import { UpdateBusinessKnowledgeDocumentDto } from './dto/update-business-knowledge-document.dto';
 import { BusinessKnowledgeDocumentsService } from './business-knowledge-documents.service';
+import { Feature } from '../common/app-features';
 
 // Reads (list/get/file) are CRM-dashboard-tier (owner/admin/manager) —
 // mutations (upload/patch/delete/retry) are owner/admin only, matching
@@ -18,6 +19,7 @@ import { BusinessKnowledgeDocumentsService } from './business-knowledge-document
 // registered before ':id', same rule as crm/deals.controller.ts.
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Roles('owner', 'admin', 'manager')
+@Feature('business_knowledge')
 @Controller('business-knowledge/documents')
 export class BusinessKnowledgeDocumentsController {
   constructor(private documentsService: BusinessKnowledgeDocumentsService) {}

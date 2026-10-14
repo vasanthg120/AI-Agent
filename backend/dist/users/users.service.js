@@ -49,6 +49,8 @@ exports.UsersService = void 0;
 const crypto_1 = require("crypto");
 const common_1 = require("@nestjs/common");
 const mongoose_1 = require("@nestjs/mongoose");
+const app_features_1 = require("../common/app-features");
+const team_roster_1 = require("../common/team-roster");
 const bcrypt = __importStar(require("bcrypt"));
 const mongoose_2 = require("mongoose");
 const agent_role_schema_1 = require("../agent-roles/schemas/agent-role.schema");
@@ -57,6 +59,7 @@ const user_schema_1 = require("./schemas/user.schema");
 const SALT_ROUNDS = 12;
 const MAX_SESSIONS = 10;
 const MAX_PUSH_SUBSCRIPTIONS = 20;
+const STORE_SCOPED_ROLES = new Set(['manager', 'consultant']);
 let UsersService = class UsersService {
     constructor(userModel, agentRoleModel) {
         this.userModel = userModel;
@@ -78,6 +81,19 @@ let UsersService = class UsersService {
     async findAll(organizationId) {
         return this.userModel.find({ organizationId }).exec();
     }
+    async findTeamRoster(organizationId) {
+        const users = (await this.findAll(organizationId)).filter((u) => u.active !== false && !(0, team_roster_1.isOwner)(u.roles));
+        const ids = users.map((u) => u._id.toString());
+        if (ids.length === 0)
+            return [];
+        const db = this.userModel.db;
+        const [mailboxOwners, dealOwners] = await Promise.all([
+            db.collection('outlook_connections').distinct('userId', { userId: { $in: ids }, isActive: true }),
+            db.collection('crm_deals').distinct('ownerId', { organizationId, ownerId: { $in: ids } }),
+        ]);
+        const working = new Set([...mailboxOwners, ...dealOwners].map(String));
+        return users.filter((u) => (0, team_roster_1.hasTeamRole)(u.roles) || working.has(u._id.toString()));
+    }
     create(data) {
         return this.userModel.create(data);
     }
@@ -89,53 +105,132 @@ let UsersService = class UsersService {
             .findByIdAndUpdate(userId, { [`oauthProviders.${provider}`]: providerId }, { new: true })
             .exec();
     }
+    async assertRoleRequirements(organizationId, role, assignedAgentId, storeId) {
+        if (role === 'agent_user') {
+            if (!assignedAgentId)
+                throw new common_1.BadRequestException('Choose which AI agent this Agent User is locked to.');
+            if (!(await this.resolveValidAgentIds(organizationId)).has(assignedAgentId)) {
+                throw new common_1.BadRequestException('That AI agent no longer exists or isn’t active. Pick another one.');
+            }
+        }
+        if (STORE_SCOPED_ROLES.has(role)) {
+            if (!storeId)
+                throw new common_1.BadRequestException('Choose the store this Manager/Consultant belongs to.');
+            const store = (0, mongoose_2.isValidObjectId)(storeId)
+                ? await this.userModel.db.collection('stores').findOne({ _id: new mongoose_2.Types.ObjectId(storeId), organizationId }, { projection: { _id: 1 } })
+                : null;
+            if (!store)
+                throw new common_1.BadRequestException('That store doesn’t belong to your organization. Pick one from the list.');
+        }
+    }
+    async resolveFeatures(user) {
+        if (!(0, app_features_1.isAiRoleAccount)(user.roles))
+            return undefined;
+        if (!user.assignedAgentId)
+            return [];
+        const role = await this.userModel.db
+            .collection('agent_roles')
+            .findOne({ organizationId: user.organizationId, slug: user.assignedAgentId, status: 'active' }, { projection: { features: 1 } });
+        if (!role)
+            return [];
+        const features = Array.isArray(role.features) ? role.features : app_features_1.DEFAULT_ROLE_FEATURES;
+        return features.filter((f) => app_features_1.APP_FEATURES.includes(f));
+    }
+    async profile(userId) {
+        const user = await this.findById(userId);
+        if (!user)
+            return null;
+        const features = await this.resolveFeatures(user);
+        let aiRoleName;
+        if (features !== undefined && user.assignedAgentId) {
+            const role = await this.userModel.db
+                .collection('agent_roles')
+                .findOne({ organizationId: user.organizationId, slug: user.assignedAgentId }, { projection: { name: 1 } });
+            aiRoleName = typeof role?.name === 'string' ? role.name : undefined;
+        }
+        return { ...this.toPublic(user), features, aiRoleName };
+    }
     async createByAdmin(dto, organizationId) {
-        if (dto.role === 'agent_user') {
-            if (!dto.assignedAgentId) {
-                throw new common_1.BadRequestException('assignedAgentId is required for agent_user role');
-            }
-            if (!(await this.resolveValidAgentIds(organizationId)).has(dto.assignedAgentId)) {
-                throw new common_1.BadRequestException('assignedAgentId is not a known agent');
-            }
+        const email = dto.email.trim().toLowerCase();
+        const name = dto.name.trim();
+        if (!name)
+            throw new common_1.BadRequestException('Enter the person’s name.');
+        await this.assertRoleRequirements(organizationId, dto.role, dto.assignedAgentId, dto.storeId);
+        if (await this.userModel.exists({ email })) {
+            throw new common_1.ConflictException('An account with this email address already exists.');
         }
         const tempPassword = (0, crypto_1.randomBytes)(9).toString('base64url');
         const passwordHash = await bcrypt.hash(tempPassword, SALT_ROUNDS);
-        const user = await this.userModel.create({
-            email: dto.email,
-            passwordHash,
-            name: dto.name,
-            organizationId,
-            storeId: dto.storeId,
-            roles: [dto.role],
-            assignedAgentId: dto.role === 'agent_user' ? dto.assignedAgentId : undefined,
-            department: dto.department,
-            active: true,
-            voiceAccessEnabled: dto.voiceAccessEnabled ?? true,
-            aiAccessEnabled: dto.aiAccessEnabled ?? true,
-        });
-        return { user: this.toPublic(user), tempPassword };
-    }
-    async updateByAdmin(id, dto, organizationId) {
-        if (dto.assignedAgentId && !(await this.resolveValidAgentIds(organizationId)).has(dto.assignedAgentId)) {
-            throw new common_1.BadRequestException('assignedAgentId is not a known agent');
+        try {
+            const user = await this.userModel.create({
+                email,
+                passwordHash,
+                name,
+                organizationId,
+                storeId: STORE_SCOPED_ROLES.has(dto.role) ? dto.storeId : undefined,
+                roles: [dto.role],
+                assignedAgentId: dto.role === 'agent_user' ? dto.assignedAgentId : undefined,
+                department: dto.department?.trim() || undefined,
+                active: true,
+                voiceAccessEnabled: dto.voiceAccessEnabled ?? true,
+                aiAccessEnabled: dto.aiAccessEnabled ?? true,
+            });
+            return { user: this.toPublic(user), tempPassword };
         }
-        await this.assertNotOwner(id, organizationId);
-        const update = {};
+        catch (err) {
+            if (err.code === 11000)
+                throw new common_1.ConflictException('An account with this email address already exists.');
+            throw err;
+        }
+    }
+    async updateByAdmin(id, dto, organizationId, callerId) {
+        const target = (0, mongoose_2.isValidObjectId)(id) ? await this.userModel.findOne({ _id: id, organizationId }).exec() : null;
+        if (!target)
+            throw new common_1.NotFoundException('User not found');
+        if (target.roles.includes('owner')) {
+            if (callerId !== id)
+                throw new common_1.ForbiddenException("The organization owner's account can't be modified or deleted by another admin");
+            if (dto.role !== undefined || dto.active !== undefined || dto.assignedAgentId !== undefined || dto.storeId !== undefined) {
+                throw new common_1.BadRequestException("The owner's role and status can't be changed.");
+            }
+        }
+        const role = dto.role ?? target.roles[0];
+        const assignedAgentId = dto.assignedAgentId ?? target.assignedAgentId;
+        const storeId = dto.storeId ?? target.storeId;
+        if (dto.role !== undefined || dto.assignedAgentId !== undefined || dto.storeId !== undefined) {
+            await this.assertRoleRequirements(organizationId, role, assignedAgentId, storeId);
+        }
+        const set = {};
+        const unset = {};
+        if (dto.name !== undefined) {
+            const name = dto.name.trim();
+            if (!name)
+                throw new common_1.BadRequestException('Enter the person’s name.');
+            set.name = name;
+        }
         if (dto.role)
-            update.roles = [dto.role];
-        if (dto.assignedAgentId !== undefined)
-            update.assignedAgentId = dto.assignedAgentId;
-        if (dto.storeId !== undefined)
-            update.storeId = dto.storeId;
+            set.roles = [dto.role];
+        if (role === 'agent_user')
+            set.assignedAgentId = assignedAgentId;
+        else if (target.assignedAgentId)
+            unset.assignedAgentId = '';
+        if (STORE_SCOPED_ROLES.has(role))
+            set.storeId = storeId;
+        else if (dto.role !== undefined && target.storeId && !target.roles.includes('owner'))
+            unset.storeId = '';
         if (dto.active !== undefined)
-            update.active = dto.active;
+            set.active = dto.active;
         if (dto.department !== undefined)
-            update.department = dto.department;
+            set.department = dto.department.trim();
         if (dto.voiceAccessEnabled !== undefined)
-            update.voiceAccessEnabled = dto.voiceAccessEnabled;
+            set.voiceAccessEnabled = dto.voiceAccessEnabled;
         if (dto.aiAccessEnabled !== undefined)
-            update.aiAccessEnabled = dto.aiAccessEnabled;
-        const updated = await this.userModel.findOneAndUpdate({ _id: id, organizationId }, update, { new: true }).exec();
+            set.aiAccessEnabled = dto.aiAccessEnabled;
+        if (dto.active === false)
+            set.sessions = [];
+        const updated = await this.userModel
+            .findOneAndUpdate({ _id: id, organizationId }, { ...(Object.keys(set).length ? { $set: set } : {}), ...(Object.keys(unset).length ? { $unset: unset } : {}) }, { new: true })
+            .exec();
         if (!updated)
             throw new common_1.NotFoundException('User not found');
         return this.toPublic(updated);

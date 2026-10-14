@@ -11,12 +11,42 @@ import { CustomerActivityService, TodaysEmail } from '../crm/customer-activity.s
 import { OutlookConnection, OutlookConnectionDocument } from '../outlook/schemas/outlook-connection.schema';
 import { UsersService } from '../users/users.service';
 import { EmailSyncJob, EmailSyncJobDocument } from './schemas/email-sync-job.schema';
-import { EmailIntelligenceService } from './email-intelligence.service';
+import { EmailConversationService } from './email-conversation.service';
+import { EmailHistoryService, SentMessage } from './email-history.service';
+import { analysisFailureReason, AUTO_DRAFT_MAX_AGE_DAYS, EmailIntelligenceService } from './email-intelligence.service';
 
 export interface SyncMailboxResult {
   connected: boolean;
   scannedCount: number;
   newItemsCount: number;
+  /** New mail stored without an AI reading (no credits / AI unavailable); it is tracked and retried. */
+  deferredCount?: number;
+  /** Emails found to have been answered in Outlook. */
+  answeredCount?: number;
+  /** Another sync of this mailbox was already running, so this one did nothing. */
+  alreadyRunning?: boolean;
+}
+
+export interface ReplyRefreshResult {
+  connected: boolean;
+  /** Emails newly found answered. */
+  answered: number;
+  /** False when the mailbox was checked moments ago and this call was skipped. */
+  checked: boolean;
+}
+
+interface InboxResponse {
+  connected: boolean;
+  emails: TodaysEmail[];
+  truncated?: boolean;
+  mailboxAddresses?: string[];
+}
+
+interface SentResponse {
+  connected: boolean;
+  items: SentMessage[];
+  truncated?: boolean;
+  mailboxAddresses?: string[];
 }
 
 // Phase 21 follow-up — a genuinely richer response, no longer the same
@@ -82,6 +112,37 @@ const MAX_SYNC_BACKFILL_DAYS = 14;
 // can never force an unbounded Graph query.
 const EXTERNAL_REPLY_LOOKBACK_DAYS = 180;
 
+// How far back each sync reads Sent Items to keep them (idempotent — already-stored messages are skipped).
+const SENT_KEEP_LOOKBACK_DAYS = 3;
+
+// Each sync re-reads this much before the previous run's START. Mail that
+// arrived while that run was reading the mailbox would otherwise fall between
+// the two windows; re-reading is free, since stored messages are skipped.
+const SYNC_OVERLAP_MINUTES = 15;
+// A 'running' sync older than this is a crashed process, not a sync in progress.
+const SYNC_LOCK_STALE_MS = 15 * 60_000;
+// The reply check (Sent Items only, no AI) runs at most this often per mailbox.
+const REPLY_REFRESH_MIN_INTERVAL_MS = 45_000;
+// AI readings retried per sync for mail stored while the AI was unavailable.
+const ANALYSIS_RETRY_BATCH = 15;
+// Open conversations checked against the mailbox (deleted / moved) per sync.
+const MAILBOX_CHECK_BATCH = 100;
+// Drafts written per auto-draft pass (each one is a billed AI call), and the most a single click may ask for.
+export const AUTO_DRAFT_BATCH = 10;
+const DRAFT_RUN_MAX = 25;
+
+/** What one drafting run did. */
+export interface DraftRunResult {
+  startedAt: Date;
+  finishedAt?: Date;
+  /** Emails the AI wrote a reply for. */
+  drafted: number;
+  /** Emails the AI read and wrote nothing for: no reply is needed, or it is one to write by hand. */
+  noDraft: number;
+  /** Why the run stopped early, in words a person can act on (credits used up, the AI unreachable). */
+  error?: string;
+}
+
 @Injectable()
 export class EmailIntelligenceSyncService {
   private readonly logger = new Logger(EmailIntelligenceSyncService.name);
@@ -94,6 +155,8 @@ export class EmailIntelligenceSyncService {
     private usersService: UsersService,
     private customerActivityService: CustomerActivityService,
     private emailIntelligenceService: EmailIntelligenceService,
+    private emailHistory: EmailHistoryService,
+    private conversations: EmailConversationService,
     private http: HttpService,
     private jwt: JwtService,
     private config: ConfigService,
@@ -121,7 +184,21 @@ export class EmailIntelligenceSyncService {
       .exec();
     const floor = new Date(Date.now() - SYNC_LOOKBACK_HOURS * 60 * 60_000);
     const cap = new Date(Date.now() - MAX_SYNC_BACKFILL_DAYS * 24 * 60 * 60_000);
-    const candidate = lastGoodJob?.completedAt ?? floor;
+    // From the previous run's START (not its end), less an overlap: mail that
+    // arrived while that run was still reading the mailbox is read again here.
+    const lastStart = lastGoodJob ? new Date(lastGoodJob.startedAt.getTime() - SYNC_OVERLAP_MINUTES * 60_000) : null;
+    let candidate = lastStart ?? floor;
+    // A run that could not store some of the mail it read leaves a hole behind
+    // it. Until a later run has read that window again without failures, every
+    // sync reaches back to it — so mail is never silently skipped for good.
+    const unrecovered = await this.syncJobModel
+      .findOne({ userId, failedCount: { $gt: 0 }, failuresRecovered: { $ne: true }, startedAt: { $gte: cap } })
+      .sort({ startedAt: 1 })
+      .exec();
+    if (unrecovered) {
+      const hole = unrecovered.windowStart ?? new Date(unrecovered.startedAt.getTime() - SYNC_LOOKBACK_HOURS * 60 * 60_000);
+      if (hole < candidate) candidate = hole;
+    }
     return (candidate < cap ? cap : candidate).toISOString();
   }
 
@@ -163,13 +240,14 @@ export class EmailIntelligenceSyncService {
     let alreadyAnalyzedCount = 0;
     let autoSkippedCount = 0;
     let willAnalyzeCount = 0;
+    const ownAddresses = await this.conversations.rememberAddresses(userId, connection.email, (data as InboxResponse).mailboxAddresses);
     for (const email of data.emails) {
-      const exists = await this.emailIntelligenceService.itemExists(userId, email.id);
+      const exists = await this.emailIntelligenceService.alreadyStored(userId, email);
       if (exists) {
         alreadyAnalyzedCount += 1;
         continue;
       }
-      if (this.emailIntelligenceService.wouldSkipLlmAnalysis(email, connection.email)) {
+      if (this.emailIntelligenceService.wouldSkipLlmAnalysis(email, connection.email, ownAddresses)) {
         autoSkippedCount += 1;
       } else {
         willAnalyzeCount += 1;
@@ -178,7 +256,10 @@ export class EmailIntelligenceSyncService {
 
     const [estimate, lastJob] = await Promise.all([
       this.estimateTokenUsage(user.organizationId, willAnalyzeCount),
-      this.syncJobModel.findOne({ userId }).sort({ createdAt: -1 }).exec(),
+      this.syncJobModel
+        .findOne({ userId, status: { $ne: 'running' } })
+        .sort({ createdAt: -1 })
+        .exec(),
     ]);
 
     return {
@@ -230,10 +311,7 @@ export class EmailIntelligenceSyncService {
     const providers: ('anthropic' | 'groq')[] = ['anthropic', 'groq'];
     return Promise.all(
       providers.map(async (provider) => {
-        const latest = await this.agentExecutionModel
-          .findOne({ organizationId, provider, kind: 'llm' })
-          .sort({ occurredAt: -1 })
-          .exec();
+        const latest = await this.agentExecutionModel.findOne({ organizationId, provider, kind: 'llm' }).sort({ occurredAt: -1 }).exec();
         if (!latest) return { provider, status: 'unknown' as const, lastCheckedAt: null, lastError: null };
         return {
           provider,
@@ -245,119 +323,377 @@ export class EmailIntelligenceSyncService {
     );
   }
 
-  // Scoped to exactly one user's own connected mailbox — matches this
-  // module's established self-scoped-only stance (no org-wide oversight
-  // view, see the controller's own class comment). If several teammates
-  // share one physical inbox, only whichever of them actually owns the
-  // active OutlookConnection record can sync it — same attribution rule the
-  // old cron's mailbox-dedup fix already established, just exercised one
-  // click at a time instead of silently in the background.
+  private graphToken(userId: string): string {
+    return this.jwt.sign({ sub: userId }, { expiresIn: '5m' });
+  }
+
+  // In-process guard for the cheap reply check (the full sync takes a real,
+  // cross-process lock — see acquireSyncLock).
+  private readonly replyRefreshes = new Map<string, { at: number; running?: Promise<ReplyRefreshResult> }>();
+
+  // One sync per mailbox at a time, across every backend process: the lock is
+  // the 'running' job document itself, made unique per user by an index. A
+  // crashed run's lock is released once it is clearly stale.
+  private async acquireSyncLock(
+    organizationId: string,
+    userId: string,
+    triggeredBy: 'user' | 'scheduled',
+    startedAt: Date,
+    windowStart: Date,
+  ): Promise<EmailSyncJobDocument | null> {
+    await this.syncJobModel
+      .updateMany(
+        { userId, status: 'running', startedAt: { $lt: new Date(startedAt.getTime() - SYNC_LOCK_STALE_MS) } },
+        { $set: { status: 'failed', completedAt: startedAt, error: 'The sync stopped before finishing.' } },
+      )
+      .exec();
+    try {
+      return await this.syncJobModel.create({ organizationId, userId, status: 'running', triggeredBy, startedAt, windowStart });
+    } catch (err) {
+      if ((err as { code?: number }).code === 11000) return null;
+      throw err;
+    }
+  }
+
+  // Reads Sent Items since `since`, keeps them, and learns the mailbox's own
+  // addresses. Returns false when Outlook is not connected.
+  private async pullSent(userId: string, organizationId: string, mailboxEmail: string): Promise<boolean> {
+    const oldestPending = await this.emailIntelligenceService.getEarliestPendingReceivedAt(userId);
+    // Sent mail is also kept (the Sent view, promised follow-ups), so recent
+    // Sent Items are read even when nothing is waiting for a reply.
+    const recent = new Date(Date.now() - SENT_KEEP_LOOKBACK_DAYS * 24 * 60 * 60_000);
+    const lookbackFloor = new Date(Date.now() - EXTERNAL_REPLY_LOOKBACK_DAYS * 24 * 60 * 60_000);
+    const oldest = oldestPending && oldestPending < recent ? oldestPending : recent;
+    const since = (oldest < lookbackFloor ? lookbackFloor : oldest).toISOString();
+
+    const { data } = await firstValueFrom(
+      this.http.get<SentResponse>(`${this.pythonAgentUrl}/outlook/sent-since`, {
+        params: { since },
+        headers: { Authorization: `Bearer ${this.graphToken(userId)}` },
+      }),
+    );
+    if (!data.connected) return false;
+    await this.conversations.rememberAddresses(userId, mailboxEmail, data.mailboxAddresses);
+    await this.emailHistory.storeSent(organizationId, userId, mailboxEmail, data.items);
+    return true;
+  }
+
+  /**
+   * The cheap, AI-free half of a sync: reads the mailbox's Sent Items and
+   * settles which conversations have been answered. This is what makes a
+   * reply typed in Outlook show up here within a couple of minutes — it runs
+   * on a short timer and whenever the inbox page is open, and costs one
+   * Outlook request. It never reads new inbound mail and never calls the AI.
+   */
+  async refreshReplies(userId: string, options: { force?: boolean } = {}): Promise<ReplyRefreshResult> {
+    const state = this.replyRefreshes.get(userId);
+    if (state?.running) return state.running;
+    if (!options.force && state && Date.now() - state.at < REPLY_REFRESH_MIN_INTERVAL_MS) return { connected: true, answered: 0, checked: false };
+
+    const running = (async (): Promise<ReplyRefreshResult> => {
+      const user = await this.usersService.findById(userId);
+      const connection = await this.connectionModel.findOne({ userId, isActive: true }).exec();
+      if (!user || !connection || connection.status === 'needs_reauth') return { connected: false, answered: 0, checked: true };
+      if (!(await this.pullSent(userId, user.organizationId, connection.email))) return { connected: false, answered: 0, checked: true };
+      const { answered } = await this.conversations.reconcile(userId);
+      if (answered > 0) await this.emailHistory.maintainFollowUps(userId).catch(() => undefined);
+      return { connected: true, answered, checked: true };
+    })();
+    this.replyRefreshes.set(userId, { at: Date.now(), running });
+    try {
+      return await running;
+    } finally {
+      this.replyRefreshes.set(userId, { at: Date.now() });
+    }
+  }
+
+  // Every 2 minutes, for every connected mailbox that has something waiting:
+  // has it been answered in Outlook? No AI, one Outlook request per mailbox.
+  @Cron('*/2 * * * *')
+  async runScheduledReplyRefresh(): Promise<void> {
+    const connections = await this.connectionModel
+      .find({ isActive: true, status: { $ne: 'needs_reauth' } })
+      .select('userId')
+      .lean()
+      .exec();
+    for (const connection of connections) {
+      try {
+        if (!(await this.emailIntelligenceService.getEarliestPendingReceivedAt(connection.userId))) continue;
+        await this.refreshReplies(connection.userId);
+      } catch (err) {
+        this.logger.warn(`Reply check failed for user ${connection.userId}: ${(err as Error).message}`);
+      }
+    }
+  }
+
+  // Asks Outlook where the still-waiting messages are now: one that was
+  // deleted stops waiting, one that was moved keeps working under its new id.
+  private async checkMailboxState(userId: string): Promise<void> {
+    const open = await this.emailIntelligenceService.listOpenForMailboxCheck(userId, MAILBOX_CHECK_BATCH);
+    if (open.length === 0) return;
+    const { data } = await firstValueFrom(
+      this.http.post<{ connected: boolean; states: { id: string; state: string; newId?: string | null; isRead?: boolean | null }[] }>(
+        `${this.pythonAgentUrl}/outlook/messages-state`,
+        { messages: open.map((o) => ({ id: o.externalMessageId, internetMessageId: o.internetMessageId ?? null })) },
+        { headers: { Authorization: `Bearer ${this.graphToken(userId)}` } },
+      ),
+    );
+    if (!data.connected) return;
+    const removed = await this.emailIntelligenceService.applyMailboxStates(userId, data.states);
+    if (removed > 0) this.logger.log(`Mailbox of user ${userId}: ${removed} waiting email(s) were deleted in Outlook and no longer count as waiting`);
+  }
+
+  // Scoped to exactly one user's own connected mailbox. The order matters:
+  //   1. Sent Items first, so a new email that was already answered in Outlook
+  //      is stored as answered — no AI call, no "needs a reply" notification.
+  //   2. Received mail, wherever it sits in the mailbox. Every new message is
+  //      stored; the AI reads the ones that need reading, and a message the AI
+  //      could not read is stored anyway (tracked, flagged, retried later).
+  //   3. The response-state engine settles which conversations are answered
+  //      and groups each conversation under its newest customer message.
+  //   4. Housekeeping: read state, deleted/moved mail, AI retries, follow-ups.
+  // Each later step is best-effort — one failing never undoes the ones before.
   async syncMyMailbox(userId: string, triggeredBy: 'user' | 'scheduled' = 'user'): Promise<SyncMailboxResult> {
     const startedAt = new Date();
     const user = await this.usersService.findById(userId);
     const connection = await this.connectionModel.findOne({ userId, isActive: true }).exec();
     if (!user || !connection) return { connected: false, scannedCount: 0, newItemsCount: 0 };
 
+    // The window is worked out before the lock is taken: the lock is itself a job document.
+    const since = await this.resolveSyncSince(userId);
+    const job = await this.acquireSyncLock(user.organizationId, userId, triggeredBy, startedAt, new Date(since));
+    if (!job) return { connected: true, scannedCount: 0, newItemsCount: 0, alreadyRunning: true };
+
+    const finish = async (fields: Partial<EmailSyncJob>) => {
+      try {
+        await this.syncJobModel.updateOne({ _id: job._id }, { $set: { ...fields, completedAt: new Date() } }).exec();
+      } catch (err) {
+        this.logger.error(`Failed to record the sync result for user ${userId}: ${(err as Error).message}`);
+      }
+    };
+
     try {
-      const since = await this.resolveSyncSince(userId);
-      const token = this.jwt.sign({ sub: userId }, { expiresIn: '5m' });
+      if (!(await this.pullSent(userId, user.organizationId, connection.email))) {
+        await finish({ status: 'failed', error: 'Outlook is not connected.' });
+        return { connected: false, scannedCount: 0, newItemsCount: 0 };
+      }
       const { data } = await firstValueFrom(
-        this.http.get<{ connected: boolean; emails: TodaysEmail[] }>(`${this.pythonAgentUrl}/outlook/messages-since`, {
+        this.http.get<InboxResponse>(`${this.pythonAgentUrl}/outlook/messages-since`, {
           params: { since },
-          headers: { Authorization: `Bearer ${token}` },
+          headers: { Authorization: `Bearer ${this.graphToken(userId)}` },
         }),
       );
-      if (!data.connected) return { connected: false, scannedCount: 0, newItemsCount: 0 };
-
+      if (!data.connected) {
+        await finish({ status: 'failed', error: 'Outlook is not connected.' });
+        return { connected: false, scannedCount: 0, newItemsCount: 0 };
+      }
+      const ownAddresses = await this.conversations.rememberAddresses(userId, connection.email, data.mailboxAddresses);
       const context = await this.customerActivityService.gatherCorrelationContext(user.organizationId);
+      const replies = await this.conversations.replyIndex(userId, new Date(new Date(since).getTime() - 60 * 60_000), ownAddresses);
 
       let newItemsCount = 0;
       let succeededCount = 0;
       let failedCount = 0;
+      let deferredCount = 0;
       const alreadyStored: { id: string; isRead: boolean }[] = [];
-      for (const email of data.emails) {
-        const exists = await this.emailIntelligenceService.itemExists(userId, email.id);
-        if (exists) {
+      const touchedConversations = new Set<string>();
+      // Oldest first, so each message is read by the AI with the earlier ones of its conversation already stored.
+      const emails = [...data.emails].sort((a, b) => new Date(a.receivedAt).getTime() - new Date(b.receivedAt).getTime());
+      for (const email of emails) {
+        if (!email.id || !email.receivedAt) continue;
+        if (await this.emailIntelligenceService.alreadyStored(userId, email)) {
           alreadyStored.push({ id: email.id, isRead: email.isRead });
           continue;
         }
         newItemsCount += 1;
         try {
-          await this.emailIntelligenceService.analyzeAndCreate(user.organizationId, userId, connection.email, email, context);
+          const receivedAt = new Date(email.receivedAt);
+          const reply = replies.findReply({
+            receivedAt,
+            conversationId: email.conversationId,
+            internetMessageId: email.internetMessageId,
+            fromAddress: email.from,
+            subject: email.subject,
+          });
+          const created = await this.emailIntelligenceService.analyzeAndCreate(user.organizationId, userId, connection.email, email, context, {
+            ownAddresses,
+            answered: reply ? this.conversations.answeredFields(reply) : undefined,
+            thread: reply ? undefined : await this.conversations.threadContext(userId, email.conversationId, receivedAt),
+          });
+          if (created?.analysisState === 'pending') deferredCount += 1;
           succeededCount += 1;
+          if (email.conversationId) touchedConversations.add(email.conversationId);
         } catch (err) {
           failedCount += 1;
-          this.logger.error(`Analysis failed for message ${email.id}: ${(err as Error).message}`);
+          this.logger.error(`Could not store message ${email.id} for user ${userId}: ${(err as Error).message}`);
         }
       }
 
-      // Best-effort, after the main scan — a failure here (or nothing to
-      // check) must never turn an otherwise-successful sync into a failed
-      // one; see detectExternalReplies' own comment for why this exists.
-      try {
+      let answeredCount = 0;
+      const step = async (name: string, run: () => Promise<void>) => {
+        try {
+          await run();
+        } catch (err) {
+          this.logger.error(`${name} failed for user ${userId}: ${(err as Error).message}`);
+        }
+      };
+      await step('Conversation state', async () => {
+        answeredCount = await this.conversations.applyReplies(userId);
+        // Everything on the first run after this was introduced; afterwards only what changed.
+        await this.conversations.refreshThreadHeads(userId, (await this.groupingIsCurrent(userId)) ? [...touchedConversations] : undefined);
+      });
+      await step('Read-state refresh', async () => {
         await this.emailIntelligenceService.refreshReadState(userId, alreadyStored);
-      } catch (err) {
-        this.logger.error(`Read-state refresh failed for user ${userId}: ${(err as Error).message}`);
-      }
-      try {
-        await this.detectExternalReplies(userId);
-      } catch (err) {
-        this.logger.error(`External-reply detection failed for user ${userId}: ${(err as Error).message}`);
-      }
+      });
+      await step('Mailbox check', () => this.checkMailboxState(userId));
+      await step('AI retry', async () => {
+        deferredCount = Math.max(0, deferredCount - (await this.retryDeferredAnalysis(userId, context, ownAddresses, deferredCount > 0)));
+      });
+      // Only for a mailbox whose owner switched it on: drafts for recent mail still waiting without one.
+      await step('Auto-draft', async () => {
+        if (!(await this.emailIntelligenceService.getInboxSettings(userId)).autoDraft) return;
+        await this.draftWaiting(userId, { limit: AUTO_DRAFT_BATCH, maxAgeDays: AUTO_DRAFT_MAX_AGE_DAYS, context, ownAddresses });
+      });
+      // Promised follow-ups that never went out, and reminders the mailbox
+      // shows are no longer needed — read from the threads, no AI call.
+      await step('Follow-up maintenance', () => this.emailHistory.maintainFollowUps(userId));
 
-      const result = { connected: true, scannedCount: data.emails.length, newItemsCount };
-      await this.persistSyncJob({
-        organizationId: user.organizationId,
-        userId,
-        // 'completed_with_errors' whenever any item failed — including the
-        // all-failed case (e.g. a real Anthropic outage) — so the sync
-        // history never misreports a run with real failures as clean.
+      const result: SyncMailboxResult = { connected: true, scannedCount: data.emails.length, newItemsCount, deferredCount, answeredCount };
+      await finish({
         status: failedCount > 0 ? 'completed_with_errors' : 'completed',
         scannedCount: result.scannedCount,
         newItemsCount,
         succeededCount,
         failedCount,
-        startedAt,
-        triggeredBy,
+        deferredCount,
+        answeredCount,
+        truncated: !!data.truncated,
       });
+      // This run read its whole window and stored everything: earlier holes inside it are closed.
+      if (failedCount === 0 && !data.truncated) {
+        await this.syncJobModel
+          .updateMany(
+            { userId, _id: { $ne: job._id }, failedCount: { $gt: 0 }, failuresRecovered: { $ne: true }, startedAt: { $lt: startedAt } },
+            { $set: { failuresRecovered: true } },
+          )
+          .exec()
+          .catch(() => undefined);
+      }
+      this.logger.log(
+        `Mailbox sync for user ${userId} (${triggeredBy}): ${data.emails.length} read, ${newItemsCount} new, ${deferredCount} awaiting AI, ${answeredCount} found answered, ${failedCount} failed`,
+      );
       return result;
     } catch (err) {
-      // The real sync operation itself failed (e.g. python-agent unreachable,
-      // gatherCorrelationContext threw) — best-effort log a 'failed' job doc,
-      // then re-throw the ORIGINAL error unchanged. A failure inside
-      // persistSyncJob must never replace/mask the real failure the caller
-      // needs to see.
-      await this.persistSyncJob({
-        organizationId: user.organizationId,
-        userId,
-        status: 'failed',
-        scannedCount: 0,
-        newItemsCount: 0,
-        succeededCount: 0,
-        failedCount: 0,
-        startedAt,
-        triggeredBy,
-      });
+      // The sync itself failed (python-agent unreachable, Outlook refused) — the
+      // window it meant to cover is NOT counted as covered (see resolveSyncSince).
+      await finish({ status: 'failed', error: (err as Error).message.slice(0, 300) });
       throw err;
     }
   }
 
-  // Reintroduced background sync — the ORIGINAL always-on 3-minute cron
-  // (see this file's header comment) was removed because it burned real AI
-  // spend classifying every connected mailbox's new mail continuously,
-  // whether or not anyone was using the app that day. This is the same
-  // mechanism deliberately brought back at explicit user request, on a much
-  // longer interval (every 30 minutes, not every 3) to bound that cost
-  // while still keeping every connected mailbox reasonably fresh without
-  // anyone having to remember to click Sync. Reuses syncMyMailbox exactly —
-  // same resolveSyncSince incremental lookback (so a mailbox that's been
-  // running on schedule only ever re-scans the last ~30 minutes, not a
-  // wasteful full window), same deterministic pre-filters ahead of any LLM
-  // call, same dedup — this is not a second, different sync path. Runs
-  // across every connected mailbox in every organization on this instance;
-  // one mailbox's failure (expired token, python-agent hiccup) is isolated
-  // via syncMyMailbox's own try/catch and must never stop the sweep for
-  // everyone else.
+  // ---- AI drafts for mail that is waiting without one ---------------------------------
+  //
+  // New mail is read and drafted by the AI as it is synced. This is for the
+  // rest: mail brought in from mailbox history, or that arrived while the AI
+  // was unavailable — waiting for a reply with nothing drafted. A run works
+  // through them newest first, one billed AI call each, and stops at the first
+  // failure (no credits, an outage): the next email would fail the same way.
+
+  // One run per mailbox at a time, so a click and the background pass can never draft the same email twice.
+  private draftRuns = new Map<string, DraftRunResult>();
+  private drafting = new Set<string>();
+
+  /** Whether a run is under way for this mailbox, and what the last one did. */
+  draftRunState(userId: string): { running: boolean; last: DraftRunResult | null } {
+    return { running: this.drafting.has(userId), last: this.draftRuns.get(userId) ?? null };
+  }
+
+  /** Runs in the background; the caller watches draftRunState. False when one is already running. */
+  startDraftRun(userId: string, options: { limit?: number; maxAgeDays?: number } = {}): boolean {
+    if (this.drafting.has(userId)) return false;
+    void this.draftWaiting(userId, options).catch((err) => this.logger.error(`Draft run failed for user ${userId}: ${(err as Error).message}`));
+    return true;
+  }
+
+  async draftWaiting(
+    userId: string,
+    options: {
+      limit?: number;
+      maxAgeDays?: number;
+      context?: Awaited<ReturnType<CustomerActivityService['gatherCorrelationContext']>>;
+      ownAddresses?: string[];
+    } = {},
+  ): Promise<DraftRunResult | null> {
+    if (this.drafting.has(userId)) return null;
+    this.drafting.add(userId);
+    const run: DraftRunResult = { startedAt: new Date(), drafted: 0, noDraft: 0 };
+    this.draftRuns.set(userId, run);
+    try {
+      const limit = Math.min(Math.max(Math.round(options.limit ?? AUTO_DRAFT_BATCH), 1), DRAFT_RUN_MAX);
+      const waiting = await this.emailIntelligenceService.listWithoutDraft(userId, limit, options.maxAgeDays);
+      if (waiting.length === 0) return run;
+      const user = await this.usersService.findById(userId);
+      if (!user) return run;
+      const context = options.context ?? (await this.customerActivityService.gatherCorrelationContext(user.organizationId));
+      const ownAddresses = options.ownAddresses ?? (await this.conversations.ownAddresses(userId));
+      for (const item of waiting) {
+        try {
+          // The AI reads the whole conversation so far, not just this one message.
+          const thread = await this.conversations.threadContext(userId, item.conversationId, item.receivedAt, item._id.toString());
+          const read = await this.emailIntelligenceService.regenerate(userId, item._id.toString(), context, { ownAddresses, thread });
+          if (read.draftReply?.trim()) run.drafted += 1;
+          else run.noDraft += 1;
+        } catch (err) {
+          run.error = analysisFailureReason(err);
+          this.logger.warn(`Draft run for user ${userId} stopped: ${(err as Error).message}`);
+          break;
+        }
+      }
+      return run;
+    } finally {
+      run.finishedAt = new Date();
+      this.drafting.delete(userId);
+    }
+  }
+
+  // Whether every stored conversation already has its grouping (threadHead)
+  // worked out — false on a mailbox synced before grouping existed.
+  private groupedUsers = new Set<string>();
+  private async groupingIsCurrent(userId: string): Promise<boolean> {
+    if (this.groupedUsers.has(userId)) return true;
+    this.groupedUsers.add(userId);
+    return false;
+  }
+
+  // Mail stored while the AI was unavailable gets its AI reading once the AI
+  // is back. Stops at the first failure — if credits are still out there is no
+  // point asking again for each email. Returns how many were read.
+  private async retryDeferredAnalysis(
+    userId: string,
+    context: Awaited<ReturnType<CustomerActivityService['gatherCorrelationContext']>>,
+    ownAddresses: string[],
+    justFailed: boolean,
+  ): Promise<number> {
+    if (justFailed) return 0; // the AI was unavailable seconds ago in this very run
+    const waiting = await this.emailIntelligenceService.listAwaitingAnalysis(userId, ANALYSIS_RETRY_BATCH);
+    let read = 0;
+    for (const item of waiting) {
+      try {
+        const thread = await this.conversations.threadContext(userId, item.conversationId, item.receivedAt, item._id.toString());
+        await this.emailIntelligenceService.regenerate(userId, item._id.toString(), context, { ownAddresses, thread });
+        read += 1;
+      } catch (err) {
+        this.logger.warn(`AI still unavailable for user ${userId}: ${(err as Error).message}`);
+        break;
+      }
+    }
+    return read;
+  }
+
+  // Background sync of every connected mailbox, every 30 minutes — the same
+  // syncMyMailbox a click runs. One mailbox's failure (expired token, an
+  // Outlook hiccup) never stops the sweep for everyone else. Replies typed in
+  // Outlook do not wait for this: see runScheduledReplyRefresh.
   @Cron(CronExpression.EVERY_30_MINUTES)
   async runScheduledSync(): Promise<void> {
     const connections = await this.connectionModel.find({ isActive: true, status: { $ne: 'needs_reauth' } }).exec();
@@ -370,75 +706,24 @@ export class EmailIntelligenceSyncService {
     }
   }
 
-  // The actual fix for the "already replied to in Outlook, still shows as
-  // missed" bug: this app only ever knows about a reply it sent itself
-  // (sentAt, via the approve/send flow) — a reply typed directly into the
-  // real Outlook client is otherwise invisible, so that email just sits at
-  // status:'pending' until it crosses the 24h cutoff and gets counted as
-  // missed, even though the salesperson genuinely already answered it.
-  //
-  // Fixed by cross-referencing every still-open pending item's Graph
-  // conversationId against Sent Items: any thread with an outbound message
-  // sent after the item's receivedAt means it was answered, whether or not
-  // that answer went through this app. One Sent Items fetch per sync run
-  // (not one Graph call per pending item) — cheap and metadata-only, no LLM
-  // cost, unlike the cron this module's own header comment explains was
-  // removed for exactly that reason.
-  private async detectExternalReplies(userId: string): Promise<void> {
-    const oldestPending = await this.emailIntelligenceService.getEarliestPendingReceivedAt(userId);
-    if (!oldestPending) return; // nothing still open — skip the Graph call entirely
-
-    const lookbackFloor = new Date(Date.now() - EXTERNAL_REPLY_LOOKBACK_DAYS * 24 * 60 * 60_000);
-    const since = (oldestPending < lookbackFloor ? lookbackFloor : oldestPending).toISOString();
-
-    const token = this.jwt.sign({ sub: userId }, { expiresIn: '5m' });
-    const { data } = await firstValueFrom(
-      this.http.get<{ connected: boolean; items: { id: string; conversationId: string; sentAt: string }[] }>(
-        `${this.pythonAgentUrl}/outlook/sent-since`,
-        { params: { since }, headers: { Authorization: `Bearer ${token}` } },
-      ),
-    );
-    if (!data.connected || data.items.length === 0) return;
-
-    // Latest sentAt per thread — a thread can have several outbound
-    // messages in the window; only the most recent one matters for "was
-    // this answered".
-    const latestByConversation = new Map<string, Date>();
-    for (const item of data.items) {
-      if (!item.conversationId) continue;
-      const sentAt = new Date(item.sentAt);
-      const existing = latestByConversation.get(item.conversationId);
-      if (!existing || sentAt > existing) latestByConversation.set(item.conversationId, sentAt);
-    }
-
-    await this.emailIntelligenceService.markExternalReplies(userId, latestByConversation);
-  }
-
-  // Best-effort only — never allowed to throw into a caller that already has
-  // a real result (success or failure) to return. Awaited (not fire-and-
-  // forget) so a GET /sync/jobs call immediately after a sync is guaranteed
-  // to see the just-finished job, unlike a detached .catch() write.
-  private async persistSyncJob(fields: {
-    organizationId: string;
-    userId: string;
-    status: 'completed' | 'completed_with_errors' | 'failed';
-    scannedCount: number;
-    newItemsCount: number;
-    succeededCount: number;
-    failedCount: number;
-    startedAt: Date;
-    triggeredBy: 'user' | 'scheduled';
-  }): Promise<void> {
-    try {
-      await this.syncJobModel.create({ ...fields, completedAt: new Date() });
-    } catch (err) {
-      this.logger.error(`Failed to persist sync job record: ${(err as Error).message}`);
-    }
-  }
-
   // Recent sync history for the caller's own mailbox — self-scoped, matches
   // every other read on this module.
   async listRecentSyncJobs(userId: string, limit = 20): Promise<EmailSyncJobDocument[]> {
     return this.syncJobModel.find({ userId }).sort({ createdAt: -1 }).limit(limit).exec();
+  }
+
+  /** When this mailbox last finished a sync, and whether one is running now. */
+  async syncState(userId: string): Promise<{ lastSyncedAt: Date | null; running: boolean; awaitingAnalysis: number }> {
+    const [last, running, awaiting] = await Promise.all([
+      this.syncJobModel
+        .findOne({ userId, status: { $in: ['completed', 'completed_with_errors'] } })
+        .sort({ createdAt: -1 })
+        .select('completedAt')
+        .lean()
+        .exec(),
+      this.syncJobModel.exists({ userId, status: 'running' }),
+      this.emailIntelligenceService.listAwaitingAnalysis(userId, 200),
+    ]);
+    return { lastSyncedAt: last?.completedAt ?? null, running: !!running, awaitingAnalysis: awaiting.length };
   }
 }

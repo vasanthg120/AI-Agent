@@ -101,7 +101,7 @@ def _source_filter(source: dict) -> dict:
 # ---- deals -------------------------------------------------------------------
 
 
-def _deal_update(source, store_id, raw, existing_by_external_id, owner_mapping_by_ref, owner_label_by_ref):
+def _deal_update(source, store_id, raw, existing_by_external_id, owner_mapping_by_ref, owner_label_by_ref, details=None, products=None):
     c = to_canonical(raw, (source.get("fieldMappings") or {}).get("deals"))
     external_id = c.get("externalId")
     if not external_id:
@@ -123,6 +123,12 @@ def _deal_update(source, store_id, raw, existing_by_external_id, owner_mapping_b
     }
     if store_id:
         fields["storeId"] = store_id
+    if details is not None:
+        fields["sourceData"] = details
+    # The product lines the CRM holds on the deal (only for CRMs that send them).
+    # Not an "activity" field: a line being edited doesn't make the deal look freshly worked on.
+    if products is not None:
+        fields["products"] = products
 
     if (
         existing is not None
@@ -183,7 +189,17 @@ def _sync_deals(source: dict, adapter, seen_fields: set) -> int:
         operations = [
             op
             for op in (
-                _deal_update(source, store_id, d, existing_by_external_id, owner_mapping_by_ref, owner_label_by_ref) for d in rows
+                _deal_update(
+                    source,
+                    store_id,
+                    d,
+                    existing_by_external_id,
+                    owner_mapping_by_ref,
+                    owner_label_by_ref,
+                    adapter.details("deals", d),
+                    adapter.products(d),
+                )
+                for d in rows
             )
             if op
         ]
@@ -196,7 +212,7 @@ def _sync_deals(source: dict, adapter, seen_fields: set) -> int:
 # ---- quotes ------------------------------------------------------------------
 
 
-def _quote_update(source, raw, deal_native_id_by_external_id, existing_by_external_id):
+def _quote_update(source, raw, deal_native_id_by_external_id, existing_by_external_id, owner_mapping_by_ref=None, charges=None):
     c = to_canonical(raw, (source.get("fieldMappings") or {}).get("quotes"))
     external_id = c.get("externalId")
     if not external_id:
@@ -233,6 +249,11 @@ def _quote_update(source, raw, deal_native_id_by_external_id, existing_by_extern
         owner = owner.get("id") or owner.get("_id")
     if owner:
         fields["quoteOwner"] = str(owner)
+        # The CRM owner already linked to a HaiVE user (Settings -> Deal Assignment)
+        # owns this quotation too.
+        mapped_owner_id = (owner_mapping_by_ref or {}).get(str(owner))
+        if mapped_owner_id:
+            fields["ownerUserId"] = mapped_owner_id
     if c.get("ownerName"):
         fields["quoteOwnerLabel"] = str(c["ownerName"])
     if deal_id:
@@ -241,6 +262,11 @@ def _quote_update(source, raw, deal_native_id_by_external_id, existing_by_extern
         fields["quoteNumber"] = str(c["number"])
     if client_details:
         fields["clientDetails"] = client_details
+    # The quotation's own tax and fee lines (only for CRMs that send them): with the deal's
+    # product lines they are what the quotation's amount is made of.
+    if charges is not None:
+        fields["taxes"] = charges.get("taxes") or []
+        fields["fees"] = charges.get("fees") or []
 
     existing = existing_by_external_id.get(external_id)
     if existing is None or any(existing.get(f) != fields.get(f) for f in _QUOTE_ACTIVITY_FIELDS):
@@ -267,6 +293,13 @@ def _sync_quotes(source: dict, adapter, seen_fields: set) -> int:
         )
     }
     mapping = (source.get("fieldMappings") or {}).get("quotes") or {}
+    # CRM owner -> HaiVE user, as linked in Settings -> Deal Assignment (shared with deals).
+    quote_owner_mapping_by_ref = {
+        m["externalOwnerRef"]: m["ownerId"]
+        for m in db.crm_deal_owner_mappings.find(
+            {"organizationId": source["organizationId"], "provider": source["provider"]}, {"externalOwnerRef": 1, "ownerId": 1}
+        )
+    }
     newly_approved: list[str] = []
     synced = 0
     for rows in adapter.pages("quotes"):
@@ -274,7 +307,9 @@ def _sync_quotes(source: dict, adapter, seen_fields: set) -> int:
             seen_fields |= field_paths(raw)
         operations = []
         for raw in rows:
-            op = _quote_update(source, raw, deal_native_id_by_external_id, existing_by_external_id)
+            op = _quote_update(
+                source, raw, deal_native_id_by_external_id, existing_by_external_id, quote_owner_mapping_by_ref, adapter.charges(raw)
+            )
             if not op:
                 continue
             operations.append(op)
@@ -307,17 +342,22 @@ def _sync_simple(source: dict, adapter, module: str, collection: str, seen_field
             c = to_canonical(raw, mapping)
             if not c.get("externalId"):
                 continue
-            fields = {k: v for k, v in c.items() if v not in (None, "") and k != "externalId"}
+            fields = {k: v for k, v in c.items() if v not in (None, "") and k not in ("externalId", "createdAt")}
             if module == "contacts" and not fields.get("name"):
                 fields["name"] = fields.get("email") or "Unnamed contact"
             if module == "accounts" and not fields.get("name"):
                 fields["name"] = "Unnamed company"
+            # When the CRM says when the record was created, that date is kept as its own field:
+            # createdAt on records stored earlier is only when HaiVE first saw them.
+            created = _parse_date(c.get("createdAt"))
+            if created:
+                fields["sourceCreatedAt"] = created
             operations.append(
                 UpdateOne(
                     {**_source_filter(source), "externalId": str(c["externalId"])},
                     {
                         "$set": {**_source_filter(source), "sourceProvider": source["provider"], "externalId": str(c["externalId"]), **fields},
-                        "$setOnInsert": {"createdAt": _now()},
+                        "$setOnInsert": {"createdAt": created or _now()},
                     },
                     upsert=True,
                 )
@@ -387,9 +427,83 @@ def _draft_invoices_for_newly_approved(db, source: dict, external_ids: list[str]
 # ---- running a source ------------------------------------------------------------
 
 
-def sync_source(source: dict, modules: tuple[str, ...] | None = None) -> dict:
+_SAMPLES_PER_MODULE = 3
+_MAX_SAMPLE_CHARS = 20_000
+
+
+class _Recording:
+    """An adapter that also keeps the first few records of each module it
+    reads — what the mapping screen uses to suggest and preview field
+    mappings. Everything else is the wrapped adapter's own behaviour."""
+
+    def __init__(self, adapter):
+        self._adapter = adapter
+        self.samples: dict[str, list[dict]] = {}
+
+    def __getattr__(self, name):
+        return getattr(self._adapter, name)
+
+    def pages(self, module: str):
+        for rows in self._adapter.pages(module):
+            kept = self.samples.setdefault(module, [])
+            if len(kept) < _SAMPLES_PER_MODULE:
+                kept.extend(rows[: _SAMPLES_PER_MODULE - len(kept)])
+            yield rows
+
+
+def _save_samples(source: dict, samples: dict[str, list[dict]]) -> None:
+    import json
+
+    db = get_db()
+    for module, records in samples.items():
+        if not records:
+            continue
+        safe = [r for r in records if len(json.dumps(r, default=str)) <= _MAX_SAMPLE_CHARS]
+        if safe:
+            db.crm_source_samples.update_one(
+                {**_source_filter(source), "module": module},
+                {"$set": {**_source_filter(source), "module": module, "records": safe, "updatedAt": _now()}},
+                upsert=True,
+            )
+
+
+def describe_failure(exc: Exception) -> dict:
+    """A failed sync as three things: what to tell a person (never a raw
+    exception), what kind of problem it is (so the screen can offer the right
+    next step), and the technical detail for whoever has to debug it."""
+    detail = f"{exc.__class__.__name__}: {exc}"[:800]
+    text = detail.lower()
+    if any(k in text for k in ("401", "403", "unauthor", "forbidden", "expired", "not connected", "no credentials", "invalid token", "rejected")):
+        kind, message = "auth", "HaiVE couldn't sign in to this CRM. The connection may have expired or been revoked — reconnect it."
+    elif "429" in text or "rate limit" in text or "too many requests" in text:
+        kind, message = "rate_limit", "The CRM is limiting how fast HaiVE can read from it. The next sync will pick up where this one stopped."
+    elif any(k in text for k in ("timeout", "timed out", "connection", "unreachable", "name resolution", "502", "503", "504")):
+        kind, message = "unreachable", "The CRM couldn't be reached. This is usually temporary — try again in a few minutes."
+    else:
+        kind, message = "other", "The sync couldn't be completed. Try again; if it keeps failing, check the connection and the field mapping."
+    return {"message": message, "kind": kind, "detail": detail}
+
+
+def _record_run(source: dict, started: datetime, trigger: str, status_: str, counts: dict, failure: dict | None = None) -> None:
+    try:
+        get_db().crm_sync_runs.insert_one(
+            {
+                **_source_filter(source),
+                "trigger": trigger,
+                "status": status_,
+                "startedAt": started,
+                "finishedAt": _now(),
+                "counts": counts,
+                **({"error": failure["message"], "errorKind": failure["kind"], "errorDetail": failure["detail"]} if failure else {}),
+            }
+        )
+    except Exception:  # noqa: BLE001 - history is a record of the sync, never a reason for it to fail
+        logger.exception("Could not record the sync run for %s", source.get("label"))
+
+
+def sync_source(source: dict, modules: tuple[str, ...] | None = None, trigger: str = "scheduled") -> dict:
     """Syncs one data source and records the outcome on it (last sync time,
-    status, counts, error) — what Settings -> Data Sources shows."""
+    status, counts, error) and in its history (crm_sync_runs)."""
     db = get_db()
     wanted = [m for m in (modules or ("deals", "quotes", "contacts", "accounts")) if m in (source.get("modules") or [])]
     db.crm_data_sources.update_one({"_id": source["_id"]}, {"$set": {"sync.lastStatus": "running"}})
@@ -403,6 +517,10 @@ def sync_source(source: dict, modules: tuple[str, ...] | None = None) -> dict:
         adapter = adapter_for(source)
         if adapter.incremental:
             adapter.since = _parse_date((source.get("sync") or {}).get("cursor"))
+            # Records synced before their detail was kept: read everything once more.
+            if adapter.stores_details and db.crm_deals.find_one({**_source_filter(source), "sourceData": {"$exists": False}}, {"_id": 1}):
+                adapter.since = None
+        adapter = _Recording(adapter)
         for module in wanted:
             if module not in adapter.modules or not ((source.get("fieldMappings") or {}).get(module) or {}).get("externalId"):
                 continue  # this CRM (or its mapping) doesn't provide the module
@@ -416,22 +534,68 @@ def sync_source(source: dict, modules: tuple[str, ...] | None = None) -> dict:
             elif module == "accounts":
                 counts["accounts"] = _sync_simple(source, adapter, "accounts", "crm_accounts", seen[module])
     except Exception as exc:  # recorded on the source, never raised into the scheduler
-        message = str(exc) if isinstance(exc, AdapterError) else f"Sync failed: {exc.__class__.__name__}: {exc}"
-        logger.warning("CRM sync of %s (org %s) failed: %s", source.get("label"), source.get("organizationId"), message)
+        failure = describe_failure(exc)
+        logger.warning("CRM sync of %s (org %s) failed: %s", source.get("label"), source.get("organizationId"), failure["detail"])
         db.crm_data_sources.update_one(
             {"_id": source["_id"]},
-            {"$set": {"sync.lastStatus": "error", "sync.lastError": message[:500], "sync.lastSyncAt": _now()}},
+            {
+                "$set": {
+                    "sync.lastStatus": "error",
+                    "sync.lastError": failure["message"],
+                    "sync.lastErrorKind": failure["kind"],
+                    "sync.lastErrorDetail": failure["detail"],
+                    "sync.lastSyncAt": _now(),
+                }
+            },
         )
-        return {"status": "error", "error": message, **counts}
+        _record_run(source, started, trigger, "error", counts, failure)
+        return {"status": "error", "error": failure["message"], "errorKind": failure["kind"], **counts}
 
-    update = {"sync.lastStatus": "ok", "sync.lastSyncAt": _now(), "sync.lastCounts": counts}
+    _save_samples(source, adapter.samples)
+    _record_run(source, started, trigger, "ok", counts)
+    update = {"sync.lastStatus": "ok", "sync.lastSyncAt": _now(), "sync.lastSuccessAt": _now(), "sync.lastCounts": counts}
     if adapter.incremental and modules is None:
         update["sync.cursor"] = started
     for module, paths in seen.items():
         if paths:
             update[f"availableFields.{module}"] = sorted(paths)[:500]
-    db.crm_data_sources.update_one({"_id": source["_id"]}, {"$set": update, "$unset": {"sync.lastError": ""}})
+    db.crm_data_sources.update_one(
+        {"_id": source["_id"]},
+        {"$set": update, "$unset": {"sync.lastError": "", "sync.lastErrorKind": "", "sync.lastErrorDetail": ""}},
+    )
     return {"status": "ok", **counts}
+
+
+def discover_source(source: dict) -> dict:
+    """The first look at a newly connected CRM, before anything is synced:
+    proves the connection really reads data, and brings back a first page of
+    each kind of record — how many, which fields they carry, and a few
+    samples for the mapping screen. Writes no CRM records."""
+    try:
+        adapter = adapter_for(source)
+    except Exception as exc:  # noqa: BLE001
+        return {"status": "error", **describe_failure(exc)}
+    found: dict[str, dict] = {}
+    samples: dict[str, list[dict]] = {}
+    update: dict = {}
+    for module in ("deals", "quotes", "contacts", "accounts"):
+        if module not in adapter.modules:
+            continue
+        try:
+            rows = next(iter(adapter.pages(module)), [])
+        except Exception as exc:  # noqa: BLE001
+            return {"status": "error", "module": module, **describe_failure(exc)}
+        paths: set[str] = set()
+        for raw in rows[:_MAX_FIELD_SAMPLES]:
+            paths |= field_paths(raw)
+        found[module] = {"records": len(rows), "fields": len(paths)}
+        samples[module] = rows[:_SAMPLES_PER_MODULE]
+        if paths:
+            update[f"availableFields.{module}"] = sorted(paths)[:500]
+    _save_samples(source, samples)
+    if update:
+        get_db().crm_data_sources.update_one({"_id": source["_id"]}, {"$set": update})
+    return {"status": "ok", "modules": found}
 
 
 def _syncable_sources(organization_id: str | None = None) -> list[dict]:
@@ -456,7 +620,17 @@ def sync_source_by_id(organization_id: str, data_source_id: str) -> dict:
         source = None
     if not source:
         return {"status": "error", "error": "Data source not found."}
-    return sync_source(source)
+    return sync_source(source, trigger="manual")
+
+
+def discover_source_by_id(organization_id: str, data_source_id: str) -> dict:
+    try:
+        source = get_db().crm_data_sources.find_one({"_id": ObjectId(data_source_id), "organizationId": organization_id})
+    except Exception:
+        source = None
+    if not source:
+        return {"status": "error", "message": "Data source not found.", "kind": "other", "detail": ""}
+    return discover_source(source)
 
 
 def sync_org(organization_id: str) -> dict:

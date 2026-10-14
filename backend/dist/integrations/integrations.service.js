@@ -28,7 +28,6 @@ const encryption_service_1 = require("../common/encryption/encryption.service");
 const auth_methods_1 = require("./auth-methods");
 const provider_rules_1 = require("./provider-rules");
 const integration_credential_schema_1 = require("./schemas/integration-credential.schema");
-const CRM_PROVIDERS = new Set(provider_catalog_1.CRM_INTEGRATION_PROVIDERS);
 const PROVIDER_SLUG = /^[a-z0-9][a-z0-9_-]{0,63}$/i;
 exports.PLATFORM_PROVIDERS = ['anthropic', 'sarvam', 'elevenlabs', 'groq'];
 let IntegrationsService = IntegrationsService_1 = class IntegrationsService {
@@ -48,7 +47,7 @@ let IntegrationsService = IntegrationsService_1 = class IntegrationsService {
         return data;
     }
     triggerCrmSyncIfApplicable(organizationId, provider) {
-        if (!CRM_PROVIDERS.has(provider.toLowerCase()))
+        if (!(0, provider_catalog_1.crmProviderForIntegration)(provider))
             return;
         this.dataSources
             .reconcile(organizationId)
@@ -63,7 +62,7 @@ let IntegrationsService = IntegrationsService_1 = class IntegrationsService {
         this.triggerCrmSyncIfApplicable(organizationId, provider);
         return { connected: true, maskedKey: this.mask(apiKey), baseUrl };
     }
-    async connectWithAuth(organizationId, provider, dto) {
+    async connectWithAuth(organizationId, provider, dto, options = {}) {
         const authType = dto.authType;
         this.assertAllowed(provider, authType);
         const credentials = (dto.credentials ?? {});
@@ -80,7 +79,13 @@ let IntegrationsService = IntegrationsService_1 = class IntegrationsService {
             healthCheckPath: dto.healthCheckPath,
             apiKey: undefined,
         }, { upsert: true });
-        this.triggerCrmSyncIfApplicable(organizationId, provider);
+        if (options.skipSync) {
+            if ((0, provider_catalog_1.crmProviderForIntegration)(provider))
+                await this.dataSources.reconcile(organizationId);
+        }
+        else {
+            this.triggerCrmSyncIfApplicable(organizationId, provider);
+        }
         return { connected: true, authType, baseUrl: dto.baseUrl };
     }
     connectFromDto(organizationId, provider, dto) {
@@ -124,7 +129,7 @@ let IntegrationsService = IntegrationsService_1 = class IntegrationsService {
     async disconnect(organizationId, provider) {
         this.assertAllowed(provider);
         await this.credentialModel.deleteOne({ organizationId, provider });
-        if (CRM_PROVIDERS.has(provider.toLowerCase()))
+        if ((0, provider_catalog_1.crmProviderForIntegration)(provider))
             await this.dataSources.reconcile(organizationId);
     }
     async testConnection(organizationId, provider, dto) {

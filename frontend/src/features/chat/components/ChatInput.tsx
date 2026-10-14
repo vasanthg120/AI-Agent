@@ -1,18 +1,37 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { ChangeEvent, DragEvent, KeyboardEvent } from 'react';
+import type { ChangeEvent, ClipboardEvent, DragEvent, KeyboardEvent } from 'react';
 import clsx from 'clsx';
 import toast from 'react-hot-toast';
-import { FiPaperclip, FiImage, FiMic, FiSend, FiSquare } from 'react-icons/fi';
+import { FiAlertCircle, FiFileText, FiPaperclip, FiImage, FiMic, FiSend, FiSquare, FiX } from 'react-icons/fi';
 import { IconButton, Tooltip } from '@/components/ui';
 import { useAutosizeTextarea } from '@/hooks/useAutosizeTextarea';
 import { useChatStore } from '@/stores/chatStore';
-import { chatService } from '@/services/chatService';
+import { chatService, DEFAULT_ATTACHMENT_LIMITS } from '@/services/chatService';
 import { mockSlashCommands } from '@/services/mock/fixtures/chat';
-import type { ChatAgent } from '@/types';
+import type { ChatAgent, MessageAttachment } from '@/types';
+import { extractErrorMessage } from '@/utils/errors';
+import { formatBytes } from '@/utils/format';
+import { generateId } from '@/utils/id';
 import { VoiceInputModal } from './VoiceInputModal';
 import styles from './ChatInput.module.css';
 
 type Popup = { type: 'slash'; query: string } | { type: 'mention'; query: string } | null;
+
+// A document picked for the next message: uploading, ready to send, or refused.
+interface PendingAttachment {
+  localId: string;
+  name: string;
+  size: number;
+  status: 'uploading' | 'ready' | 'error';
+  progress: number;
+  error?: string;
+  attachment?: MessageAttachment;
+  abort?: AbortController;
+}
+
+const ATTACHMENT_ONLY_PROMPT = 'Please review the attached file(s).';
+const IMAGE_EXTENSIONS = ['.png', '.jpg', '.jpeg', '.webp'];
+const isImageName = (name: string) => IMAGE_EXTENSIONS.some((ext) => name.toLowerCase().endsWith(ext));
 
 export interface ChatInputProps {
   prefillText?: string;
@@ -28,6 +47,8 @@ export function ChatInput({ prefillText, onPrefillConsumed }: ChatInputProps) {
   const [voiceModalOpen, setVoiceModalOpen] = useState(false);
   const [agents, setAgents] = useState<ChatAgent[]>([]);
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
+  const [attachments, setAttachments] = useState<PendingAttachment[]>([]);
+  const [limits, setLimits] = useState(DEFAULT_ATTACHMENT_LIMITS);
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -54,6 +75,8 @@ export function ChatInput({ prefillText, onPrefillConsumed }: ChatInputProps) {
 
   useEffect(() => {
     chatService.getAgents().then(setAgents).catch(() => setAgents([]));
+    // The server's own limits; the defaults stand in until (or unless) they load.
+    chatService.getAttachmentLimits().then(setLimits).catch(() => undefined);
   }, []);
 
   // A freshly-typed @mention only applies to the next message being
@@ -113,13 +136,21 @@ export function ChatInput({ prefillText, onPrefillConsumed }: ChatInputProps) {
     setSelectedAgentId(agent.id);
   };
 
+  const isUploading = attachments.some((a) => a.status === 'uploading');
+
   const handleSubmit = () => {
     if (isStreamingCurrent) return;
-    const trimmed = text.trim();
+    if (isUploading) {
+      toast('Your document is still uploading — it will be ready in a moment.');
+      return;
+    }
+    const ready = attachments.flatMap((a) => (a.status === 'ready' && a.attachment ? [a.attachment] : []));
+    const trimmed = text.trim() || (ready.length > 0 ? ATTACHMENT_ONLY_PROMPT : '');
     if (!trimmed) return;
-    void sendMessage(trimmed, selectedAgentId ?? undefined);
+    void sendMessage(trimmed, selectedAgentId ?? undefined, ready);
     setText('');
     setPopup(null);
+    setAttachments([]);
   };
 
   const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -153,15 +184,72 @@ export function ChatInput({ prefillText, onPrefillConsumed }: ChatInputProps) {
     }
   };
 
-  // handleSubmit only ever sends `text` — there is no attachments field
-  // anywhere on SendMessageDto/the chat send path, so a file picked here
-  // used to render a normal-looking "attached" chip and then silently never
-  // reach the backend at all, with nothing telling the user their file
-  // wasn't actually sent. Until real upload support exists, surface that
-  // plainly instead of pretending it worked.
+  const patchAttachment = (localId: string, patch: Partial<PendingAttachment>) =>
+    setAttachments((list) => list.map((a) => (a.localId === localId ? { ...a, ...patch } : a)));
+
+  // Each picked file is checked here (type, size, count) so an obvious
+  // problem is reported at once, then uploaded: the server checks it again,
+  // reads its text and returns the id that is sent with the message.
   const addFiles = (files: FileList | File[]) => {
-    if (files.length === 0) return;
-    toast.error("File attachments aren't supported yet — only your typed message will be sent.");
+    const picked = Array.from(files);
+    if (picked.length === 0) return;
+    const supported = 'PDF, Word (.docx), Excel, PowerPoint (.pptx), CSV, text, or an image (PNG, JPG, WebP)';
+    let room = limits.maxPerMessage - attachments.filter((a) => a.status !== 'error').length;
+    const accepted: { entry: PendingAttachment; file: File }[] = [];
+    for (const file of picked) {
+      const extension = file.name.includes('.') ? `.${file.name.split('.').pop()!.toLowerCase()}` : '';
+      if (extension === '.doc') {
+        toast.error(`“${file.name}” is an old Word file — save it as .docx or PDF and attach that.`);
+      } else if (!limits.extensions.includes(extension)) {
+        toast.error(`“${file.name}” can’t be attached. Supported: ${supported}.`);
+      } else if (file.size === 0) {
+        toast.error(`“${file.name}” is empty.`);
+      } else if (file.size > limits.maxFileBytes) {
+        toast.error(`“${file.name}” is ${formatBytes(file.size)} — files can be up to ${formatBytes(limits.maxFileBytes)}.`);
+      } else if (attachments.some((a) => a.name === file.name && a.size === file.size && a.status !== 'error')) {
+        toast(`“${file.name}” is already attached.`);
+      } else if (room <= 0) {
+        toast.error(`You can attach up to ${limits.maxPerMessage} files per message.`);
+        break;
+      } else {
+        room -= 1;
+        accepted.push({
+          file,
+          entry: {
+            localId: generateId('att'),
+            name: file.name,
+            size: file.size,
+            status: 'uploading',
+            progress: 0,
+            abort: new AbortController(),
+          },
+        });
+      }
+    }
+    if (accepted.length === 0) return;
+    setAttachments((list) => [...list, ...accepted.map((a) => a.entry)]);
+    for (const { entry, file } of accepted) {
+      chatService
+        .uploadAttachment(file, (progress) => patchAttachment(entry.localId, { progress }), entry.abort?.signal)
+        .then((attachment) => patchAttachment(entry.localId, { status: 'ready', progress: 100, attachment }))
+        .catch((err) => {
+          if (entry.abort?.signal.aborted) return; // removed while uploading
+          patchAttachment(entry.localId, { status: 'error', error: extractErrorMessage(err) });
+        });
+    }
+  };
+
+  const removeAttachment = (target: PendingAttachment) => {
+    target.abort?.abort();
+    setAttachments((list) => list.filter((a) => a.localId !== target.localId));
+    // Best-effort: an unsent upload expires on the server by itself anyway.
+    if (target.attachment) void chatService.deleteAttachment(target.attachment.id).catch(() => undefined);
+  };
+
+  const handlePaste = (event: ClipboardEvent<HTMLTextAreaElement>) => {
+    if (event.clipboardData.files.length === 0) return;
+    event.preventDefault();
+    addFiles(event.clipboardData.files);
   };
 
   const handleDrop = (event: DragEvent<HTMLDivElement>) => {
@@ -221,6 +309,45 @@ export function ChatInput({ prefillText, onPrefillConsumed }: ChatInputProps) {
         </div>
       )}
 
+      {attachments.length > 0 && (
+        <div className={styles.attachmentsRow} aria-label="Attached documents">
+          {attachments.map((a) => (
+            <div
+              key={a.localId}
+              className={clsx(styles.attachmentChip, a.status === 'error' && styles.attachmentChipError)}
+              title={a.status === 'error' ? a.error : a.name}
+            >
+              {a.status === 'error' ? <FiAlertCircle aria-hidden /> : isImageName(a.name) ? <FiImage aria-hidden /> : <FiFileText aria-hidden />}
+              <span className={styles.attachmentText}>
+                <span className={styles.attachmentName}>{a.name}</span>
+                <span className={styles.attachmentMeta} role={a.status === 'error' ? 'alert' : undefined}>
+                  {a.status === 'uploading'
+                    ? a.progress < 100
+                      ? `Uploading ${a.progress}%`
+                      : isImageName(a.name)
+                        ? 'Reading image…'
+                        : 'Reading document…'
+                    : a.status === 'error'
+                      ? a.error
+                      : formatBytes(a.size)}
+                </span>
+              </span>
+              <button
+                type="button"
+                className={styles.attachmentRemove}
+                onClick={() => removeAttachment(a)}
+                aria-label={`Remove ${a.name}`}
+              >
+                <FiX />
+              </button>
+              {a.status === 'uploading' && (
+                <span className={styles.attachmentProgress} style={{ width: `${Math.max(a.progress, 4)}%` }} aria-hidden />
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
       <div className={styles.textareaRow}>
         <textarea
           ref={textareaRef}
@@ -230,6 +357,7 @@ export function ChatInput({ prefillText, onPrefillConsumed }: ChatInputProps) {
           value={text}
           onChange={handleChange}
           onKeyDown={handleKeyDown}
+          onPaste={handlePaste}
           onFocus={() => setFocused(true)}
           onBlur={() => setFocused(false)}
         />
@@ -246,14 +374,28 @@ export function ChatInput({ prefillText, onPrefillConsumed }: ChatInputProps) {
           <Tooltip content="Voice input">
             <IconButton icon={<FiMic />} label="Voice input" size="sm" onClick={() => setVoiceModalOpen(true)} />
           </Tooltip>
-          <input ref={fileInputRef} type="file" multiple className={styles.hiddenInput} onChange={(e) => e.target.files && addFiles(e.target.files)} />
+          <input
+            ref={fileInputRef}
+            type="file"
+            multiple
+            accept={limits.extensions.join(',')}
+            className={styles.hiddenInput}
+            onChange={(e) => {
+              if (e.target.files) addFiles(e.target.files);
+              // So the same file can be picked again after removing it.
+              e.target.value = '';
+            }}
+          />
           <input
             ref={imageInputRef}
             type="file"
             multiple
-            accept="image/*"
+            accept={limits.extensions.filter((ext) => IMAGE_EXTENSIONS.includes(ext)).join(',')}
             className={styles.hiddenInput}
-            onChange={(e) => e.target.files && addFiles(e.target.files)}
+            onChange={(e) => {
+              if (e.target.files) addFiles(e.target.files);
+              e.target.value = '';
+            }}
           />
         </div>
         <div className={styles.toolbarRight}>

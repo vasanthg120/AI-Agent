@@ -11,7 +11,10 @@ import { UsersModule } from '../users/users.module';
 import { AgentExecution, AgentExecutionSchema } from '../command-center/schemas/agent-execution.schema';
 import { EmailFollowUpReminder, EmailFollowUpReminderSchema } from './schemas/email-follow-up-reminder.schema';
 import { EmailIntelligenceItem, EmailIntelligenceItemSchema } from './schemas/email-intelligence-item.schema';
+import { EmailSentItem, EmailSentItemSchema } from './schemas/email-sent-item.schema';
 import { EmailSyncJob, EmailSyncJobSchema } from './schemas/email-sync-job.schema';
+import { EmailConversationService } from './email-conversation.service';
+import { EmailHistoryService } from './email-history.service';
 import { CustomerTimelineController } from './customer-timeline.controller';
 import { EmailIntelligenceController } from './email-intelligence.controller';
 import { EmailIntelligenceSyncService } from './email-intelligence-sync.service';
@@ -22,6 +25,8 @@ import { EmailIntelligenceService } from './email-intelligence.service';
     MongooseModule.forFeature([
       { name: EmailIntelligenceItem.name, schema: EmailIntelligenceItemSchema },
       { name: EmailFollowUpReminder.name, schema: EmailFollowUpReminderSchema },
+      // Sent Items (history import + every sync) — see EmailHistoryService.
+      { name: EmailSentItem.name, schema: EmailSentItemSchema },
       // Read-only reuse of OutlookModule's schema class (not a DI export) —
       // EmailIntelligenceSyncService only ever needs `findOne({userId,
       // isActive:true})`, no OutlookService method exists for that shape so
@@ -59,7 +64,7 @@ import { EmailIntelligenceService } from './email-intelligence.service';
     EmailSlaModule,
   ],
   controllers: [EmailIntelligenceController, CustomerTimelineController],
-  providers: [EmailIntelligenceService, EmailIntelligenceSyncService],
+  providers: [EmailIntelligenceService, EmailConversationService, EmailHistoryService, EmailIntelligenceSyncService],
   // Phase 16: EmailIntelligenceService.list() (self-scoped) is consumed by
   // the new HomeDashboardModule, which sits above both this module and
   // CrmModule — safe since HomeDashboardModule imports both but neither of

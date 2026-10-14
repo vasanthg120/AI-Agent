@@ -12,6 +12,7 @@ export const ROUTES = {
   myCustomerActivity: '/my-customer-activity',
   businessKnowledge: '/business-knowledge',
   emailIntelligence: '/ai-email-inbox',
+  customers: '/customers',
   finance: '/finance',
   reporting: '/reporting',
   todoEod: '/todo-eod',

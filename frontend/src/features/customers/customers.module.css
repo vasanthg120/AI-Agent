@@ -1,0 +1,1251 @@
+/* Customers: the page frame, the filter tiles and toolbar, and the list — a
+   table where there is room for it, cards where there isn't. (The customer
+   panel has its own stylesheet, customer-detail.module.css.) */
+
+.page {
+  padding: var(--space-6) var(--space-8) var(--space-10);
+  overflow-y: auto;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+  /* Layout below follows the room the page really has (the sidebar may be open or closed), not the window. */
+  container: customers-page / inline-size;
+}
+
+/* The page scrolls as a whole: nothing in it gives up height to fit the screen. */
+.page > * {
+  flex-shrink: 0;
+}
+
+@media (max-width: 720px) {
+  .page {
+    padding: var(--space-4) var(--space-4) var(--space-8);
+    gap: var(--space-4);
+  }
+}
+
+/* ---- header: sync status, source, sync ---- */
+
+.meta {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+}
+
+.headerActions {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+
+/* A small label above a control. */
+.selectField {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+}
+
+.selectField select {
+  height: 40px;
+  min-width: 190px;
+  max-width: 100%;
+  padding: 0 var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-surface);
+  color: var(--color-text-primary);
+  font: inherit;
+  font-size: var(--text-sm);
+  cursor: pointer;
+  transition: border-color var(--duration-fast) var(--ease-out);
+}
+
+.selectField select:hover {
+  border-color: var(--color-border-strong);
+}
+
+.selectField select:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 1px;
+}
+
+.notice {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-md);
+  background: rgba(251, 191, 36, 0.12);
+  font-size: var(--text-sm);
+  line-height: 1.5;
+  color: var(--color-text-secondary);
+  animation: rise var(--duration-normal) var(--ease-out) backwards;
+}
+
+.notice svg {
+  flex: none;
+  margin-top: 3px;
+  color: var(--color-warning);
+}
+
+.link {
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--color-accent);
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+/* ---- the filter tiles ---- */
+
+.tiles {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: var(--space-3);
+}
+
+.tile {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-bg-surface);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    border-color var(--duration-normal) var(--ease-out),
+    background-color var(--duration-normal) var(--ease-out),
+    box-shadow var(--duration-normal) var(--ease-out),
+    transform var(--duration-normal) var(--ease-out);
+}
+
+.tile:hover {
+  border-color: var(--color-border-strong);
+  box-shadow: var(--shadow-md);
+  transform: translateY(-1px);
+}
+
+.tile:active {
+  transform: translateY(0) scale(0.985);
+  box-shadow: none;
+}
+
+.tile:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+.tileActive,
+.tileActive:hover {
+  border-color: var(--color-accent);
+  background: var(--color-accent-muted);
+}
+
+.tileIcon {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-md);
+  background: var(--color-bg-hover);
+  color: var(--color-accent);
+  transition: background-color var(--duration-normal) var(--ease-out);
+}
+
+.tileActive .tileIcon {
+  background: var(--color-bg-surface);
+}
+
+.tileAttention .tileIcon {
+  color: var(--color-danger);
+}
+
+.tileText {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.tileText strong {
+  font-size: var(--text-xl);
+  line-height: 1.15;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text-primary);
+}
+
+/* The label wraps rather than being cut short: every tile says what it counts. */
+.tileText > span:last-child {
+  font-size: var(--text-xs);
+  line-height: 1.25;
+  color: var(--color-text-muted);
+}
+
+/* ---- the toolbar ---- */
+
+.toolbar {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+
+.search {
+  flex: 1 1 260px;
+  min-width: 0;
+}
+
+.search input {
+  text-overflow: ellipsis;
+}
+
+/* ---- the board's own tools: filters, columns, row height, export ---- */
+
+.boardTools {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.tool {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 34px;
+  padding: 0 var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-surface);
+  color: var(--color-text-secondary);
+  font: inherit;
+  font-size: var(--text-sm);
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    border-color var(--duration-fast) var(--ease-out),
+    background-color var(--duration-fast) var(--ease-out),
+    color var(--duration-fast) var(--ease-out);
+}
+
+.tool svg {
+  flex: none;
+  color: var(--color-accent);
+}
+
+.tool:hover:not(:disabled) {
+  border-color: var(--color-border-strong);
+  color: var(--color-text-primary);
+}
+
+.tool:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 1px;
+}
+
+.tool:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+/* In use: a filter is set, a column is hidden, the rows are compact. */
+.toolOn {
+  border-color: var(--color-accent);
+  background: var(--color-bg-active);
+  color: var(--color-text-primary);
+}
+
+.toolCount {
+  min-width: 18px;
+  padding: 0 5px;
+  border-radius: var(--radius-full);
+  background: var(--color-accent);
+  color: var(--color-accent-contrast);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 18px;
+  text-align: center;
+}
+
+.picker {
+  position: relative;
+}
+
+.pickerMenu {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: var(--z-dropdown);
+  display: flex;
+  flex-direction: column;
+  min-width: 190px;
+  padding: var(--space-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-surface-elevated);
+  box-shadow: var(--shadow-lg);
+  animation: rise var(--duration-fast) var(--ease-out);
+}
+
+.pickerOption {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 6px var(--space-2);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-sm);
+  color: var(--color-text-primary);
+  cursor: pointer;
+}
+
+.pickerOption:hover {
+  background: var(--color-bg-hover);
+}
+
+.pickerOption input {
+  accent-color: var(--color-accent);
+}
+
+.pickerReset {
+  margin-top: var(--space-1);
+  padding: 6px var(--space-2);
+  border: none;
+  border-top: 1px solid var(--color-border);
+  background: none;
+  color: var(--color-accent);
+  font: inherit;
+  font-size: var(--text-sm);
+  text-align: left;
+  cursor: pointer;
+}
+
+.filterBar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  padding: var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-hover);
+  animation: rise var(--duration-normal) var(--ease-out) backwards;
+}
+
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* ---- the list ---- */
+
+/* The table and its card form answer to the room they really have. */
+.wrap {
+  container: customers / inline-size;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+  /* Paging brings the top of the list back into view, clear of the page's own padding. */
+  scroll-margin-top: var(--space-4);
+}
+
+.listHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2) var(--space-4);
+  flex-wrap: wrap;
+  min-height: 20px;
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+}
+
+.listHead strong {
+  color: var(--color-text-primary);
+}
+
+/* What the coloured edge of a row means. */
+.legend {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+}
+
+.legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.legend i {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.legendOverdue {
+  background: var(--color-danger);
+}
+
+.legendToday {
+  background: var(--color-warning);
+}
+
+.legendDone {
+  background: var(--color-success);
+}
+
+.legendProgress {
+  background: var(--color-info);
+}
+
+.tableWrap {
+  overflow-x: auto;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-bg-surface);
+  transition: opacity var(--duration-normal) var(--ease-out);
+}
+
+.tableWrap[aria-busy='true'],
+.cards[aria-busy='true'] {
+  opacity: 0.55;
+}
+
+.table {
+  /* A solid colour, not a see-through wash: the pinned column must hide what scrolls beneath it. */
+  --row-hover: color-mix(in srgb, var(--color-accent) 7%, var(--color-bg-surface));
+  width: 100%;
+  min-width: 820px;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: var(--text-sm);
+}
+
+.table th {
+  padding: 11px 12px;
+  text-align: left;
+  font-size: var(--text-xs);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--color-text-muted);
+  background: var(--color-bg-surface);
+  border-bottom: 1px solid var(--color-border);
+  white-space: nowrap;
+}
+
+.table td {
+  padding: 12px;
+  vertical-align: top;
+  line-height: 1.4;
+  color: var(--color-text-secondary);
+  background: var(--color-bg-surface);
+  border-bottom: 1px solid var(--color-border);
+  transition: background-color var(--duration-normal) var(--ease-out);
+}
+
+.table th:first-child,
+.table td:first-child {
+  padding-left: var(--space-4);
+}
+
+.table th:last-child,
+.table td:last-child {
+  padding-right: var(--space-4);
+}
+
+.table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.table strong {
+  color: var(--color-text-primary);
+}
+
+.row {
+  cursor: pointer;
+  outline: none;
+  /* Rows arrive one after another: new results read as new. */
+  animation: rise var(--duration-slow) var(--ease-out) backwards;
+  animation-delay: calc(var(--i, 0) * 18ms);
+}
+
+.row:hover td,
+.row:focus-visible td {
+  background-color: var(--row-hover);
+}
+
+.row:focus-visible td:first-child {
+  box-shadow:
+    inset 2px 0 0 var(--color-accent),
+    1px 0 0 var(--color-border);
+}
+
+.sortButton {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0;
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-transform: inherit;
+  letter-spacing: inherit;
+  cursor: pointer;
+  transition: color var(--duration-fast) var(--ease-out);
+}
+
+.sortButton:hover,
+.sortActive {
+  color: var(--color-text-primary);
+}
+
+.sortButton:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+/* One arrow that turns over, and waits faintly on the columns that can be sorted. */
+.sortButton svg {
+  flex: none;
+  color: var(--color-accent);
+  opacity: 0;
+  transition:
+    transform var(--duration-normal) var(--ease-out),
+    opacity var(--duration-fast) var(--ease-out);
+}
+
+.sortButton:hover svg {
+  opacity: 0.45;
+}
+
+.sortActive svg,
+.sortActive:hover svg {
+  opacity: 1;
+}
+
+.sortAscending svg {
+  transform: rotate(180deg);
+}
+
+/* The customer stays in view if the table has to scroll sideways. Above the
+   cells that pass beneath it, below the heading cell in its own column. */
+.customerCell {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  min-width: 200px;
+  max-width: 260px;
+  box-shadow: 1px 0 0 var(--color-border);
+}
+
+.table th:first-child {
+  position: sticky;
+  left: 0;
+  z-index: 2;
+  box-shadow: 1px 0 0 var(--color-border);
+}
+
+/* A stripe down the left edge says how pressing the next step is. */
+.table tr.urgency_overdue .customerCell {
+  box-shadow:
+    inset 3px 0 0 var(--color-danger),
+    1px 0 0 var(--color-border);
+}
+
+.table tr.urgency_today .customerCell {
+  box-shadow:
+    inset 3px 0 0 var(--color-warning),
+    1px 0 0 var(--color-border);
+}
+
+.who {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  min-width: 0;
+}
+
+.whoAvatar {
+  flex: none;
+  margin-top: 1px;
+}
+
+.whoText {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.cellMain {
+  color: var(--color-text-primary);
+}
+
+.cellSub {
+  margin-top: 3px;
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+}
+
+.none {
+  color: var(--color-text-muted);
+}
+
+/* One step of the work: every chip column is the same width, so the board reads as a grid. */
+.table th.stageCol,
+.table td.stageCol {
+  width: 140px;
+  min-width: 140px;
+  max-width: 140px;
+  padding-left: 6px;
+  padding-right: 6px;
+}
+
+.colActivity {
+  min-width: 150px;
+}
+
+.ownerCell {
+  min-width: 132px;
+  max-width: 180px;
+}
+
+.owner {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  color: var(--color-text-primary);
+}
+
+.owner > span:last-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.table th.menuCol,
+.table td.menuCol {
+  width: 44px;
+  padding-left: 0;
+  padding-right: var(--space-2);
+  text-align: right;
+  vertical-align: middle;
+}
+
+/* Compact rows: one line each — the chips and the names, without what is under them. */
+.compact td {
+  padding-top: 7px;
+  padding-bottom: 7px;
+  vertical-align: middle;
+}
+
+.compact .who {
+  align-items: center;
+}
+
+.compact .whoText .cellSub {
+  display: none;
+}
+
+.compact .insight {
+  -webkit-line-clamp: 1;
+}
+
+.sources {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 6px;
+}
+
+.source {
+  padding: 0 6px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-full);
+  font-size: 11px;
+  line-height: 18px;
+  color: var(--color-text-muted);
+  white-space: nowrap;
+}
+
+.nextCell {
+  min-width: 176px;
+}
+
+.nextAction {
+  margin-bottom: 3px;
+  font-size: var(--text-xs);
+  font-weight: 600;
+  color: var(--color-text-secondary);
+}
+
+.nextAction_overdue {
+  color: var(--color-danger);
+}
+
+.nextAction_today {
+  color: var(--color-warning);
+}
+
+.insight {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
+  font-size: var(--text-xs);
+  line-height: 1.5;
+  color: var(--color-text-secondary);
+}
+
+.aiMark {
+  margin-right: 4px;
+  vertical-align: -2px;
+  color: var(--color-accent);
+}
+
+/* ---- the same customers as cards ---- */
+
+.cards {
+  display: none;
+  flex-direction: column;
+  gap: var(--space-3);
+  transition: opacity var(--duration-normal) var(--ease-out);
+}
+
+.card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-bg-surface);
+  font-size: var(--text-sm);
+  cursor: pointer;
+  overflow: hidden;
+  outline: none;
+  animation: rise var(--duration-slow) var(--ease-out) backwards;
+  animation-delay: calc(var(--i, 0) * 24ms);
+  transition:
+    border-color var(--duration-normal) var(--ease-out),
+    box-shadow var(--duration-normal) var(--ease-out),
+    transform var(--duration-fast) var(--ease-out);
+}
+
+.card:hover {
+  border-color: var(--color-border-strong);
+  box-shadow: var(--shadow-md);
+}
+
+.card:active {
+  transform: scale(0.99);
+}
+
+.card:focus-visible {
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 2px var(--color-accent-muted);
+}
+
+.card.urgency_overdue::before,
+.card.urgency_today::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  background: var(--color-warning);
+}
+
+.card.urgency_overdue::before {
+  background: var(--color-danger);
+}
+
+.cardHead {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.cardName {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.cardName strong {
+  color: var(--color-text-primary);
+}
+
+.cardName span {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+}
+
+/* The next step, set apart: it is what the card is for. */
+.cardNext {
+  padding: var(--space-3);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-hover);
+}
+
+/* The six steps, three across: the board's columns folded into the card. */
+.cardStages {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-3) var(--space-2);
+}
+
+.cardFoot {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  overflow-wrap: anywhere;
+}
+
+.pagination {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+}
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .row,
+  .card,
+  .notice {
+    animation: none;
+  }
+
+  .tile,
+  .tile:hover,
+  .card,
+  .card:active {
+    transform: none;
+    transition: none;
+  }
+}
+
+/* ---- narrower layouts ---- */
+
+/* Six tiles need room for their labels; below that, two rows of three. */
+@container customers-page (max-width: 1040px) {
+  .tiles {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+/* On a phone the tiles become one row to swipe through — the next one always peeks in. */
+@container customers-page (max-width: 600px) {
+  .tiles {
+    display: flex;
+    margin: 0 calc(var(--space-4) * -1);
+    padding: 2px var(--space-4);
+    overflow-x: auto;
+    scroll-snap-type: x proximity;
+    scroll-padding-left: var(--space-4);
+    scrollbar-width: none;
+  }
+
+  .tiles::-webkit-scrollbar {
+    display: none;
+  }
+
+  .tile {
+    flex: 0 0 142px;
+    scroll-snap-align: start;
+  }
+
+  .tile:hover {
+    transform: none;
+    box-shadow: none;
+  }
+
+  .headerActions {
+    width: 100%;
+  }
+
+  .headerActions .selectField {
+    flex: 1;
+  }
+
+  .toolbar {
+    gap: var(--space-2) var(--space-3);
+  }
+
+  .search {
+    flex-basis: 100%;
+  }
+
+  /* Period and Show share the row under the search box. */
+  .toolbar .selectField {
+    flex: 1 1 0;
+  }
+
+  .selectField select,
+  .selectField > div {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .legend {
+    display: none;
+  }
+
+  .pagination {
+    justify-content: space-between;
+  }
+
+  .pagination > span {
+    margin-right: auto;
+  }
+}
+
+/* The board scrolls sideways when its columns need more room than there is (the customer stays
+   pinned); below this it is cards: two across on a tablet, one on a phone. */
+@container customers (max-width: 940px) {
+  .tableWrap {
+    display: none;
+  }
+
+  .cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  }
+}
+
+/* Columns and row height belong to the table: where the cards show instead, their tools step aside. */
+@container customers-page (max-width: 940px) {
+  .tableOnly {
+    display: none;
+  }
+}
+
+@container customers-page (max-width: 600px) {
+  .boardTools .tool {
+    flex: 1 1 0;
+    justify-content: center;
+  }
+
+  .filterBar > * {
+    flex: 1 1 140px;
+  }
+}
+
+/* ==== Fitting the screen (layout pass) ==== */
+
+/* The sync times: one quiet line (the whole of it on hover). */
+.meta {
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---- one toolbar: the search takes what is left; the board's tools stand level with the boxes beside them ---- */
+
+.search {
+  flex: 1 1 220px;
+}
+
+.toolbar .selectField select {
+  min-width: 150px;
+}
+
+.toolbar .boardTools {
+  flex: none;
+}
+
+.toolbar .tool {
+  height: 40px;
+}
+
+/* ---- the board's columns give way in steps, so the six steps and the next step stay in view ---- */
+
+.whoName {
+  display: flex;
+  align-items: center;
+  gap: 4px 6px;
+  flex-wrap: wrap;
+}
+
+/* What a folded column said, inside the customer's own cell: hidden until its column gives up its room. */
+.whoText .foldedA,
+.whoText .foldedB {
+  display: none;
+}
+
+.table th.stageCol,
+.table td.stageCol {
+  width: 124px;
+  min-width: 124px;
+  max-width: 124px;
+  padding-left: 5px;
+  padding-right: 5px;
+}
+
+/* Owner and Type first. */
+@container customers (max-width: 1540px) {
+  .table th.foldA,
+  .table td.foldA {
+    display: none;
+  }
+
+  .whoText .foldedA {
+    display: block;
+  }
+
+  .whoText .whoName .foldedA {
+    display: inline-flex;
+  }
+
+  .table th.stageCol,
+  .table td.stageCol {
+    width: 112px;
+    min-width: 112px;
+    max-width: 112px;
+  }
+
+  .customerCell {
+    max-width: 280px;
+  }
+}
+
+/* Then the last activity — and the chips draw in a little: a small laptop shows the whole board. */
+@container customers (max-width: 1245px) {
+  .table {
+    --chip-pad: 6px;
+    min-width: 0;
+  }
+
+  .table th.foldB,
+  .table td.foldB {
+    display: none;
+  }
+
+  .whoText .foldedB {
+    display: block;
+  }
+
+  .table th,
+  .table td {
+    padding-left: 8px;
+    padding-right: 8px;
+  }
+
+  .table th.stageCol,
+  .table td.stageCol {
+    width: 106px;
+    min-width: 106px;
+    max-width: 106px;
+    padding-left: 4px;
+    padding-right: 4px;
+  }
+
+  .customerCell {
+    min-width: 190px;
+  }
+
+  .nextCell {
+    min-width: 144px;
+  }
+
+  .table th.menuCol,
+  .table td.menuCol {
+    width: 40px;
+    padding-right: 4px;
+  }
+}
+
+/* ---- the tiles: six in a row down to a small laptop, three across below that, a row to swipe on a phone ---- */
+
+@container customers-page (max-width: 1040px) {
+  .tiles {
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+    gap: var(--space-2);
+  }
+
+  .tile {
+    gap: 8px;
+    padding: 10px;
+  }
+
+  .tileIcon {
+    width: 28px;
+    height: 28px;
+  }
+}
+
+@container customers-page (max-width: 860px) {
+  .tiles {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+/* ---- a phone ---- */
+
+@container customers-page (max-width: 600px) {
+  /* When each source last synced is for a desk; the room goes to the customers. */
+  .meta {
+    display: none;
+  }
+
+  .toolbar .boardTools {
+    flex: 1 1 100%;
+  }
+
+  .notice {
+    padding: var(--space-2) var(--space-3);
+    font-size: var(--text-xs);
+  }
+
+  .listHead {
+    min-height: 0;
+  }
+}
+
+/* -- second round -- */
+
+/* A folded line keeps to one line: the whole of it is on hover. */
+.whoText > .foldedA,
+.whoText > .foldedB {
+  /* Takes the cell's width without asking for any: a long line is cut short, it never widens the column. */
+  width: 0;
+  min-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The smallest screens that still show the table: the row's menu steps aside (a click on the row opens
+   everything it offered), and the first and last columns draw in. */
+@container customers (max-width: 1010px) {
+  .table th.menuCol,
+  .table td.menuCol {
+    display: none;
+  }
+
+  .customerCell {
+    min-width: 170px;
+  }
+
+  .nextCell {
+    min-width: 130px;
+  }
+}
+
+/* A narrow card: two steps across, so each keeps room for its words. */
+@container customers (max-width: 350px) {
+  .cardStages {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@container customers-page (max-width: 600px) {
+  /* The search box takes a row of its own; the period and the view share the next. */
+  .search {
+    flex: 1 1 100%;
+  }
+
+  /* The page's one-line description is for a desk: on a phone the room goes to the list. */
+  .page > header p {
+    display: none;
+  }
+}
+
+/* Several notices stand together rather than each taking a place of its own. */
+.notices {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+/* A short screen: the page's parts stand a little closer, so the list starts sooner. */
+@media (max-height: 800px) {
+  .page {
+    gap: var(--space-4);
+    padding-top: var(--space-4);
+  }
+}
+
+/* ==== Moving smoothly ==== */
+
+/* Both boards stay on the page once visited; the one not on show waits out of sight, exactly as it was left. */
+.page {
+  overflow-x: hidden;
+}
+
+.page[hidden] {
+  display: none;
+}
+
+/* A board coming back into view: what is under the tabs settles in, the top of it first. The heading and
+   the tabs themselves stay still — they are the same on both boards. */
+.switched > :nth-child(n + 3) {
+  animation: settle 280ms var(--ease-out) backwards;
+}
+
+.switched > :nth-child(4) {
+  animation-delay: 40ms;
+}
+
+.switched > :nth-child(n + 5) {
+  animation-delay: 80ms;
+}
+
+@keyframes settle {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+
+/* The list dims only when an answer is slow in coming: a quick one changes it without a blink. */
+.tableWrap,
+.cards {
+  transition: opacity 180ms var(--ease-out);
+}
+
+.tableWrap[aria-busy='true'],
+.cards[aria-busy='true'] {
+  opacity: 0.6;
+  transition-delay: 220ms;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .switched > * {
+    animation: none;
+  }
+}

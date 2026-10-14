@@ -3,7 +3,7 @@ import { Navigate, Route, Routes } from 'react-router-dom';
 import { AppLayout } from '@/layouts/AppLayout/AppLayout';
 import { AuthLayout } from '@/layouts/AuthLayout/AuthLayout';
 import { ProtectedRoute, PublicOnlyRoute } from './ProtectedRoute';
-import { RequireRole } from './RequireRole';
+import { RequireFeature, RequireRole } from './RequireRole';
 import { BlockRole } from './BlockRole';
 import { Spinner } from '@/components/ui';
 import { ROUTES } from '@/constants/routes';
@@ -32,6 +32,9 @@ const CallCopilotPage = lazy(() =>
 const MyCustomerActivityPage = lazy(() =>
   import('@/features/deal-performance/MyCustomerActivityPage').then((m) => ({ default: m.MyCustomerActivityPage })),
 );
+const CustomersPage = lazy(() =>
+  import('@/features/customers/CustomersPage').then((m) => ({ default: m.CustomersPage })),
+);
 const BusinessKnowledgePage = lazy(() =>
   import('@/features/business-knowledge/BusinessKnowledgePage').then((m) => ({ default: m.BusinessKnowledgePage })),
 );
@@ -39,11 +42,15 @@ const EmailIntelligencePage = lazy(() =>
   import('@/features/email-intelligence/EmailIntelligencePage').then((m) => ({ default: m.EmailIntelligencePage })),
 );
 const FinancePage = lazy(() => import('@/features/finance/FinancePage').then((m) => ({ default: m.FinancePage })));
-const ReportingPage = lazy(() => import('@/features/reporting/ReportingPage').then((m) => ({ default: m.ReportingPage })));
+const ReportingPage = lazy(() =>
+  import('@/features/reporting/ReportingPage').then((m) => ({ default: m.ReportingPage })),
+);
 const TodoEodPage = lazy(() => import('@/features/todo-eod/TodoEodPage').then((m) => ({ default: m.TodoEodPage })));
 const EodPage = lazy(() => import('@/features/todo-eod/EodPage').then((m) => ({ default: m.EodPage })));
 const ChatPage = lazy(() => import('@/features/chat/ChatPage').then((m) => ({ default: m.ChatPage })));
-const ChatHistoryPage = lazy(() => import('@/features/chat/ChatHistoryPage').then((m) => ({ default: m.ChatHistoryPage })));
+const ChatHistoryPage = lazy(() =>
+  import('@/features/chat/ChatHistoryPage').then((m) => ({ default: m.ChatHistoryPage })),
+);
 const IntegrationsPage = lazy(() =>
   import('@/features/integrations/IntegrationsPage').then((m) => ({ default: m.IntegrationsPage })),
 );
@@ -53,12 +60,16 @@ const NotificationsPage = lazy(() =>
 const ProfilePage = lazy(() => import('@/features/profile/ProfilePage').then((m) => ({ default: m.ProfilePage })));
 const BillingPage = lazy(() => import('@/features/billing/BillingPage').then((m) => ({ default: m.BillingPage })));
 const PricingPage = lazy(() => import('@/features/billing/PricingPage').then((m) => ({ default: m.PricingPage })));
-const AddCreditsPage = lazy(() => import('@/features/billing/AddCreditsPage').then((m) => ({ default: m.AddCreditsPage })));
+const AddCreditsPage = lazy(() =>
+  import('@/features/billing/AddCreditsPage').then((m) => ({ default: m.AddCreditsPage })),
+);
 const PlatformAdminBillingPage = lazy(() =>
   import('@/features/platform-admin/PlatformAdminBillingPage').then((m) => ({ default: m.PlatformAdminBillingPage })),
 );
 
-const SettingsLayout = lazy(() => import('@/features/settings/SettingsLayout').then((m) => ({ default: m.SettingsLayout })));
+const SettingsLayout = lazy(() =>
+  import('@/features/settings/SettingsLayout').then((m) => ({ default: m.SettingsLayout })),
+);
 const GeneralSettings = lazy(() =>
   import('@/features/settings/tabs/GeneralSettings').then((m) => ({ default: m.GeneralSettings })),
 );
@@ -99,7 +110,9 @@ const EmailSlaSettings = lazy(() =>
   import('@/features/settings/tabs/EmailSlaSettings').then((m) => ({ default: m.EmailSlaSettings })),
 );
 
-const HelpSupportPage = lazy(() => import('@/features/help/HelpSupportPage').then((m) => ({ default: m.HelpSupportPage })));
+const HelpSupportPage = lazy(() =>
+  import('@/features/help/HelpSupportPage').then((m) => ({ default: m.HelpSupportPage })),
+);
 
 const NotFoundPage = lazy(() => import('@/pages/NotFoundPage').then((m) => ({ default: m.NotFoundPage })));
 
@@ -147,13 +160,23 @@ export function AppRoutes() {
             <Route index element={<Navigate to={ROUTES.chat} replace />} />
             <Route path={ROUTES.dashboard} element={<DashboardRouterPage />} />
             <Route path={ROUTES.agentActivity} element={<AgentWorkforceDashboardPage />} />
-            <Route path={ROUTES.callCopilot} element={<CallCopilotPage />} />
+            <Route element={<RequireFeature feature="call_copilot" />}>
+              <Route path={ROUTES.callCopilot} element={<CallCopilotPage />} />
+            </Route>
+            <Route element={<RequireFeature feature="email_inbox" />}>
+              <Route path={ROUTES.emailIntelligence} element={<EmailIntelligencePage />} />
+            </Route>
             <Route path={ROUTES.timeline} element={<TimelinePage />} />
             <Route element={<RequireRole role="consultant" />}>
               <Route path={ROUTES.myCustomerActivity} element={<MyCustomerActivityPage />} />
             </Route>
-            <Route element={<RequireRole role={['owner', 'admin', 'manager']} />}>
+            <Route element={<RequireRole role={['owner', 'admin', 'manager']} feature="business_knowledge" />}>
               <Route path={ROUTES.businessKnowledge} element={<BusinessKnowledgePage />} />
+            </Route>
+            <Route element={<RequireRole role={['owner', 'admin', 'manager']} feature="inquiries" />}>
+              <Route path={ROUTES.customers} element={<CustomersPage />} />
+              {/* New Inquiries became part of Customers; old links and bookmarks land there. */}
+              <Route path="/inquiries" element={<Navigate to={ROUTES.customers} replace />} />
             </Route>
             <Route element={<RequireRole role={['owner', 'admin']} />}>
               <Route path={ROUTES.finance} element={<FinancePage />} />
@@ -174,8 +197,7 @@ export function AppRoutes() {
               <Route path={ROUTES.platformAdminBilling} element={<PlatformAdminBillingPage />} />
             </Route>
 
-            <Route element={<BlockRole role="agent_user" />}>
-              <Route path={ROUTES.emailIntelligence} element={<EmailIntelligencePage />} />
+            <Route element={<RequireFeature feature="email_inbox" />}>
               {/* Legacy/OAuth-callback path — backend/src/outlook/outlook.controller.ts
                   redirects here directly after the Microsoft OAuth round trip
                   (`/integrations?outlook=<status>`), and IntegrationsPage's own
@@ -183,6 +205,9 @@ export function AppRoutes() {
                   so that flow keeps working; Settings → Integrations below is
                   the discoverable entry point now. */}
               <Route path={ROUTES.integrations} element={<IntegrationsPage />} />
+            </Route>
+
+            <Route element={<BlockRole role="agent_user" />}>
               <Route path={ROUTES.billing} element={<BillingPage />} />
               <Route path={ROUTES.pricing} element={<PricingPage />} />
               <Route path={ROUTES.addCredits} element={<AddCreditsPage />} />

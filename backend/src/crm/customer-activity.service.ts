@@ -48,6 +48,13 @@ export interface TodaysEmail {
   // this field, and never needs it (only analyzeAndCreate's persistence
   // path does).
   conversationId?: string;
+  // Sender's display name, Cc recipients and RFC threading headers — captured
+  // by the mailbox sync (see python-agent's routes/outlook.py); absent elsewhere.
+  fromName?: string;
+  cc?: string[];
+  internetMessageId?: string;
+  inReplyTo?: string;
+  references?: string[];
 }
 
 export interface CorrelatedEmail extends TodaysEmail {

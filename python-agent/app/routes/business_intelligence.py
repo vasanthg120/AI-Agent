@@ -20,7 +20,12 @@ class FollowupDraftResponse(BaseModel):
 @router.post("/business-intelligence/followups/draft", response_model=FollowupDraftResponse)
 def draft_followup(payload: dict, user: dict = Depends(get_current_user)):
     return FollowupDraftResponse(
-        **generate_followup_draft(payload, organization_id=user.get("organizationId"), user_id=user.get("sub", ""))
+        **generate_followup_draft(
+            payload,
+            organization_id=user.get("organizationId"),
+            user_id=user.get("sub", ""),
+            request_id=payload.get("request_id", ""),
+        )
     )
 
 

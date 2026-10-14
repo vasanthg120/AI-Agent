@@ -18,6 +18,14 @@ declare const _default: () => {
     dataSources: {
         webhookBaseUrl: string;
     };
+    chat: {
+        attachments: {
+            maxFileBytes: number;
+            maxPerMessage: number;
+            maxPerConversation: number;
+            retentionDays: number;
+        };
+    };
     gorilladash: {
         apiBaseUrl: string;
     };
@@ -32,6 +40,7 @@ declare const _default: () => {
         user: string;
         password: string;
         from: string;
+        appUrl: string;
     };
     webPush: {
         publicKey: string;

@@ -1,44 +1,28 @@
 import { axiosClient } from '@/api/axiosClient';
 
-export interface RoyaltyReportDealLine {
-  dealId: string;
-  customerName: string;
-  businessNameSource: 'quote_client_details' | 'deal_name';
-  quoteNumber?: string;
-  dealStatus: 'open' | 'won' | 'lost';
-  value: number;
-  closingDate?: string;
-  createdDate: string;
-}
-
-export interface RoyaltyReportInvoiceLine {
-  invoiceId: string;
-  invoiceNumber: string;
-  customerName: string;
-  quoteNumber?: string;
-  invoiceDate: string;
-  createdDate: string;
-  previousValue?: number;
-  currentValue: number;
-  exTaxValue: number;
-  eligibleValue: number;
-  royalty: number;
-  invoiceStatus: string;
-  voidStatus: boolean;
-}
-
-export interface RoyaltyReportWipQuoteLine {
+// One quotation of the period, with what royalty falls on it.
+export interface RoyaltyReportQuotationLine {
   quoteId: string;
   quoteNumber?: string;
   customerName: string;
-  createdDate: string;
-  quoteTotalExTax: number;
-  tax: number | null;
+  // The quotation's own date, YYYY-MM-DD.
+  date: string;
+  accepted: boolean;
+  salesExTax: number;
+  tax: number;
+  salesIncTax: number;
+  // What the royalty is charged on for this quotation.
+  eligibleValue: number;
+  // At the period's rate, before any cap.
+  royalty: number;
 }
 
-export interface RoyaltyReportLineSummary {
+export interface RoyaltyReportQuotationsSummary {
   totalRecords: number;
   totalSalesExTax: number;
+  totalTax: number;
+  totalSalesIncTax: number;
+  totalRoyalty: number;
 }
 
 export interface RoyaltyReportGroupRow {
@@ -58,15 +42,17 @@ export interface RoyaltyReportSummary {
     capType: 'none' | 'min' | 'max' | 'sliding';
     capValue?: number;
     effectiveDate: string;
+    excludeTax: boolean;
   } | null;
+  // Quotations sent in the period; of them, accepted by the customer and not accepted yet.
   totalQuotes: number;
+  totalAcceptedQuotes: number;
   totalNotAcceptedQuotes: number;
-  totalDeals: number;
-  totalInvoices: number;
-  totalVoidInvoices: number;
-  valueOfVoidedInvoices: number;
-  workInProgressValue: number;
-  grossRevenue: number;
+  salesExTax: number;
+  tax: number;
+  salesIncTax: number;
+  // Which of the two the royalty is charged on: excluding tax, unless the rule says tax is not excluded.
+  royaltyBase: 'exTax' | 'incTax';
   eligibleRevenue: number;
   royaltyFeeBeforeCap: number;
   totalDue: number;
@@ -74,22 +60,16 @@ export interface RoyaltyReportSummary {
   marketingFeeAmount: number | null;
   otherFeeAmount: number | null;
   dataSourceNote: string;
-  deals: RoyaltyReportDealLine[];
-  dealsSummary: RoyaltyReportLineSummary;
-  invoices: RoyaltyReportInvoiceLine[];
-  invoicesSummary: RoyaltyReportLineSummary;
-  wipQuotes: RoyaltyReportWipQuoteLine[];
-  wipQuotesSummary: RoyaltyReportLineSummary;
+  quotations: RoyaltyReportQuotationLine[];
+  quotationsSummary: RoyaltyReportQuotationsSummary;
   groupBy: 'salesperson' | 'customer' | null;
   groupedBreakdown: RoyaltyReportGroupRow[];
 }
 
-// Computed automatically from real Deal/Quote/Invoice data on the backend —
-// no manual invoice entry is required to generate a report (see
-// royalty-report.service.ts's own comment for why Deal revenue is the
-// primary source today). Takes an arbitrary [dateFrom, dateTo] range, not
-// just a calendar month — DateRangeControl's own "This Month" preset covers
-// the whole-month case, "Custom" covers any other start/end date pair.
+// Worked out on the backend from the quotations sent in the period — the same
+// ones the Sales and Gross Margin reports count — each with the value and the
+// tax the quotation itself carries. Nothing is read from invoices. Takes an
+// arbitrary [dateFrom, dateTo] range, not just a calendar month.
 export const royaltyReportService = {
   async generate(
     dateFrom: string,

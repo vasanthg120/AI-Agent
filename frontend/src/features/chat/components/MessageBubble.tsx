@@ -3,10 +3,11 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeHighlight from 'rehype-highlight';
 import clsx from 'clsx';
-import { FiCopy, FiRefreshCw, FiEdit2, FiThumbsUp, FiThumbsDown, FiPlayCircle, FiCheck } from 'react-icons/fi';
+import { FiCopy, FiRefreshCw, FiEdit2, FiThumbsUp, FiThumbsDown, FiPlayCircle, FiCheck, FiFileText, FiImage } from 'react-icons/fi';
 import toast from 'react-hot-toast';
 import { Avatar, IconButton, Badge, Button } from '@/components/ui';
 import { formatMessageTime } from '@/utils/date';
+import { formatBytes } from '@/utils/format';
 import { useAuthStore } from '@/stores/authStore';
 import { useChatStore } from '@/stores/chatStore';
 import type { ChatMessage } from '@/types';
@@ -62,6 +63,18 @@ export function MessageBubble({ message, isLast }: MessageBubbleProps) {
           <span>{formatMessageTime(message.createdAt)}</span>
           {message.model && <Badge variant="neutral">{message.model}</Badge>}
         </div>
+
+        {!!message.attachments?.length && (
+          <div className={styles.attachmentsRow}>
+            {message.attachments.map((a) => (
+              <span key={a.id} className={styles.attachmentChip} title={a.name}>
+                {a.kind === 'image' ? <FiImage aria-hidden /> : <FiFileText aria-hidden />}
+                <span className={styles.attachmentName}>{a.name}</span>
+                <span className={styles.attachmentSize}>{formatBytes(a.size)}</span>
+              </span>
+            ))}
+          </div>
+        )}
 
         {isEditing ? (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)', width: '100%' }}>

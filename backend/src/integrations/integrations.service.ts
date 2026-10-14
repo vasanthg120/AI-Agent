@@ -1,6 +1,6 @@
 import { HttpService } from '@nestjs/axios';
 import { DataSourcesService } from '../data-sources/data-sources.service';
-import { CRM_INTEGRATION_PROVIDERS } from '../data-sources/provider-catalog';
+import { crmProviderForIntegration } from '../data-sources/provider-catalog';
 import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
@@ -21,7 +21,6 @@ import { IntegrationCredential, IntegrationCredentialDocument } from './schemas/
 // resolve_credentials for why both are checked everywhere else too.
 // Every CRM HaiVE can take data from (the customised CRM, HubSpot,
 // Salesforce, Zoho…) — see data-sources/provider-catalog.ts.
-const CRM_PROVIDERS = new Set(CRM_INTEGRATION_PROVIDERS);
 
 const PROVIDER_SLUG = /^[a-z0-9][a-z0-9_-]{0,63}$/i;
 
@@ -100,7 +99,7 @@ export class IntegrationsService {
    * data-sources/provider-catalog.ts); every other provider (Anthropic,
    * Stripe, a customer's own custom REST API, ...) has nothing to sync. */
   private triggerCrmSyncIfApplicable(organizationId: string, provider: string): void {
-    if (!CRM_PROVIDERS.has(provider.toLowerCase())) return;
+    if (!crmProviderForIntegration(provider)) return;
     // The CRM becomes its own data source first, so what the sync writes is
     // tagged with it from the very first record.
     this.dataSources
@@ -134,6 +133,9 @@ export class IntegrationsService {
     organizationId: string,
     provider: string,
     dto: ConnectIntegrationDto,
+    // The setup wizard reviews the field mapping before the first sync, so it
+    // asks for the connection to be saved without starting one.
+    options: { skipSync?: boolean } = {},
   ): Promise<{ connected: true; authType: AuthType; baseUrl?: string }> {
     const authType = dto.authType!;
     this.assertAllowed(provider, authType);
@@ -157,7 +159,11 @@ export class IntegrationsService {
       },
       { upsert: true },
     );
-    this.triggerCrmSyncIfApplicable(organizationId, provider);
+    if (options.skipSync) {
+      if (crmProviderForIntegration(provider)) await this.dataSources.reconcile(organizationId);
+    } else {
+      this.triggerCrmSyncIfApplicable(organizationId, provider);
+    }
     return { connected: true, authType, baseUrl: dto.baseUrl };
   }
 
@@ -228,7 +234,7 @@ export class IntegrationsService {
     await this.credentialModel.deleteOne({ organizationId, provider });
     // A disconnected CRM's data source is kept (its history stays viewable)
     // but marked disconnected and never read by default or unified views.
-    if (CRM_PROVIDERS.has(provider.toLowerCase())) await this.dataSources.reconcile(organizationId);
+    if (crmProviderForIntegration(provider)) await this.dataSources.reconcile(organizationId);
   }
 
   /** Pings the provider's baseUrl (+ optional healthCheckPath) with the

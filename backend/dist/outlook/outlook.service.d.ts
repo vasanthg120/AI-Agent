@@ -10,6 +10,7 @@ export interface OutlookAccountSummary {
     isActive: boolean;
     connectedAt: Date;
     status: 'connected' | 'needs_reauth';
+    handledByUserId?: string;
 }
 export interface OutlookOrgAccountSummary extends OutlookAccountSummary {
     ownerUserId: string;
@@ -52,6 +53,7 @@ export declare class OutlookService {
         email?: string;
         canSend: boolean;
     }>;
+    setHandler(userId: string, organizationId: string, email: string, handlerUserId: string | null): Promise<OutlookAccountSummary[]>;
     listAccounts(userId: string): Promise<OutlookAccountSummary[]>;
     listOrgAccounts(organizationId: string): Promise<OutlookOrgAccountSummary[]>;
     setActive(userId: string, email: string): Promise<void>;

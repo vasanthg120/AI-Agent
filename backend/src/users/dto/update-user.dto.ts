@@ -1,4 +1,4 @@
-import { IsBoolean, IsIn, IsOptional, IsString, MinLength, ValidateIf } from 'class-validator';
+import { IsBoolean, IsIn, IsOptional, IsString, MaxLength, MinLength, ValidateIf } from 'class-validator';
 
 // 'owner' is registration-only (the user who created the org) — not
 // assignable via the admin panel, so it's excluded here even though User.roles
@@ -15,6 +15,12 @@ export type AssignableRole = (typeof ASSIGNABLE_ROLES)[number];
 const STORE_SCOPED_ROLES = new Set(['manager', 'consultant']);
 
 export class UpdateUserDto {
+  @IsOptional()
+  @IsString()
+  @MinLength(1)
+  @MaxLength(100)
+  name?: string;
+
   @IsOptional()
   @IsIn(ASSIGNABLE_ROLES)
   role?: AssignableRole;

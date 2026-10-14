@@ -190,6 +190,12 @@ export const dealsService = {
     return data;
   },
 
+  // Many deals to one person (or to nobody) in a single request.
+  async assignMany(dealIds: string[], ownerId: string | null): Promise<{ requested: number; assigned: number }> {
+    const { data } = await axiosClient.post<{ requested: number; assigned: number }>('/crm/deals/assign-bulk', { dealIds, ownerId });
+    return data;
+  },
+
   async assign(dealId: string, ownerId: string | null): Promise<Deal> {
     const { data } = await axiosClient.patch<Deal>(`/crm/deals/${dealId}/assign`, { ownerId });
     return data;

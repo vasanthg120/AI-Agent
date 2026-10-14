@@ -46,6 +46,16 @@ export interface MigrationRunResult {
  * because it was never split, or because a prior run already
  * renamed/archived everything) resolves to action:'none' and is skipped.
  */
+// Tenant-keyed billing collections beyond the wallet's own (see repointBillingRecords).
+const DEPENDENT_COLLECTIONS = [
+  'billing_subscriptions',
+  'billing_subscription_events',
+  'billing_invoices',
+  'billing_coupon_redemptions',
+  'billing_refunds',
+  'usage_records',
+];
+
 @Injectable()
 export class BillingMigrationService {
   private readonly logger = new Logger(BillingMigrationService.name);
@@ -146,11 +156,43 @@ export class BillingMigrationService {
 
   private async applyPlan(plan: OrganizationMigrationPlan): Promise<void> {
     if (plan.action === 'rename') {
+      const originalKeys = plan.sourceWallets.map((s) => s.originalKey);
+      for (const model of [this.reservationModel, this.transactionModel, this.paymentRecordModel, this.paymentMethodModel]) {
+        await (model as Model<unknown>).updateMany({ organizationId: { $in: originalKeys } }, { $set: { organizationId: plan.organizationId } });
+      }
       await this.walletModel.updateOne({ _id: plan.targetWalletId }, { $set: { organizationId: plan.organizationId } });
+      await this.repointBillingRecords(originalKeys, plan.organizationId);
       return;
     }
     if (plan.action === 'merge') {
       await this.mergeWallets(plan);
+      await this.repointBillingRecords(
+        plan.sourceWallets.map((s) => s.originalKey),
+        plan.organizationId,
+      );
+    }
+  }
+
+  // Everything else billing keeps per tenant — the plan subscription and its
+  // history, invoices, coupon redemptions, refunds, usage — follows the wallet
+  // onto the organization. Without this the organization would hold the
+  // credits but show no plan. One document at a time: where a unique index
+  // refuses a second row for the organization (two members each had their own
+  // subscription), the row stays where it was and is logged, never dropped.
+  private async repointBillingRecords(originalKeys: string[], organizationId: string): Promise<void> {
+    const keys = originalKeys.filter((k) => k && k !== organizationId);
+    if (keys.length === 0) return;
+    const db = this.walletModel.db;
+    for (const name of DEPENDENT_COLLECTIONS) {
+      const collection = db.collection(name);
+      const rows = await collection.find({ organizationId: { $in: keys } }, { projection: { _id: 1 } }).toArray();
+      for (const row of rows) {
+        try {
+          await collection.updateOne({ _id: row._id }, { $set: { organizationId } });
+        } catch (err) {
+          this.logger.warn(`Could not move a ${name} record of organization ${organizationId}: ${(err as Error).message}`);
+        }
+      }
     }
   }
 

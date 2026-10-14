@@ -42,7 +42,9 @@ export declare class IntegrationsService {
         maskedKey: string;
         baseUrl?: string;
     }>;
-    connectWithAuth(organizationId: string, provider: string, dto: ConnectIntegrationDto): Promise<{
+    connectWithAuth(organizationId: string, provider: string, dto: ConnectIntegrationDto, options?: {
+        skipSync?: boolean;
+    }): Promise<{
         connected: true;
         authType: AuthType;
         baseUrl?: string;

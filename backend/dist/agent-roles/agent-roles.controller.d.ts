@@ -29,6 +29,7 @@ export declare class AgentRolesController {
         assignedUserIds: string[];
         allowedTools: string[];
         modelTier?: "fast" | "standard";
+        features?: string[];
         avatarColor: string;
         createdBy: string;
         _id: import("mongoose").Types.ObjectId;
@@ -59,6 +60,7 @@ export declare class AgentRolesController {
         assignedUserIds: string[];
         allowedTools: string[];
         modelTier?: "fast" | "standard";
+        features?: string[];
         avatarColor: string;
         createdBy: string;
         _id: import("mongoose").Types.ObjectId;
@@ -89,6 +91,7 @@ export declare class AgentRolesController {
         assignedUserIds: string[];
         allowedTools: string[];
         modelTier?: "fast" | "standard";
+        features?: string[];
         avatarColor: string;
         createdBy: string;
         _id: import("mongoose").Types.ObjectId;
@@ -119,6 +122,7 @@ export declare class AgentRolesController {
         assignedUserIds: string[];
         allowedTools: string[];
         modelTier?: "fast" | "standard";
+        features?: string[];
         avatarColor: string;
         createdBy: string;
         _id: import("mongoose").Types.ObjectId;
@@ -149,6 +153,7 @@ export declare class AgentRolesController {
         assignedUserIds: string[];
         allowedTools: string[];
         modelTier?: "fast" | "standard";
+        features?: string[];
         avatarColor: string;
         createdBy: string;
         _id: import("mongoose").Types.ObjectId;

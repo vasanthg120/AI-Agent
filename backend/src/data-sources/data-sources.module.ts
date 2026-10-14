@@ -19,6 +19,6 @@ import { WebhookSourcesService } from './webhook-sources.service';
   imports: [MongooseModule.forFeature([{ name: DataSource.name, schema: DataSourceSchema }]), HttpModule.register({ timeout: 30_000 }), AuthModule],
   controllers: [WebhookSourcesController, WebhookIngestController, DataSourcesController],
   providers: [DataSourcesService, WebhookSourcesService, { provide: APP_INTERCEPTOR, useClass: DataSourceScopeInterceptor }],
-  exports: [DataSourcesService],
+  exports: [DataSourcesService, WebhookSourcesService],
 })
 export class DataSourcesModule {}

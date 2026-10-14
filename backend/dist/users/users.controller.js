@@ -27,8 +27,7 @@ let UsersController = class UsersController {
         this.usersService = usersService;
     }
     async me(user) {
-        const found = await this.usersService.findById(user.sub);
-        return found ? this.usersService.toPublic(found) : null;
+        return this.usersService.profile(user.sub);
     }
     updateMe(user, dto) {
         return this.usersService.updateOwnProfile(user.sub, dto);
@@ -44,7 +43,7 @@ let UsersController = class UsersController {
         if (id === caller.sub && (dto.active === false || (dto.role && dto.role !== 'admin'))) {
             throw new common_1.BadRequestException("Can't demote or disable your own account");
         }
-        return this.usersService.updateByAdmin(id, dto, caller.organizationId);
+        return this.usersService.updateByAdmin(id, dto, caller.organizationId, caller.sub);
     }
     remove(caller, id) {
         if (id === caller.sub) {

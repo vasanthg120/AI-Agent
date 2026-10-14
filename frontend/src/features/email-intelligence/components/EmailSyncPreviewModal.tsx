@@ -65,7 +65,9 @@ export function EmailSyncPreviewModal({ open, preview, syncing, onCancel, onConf
       </div>
 
       {preview.estimatedBasis === 'no_history' && preview.willAnalyzeCount > 0 && (
-        <div className={styles.previewHint}>No AI call history yet — a token estimate will appear after your first sync.</div>
+        <div className={styles.previewHint}>
+          No AI call history yet — a token estimate will appear after your first sync.
+        </div>
       )}
 
       <div className={styles.previewLastSync}>

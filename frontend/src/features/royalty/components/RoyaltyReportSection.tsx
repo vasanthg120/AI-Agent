@@ -1,39 +1,43 @@
 import { useMemo, useState } from 'react';
 import clsx from 'clsx';
-import { FiBriefcase, FiClock, FiDownload, FiGrid, FiList, FiPercent, FiZap } from 'react-icons/fi';
-import { Badge, Button, DateRangeControl, Dropdown, SectionCard, Skeleton, StatTile, type DateRange } from '@/components/ui';
-import { formatINR as money } from '@/utils/currency';
+import { FiDownload, FiFileText, FiGrid, FiList, FiPercent, FiZap } from 'react-icons/fi';
+import {
+  Badge,
+  Button,
+  DateRangeControl,
+  Dropdown,
+  SectionCard,
+  Skeleton,
+  StatTile,
+  type DateRange,
+} from '@/components/ui';
+import { formatINRExact as money } from '@/utils/currency';
 import { dayjs } from '@/utils/date';
 import { extractErrorMessage } from '@/utils/errors';
 import {
   royaltyReportService,
-  type RoyaltyReportLineSummary,
+  type RoyaltyReportQuotationsSummary,
   type RoyaltyReportSummary,
 } from '@/services/royaltyReportService';
 import styles from '../royalty.module.css';
 
-// Shared "Summary: Total Records / Total Sales (Ex Tax)" footer under each
-// itemized table — same two figures for Deals/Work In Progress, so this is
-// one small component instead of two copies of the same markup.
-function TableSummaryFooter({ summary }: { summary: RoyaltyReportLineSummary }) {
+// Under the quotations: how many, and what they add up to — excluding tax, tax, including tax, royalty.
+function TableSummaryFooter({ summary }: { summary: RoyaltyReportQuotationsSummary }) {
   return (
     <div className={styles.tableSummaryFooter}>
       <span className={styles.tableSummaryLabel}>Summary:</span>
       <span>
-        {summary.totalRecords} record{summary.totalRecords === 1 ? '' : 's'}
+        {summary.totalRecords} quotation{summary.totalRecords === 1 ? '' : 's'}
       </span>
-      <span className={styles.tableSummaryValue}>Total Sales (Ex Tax): {money(summary.totalSalesExTax)}</span>
+      <span className={styles.tableSummaryValue}>Sales (Ex Tax): {money(summary.totalSalesExTax)}</span>
+      <span>Tax: {money(summary.totalTax)}</span>
+      <span>Sales (Inc Tax): {money(summary.totalSalesIncTax)}</span>
+      <span>Royalty: {money(summary.totalRoyalty)}</span>
     </div>
   );
 }
 
 type ViewMode = 'card' | 'table';
-
-const DEAL_STATUS_VARIANT: Record<'open' | 'won' | 'lost', 'neutral' | 'success' | 'danger'> = {
-  open: 'neutral',
-  won: 'success',
-  lost: 'danger',
-};
 
 interface ReportLine {
   label: string;
@@ -45,15 +49,16 @@ interface ReportLine {
 // downloaded export show the exact same Executive Summary line items.
 function buildReportLines(report: RoyaltyReportSummary): ReportLine[] {
   const lines: ReportLine[] = [
-    { label: 'Total Quotes', value: String(report.totalQuotes) },
-    { label: 'Total Not Accepted Quotes', value: String(report.totalNotAcceptedQuotes) },
-    { label: 'Total Deals', value: String(report.totalDeals) },
-    { label: 'Total Invoices', value: String(report.totalInvoices) },
-    { label: 'Total Void Invoices', value: String(report.totalVoidInvoices) },
-    { label: 'Value of Currently Voided Invoices', value: money(report.valueOfVoidedInvoices) },
-    { label: 'Value of Work In Progress', value: money(report.workInProgressValue) },
-    { label: 'Gross Revenue', value: money(report.grossRevenue) },
-    { label: 'Eligible Revenue', value: money(report.eligibleRevenue) },
+    { label: 'Quotations Sent', value: String(report.totalQuotes) },
+    { label: 'Accepted Quotations', value: String(report.totalAcceptedQuotes) },
+    { label: 'Not Accepted Yet', value: String(report.totalNotAcceptedQuotes) },
+    { label: 'Sales (Ex Tax)', value: money(report.salesExTax) },
+    { label: 'Tax', value: money(report.tax) },
+    { label: 'Sales (Including Tax)', value: money(report.salesIncTax) },
+    {
+      label: 'Royalty Charged On',
+      value: report.royaltyBase === 'exTax' ? 'Sales (Ex Tax)' : 'Sales (Including Tax)',
+    },
     { label: 'Royalty Percentage', value: report.royaltyRule ? `${report.royaltyRule.royaltyPercentage}%` : '—' },
     { label: 'Royalty Fee (before cap)', value: money(report.royaltyFeeBeforeCap) },
     { label: 'Total Due', value: money(report.totalDue) },
@@ -62,7 +67,8 @@ function buildReportLines(report: RoyaltyReportSummary): ReportLine[] {
       value: report.effectiveRoyaltyPct !== null ? `${report.effectiveRoyaltyPct}%` : '—',
     },
   ];
-  if (report.marketingFeeAmount !== null) lines.push({ label: 'Marketing Fee', value: money(report.marketingFeeAmount) });
+  if (report.marketingFeeAmount !== null)
+    lines.push({ label: 'Marketing Fee', value: money(report.marketingFeeAmount) });
   if (report.otherFeeAmount !== null) lines.push({ label: 'Other Fee', value: money(report.otherFeeAmount) });
   return lines;
 }
@@ -71,9 +77,9 @@ function buildReportLines(report: RoyaltyReportSummary): ReportLine[] {
 // picking a date range only updates local state; the report itself is only
 // computed on a real click, matching the on-demand "Generate" idiom already
 // established for Customer Activity's/Finance's own AI summaries (never
-// fired automatically on mount or on every filter change). Computed
-// entirely from real, already-existing CRM data (won-deal revenue plus any
-// real invoices) — no manual invoice entry is required to see a report.
+// fired automatically on mount or on every filter change). Worked out from
+// the quotations sent in the period — the value and the tax each quotation
+// carries — the same ones the Sales and Gross Margin reports count.
 // DateRangeControl (not MonthPicker) — a real "start date through end
 // date" range, not locked to a calendar month; its own "This Month" preset
 // still covers the whole-month case.
@@ -166,8 +172,8 @@ export function RoyaltyReportSection() {
         <>
           {!report.royaltyRule && (
             <div className={styles.emptyState}>
-              No royalty rule is configured yet — set one under Settings → Royalty Rules for real Total
-              Due/Royalty Fee figures.
+              No royalty rule is configured yet — set one under Settings → Royalty Rules for real Total Due/Royalty Fee
+              figures.
             </div>
           )}
           <div className={styles.reportNote}>{report.dataSourceNote}</div>
@@ -207,80 +213,62 @@ export function RoyaltyReportSection() {
           {hasFees && view === 'card' && (
             <SectionCard title="Additional Fees" icon={FiPercent}>
               <div className={styles.statsGrid}>
-                {report.marketingFeeAmount !== null && <StatTile value={money(report.marketingFeeAmount)} label="Marketing Fee" />}
+                {report.marketingFeeAmount !== null && (
+                  <StatTile value={money(report.marketingFeeAmount)} label="Marketing Fee" />
+                )}
                 {report.otherFeeAmount !== null && <StatTile value={money(report.otherFeeAmount)} label="Other Fee" />}
               </div>
             </SectionCard>
           )}
 
-          <SectionCard title={`Deals (${report.deals.length})`} icon={FiBriefcase}>
-            {report.deals.length === 0 ? (
-              <div className={styles.emptyState}>No deals in this date range.</div>
+          <SectionCard title={`Quotations (${report.quotations.length})`} icon={FiFileText}>
+            {report.quotations.length === 0 ? (
+              <div className={styles.emptyState}>No quotation was sent in this date range.</div>
             ) : (
               <>
                 <div className={styles.tableScroll}>
-                  <table className={styles.reportTable}>
+                  <table className={clsx(styles.reportTable, styles.linesTable)}>
                     <thead>
                       <tr>
-                        <th>Customer</th>
                         <th>Quote #</th>
+                        <th>Customer</th>
+                        <th>Date</th>
                         <th>Status</th>
-                        <th>Value</th>
-                        <th>Closing Date</th>
-                        <th>Created Date</th>
+                        <th className={styles.num}>Sales (Ex Tax)</th>
+                        <th className={styles.num}>Tax</th>
+                        <th className={styles.num}>Sales (Inc Tax)</th>
+                        <th className={styles.num}>Royalty</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {report.deals.map((d) => (
-                        <tr key={d.dealId}>
-                          <td>{d.customerName}</td>
-                          <td>{d.quoteNumber ?? '—'}</td>
-                          <td>
-                            <Badge variant={DEAL_STATUS_VARIANT[d.dealStatus]}>{d.dealStatus}</Badge>
-                          </td>
-                          <td>{money(d.value)}</td>
-                          <td>{d.closingDate ?? '—'}</td>
-                          <td>{d.createdDate}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-                <TableSummaryFooter summary={report.dealsSummary} />
-              </>
-            )}
-          </SectionCard>
-
-          <SectionCard title={`Work In Progress — Quotes (${report.wipQuotes.length})`} icon={FiClock}>
-            {report.wipQuotes.length === 0 ? (
-              <div className={styles.emptyState}>No quotes still awaiting a decision in this date range.</div>
-            ) : (
-              <>
-                <div className={styles.tableScroll}>
-                  <table className={styles.reportTable}>
-                    <thead>
-                      <tr>
-                        <th>Quote #</th>
-                        <th>Customer</th>
-                        <th>Created Date</th>
-                        <th>Quote Total (Ex Tax)</th>
-                        <th>Tax</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {report.wipQuotes.map((q) => (
+                      {report.quotations.map((q) => (
                         <tr key={q.quoteId}>
-                          <td>{q.quoteNumber ?? '—'}</td>
-                          <td>{q.customerName}</td>
-                          <td>{q.createdDate}</td>
-                          <td>{money(q.quoteTotalExTax)}</td>
-                          <td>{q.tax !== null ? money(q.tax) : '—'}</td>
+                          <td data-label="Quote #">{q.quoteNumber ?? '—'}</td>
+                          <td data-label="Customer">{q.customerName}</td>
+                          <td data-label="Date">{dayjs(q.date).format('D MMM YYYY')}</td>
+                          <td data-label="Status">
+                            <Badge variant={q.accepted ? 'success' : 'neutral'}>
+                              {q.accepted ? 'Accepted' : 'Not accepted yet'}
+                            </Badge>
+                          </td>
+                          <td data-label="Sales (Ex Tax)" className={styles.num}>
+                            {money(q.salesExTax)}
+                          </td>
+                          <td data-label="Tax" className={styles.num}>
+                            {money(q.tax)}
+                          </td>
+                          <td data-label="Sales (Inc Tax)" className={styles.num}>
+                            {money(q.salesIncTax)}
+                          </td>
+                          <td data-label="Royalty" className={styles.num}>
+                            {report.royaltyRule ? money(q.royalty) : '—'}
+                          </td>
                         </tr>
                       ))}
                     </tbody>
                   </table>
                 </div>
-                <TableSummaryFooter summary={report.wipQuotesSummary} />
+                <TableSummaryFooter summary={report.quotationsSummary} />
               </>
             )}
           </SectionCard>
@@ -288,7 +276,9 @@ export function RoyaltyReportSection() {
       )}
 
       {!loading && !report && !error && (
-        <div className={styles.emptyState}>Pick a date range and hit Generate to see that range&apos;s royalty report.</div>
+        <div className={styles.emptyState}>
+          Pick a date range and hit Generate to see that range&apos;s royalty report.
+        </div>
       )}
     </div>
   );

@@ -18,6 +18,13 @@ class UpdateUserDto {
 exports.UpdateUserDto = UpdateUserDto;
 __decorate([
     (0, class_validator_1.IsOptional)(),
+    (0, class_validator_1.IsString)(),
+    (0, class_validator_1.MinLength)(1),
+    (0, class_validator_1.MaxLength)(100),
+    __metadata("design:type", String)
+], UpdateUserDto.prototype, "name", void 0);
+__decorate([
+    (0, class_validator_1.IsOptional)(),
     (0, class_validator_1.IsIn)(exports.ASSIGNABLE_ROLES),
     __metadata("design:type", String)
 ], UpdateUserDto.prototype, "role", void 0);

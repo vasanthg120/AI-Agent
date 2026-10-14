@@ -4,6 +4,7 @@ import { JwtService } from '@nestjs/jwt';
 import { Model } from 'mongoose';
 import { RedisCacheService } from '../common/redis/redis-cache.service';
 import { AgentRoleDocument } from '../agent-roles/schemas/agent-role.schema';
+import { ChatAttachmentsService } from './chat-attachments.service';
 import { ConversationDocument } from './schemas/conversation.schema';
 import { JwtPayload } from '../auth/jwt-payload.interface';
 export interface StreamEvent {
@@ -21,9 +22,10 @@ export declare class ChatService {
     private config;
     private cache;
     private jwt;
+    private attachments;
     private readonly logger;
     private readonly agentUrl;
-    constructor(conversationModel: Model<ConversationDocument>, agentRoleModel: Model<AgentRoleDocument>, http: HttpService, config: ConfigService, cache: RedisCacheService, jwt: JwtService);
+    constructor(conversationModel: Model<ConversationDocument>, agentRoleModel: Model<AgentRoleDocument>, http: HttpService, config: ConfigService, cache: RedisCacheService, jwt: JwtService, attachments: ChatAttachmentsService);
     listAgents(caller?: JwtPayload): Promise<Omit<{
         assignedDepartments: string[];
         assignedUserIds: string[];
@@ -37,13 +39,13 @@ export declare class ChatService {
     renameConversation(userId: string, conversationId: string, title: string): Promise<void>;
     setConversationFlag(userId: string, conversationId: string, flag: 'pinned' | 'favorite' | 'archived', value: boolean): Promise<void>;
     deleteConversation(userId: string, conversationId: string): Promise<void>;
-    sendMessage(userId: string, organizationId: string, userJwt: string, message: string, conversationId?: string, agentId?: string): Promise<{
+    sendMessage(userId: string, organizationId: string, userJwt: string, message: string, conversationId?: string, agentId?: string, attachmentIds?: string[]): Promise<{
         conversationId: string;
         reply: string;
         toolsUsed: string[];
         suggestions: string[];
     }>;
-    sendMessageStreaming(userId: string, organizationId: string, userJwt: string, message: string, conversationId: string | undefined, onEvent: (event: StreamEvent) => void, agentId?: string, onConversationId?: (id: string) => void): Promise<{
+    sendMessageStreaming(userId: string, organizationId: string, userJwt: string, message: string, conversationId: string | undefined, onEvent: (event: StreamEvent) => void, agentId?: string, onConversationId?: (id: string) => void, attachmentIds?: string[]): Promise<{
         conversationId: string;
         reply: string;
         toolsUsed: string[];
@@ -55,6 +57,7 @@ export declare class ChatService {
         toolsUsed: string[];
         suggestions: string[];
     }>;
+    private userTurn;
     private getOrCreateConversation;
     private resolveConversationAgent;
     private finishTurn;

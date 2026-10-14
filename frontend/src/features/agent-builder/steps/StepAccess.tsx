@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react';
-import { FiUsers } from 'react-icons/fi';
+import { FiGrid, FiUsers } from 'react-icons/fi';
 import { Badge, MultiSelectDropdown, SectionCard, StringListEditor, Switch } from '@/components/ui';
 import { integrationsService } from '@/services/integrationsService';
 import type { AdminUser } from '@/services/usersService';
 import { defaultToolsForSystem, isSystemEnabled, TOOL_SYSTEMS } from '../toolCatalog';
 import type { FormState } from '../formState';
+import { APP_FEATURES, BASIC_FEATURES_TEXT } from '@/utils/access';
 import styles from './steps.module.css';
 
 type ProviderStatus = { connected: boolean; label: string };
@@ -106,7 +107,7 @@ export function StepAccess({
                       const status = providerStatus[p];
                       const label =
                         p === 'crm'
-                          ? 'CRM'
+                          ? 'Pantheras CRM'
                           : p === 'outlook'
                             ? 'Outlook'
                             : p === 'gorilladash'
@@ -133,6 +134,32 @@ export function StepAccess({
         A system with no connection shown works without a separate account (it uses your organization's internal data).
         Connect Outlook, Gmail, or CRM in Settings → Integrations if a badge above says "Not connected."
       </p>
+
+      <SectionCard title="What people with this role can use" icon={FiGrid}>
+        <p className={styles.stepIntro}>
+          When you create a user and give them this AI role, they sign in with their own account and get:{' '}
+          {BASIC_FEATURES_TEXT}. Switch on anything else they should have.
+        </p>
+        {APP_FEATURES.map((feature) => (
+          <div key={feature.id} className={styles.systemHeader}>
+            <div className={styles.systemHeaderLeft}>
+              <strong>{feature.label}</strong>
+              <span className={styles.systemDescription}>{feature.description}</span>
+            </div>
+            <Switch
+              checked={form.features.includes(feature.id)}
+              ariaLabel={feature.label}
+              onChange={(on) =>
+                update({
+                  features: on
+                    ? [...new Set([...form.features, feature.id])]
+                    : form.features.filter((f) => f !== feature.id),
+                })
+              }
+            />
+          </div>
+        ))}
+      </SectionCard>
 
       <SectionCard title="Who can use this agent" icon={FiUsers}>
         <p className={styles.stepIntro}>

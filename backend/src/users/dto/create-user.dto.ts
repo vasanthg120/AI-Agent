@@ -1,4 +1,4 @@
-import { IsBoolean, IsEmail, IsIn, IsOptional, IsString, MinLength, ValidateIf } from 'class-validator';
+import { IsBoolean, IsEmail, IsIn, IsOptional, IsString, MaxLength, MinLength, ValidateIf } from 'class-validator';
 import { ASSIGNABLE_ROLES, AssignableRole } from './update-user.dto';
 
 const STORE_SCOPED_ROLES = new Set(['manager', 'consultant']);
@@ -9,6 +9,7 @@ export class CreateUserDto {
 
   @IsString()
   @MinLength(1)
+  @MaxLength(100)
   name: string;
 
   @IsIn(ASSIGNABLE_ROLES)

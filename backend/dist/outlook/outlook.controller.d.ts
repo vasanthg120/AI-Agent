@@ -42,6 +42,9 @@ export declare class OutlookController {
     }>;
     listAccounts(user: JwtPayload): Promise<import("./outlook.service").OutlookAccountSummary[]>;
     setActive(user: JwtPayload, email: string): Promise<void>;
+    setHandler(user: JwtPayload, email: string, body: {
+        userId?: string | null;
+    }): Promise<import("./outlook.service").OutlookAccountSummary[]>;
     disconnectAccount(user: JwtPayload, email: string): Promise<void>;
     listOrgAccounts(user: JwtPayload): Promise<import("./outlook.service").OutlookOrgAccountSummary[]>;
 }

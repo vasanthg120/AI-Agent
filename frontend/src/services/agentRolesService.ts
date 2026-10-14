@@ -40,13 +40,23 @@ export interface AgentRole {
   // Which registered tools this persona may call — empty/absent means
   // unrestricted (see backend/src/agent-roles/schemas/agent-role.schema.ts).
   allowedTools?: string[];
+  // The app features people assigned to this role can use (see utils/access.ts).
+  // Absent on roles created before this existed — treated as the default set.
+  features?: string[];
   // Unset (or null, while editing) = the existing message-length/round-based heuristic.
   modelTier?: 'fast' | 'standard' | null;
 }
 
 type AgentRoleConfigFields = Pick<
   AgentRole,
-  'name' | 'department' | 'description' | 'systemPrompt' | 'assignedDepartments' | 'assignedUserIds' | 'allowedTools'
+  | 'name'
+  | 'department'
+  | 'description'
+  | 'systemPrompt'
+  | 'assignedDepartments'
+  | 'assignedUserIds'
+  | 'allowedTools'
+  | 'features'
 >;
 
 export type UpdateAgentRolePayload = Partial<AgentRoleConfigFields> & {

@@ -194,7 +194,13 @@ def run(state_input: dict) -> dict:
         # app.agent.trivial_router's own docstring for why its allow-list is
         # deliberately narrow. Falls through to the real classify_request
         # call (unchanged below) whenever it isn't confident.
-        plan = trivial_router.trivial_plan(state_input["messages"])
+        # A conversation with attached documents goes straight to the main
+        # agent: its system prompt holds the documents, which neither the
+        # tool-free "general" lane's small model nor the specialist fan-out
+        # (each specialist has its own prompt) would see.
+        plan = {"mode": "simple", "assignments": [], "reasoning": ""} if state_input.get("has_attachments") else None
+        if plan is None:
+            plan = trivial_router.trivial_plan(state_input["messages"])
         if plan is None:
             try:
                 plan = anthropic_client.classify_request(

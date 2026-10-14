@@ -1,5 +1,10 @@
 import type { BadgeVariant } from '@/components/ui';
-import type { EmailIntelligenceItem, EmailResponseStatus, EmailRespondedVia } from '@/services/emailIntelligenceService';
+import type {
+  EmailCategory,
+  EmailIntelligenceItem,
+  EmailResponseStatus,
+  EmailRespondedVia,
+} from '@/services/emailIntelligenceService';
 
 // How an email's state is worded — one place, so the queue row, the detail
 // banner and the conversation timeline can never describe the same email
@@ -19,6 +24,27 @@ export const RESPONSE_VIEW_LABEL: Record<EmailResponseStatus, string> = {
   resolved: 'Resolved',
 };
 
+// The finer, one-per-conversation category the backend derives.
+export const CATEGORY_LABEL: Record<EmailCategory, string> = {
+  urgent: 'Urgent',
+  needs_response: 'Needs response',
+  waiting_for_customer: 'Waiting for customer',
+  follow_up_required: 'Follow-up required',
+  responded: 'Responded',
+  informational: 'Informational',
+  completed: 'Completed',
+};
+
+export const CATEGORY_VARIANT: Record<EmailCategory, BadgeVariant> = {
+  urgent: 'danger',
+  needs_response: 'warning',
+  waiting_for_customer: 'info',
+  follow_up_required: 'warning',
+  responded: 'success',
+  informational: 'neutral',
+  completed: 'neutral',
+};
+
 export function responseBadge(item: StateFields): { label: string; variant: BadgeVariant } {
   if (item.responseStatus === 'responded') {
     return { label: item.respondedVia ? RESPONDED_VIA_LABEL[item.respondedVia] : 'Replied', variant: 'success' };
@@ -31,11 +57,12 @@ export function responseBadge(item: StateFields): { label: string; variant: Badg
         ? { label: 'Send failed', variant: 'danger' }
         : { label: 'Approved · ready to send', variant: 'info' };
     }
-    if (item.aiStatus === 'validation_failed') return { label: 'Needs review', variant: 'danger' };
-    if (item.aiStatus === 'draft_ready') return { label: 'Draft ready', variant: 'warning' };
+    if (item.aiStatus === 'validation_failed') return { label: 'Write it yourself', variant: 'danger' };
+    // One click from done: the reply is written, it only needs checking and sending.
+    if (item.aiStatus === 'draft_ready') return { label: 'Draft ready', variant: 'accent' };
     return { label: 'Needs reply', variant: 'warning' };
   }
-  if (item.status === 'rejected') return { label: 'Rejected', variant: 'neutral' };
+  if (item.status === 'rejected') return { label: 'Closed · no reply', variant: 'neutral' };
   if (item.aiStatus === 'awaiting_customer_response') return { label: 'Awaiting customer', variant: 'info' };
   if (item.status === 'approved') return { label: 'Approved · no reply needed', variant: 'neutral' };
   return { label: 'No reply needed', variant: 'neutral' };

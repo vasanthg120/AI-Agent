@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, Query, Res, UseGuards } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Delete, Get, HttpCode, Param, Patch, Post, Query, Res, UseGuards } from '@nestjs/common';
 import { Response } from 'express';
 import { createBrandedDocument, finalizePagedDocument } from '../common/pdf/branded-pdf';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
@@ -8,7 +8,7 @@ import { Roles } from '../common/decorators/roles.decorator';
 import { JwtPayload } from '../auth/jwt-payload.interface';
 import { OrganizationsService } from '../organizations/organizations.service';
 import { UsersService } from '../users/users.service';
-import { AssignDealDto } from './dto/assign-deal.dto';
+import { AssignDealDto, AssignDealsBulkDto } from './dto/assign-deal.dto';
 import { CreateDealDto } from './dto/create-deal.dto';
 import { UpdateDealDto } from './dto/update-deal.dto';
 import { ListDealsQueryDto } from './dto/list-deals-query.dto';
@@ -190,12 +190,36 @@ export class DealsController {
     return this.dealsService.update(id, user.organizationId, dto, storeConstraint);
   }
 
+  // A deal can only be given to an active person of this organization — never
+  // to an id from somewhere else, which would silently orphan the deal.
+  private async assertAssignable(organizationId: string, ownerId: string | null | undefined): Promise<string | null> {
+    if (!ownerId) return null;
+    const owner = /^[0-9a-f]{24}$/i.test(ownerId) ? await this.usersService.findById(ownerId) : null;
+    if (!owner || owner.organizationId !== organizationId) throw new BadRequestException('That person isn’t in your organization. Pick someone from the list.');
+    if (owner.active === false) throw new BadRequestException(`${owner.name} is deactivated and can’t be given deals.`);
+    return ownerId;
+  }
+
+  // Bulk assignment as ONE request (the page used to send one request per
+  // selected deal, all at once — enough of them trips the API's per-minute
+  // request limit and they all fail together).
+  @Post('assign-bulk')
+  @HttpCode(200)
+  @UseGuards(RolesGuard)
+  @Roles('owner', 'admin', 'manager')
+  async assignBulk(@CurrentUser() user: JwtPayload, @Body() dto: AssignDealsBulkDto) {
+    const ownerId = await this.assertAssignable(user.organizationId, dto.ownerId);
+    const canOverride = user.roles.includes('admin') || user.roles.includes('owner');
+    return this.dealsService.assignOwnerBulk(dto.dealIds, user.organizationId, ownerId, canOverride ? undefined : user.storeId);
+  }
+
   @Patch(':id/assign')
   @UseGuards(RolesGuard)
   @Roles('owner', 'admin', 'manager')
-  assign(@CurrentUser() user: JwtPayload, @Param('id') id: string, @Body() dto: AssignDealDto) {
+  async assign(@CurrentUser() user: JwtPayload, @Param('id') id: string, @Body() dto: AssignDealDto) {
+    const ownerId = await this.assertAssignable(user.organizationId, dto.ownerId);
     const canOverride = user.roles.includes('admin') || user.roles.includes('owner');
     const storeConstraint = canOverride ? undefined : user.storeId;
-    return this.dealsService.assignOwner(id, user.organizationId, dto.ownerId ?? null, storeConstraint);
+    return this.dealsService.assignOwner(id, user.organizationId, ownerId, storeConstraint);
   }
 }

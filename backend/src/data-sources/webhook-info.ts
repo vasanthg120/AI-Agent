@@ -1,7 +1,12 @@
-import type { MirroredModule } from './provider-catalog';
+import { PUSH_PROVIDERS, type MirroredModule } from './provider-catalog';
 import type { DataSource } from './schemas/data-source.schema';
 
+// The generic one ("an app in your Zapier account"); Hoops is the other push provider.
 export const WEBHOOK_PROVIDER = 'zapier';
+
+export function isPushProvider(provider: string | undefined): boolean {
+  return !!provider && (PUSH_PROVIDERS as string[]).includes(provider);
+}
 // Modules a pushed record can be (quotes need line items and a linked deal —
 // not something a Zap trigger sends).
 export const WEBHOOK_MODULES: MirroredModule[] = ['deals', 'contacts', 'accounts'];

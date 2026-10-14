@@ -6,6 +6,9 @@ class ChatRequest(BaseModel):
     conversation_id: str
     message: str
     agent_id: str | None = None
+    # Documents sent with this message (ids in chat_attachments) - the rest of
+    # the conversation's documents are found by conversation_id.
+    attachment_ids: list[str] = []
 
 
 class ChatResponse(BaseModel):

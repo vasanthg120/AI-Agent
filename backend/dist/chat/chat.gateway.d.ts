@@ -25,6 +25,7 @@ export declare class ChatGateway implements OnGatewayConnection, OnGatewayDiscon
         message: string;
         conversationId?: string;
         agentId?: string;
+        attachmentIds?: string[];
     }): Promise<void>;
     onCancel(client: AuthedSocket, body: {
         conversationId?: string;

@@ -61,7 +61,7 @@ export class ChatController {
     // agent_user accounts only ever see one agent in the mention list anyway
     // — default new conversations to it so they don't need to @mention.
     const agentId = dto.agentId ?? (user.roles.includes('agent_user') ? user.assignedAgentId : undefined);
-    return this.chatService.sendMessage(user.sub, user.organizationId, bearerToken, dto.message, dto.conversationId, agentId);
+    return this.chatService.sendMessage(user.sub, user.organizationId, bearerToken, dto.message, dto.conversationId, agentId, dto.attachmentIds);
   }
 
   // The organization purchased the AI credits; this is the per-employee

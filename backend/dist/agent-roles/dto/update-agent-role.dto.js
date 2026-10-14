@@ -11,6 +11,7 @@ var __metadata = (this && this.__metadata) || function (k, v) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.UpdateAgentRoleDto = void 0;
 const class_validator_1 = require("class-validator");
+const app_features_1 = require("../../common/app-features");
 const agent_role_schema_1 = require("../schemas/agent-role.schema");
 class UpdateAgentRoleDto {
 }
@@ -58,6 +59,12 @@ __decorate([
     (0, class_validator_1.IsString)({ each: true }),
     __metadata("design:type", Array)
 ], UpdateAgentRoleDto.prototype, "allowedTools", void 0);
+__decorate([
+    (0, class_validator_1.IsOptional)(),
+    (0, class_validator_1.IsArray)(),
+    (0, class_validator_1.IsIn)(app_features_1.APP_FEATURES, { each: true }),
+    __metadata("design:type", Array)
+], UpdateAgentRoleDto.prototype, "features", void 0);
 __decorate([
     (0, class_validator_1.IsOptional)(),
     (0, class_validator_1.IsIn)(['fast', 'standard', null]),

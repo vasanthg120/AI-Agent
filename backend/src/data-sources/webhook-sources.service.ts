@@ -8,6 +8,7 @@ import { DataSourcesService } from './data-sources.service';
 import { CRM_PROVIDERS, MirroredModule, Terminology } from './provider-catalog';
 import { DataSource, DataSourceDocument } from './schemas/data-source.schema';
 import { WEBHOOK_MODULES, WEBHOOK_PROVIDER, webhookInfo } from './webhook-info';
+import { PUSH_PROVIDERS, type CrmProviderId } from './provider-catalog';
 
 const COLLECTION: Record<string, string> = {
   deals: 'crm_deals',
@@ -82,7 +83,7 @@ export class WebhookSourcesService {
 
   private async owned(organizationId: string, id: string): Promise<DataSourceDocument> {
     if (!isValidObjectId(id)) throw new NotFoundException('Data source not found.');
-    const source = await this.sourceModel.findOne({ _id: id, organizationId, provider: WEBHOOK_PROVIDER }).exec();
+    const source = await this.sourceModel.findOne({ _id: id, organizationId, provider: { $in: PUSH_PROVIDERS } }).exec();
     if (!source) throw new NotFoundException('Data source not found.');
     return source;
   }
@@ -91,22 +92,30 @@ export class WebhookSourcesService {
   async create(
     organizationId: string,
     input: {
-      label: string;
+      label?: string;
       modules?: MirroredModule[];
       terminology?: Partial<Terminology>;
+      // 'zapier' (any app, named by the admin) or a first-class push provider such as 'hoops'.
+      provider?: CrmProviderId;
     },
   ) {
-    const label = input.label.trim().slice(0, 60);
+    const provider = CRM_PROVIDERS[input.provider ?? WEBHOOK_PROVIDER];
+    if (!provider || !PUSH_PROVIDERS.includes(provider.id)) throw new BadRequestException('That integration doesn’t receive records this way.');
+    const named = provider.id !== WEBHOOK_PROVIDER;
+    const label = (input.label ?? (named ? provider.label : '')).trim().slice(0, 60);
     if (!label) throw new BadRequestException('Give the source a name, e.g. the app it comes from (“Hoops”).');
     const existing = await this.sourceModel.find({ organizationId }, { key: 1, label: 1 }).exec();
+    // A first-class provider is one source per organization, under its own key.
+    if (named && existing.some((s) => s.key === provider.id)) {
+      throw new BadRequestException(`${provider.label} is already set up. Open it to see its address or replace its key.`);
+    }
     if (existing.some((s) => s.label.toLowerCase() === label.toLowerCase())) {
       throw new BadRequestException(`There is already a data source called “${label}”. Pick another name.`);
     }
     const keys = new Set(existing.map((s) => s.key));
-    let key = `zapier-${this.slug(label)}`;
-    for (let n = 2; keys.has(key); n++) key = `zapier-${this.slug(label)}-${n}`;
+    let key = named ? provider.id : `zapier-${this.slug(label)}`;
+    for (let n = 2; !named && keys.has(key); n++) key = `zapier-${this.slug(label)}-${n}`;
 
-    const provider = CRM_PROVIDERS.zapier;
     const modules = (input.modules?.length ? input.modules : provider.modules).filter((m): m is MirroredModule =>
       WEBHOOK_MODULES.includes(m as MirroredModule),
     );
@@ -199,7 +208,7 @@ export class WebhookSourcesService {
     // One answer for "no such source" and "wrong key": nothing to probe.
     const refuse = () => new ForbiddenException('Unknown webhook address or key.');
     if (!key || !isValidObjectId(id)) throw refuse();
-    const source = await this.sourceModel.findOne({ _id: id, provider: WEBHOOK_PROVIDER }).exec();
+    const source = await this.sourceModel.findOne({ _id: id, provider: { $in: PUSH_PROVIDERS } }).exec();
     const stored = (source?.metadata as Record<string, unknown> | undefined)?.webhookKeyHash;
     if (!source || typeof stored !== 'string' || !sameHash(stored, hashKey(key))) throw refuse();
     if (source.status !== 'active') throw new ForbiddenException(`${source.label} is disconnected in HaiVE. Reconnect it in Settings → Data Sources.`);
@@ -306,6 +315,25 @@ export class WebhookSourcesService {
       stored += 1;
     }
 
+    // A few of the latest records as received (bounded), for mapping
+    // suggestions and the "preview" of a mapping — and one line of history.
+    await this.connection.collection('crm_source_samples').updateOne(
+      { organizationId, dataSourceId: sourceId, module: mod },
+      { $set: { organizationId, dataSourceId: sourceId, module: mod, records: records.slice(0, 5), updatedAt: now } },
+      { upsert: true },
+    );
+    await this.connection.collection('crm_sync_runs').insertOne({
+      organizationId,
+      dataSourceId: sourceId,
+      trigger: 'push',
+      status: stored > 0 || problems.length === 0 ? 'ok' : 'error',
+      startedAt: now,
+      finishedAt: new Date(),
+      counts: { [mod]: stored },
+      failed: records.length - stored,
+      error: stored === 0 && problems.length ? problems[0] : undefined,
+    });
+
     const seen = new Set<string>(source.availableFields?.[mod] ?? []);
     for (const raw of records.slice(0, 20)) for (const path of fieldPaths(raw)) seen.add(path);
     await this.sourceModel
@@ -319,10 +347,11 @@ export class WebhookSourcesService {
             'sync.lastStatus': stored > 0 || problems.length === 0 ? 'ok' : 'error',
             'sync.lastCounts': { [mod]: stored },
             'metadata.webhookLastReceivedAt': now,
-            ...(stored === 0 && problems.length ? { 'sync.lastError': problems[0] } : {}),
+            ...(stored === 0 && problems.length ? { 'sync.lastError': problems[0], 'sync.lastErrorKind': 'mapping' } : {}),
+            ...(stored > 0 ? { 'sync.lastSuccessAt': now } : {}),
           },
           $inc: { 'metadata.webhookReceived': stored },
-          ...(stored > 0 ? { $unset: { 'sync.lastError': '' } } : {}),
+          ...(stored > 0 ? { $unset: { 'sync.lastError': '', 'sync.lastErrorKind': '', 'sync.lastErrorDetail': '' } } : {}),
         },
       )
       .exec();

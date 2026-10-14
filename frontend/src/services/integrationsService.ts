@@ -14,6 +14,8 @@ export interface OutlookAccount {
   // expired (see outlook_store.py/gmail_store.py's _refresh) and no amount
   // of retrying fixes it; the UI should prompt to reconnect.
   status: 'connected' | 'needs_reauth';
+  // The team member whose work this mailbox's email counts as on the team dashboards.
+  handledByUserId?: string;
 }
 
 export type GmailAccount = OutlookAccount;
@@ -300,6 +302,11 @@ export const integrationsService = {
 
   async setActiveOutlookAccount(email: string): Promise<void> {
     await axiosClient.post(`/outlook/accounts/${encodeURIComponent(email)}/activate`);
+  },
+
+  // Whose work this mailbox is (a shared mailbox answered by a team member); null = the person who connected it.
+  async setOutlookAccountHandler(email: string, userId: string | null): Promise<void> {
+    await axiosClient.put(`/outlook/accounts/${encodeURIComponent(email)}/handler`, { userId });
   },
 
   async disconnectOutlookAccount(email: string): Promise<void> {

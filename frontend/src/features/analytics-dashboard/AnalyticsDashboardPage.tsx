@@ -27,6 +27,7 @@ import { RevenueMomentumCard } from './components/RevenueMomentumCard';
 import { ActionQueueCard } from './components/ActionQueueCard';
 import { DealsNeedingDecisionTable } from './components/DealsNeedingDecisionTable';
 import { PipelineHealthCard } from './components/PipelineHealthCard';
+import { OverallPipelineCard } from './components/OverallPipelineCard';
 import { DealFunnelCard } from './components/DealFunnelCard';
 import { DealStatusDistributionCard } from './components/DealStatusDistributionCard';
 import { TeamPerformanceSummaryCards } from './components/TeamPerformanceSummaryCards';
@@ -100,6 +101,9 @@ type DrillDownTarget =
       dealStatus?: ('open' | 'won' | 'lost')[];
       ownerId?: string[];
       dateField?: 'createdAt' | 'expectedClosingDate';
+      // The Overall Pipeline section looks past the month chosen at the top:
+      // every month ('all'), or one month of its own. Omitted = the chosen month.
+      range?: 'all' | { dateFrom: string; dateTo: string };
     }
   | { kind: 'quotes'; title: string; clientApprovalStatus?: 'approved' | 'not-approved' };
 
@@ -170,8 +174,7 @@ export function AnalyticsDashboardPage() {
       if (drillDown.kind === 'deals') {
         const result = await dealsService.listFiltered(
           {
-            dateFrom,
-            dateTo,
+            ...(drillDown.range === 'all' ? {} : (drillDown.range ?? { dateFrom, dateTo })),
             ...(drillDown.dateField ? { dateField: drillDown.dateField } : {}),
             ...(drillDown.dealStatus ? { dealStatus: drillDown.dealStatus } : {}),
             ...(drillDown.ownerId ? { ownerId: drillDown.ownerId } : {}),
@@ -294,6 +297,15 @@ export function AnalyticsDashboardPage() {
                     />
                   </div>
                 </SectionCard>
+
+                {/* The one section that is not about the chosen month: every open deal, month by month. */}
+                <OverallPipelineCard
+                  storeId={canOverrideStore ? storeId : undefined}
+                  selectedPeriod={dateFrom.slice(0, 7)}
+                  onOpenDeals={({ title, range }) =>
+                    setDrillDown({ kind: 'deals', title, dealStatus: ['open'], dateField: 'expectedClosingDate', range })
+                  }
+                />
 
                 <div className={styles.twoColumn}>
                   <RevenueMomentumCard dateFrom={dateFrom} dateTo={dateTo} storeId={canOverrideStore ? storeId : undefined} />

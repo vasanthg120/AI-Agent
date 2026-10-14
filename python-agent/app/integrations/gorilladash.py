@@ -34,6 +34,7 @@ from app.memory import integration_store
 logger = logging.getLogger(__name__)
 
 PROVIDER = "gorilladash"
+PROVIDER_NAMES = (PROVIDER, "gorilla_dash", "gorilla-dash")
 DEFAULT_BASE_URL = "https://api.gorilladash.com"
 MAX_PER_PAGE = 1000
 TIMEOUT = 20
@@ -51,7 +52,9 @@ class GorillaDashError(Exception):
 
 def credentials_for(organization_id: str | None) -> tuple[str, str, str] | None:
     """(base_url, api_key, api_secret) for this organization, or None."""
-    creds = integration_store.get_credentials(PROVIDER, organization_id)
+    # Also found when it was connected from the generic Integrations page as
+    # "gorilla_dash" / "gorilla-dash" (the backend treats those as the same CRM).
+    creds = next((c for name in PROVIDER_NAMES if (c := integration_store.get_credentials(name, organization_id))), None)
     if not creds:
         return None
     values = creds.get("credentials") or {}

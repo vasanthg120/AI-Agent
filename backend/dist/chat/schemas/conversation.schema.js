@@ -11,6 +11,7 @@ var __metadata = (this && this.__metadata) || function (k, v) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.ConversationSchema = exports.Conversation = exports.ChatMessage = void 0;
 const mongoose_1 = require("@nestjs/mongoose");
+const mongoose_2 = require("mongoose");
 let ChatMessage = class ChatMessage {
 };
 exports.ChatMessage = ChatMessage;
@@ -26,6 +27,10 @@ __decorate([
     (0, mongoose_1.Prop)({ type: [String], default: [] }),
     __metadata("design:type", Array)
 ], ChatMessage.prototype, "toolsUsed", void 0);
+__decorate([
+    (0, mongoose_1.Prop)({ type: [mongoose_2.SchemaTypes.Mixed], default: undefined }),
+    __metadata("design:type", Array)
+], ChatMessage.prototype, "attachments", void 0);
 __decorate([
     (0, mongoose_1.Prop)({ default: () => new Date() }),
     __metadata("design:type", Date)

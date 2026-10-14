@@ -101,14 +101,13 @@ export const PROVIDER_RULES: Record<string, ProviderRule> = {
   // Twilio authenticates with HTTP Basic (Account SID : Auth Token). Connected
   // from Settings -> Calling (international calls), which verifies the pair first.
   twilio: { label: 'Twilio', allowedAuthTypes: ['basic', 'apiKey'] },
-  // White-labeled on purpose: this is the connector id of the external CRM
-  // provider used behind the scenes (see python-agent/app/integrations/
-  // prospectconnect.py). Customers should only ever see "CRM", never the
-  // underlying vendor's name — falling through to getProviderRule's default
-  // (label = the raw provider string) would leak it straight into the
-  // Custom Integrations list and every toast that names this integration.
+  // Pantheras CRM. "prospectconnect" is its connector id (see python-agent/
+  // app/integrations/prospectconnect.py) and "crm" the older name some
+  // organizations saved it under — both are shown as Pantheras CRM, never as
+  // the raw id.
+  crm: { label: 'Pantheras CRM', allowedAuthTypes: ['apiKeyBaseUrl', 'apiKey', 'bearer', 'basic', 'customHeaders'] },
   prospectconnect: {
-    label: 'CRM',
+    label: 'Pantheras CRM',
     allowedAuthTypes: ['apiKeyBaseUrl', 'apiKey', 'bearer', 'basic', 'customHeaders'],
   },
 };

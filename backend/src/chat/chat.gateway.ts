@@ -1,4 +1,4 @@
-import { Logger } from '@nestjs/common';
+import { BadRequestException, Logger } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import {
   ConnectedSocket,
@@ -96,7 +96,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @SubscribeMessage('message')
   async onMessage(
     @ConnectedSocket() client: AuthedSocket,
-    @MessageBody() body: { message: string; conversationId?: string; agentId?: string },
+    @MessageBody() body: { message: string; conversationId?: string; agentId?: string; attachmentIds?: string[] },
   ) {
     const user = client.data.user;
     const token = client.data.token;
@@ -118,6 +118,11 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     // starts, but every event emitted from here on (including a 'cancel'
     // the client might send mid-stream) needs the real one, not undefined.
     let conversationId = body.conversationId;
+
+    // Sockets skip the HTTP ValidationPipe, so the ids are checked here: a
+    // short list of strings (ChatAttachmentsService.attach verifies ownership).
+    const attachmentIds =
+      Array.isArray(body.attachmentIds) && body.attachmentIds.every((id) => typeof id === 'string') ? body.attachmentIds.slice(0, 10) : undefined;
 
     client.emit('typing', { typing: true });
     // Wrapped end-to-end: an unhandled rejection anywhere in this call
@@ -156,13 +161,16 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
           conversationId = resolvedId;
           client.emit('conversationId', { conversationId: resolvedId });
         },
+        attachmentIds,
       );
       client.emit('typing', { typing: false });
       client.emit('message', result);
     } catch (err) {
       this.logger.error(`onMessage failed for conversation ${conversationId}: ${(err as Error).message}`);
       client.emit('typing', { typing: false });
-      client.emit('error', { message: "Something went wrong generating that reply. Please try again." });
+      // A refused attachment (expired, too many, not the caller's) explains itself; anything else stays generic.
+      const message = err instanceof BadRequestException ? err.message : 'Something went wrong generating that reply. Please try again.';
+      client.emit('error', { message });
     }
   }
 

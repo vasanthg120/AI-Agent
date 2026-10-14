@@ -158,7 +158,7 @@ describe('Data sources (real Mongo)', () => {
       const pc = all.find((s) => s.key === 'prospectconnect')!;
       const native = all.find((s) => s.key === 'haive')!;
       expect(pc.isDefault).toBe(true);
-      expect(pc.label).toBe('Customized Haive CRM');
+      expect(pc.label).toBe('Pantheras CRM');
       expect((await deals.findOne({ organizationId: org, name: 'synced' }).exec())!.dataSourceId).toBe(pc._id.toString());
       expect((await deals.findOne({ organizationId: org, name: 'native' }).exec())!.dataSourceId).toBe(native._id.toString());
     });
@@ -198,6 +198,42 @@ describe('Data sources (real Mongo)', () => {
       expect(all.find((s) => s.key === 'haive')!.isDefault).toBe(true);
       // Unified never includes a disconnected source.
       expect((await service.resolveScope(org, 'unified')).sourceIds).not.toContain(hubspot._id.toString());
+    });
+
+    it('a CRM connected after sign-up takes over from the empty HaiVE workspace as the default', async () => {
+      // Sign-up: only the (empty) workspace exists, so it is the default.
+      await service.reconcile(org);
+      expect((await sources.findOne({ organizationId: org, key: 'haive' }).exec())!.isDefault).toBe(true);
+
+      await connection.collection('integration_credentials').insertOne({ organizationId: org, provider: 'prospectconnect' });
+      await service.reconcile(org);
+      const pc = (await sources.findOne({ organizationId: org, key: 'prospectconnect' }).exec())!;
+      expect(pc.isDefault).toBe(true);
+      expect((await service.resolveScope(org, undefined)).sourceIds).toEqual([pc._id.toString()]);
+    });
+
+    it('an empty default gives way to the source holding the data, unless an admin chose it', async () => {
+      await connection.collection('integration_credentials').insertMany([
+        { organizationId: org, provider: 'hubspot' },
+        { organizationId: org, provider: 'gorilla_dash' },
+      ]);
+      await service.reconcile(org);
+      const all = await sources.find({ organizationId: org }).exec();
+      const hubspot = all.find((s) => s.key === 'hubspot')!;
+      const gorilla = all.find((s) => s.key === 'gorilladash')!;
+      // "gorilla_dash" is recognised as Gorilla Dash.
+      expect(gorilla.status).toBe('active');
+      await sources.updateMany({ organizationId: org }, { $set: { isDefault: false } }).exec();
+      await sources.updateOne({ _id: hubspot._id }, { $set: { isDefault: true } }).exec();
+
+      // Gorilla Dash's sync filled it; HubSpot (the default) is empty.
+      await deals.collection.insertOne({ organizationId: org, name: 'Lead', dataSourceId: gorilla._id.toString() });
+      expect((await service.resolveScope(org, undefined)).sourceIds).toEqual([gorilla._id.toString()]);
+
+      // An administrator's own choice stays, even when empty.
+      await service.update(org, hubspot._id.toString(), { isDefault: true });
+      await service.reconcile(org);
+      expect((await service.resolveScope(org, undefined)).sourceIds).toEqual([hubspot._id.toString()]);
     });
 
     it('rejects field mappings that are not HaiVE fields or not valid paths', async () => {
@@ -271,6 +307,8 @@ describe('metric support', () => {
   it('recognises CRMs by their integration name', () => {
     expect(crmProviderForIntegration('crm')?.id).toBe('prospectconnect');
     expect(crmProviderForIntegration('HubSpot')?.id).toBe('hubspot');
+    expect(crmProviderForIntegration('gorilla_dash')?.id).toBe('gorilladash');
+    expect(crmProviderForIntegration('Gorilla-Dash')?.id).toBe('gorilladash');
     expect(crmProviderForIntegration('stripe')).toBeNull();
   });
 });

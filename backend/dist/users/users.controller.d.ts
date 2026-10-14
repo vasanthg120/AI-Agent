@@ -7,6 +7,8 @@ export declare class UsersController {
     private usersService;
     constructor(usersService: UsersService);
     me(user: JwtPayload): Promise<{
+        features: string[] | undefined;
+        aiRoleName: string | undefined;
         id: string;
         email: string;
         name: string;

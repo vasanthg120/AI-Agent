@@ -59,6 +59,7 @@ let JwtStrategy = class JwtStrategy extends (0, passport_1.PassportStrategy)(pas
             organizationId: user.organizationId,
             storeId: user.storeId,
             assignedAgentId: user.assignedAgentId,
+            features: await this.usersService.resolveFeatures(user),
             department: user.department,
             voiceAccessEnabled: user.voiceAccessEnabled,
             aiAccessEnabled: user.aiAccessEnabled,

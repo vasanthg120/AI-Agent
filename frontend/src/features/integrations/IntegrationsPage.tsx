@@ -1,21 +1,26 @@
 import { useEffect, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useLocation, useSearchParams } from 'react-router-dom';
 import toast from 'react-hot-toast';
-import clsx from 'clsx';
 import {
-  FiCheckCircle,
-  FiGrid,
+  FiAlertCircle,
+  FiClock,
+  FiDatabase,
+  FiGlobe,
+  FiKey,
   FiLink,
+  FiMail,
   FiPlus,
   FiRefreshCw,
   FiSettings,
   FiShield,
   FiSliders,
+  FiStar,
   FiTrash2,
   FiUploadCloud,
-  FiZap,
+  FiUsers,
 } from 'react-icons/fi';
-import { Avatar, Card, Badge, Button, Input, Modal } from '@/components/ui';
+import { Avatar, Badge, Button, EmptyState, Input, Modal, Skeleton } from '@/components/ui';
 import {
   integrationsService,
   resolveManifestAuthType,
@@ -31,30 +36,20 @@ import {
   type TenantAuthorizationStatus,
   type TestConnectionResult,
 } from '@/services/integrationsService';
+import { crmIntegrationsService, type CrmIntegration } from '@/services/crmIntegrationsService';
+import { formatRelativeTime } from '@/utils/date';
 import { extractErrorMessage } from '@/utils/errors';
+import { isAiRoleAccount, isSalesperson } from '@/utils/access';
+import { usersService, type AdminUser } from '@/services/usersService';
+import { useAuthStore } from '@/stores/authStore';
+import { CrmManageModal } from './CrmManageModal';
+import { CrmSetupWizard } from './CrmSetupWizard';
+import { IntegrationCard, LetterLogo, type CardTone } from './IntegrationCard';
 import { ResourceEndpointBuilder } from './ResourceEndpointBuilder';
 import styles from './IntegrationsPage.module.css';
-
-// Custom/generic CRM connections aren't one real brand, so this is a
-// designed glyph (a hub of connected systems) rather than a fetched logo —
-// used for the Custom Integrations section header and each row's tile.
-function CustomCrmIcon({ size = 20 }: { size?: number }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden>
-      <path d="M12 8v6M12 14l-5.2 3M12 14l5.2 3" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
-      <circle cx="12" cy="5.5" r="2.5" stroke="currentColor" strokeWidth="1.8" />
-      <circle cx="5.5" cy="18.5" r="2.5" stroke="currentColor" strokeWidth="1.8" />
-      <circle cx="18.5" cy="18.5" r="2.5" stroke="currentColor" strokeWidth="1.8" />
-    </svg>
-  );
-}
+import ui from './integrations.module.css';
 
 type CardStatus = 'connected' | 'disconnected' | 'error' | 'loading';
-
-interface CardState {
-  status: CardStatus;
-  detail?: string;
-}
 
 // OAuth-based platforms (Salesforce, Slack, HubSpot, ...) aren't offered
 // here deliberately — this wizard is only for auth styles that need no
@@ -71,29 +66,33 @@ const AUTH_TYPE_LABELS: Record<AuthType, string> = {
 
 const AUTH_TYPES: AuthType[] = ['apiKeyBaseUrl', 'apiKey', 'bearer', 'basic', 'customHeaders'];
 
-// Gorilla Dash — a first-class card/modal over the same generic Custom
-// Integration flow every other CRM/SaaS uses (customHeaders auth type,
-// api.gorilladash.com's own two-header scheme), not a bespoke backend
-// integration. See ResourceEndpointBuilder for configuring its People/
-// Enquiries/Tribes/Forms/Send-Email endpoints once connected — the Dynamic
-// Executor (dynamic-executor.service.ts) runs those, and the AI agent's
-// integration_capabilities/integration_execute tools already expose
-// whatever gets configured there, for any provider, with no provider-
-// specific code on either side.
-const GORILLA_DASH_PROVIDER = 'gorilla_dash';
-const GORILLA_DASH_BASE_URL = 'https://api.gorilladash.com';
-const GORILLA_DASH_API_KEY_HEADER = 'GorillaDash-Api-Key';
-const GORILLA_DASH_API_SECRET_HEADER = 'GorillaDash-Api-Secret';
-
-// The two provider slugs a connected CRM is ever stored under — mirrors
-// backend/src/integrations/integrations.service.ts's CRM_PROVIDERS. Only
-// these rows get the "Sync Now" action; every other custom integration has
-// nothing for /integrations/crm/sync to pull.
-const CRM_PROVIDERS = new Set(['crm', 'prospectconnect']);
+// CRMs have their own provider-aware setup (see CrmSetupWizard / the
+// crm-integrations API): however one was saved in the past ("crm",
+// "prospectconnect", "gorilla_dash"…), it is shown once, as that CRM — never
+// again as a row in the generic list below.
+const CRM_CREDENTIAL = /^(crm|prospectconnect|gorilla[_-]?dash|zapier)$/i;
+const CRM_LOGO: Record<string, string> = {
+  prospectconnect: '/integrations/pantheras.png',
+  hoops: '/integrations/hoops.png',
+  gorilladash: '/integrations/gorilla-dash.png',
+};
+const MODULE_TERM: Record<string, string> = { deals: 'deal', quotes: 'quote', contacts: 'contact', accounts: 'account' };
+const pluralOf = (word: string) => (/(s|x|ch|sh)$/i.test(word) ? `${word}es` : /[^aeiou]y$/i.test(word) ? `${word.slice(0, -1)}ies` : `${word}s`);
 
 export function IntegrationsPage() {
+  const currentUser = useAuthStore((state) => state.user);
   const [searchParams, setSearchParams] = useSearchParams();
+  // Under Settings the layout already shows this page's title; on its own route the page shows it itself.
+  const insideSettings = useLocation().pathname.startsWith('/settings');
   const [outlookAccounts, setOutlookAccounts] = useState<OutlookAccount[]>([]);
+  // Who a mailbox can be handed to. Only admins can list users; for everyone else the picker is simply not shown.
+  const [teamMembers, setTeamMembers] = useState<AdminUser[]>([]);
+  useEffect(() => {
+    usersService
+      .list()
+      .then((users) => setTeamMembers(users.filter(isSalesperson)))
+      .catch(() => setTeamMembers([]));
+  }, []);
   const [outlookOrgAccounts, setOutlookOrgAccounts] = useState<OutlookOrgAccount[]>([]);
   const [outlookStatus, setOutlookStatus] = useState<CardStatus>('loading');
   const [outlookError, setOutlookError] = useState<string | undefined>();
@@ -124,17 +123,19 @@ export function IntegrationsPage() {
   // API Integration Engine — which custom integration's resource/endpoint
   // builder modal is open (see ResourceEndpointBuilder.tsx), null when closed.
   const [builderProvider, setBuilderProvider] = useState<string | null>(null);
-  const [syncingCrm, setSyncingCrm] = useState(false);
+  // CRMs — what can be connected, what each needs, how each connected one is doing.
+  const queryClient = useQueryClient();
+  const {
+    data: crmIntegrations,
+    isLoading: crmLoading,
+    isError: crmFailed,
+    error: crmError,
+    refetch: refetchCrm,
+  } = useQuery({ queryKey: ['crm-integrations'], queryFn: crmIntegrationsService.list, refetchInterval: 60_000 });
+  const [setupFor, setSetupFor] = useState<CrmIntegration | null>(null);
+  const [manageId, setManageId] = useState<string | null>(null);
+  const [syncingId, setSyncingId] = useState<string | null>(null);
 
-  // Gorilla Dash — its own dedicated card/modal (2 named fields, not a raw
-  // "Header: value" textarea), but wired to the exact same connect/test
-  // endpoints as the generic Custom Integrations flow below.
-  const [gorillaDashModalOpen, setGorillaDashModalOpen] = useState(false);
-  const [gorillaDashApiKey, setGorillaDashApiKey] = useState('');
-  const [gorillaDashApiSecret, setGorillaDashApiSecret] = useState('');
-  const [testingGorillaDash, setTestingGorillaDash] = useState(false);
-  const [gorillaDashTestResult, setGorillaDashTestResult] = useState<TestConnectionResult | null>(null);
-  const [savingGorillaDash, setSavingGorillaDash] = useState(false);
 
   // Bulk connector import — pastes a whole manifest JSON (base URL + an auth
   // template + modules[].actions[]) and creates the credential plus every
@@ -354,77 +355,17 @@ export function IntegrationsPage() {
     }
   };
 
-  // "Sync Now" — pulls fresh CRM data immediately instead of waiting on
-  // python-agent's background poll (up to CRM_MONGO_SYNC_INTERVAL_MINUTES)
-  // or disconnecting/reconnecting just to force a refresh.
-  const handleSyncCrmNow = async () => {
-    setSyncingCrm(true);
+  const syncCrm = async (integration: CrmIntegration) => {
+    setSyncingId(integration.id);
     try {
-      const result = await integrationsService.syncCrmNow();
-      toast.success(`CRM synced — ${result.dealsSynced} deal(s), ${result.quotesSynced} quote(s) updated.`);
+      const { result } = await crmIntegrationsService.syncNow(integration.id);
+      if (result.status === 'error') toast.error(result.error ?? 'The sync didn’t finish.', { duration: 8_000 });
+      else toast.success(`${integration.label} is up to date`);
     } catch (error) {
-      toast.error(extractErrorMessage(error));
+      toast.error(extractErrorMessage(error), { duration: 8_000 });
     } finally {
-      setSyncingCrm(false);
-    }
-  };
-
-  const openGorillaDashModal = () => {
-    setGorillaDashApiKey('');
-    setGorillaDashApiSecret('');
-    setGorillaDashTestResult(null);
-    setGorillaDashModalOpen(true);
-  };
-
-  const buildGorillaDashPayload = () => ({
-    authType: 'customHeaders' as const,
-    baseUrl: GORILLA_DASH_BASE_URL,
-    credentials: {
-      headers: {
-        [GORILLA_DASH_API_KEY_HEADER]: gorillaDashApiKey.trim(),
-        [GORILLA_DASH_API_SECRET_HEADER]: gorillaDashApiSecret.trim(),
-      },
-    },
-  });
-
-  const handleTestGorillaDash = async () => {
-    setTestingGorillaDash(true);
-    setGorillaDashTestResult(null);
-    try {
-      const result = await integrationsService.testCustomIntegrationConnection(GORILLA_DASH_PROVIDER, buildGorillaDashPayload());
-      setGorillaDashTestResult(result);
-    } catch (error) {
-      setGorillaDashTestResult({ ok: false, message: extractErrorMessage(error) });
-    } finally {
-      setTestingGorillaDash(false);
-    }
-  };
-
-  const handleSaveGorillaDash = async () => {
-    if (!gorillaDashApiKey.trim() || !gorillaDashApiSecret.trim()) {
-      toast.error('Both API Key and API Secret are required.');
-      return;
-    }
-    setSavingGorillaDash(true);
-    try {
-      await integrationsService.connectCustomIntegration(GORILLA_DASH_PROVIDER, buildGorillaDashPayload());
-      toast.success('Gorilla Dash connected');
-      setGorillaDashModalOpen(false);
-      loadCustomIntegrations();
-    } catch (error) {
-      toast.error(extractErrorMessage(error));
-    } finally {
-      setSavingGorillaDash(false);
-    }
-  };
-
-  const handleDisconnectGorillaDash = async () => {
-    try {
-      await integrationsService.disconnectCredential(GORILLA_DASH_PROVIDER);
-      toast.success('Gorilla Dash disconnected');
-      loadCustomIntegrations();
-    } catch (error) {
-      toast.error(extractErrorMessage(error));
+      setSyncingId(null);
+      void queryClient.invalidateQueries({ queryKey: ['crm-integrations'] });
     }
   };
 
@@ -517,6 +458,18 @@ export function IntegrationsPage() {
     }
   };
 
+  // The team dashboards count a mailbox's email as the work of whoever handles it.
+  const handleSetOutlookHandler = async (email: string, userId: string | null) => {
+    try {
+      await integrationsService.setOutlookAccountHandler(email, userId);
+      const member = teamMembers.find((m) => m.id === userId);
+      toast.success(member ? `${email} now counts as ${member.name}’s email work` : `${email} counts as your own email work`);
+      loadOutlookAccounts();
+    } catch (err) {
+      toast.error(extractErrorMessage(err));
+    }
+  };
+
   const handleDisconnectOutlookAccount = async (email: string) => {
     try {
       await integrationsService.disconnectOutlookAccount(email);
@@ -574,240 +527,357 @@ export function IntegrationsPage() {
     );
   };
 
-  const badgeFor = (state: CardState) => {
-    if (state.status === 'loading') return <Badge variant="neutral">Checking...</Badge>;
-    if (state.status === 'connected') return <Badge variant="success" dot>Connected</Badge>;
-    if (state.status === 'error') return <Badge variant="danger" dot>Connection error</Badge>;
-    return <Badge variant="neutral" dot>Not connected</Badge>;
+  const otherCustomIntegrations = customIntegrations.filter((i) => !CRM_CREDENTIAL.test(i.provider));
+  const crmList = crmIntegrations ?? [];
+  const connectedCrms = crmList.filter((i) => i.status !== 'not_connected');
+  const availableCrms = crmList.filter((i) => i.status === 'not_connected');
+  const managed = crmList.find((i) => i.id === manageId) ?? null;
+  const connectedCount =
+    connectedCrms.length +
+    (outlookStatus === 'connected' ? 1 : 0) +
+    (gmailStatus === 'connected' ? 1 : 0) +
+    otherCustomIntegrations.length;
+  const needsAttention = connectedCrms.filter((i) => i.status === 'needs_attention').length + (outlookStatus === 'error' ? 1 : 0) + (gmailStatus === 'error' ? 1 : 0);
+
+  const crmLogo = (integration: CrmIntegration) =>
+    CRM_LOGO[integration.id] ? <img src={CRM_LOGO[integration.id]} alt="" /> : <LetterLogo name={integration.label} color="#6b7280" />;
+
+  const crmTone = (integration: CrmIntegration): CardTone =>
+    integration.status === 'needs_attention'
+      ? 'attention'
+      : integration.status === 'waiting'
+        ? 'waiting'
+        : integration.status === 'connected'
+          ? 'connected'
+          : 'idle';
+
+  const crmStatus = (integration: CrmIntegration) =>
+    integration.status === 'needs_attention'
+      ? ({ label: 'Needs attention', variant: 'danger' } as const)
+      : integration.status === 'waiting'
+        ? ({ label: 'Waiting for data', variant: 'warning' } as const)
+        : integration.status === 'connected'
+          ? ({ label: 'Connected', variant: 'success' } as const)
+          : undefined;
+
+  const crmFacts = (integration: CrmIntegration) => {
+    const source = integration.source;
+    if (!source) return undefined;
+    const records = Object.entries(source.records)
+      .filter(([, count]) => count > 0)
+      .map(([module, count]) => `${count.toLocaleString()} ${pluralOf(source.terminology[MODULE_TERM[module]] ?? module).toLowerCase()}`);
+    return [
+      {
+        icon: FiClock,
+        text: source.lastSyncAt
+          ? `${integration.connection === 'push' ? 'Last record' : 'Last synced'} ${formatRelativeTime(source.lastSyncAt)}`
+          : integration.connection === 'push'
+            ? 'No records received yet'
+            : 'Not synced yet',
+      },
+      // A CRM that hasn't sent anything yet already says so in the line above.
+      ...(records.length > 0 || source.lastSyncAt ? [{ icon: FiDatabase, text: records.length > 0 ? records.join(' · ') : 'No records yet' }] : []),
+      ...(source.isDefault ? [{ icon: FiStar, text: 'Shown on dashboards' }] : []),
+    ];
   };
 
-  // Gorilla Dash lives in the same customIntegrations list every generic
-  // Custom Integration does (see loadCustomIntegrations) — no separate
-  // status fetch needed. Excluded from the generic list below since it now
-  // has its own dedicated card instead.
-  const gorillaDashIntegration = customIntegrations.find((i) => i.provider === GORILLA_DASH_PROVIDER);
-  const otherCustomIntegrations = customIntegrations.filter((i) => i.provider !== GORILLA_DASH_PROVIDER);
+  const crmCard = (integration: CrmIntegration) => {
+    const connected = integration.status !== 'not_connected';
+    return (
+      <IntegrationCard
+        key={integration.id}
+        logo={crmLogo(integration)}
+        name={integration.label}
+        tagline={integration.connection === 'push' ? 'Sends new records live' : 'Synced automatically'}
+        tone={crmTone(integration)}
+        status={crmStatus(integration)}
+        // The card already carries the name: "Hoops — new customers…" reads as "New customers…".
+        description={connected ? undefined : integration.description.replace(/^[^—]+—\s*/, '').replace(/^./, (c) => c.toUpperCase())}
+        highlights={connected ? undefined : integration.setup.provides.slice(0, 3)}
+        facts={crmFacts(integration)}
+        problem={integration.source?.error?.message}
+        actions={
+          !connected ? (
+            <Button size="sm" leftIcon={<FiLink />} onClick={() => setSetupFor(integration)}>
+              Connect
+            </Button>
+          ) : (
+            <>
+              <Button size="sm" variant="secondary" leftIcon={<FiSettings />} onClick={() => setManageId(integration.id)}>
+                Manage
+              </Button>
+              {integration.status === 'waiting' ? (
+                <Button size="sm" onClick={() => setSetupFor(integration)}>
+                  Finish setup
+                </Button>
+              ) : integration.source?.error?.kind === 'auth' ? (
+                <Button size="sm" onClick={() => setSetupFor(integration)}>
+                  Reconnect
+                </Button>
+              ) : integration.connection === 'pull' ? (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  leftIcon={<FiRefreshCw />}
+                  loading={syncingId === integration.id}
+                  onClick={() => void syncCrm(integration)}
+                >
+                  Sync now
+                </Button>
+              ) : null}
+            </>
+          )
+        }
+      />
+    );
+  };
+
+  const mailCard = (
+    kind: 'outlook' | 'gmail',
+    status: CardStatus,
+    accounts: { email: string; isActive: boolean }[],
+    onConnect: () => void,
+    onManage: () => void,
+  ) => (
+    <IntegrationCard
+      key={kind}
+      logo={<img src={`/integrations/${kind}.svg`} alt="" />}
+      name={kind === 'outlook' ? 'Microsoft Outlook' : 'Gmail'}
+      tagline={kind === 'outlook' ? 'Email and calendar' : 'Email'}
+      tone={status === 'connected' ? 'connected' : status === 'error' ? 'attention' : 'idle'}
+      status={
+        status === 'connected'
+          ? { label: 'Connected', variant: 'success' }
+          : status === 'error'
+            ? { label: 'Needs attention', variant: 'danger' }
+            : undefined
+      }
+      description={
+        status === 'connected' || status === 'error'
+          ? undefined
+          : 'HaiVE reads your inbox, sorts what needs a reply and drafts answers for you to approve.'
+      }
+      highlights={
+        status === 'connected' || status === 'error'
+          ? undefined
+          : kind === 'outlook'
+            ? ['AI Email Inbox', 'Follow-up tracking', 'Calendar and meetings']
+            : ['AI Email Inbox', 'Follow-up tracking']
+      }
+      facts={
+        status === 'connected' && accounts.length > 0
+          ? [
+              { icon: FiMail, text: (accounts.find((a) => a.isActive) ?? accounts[0]).email },
+              ...(accounts.length > 1 ? [{ icon: FiUsers, text: `${accounts.length} mailboxes connected` }] : []),
+              { icon: FiClock, text: 'Checked every 30 minutes' },
+            ]
+          : undefined
+      }
+      problem={status === 'error' ? 'HaiVE couldn’t check this connection. Reconnect the account to restore it.' : undefined}
+      actions={
+        status === 'connected' ? (
+          <Button size="sm" variant="secondary" leftIcon={<FiSettings />} onClick={onManage}>
+            Manage accounts
+          </Button>
+        ) : (
+          <Button size="sm" leftIcon={<FiLink />} loading={status === 'loading'} onClick={onConnect}>
+            {status === 'error' ? 'Reconnect' : 'Connect'}
+          </Button>
+        )
+      }
+    />
+  );
+  // The raw connection errors stay out of the card (it says what to do instead); kept for the account dialogs.
+  void outlookError;
+  void gmailError;
+
+  const mailConnectedCount = (outlookStatus === 'connected' ? 1 : 0) + (gmailStatus === 'connected' ? 1 : 0);
+  // Connected first, so what's in use is always at the top of its section.
+  const crmOrdered = [...connectedCrms, ...availableCrms];
+  const totalRecords = connectedCrms.reduce((sum, i) => sum + (i.source?.totalRecords ?? 0), 0);
+  const dashboardCrm = connectedCrms.find((i) => i.source?.isDefault);
+
+  // An account tied to an AI role is here for one thing: connecting its own mailbox.
+  const emailOnly = isAiRoleAccount(currentUser);
 
   return (
     <div className={styles.page}>
-      <div className={styles.header}>
+      {!insideSettings && (
+        <div className={ui.pageHeader}>
+          <div>
+            <h1>Integrations</h1>
+            <p>{emailOnly ? 'Connect your own mailbox for the AI Email Inbox.' : 'Connect the tools your organization uses with HaiVE.'}</p>
+          </div>
+        </div>
+      )}
+
+      {!emailOnly && (
+        <>
+      <div className={ui.overview}>
         <div>
-          <span className={styles.headerBadge}>
-            <FiZap size={12} />
-            Connected Services
+          <span className={ui.overviewIcon}>
+            <FiDatabase aria-hidden />
           </span>
-          <h1 className={styles.pageTitle}>Integrations</h1>
-          <p className={styles.pageSubtitle}>
-            Connect the AI model, mailboxes, and business systems HaiVE uses to do real work across your
-            organization — chat and analysis, email, and any CRM or SaaS tool with an API.
-          </p>
+          <div>
+            <strong>{connectedCrms.length === 0 ? 'No CRM connected' : connectedCrms.map((i) => i.label).join(', ')}</strong>
+            <span>
+              {connectedCrms.length === 0
+                ? 'Connect your CRM to see customers and sales in HaiVE'
+                : `${totalRecords.toLocaleString()} records in HaiVE${dashboardCrm ? ` · dashboards show ${dashboardCrm.label}` : ''}`}
+            </span>
+          </div>
+        </div>
+        <div>
+          <span className={ui.overviewIcon}>
+            <FiMail aria-hidden />
+          </span>
+          <div>
+            <strong>{mailConnectedCount === 0 ? 'No mailbox connected' : `${outlookAccounts.length + gmailAccounts.length} mailbox${outlookAccounts.length + gmailAccounts.length === 1 ? '' : 'es'} connected`}</strong>
+            <span>{mailConnectedCount === 0 ? 'Connect email for the AI Email Inbox' : 'Feeding the AI Email Inbox and follow-ups'}</span>
+          </div>
+        </div>
+        <div className={ui.overviewStatus}>
+          <Badge variant={connectedCount > 0 ? 'success' : 'neutral'} dot>
+            {connectedCount} connected
+          </Badge>
+          {needsAttention > 0 && (
+            <Badge variant="danger" dot>
+              {needsAttention} need{needsAttention === 1 ? 's' : ''} attention
+            </Badge>
+          )}
         </div>
       </div>
 
-      <div>
-        <div className={styles.sectionEyebrow}>Core Connections</div>
-        <div className={styles.grid}>
-          {/* Gmail — real Google OAuth delegated flow, mirrors Outlook below */}
-          <Card className={styles.card}>
-            <div className={styles.cardHeader}>
-              <span className={styles.logoTile}>
-                <img src="/integrations/gmail.svg" alt="" />
-              </span>
-              <div className={styles.cardTitleRow}>
-                <div className={styles.cardName}>Gmail</div>
-                <div className={styles.cardCategory}>Communication</div>
-              </div>
-              {badgeFor({ status: gmailStatus, detail: gmailError })}
-            </div>
-            <p className={styles.cardDescription}>Email via the Gmail API — analyzed using Claude.</p>
-            {gmailStatus === 'connected' && (
-              <div className={styles.keyPreview}>
-                {gmailAccounts.find((a) => a.isActive)?.email ?? gmailAccounts[0].email}
-                {gmailAccounts.length > 1 && ` (+${gmailAccounts.length - 1} more)`}
-              </div>
-            )}
-            {gmailStatus === 'error' && gmailError && <div className={styles.keyPreview}>{gmailError}</div>}
-            <div className={styles.cardFooter}>
-              {gmailStatus === 'connected' ? (
-                <Button size="sm" variant="secondary" leftIcon={<FiSettings />} onClick={() => setGmailModalOpen(true)}>
-                  Manage Accounts
-                </Button>
-              ) : (
-                <Button size="sm" leftIcon={<FiCheckCircle />} onClick={handleConnectGmail}>
-                  Connect
-                </Button>
-              )}
-            </div>
-          </Card>
-
-          {/* Outlook — real Microsoft Graph delegated OAuth flow, supports multiple connected accounts */}
-          <Card className={styles.card}>
-            <div className={styles.cardHeader}>
-              <span className={styles.logoTile}>
-                <img src="/integrations/outlook.svg" alt="" />
-              </span>
-              <div className={styles.cardTitleRow}>
-                <div className={styles.cardName}>Microsoft Outlook</div>
-                <div className={styles.cardCategory}>Communication</div>
-              </div>
-              {badgeFor({ status: outlookStatus, detail: outlookError })}
-            </div>
-            <p className={styles.cardDescription}>Email and calendar via Microsoft Graph — analyzed using Claude.</p>
-            {outlookStatus === 'connected' && (
-              <div className={styles.keyPreview}>
-                {outlookAccounts.find((a) => a.isActive)?.email ?? outlookAccounts[0].email}
-                {outlookAccounts.length > 1 && ` (+${outlookAccounts.length - 1} more)`}
-              </div>
-            )}
-            {outlookStatus === 'error' && outlookError && <div className={styles.keyPreview}>{outlookError}</div>}
-            <div className={styles.cardFooter}>
-              {outlookStatus === 'connected' ? (
-                <Button size="sm" variant="secondary" leftIcon={<FiSettings />} onClick={() => setOutlookModalOpen(true)}>
-                  Manage Accounts
-                </Button>
-              ) : (
-                <Button size="sm" leftIcon={<FiCheckCircle />} onClick={handleConnectOutlook}>
-                  Connect
-                </Button>
-              )}
-            </div>
-          </Card>
-        </div>
-      </div>
-
-      <div>
-        <div className={styles.sectionEyebrow}>Business Systems</div>
-        <div className={styles.grid}>
-          {/* Gorilla Dash — a dedicated card over the same generic Custom
-              Integration flow (customHeaders auth) every other CRM/SaaS
-              uses; see buildGorillaDashPayload/handleSaveGorillaDash above. */}
-          <Card className={styles.card}>
-            <div className={styles.cardHeader}>
-              <span className={clsx(styles.logoTile, styles.logoTileGorillaDash)}>
-                <img src="/integrations/gorilla-dash.png" alt="" />
-              </span>
-              <div className={styles.cardTitleRow}>
-                <div className={styles.cardName}>Gorilla Dash</div>
-                <div className={styles.cardCategory}>CRM</div>
-              </div>
-              {badgeFor({ status: gorillaDashIntegration ? 'connected' : 'disconnected' })}
-            </div>
-            <p className={styles.cardDescription}>Sync people, enquiries, and tribe data — connect it to your AI Agent.</p>
-            {gorillaDashIntegration?.baseUrl && <div className={styles.keyPreview}>{gorillaDashIntegration.baseUrl}</div>}
-            <div className={styles.cardFooter}>
-              {gorillaDashIntegration ? (
-                <>
-                  <Button
-                    size="sm"
-                    variant="secondary"
-                    leftIcon={<FiSliders />}
-                    onClick={() => setBuilderProvider(GORILLA_DASH_PROVIDER)}
-                  >
-                    Manage Resources
-                  </Button>
-                  <Button size="sm" variant="ghost" leftIcon={<FiTrash2 />} onClick={handleDisconnectGorillaDash}>
-                    Disconnect
-                  </Button>
-                </>
-              ) : (
-                <Button size="sm" leftIcon={<FiLink />} onClick={openGorillaDashModal}>
-                  Connect
-                </Button>
-              )}
-            </div>
-          </Card>
-        </div>
-      </div>
-
-      {/* Custom Integrations — connect any CRM/SaaS via API Key, Bearer
-          Token, Basic Auth, or Custom Headers. OAuth-based platforms need
-          their own dedicated flow (like Outlook/Gmail above) and aren't
-          offered here. */}
-      <Card className={styles.customSection}>
-        <div className={styles.customHeader}>
-          <div className={styles.customHeaderText}>
-            <span className={styles.customHeaderIcon}>
-              <CustomCrmIcon size={20} />
+      <section className={ui.section} aria-labelledby="integrations-crm">
+        <div className={ui.sectionHead}>
+          <div className={ui.sectionTitle}>
+            <span className={ui.sectionIcon}>
+              <FiDatabase aria-hidden />
             </span>
             <div>
-              <div className={styles.sectionTitle}>Custom Integrations</div>
-              <p className={styles.sectionSubtitle}>Connect any REST API with an API key, bearer token, basic auth, or custom headers.</p>
+              <h2 id="integrations-crm">CRM</h2>
+              <span>Where your customers, deals and quotations live. Each CRM’s data is kept separate.</span>
             </div>
           </div>
-          <div className={styles.customActions}>
-            <Button size="sm" variant="secondary" leftIcon={<FiUploadCloud />} onClick={openImportModal}>
-              Import Connector Config
+          {connectedCrms.length > 0 && <Badge variant="neutral">{connectedCrms.length} of {crmList.length} connected</Badge>}
+        </div>
+        {crmLoading ? (
+          <div className={ui.grid}>
+            <Skeleton height={190} />
+            <Skeleton height={190} />
+            <Skeleton height={190} />
+          </div>
+        ) : crmFailed ? (
+          <EmptyState
+            compact
+            icon={FiAlertCircle}
+            title="CRM integrations couldn’t be loaded"
+            description={extractErrorMessage(crmError)}
+            action={
+              <Button size="sm" variant="secondary" onClick={() => void refetchCrm()}>
+                Try again
+              </Button>
+            }
+          />
+        ) : (
+          <div className={ui.grid}>{crmOrdered.map(crmCard)}</div>
+        )}
+      </section>
+        </>
+      )}
+
+      <section className={ui.section} aria-labelledby="integrations-email">
+        <div className={ui.sectionHead}>
+          <div className={ui.sectionTitle}>
+            <span className={ui.sectionIcon}>
+              <FiMail aria-hidden />
+            </span>
+            <div>
+              <h2 id="integrations-email">Email</h2>
+              <span>The mailboxes HaiVE reads, sorts and drafts replies for. Each person connects their own.</span>
+            </div>
+          </div>
+          {mailConnectedCount > 0 && <Badge variant="neutral">{mailConnectedCount} of 2 connected</Badge>}
+        </div>
+        <div className={ui.grid}>
+          {mailCard('outlook', outlookStatus, outlookAccounts, handleConnectOutlook, () => setOutlookModalOpen(true))}
+          {mailCard('gmail', gmailStatus, gmailAccounts, handleConnectGmail, () => setGmailModalOpen(true))}
+        </div>
+      </section>
+
+      {!emailOnly && (
+        <>
+      {/* For a system HaiVE has no dedicated integration for: any REST API,
+          by API key, bearer token, basic auth or custom headers. Kept below
+          the two things every customer needs. */}
+      <section className={ui.section} aria-labelledby="integrations-other">
+        <div className={ui.sectionHead}>
+          <div className={ui.sectionTitle}>
+            <span className={ui.sectionIcon}>
+              <FiGlobe aria-hidden />
+            </span>
+            <div>
+              <h2 id="integrations-other">Other systems</h2>
+              <span>Any other tool that has an API — for the AI to look things up or take actions in.</span>
+            </div>
+          </div>
+          <div className={ui.rowActions}>
+            <Button size="sm" variant="ghost" leftIcon={<FiUploadCloud />} onClick={openImportModal}>
+              Import connector
             </Button>
-            <Button size="sm" leftIcon={<FiLink />} onClick={openCustomModal}>
-              Add Integration
+            <Button size="sm" variant="secondary" leftIcon={<FiPlus />} onClick={openCustomModal}>
+              Add a connection
             </Button>
           </div>
         </div>
         {otherCustomIntegrations.length === 0 ? (
-          <div className={styles.emptyState}>
-            <span className={styles.emptyStateIcon}>
-              <FiGrid size={20} />
-            </span>
-            <p className={styles.emptyStateText}>
-              No custom integrations yet. Connect a CRM, SaaS tool, or internal system — with an API key, bearer
-              token, basic auth, or custom headers — or import a connector config to set one up in one shot.
-            </p>
-          </div>
+          <p className={ui.sectionEmpty}>No other systems connected. Most organizations only need a CRM and email.</p>
         ) : (
-          <div className={styles.accountList}>
+          <div className={ui.grid}>
             {otherCustomIntegrations.map((integration) => (
-              <div key={integration.provider} className={styles.accountRow}>
-                <div className={styles.accountRowMain}>
-                  <Avatar
-                    name={integration.label || integration.provider}
-                    size="md"
-                    color="linear-gradient(135deg, #8b5cf6 0%, #4c1d95 100%)"
-                  />
-                  <div>
-                    <div className={styles.accountEmail}>{integration.label || integration.provider}</div>
-                    <span className={styles.accountOwner}>
-                      {integration.authType ? AUTH_TYPE_LABELS[integration.authType] : 'API Key'}
-                      {integration.baseUrl ? ` · ${integration.baseUrl}` : ''}
-                    </span>
-                  </div>
-                </div>
-                <div className={styles.accountActions}>
-                  <Badge variant="success" dot>
-                    Connected
-                  </Badge>
-                  {CRM_PROVIDERS.has(integration.provider) && (
+              <IntegrationCard
+                key={integration.provider}
+                logo={<Avatar name={integration.label || integration.provider} size="md" color="linear-gradient(135deg, #8b5cf6 0%, #4c1d95 100%)" />}
+                name={integration.label || integration.provider}
+                tagline="Custom connection"
+                tone="connected"
+                status={{ label: 'Connected', variant: 'success' }}
+                facts={[
+                  { icon: FiGlobe, text: integration.baseUrl ?? 'No address set' },
+                  { icon: FiKey, text: integration.authType ? AUTH_TYPE_LABELS[integration.authType] : 'API Key' },
+                ]}
+                actions={
+                  <>
+                    <Button size="sm" variant="secondary" leftIcon={<FiSliders />} onClick={() => setBuilderProvider(integration.provider)}>
+                      Manage
+                    </Button>
                     <Button
                       size="sm"
-                      variant="secondary"
-                      leftIcon={<FiRefreshCw />}
-                      loading={syncingCrm}
-                      onClick={handleSyncCrmNow}
+                      variant="ghost"
+                      leftIcon={<FiTrash2 />}
+                      onClick={() => handleDisconnectCustomIntegration(integration.provider, integration.label || integration.provider)}
                     >
-                      Sync Now
+                      Disconnect
                     </Button>
-                  )}
-                  <Button
-                    size="sm"
-                    variant="secondary"
-                    leftIcon={<FiSliders />}
-                    onClick={() => setBuilderProvider(integration.provider)}
-                  >
-                    Manage Resources
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    leftIcon={<FiTrash2 />}
-                    onClick={() => handleDisconnectCustomIntegration(integration.provider, integration.label || integration.provider)}
-                  >
-                    Disconnect
-                  </Button>
-                </div>
-              </div>
+                  </>
+                }
+              />
             ))}
           </div>
         )}
-      </Card>
+      </section>
+        </>
+      )}
+
+      <CrmSetupWizard integration={setupFor} onClose={() => setSetupFor(null)} />
+      <CrmManageModal
+        integration={managed}
+        onClose={() => setManageId(null)}
+        onReconnect={(integration) => {
+          setManageId(null);
+          setSetupFor(integration);
+        }}
+      />
 
       {builderProvider && (
         <ResourceEndpointBuilder provider={builderProvider} open onClose={() => setBuilderProvider(null)} />
@@ -1025,62 +1095,6 @@ export function IntegrationsPage() {
       )}
 
 
-      {gorillaDashModalOpen && (
-        <Modal
-          open
-          onClose={() => setGorillaDashModalOpen(false)}
-          title="Gorilla Dash Integration"
-          description="Paste your Gorilla Dash API Key and API Secret. They're encrypted and stored server-side — never exposed to the browser."
-        >
-          <div className={styles.accountList}>
-            <Input
-              label="API Key"
-              type="password"
-              value={gorillaDashApiKey}
-              onChange={(e) => {
-                setGorillaDashApiKey(e.target.value);
-                setGorillaDashTestResult(null);
-              }}
-              autoFocus
-            />
-            <Input
-              label="API Secret"
-              type="password"
-              value={gorillaDashApiSecret}
-              onChange={(e) => {
-                setGorillaDashApiSecret(e.target.value);
-                setGorillaDashTestResult(null);
-              }}
-            />
-
-            {gorillaDashTestResult && (
-              <div className={gorillaDashTestResult.ok ? styles.testResultOk : styles.testResultFail}>
-                {gorillaDashTestResult.message}
-              </div>
-            )}
-
-            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 'var(--space-2)' }}>
-              <Button
-                variant="secondary"
-                loading={testingGorillaDash}
-                disabled={!gorillaDashApiKey.trim() || !gorillaDashApiSecret.trim()}
-                onClick={handleTestGorillaDash}
-              >
-                Test Connection
-              </Button>
-              <div style={{ display: 'flex', gap: 'var(--space-2)' }}>
-                <Button variant="ghost" onClick={() => setGorillaDashModalOpen(false)}>
-                  Cancel
-                </Button>
-                <Button loading={savingGorillaDash} onClick={handleSaveGorillaDash}>
-                  Save Connection
-                </Button>
-              </div>
-            </div>
-          </div>
-        </Modal>
-      )}
-
       {outlookModalOpen && (
         <Modal
           open
@@ -1094,6 +1108,24 @@ export function IntegrationsPage() {
                 <div>
                   <div className={styles.accountEmail}>{account.email}</div>
                   {accountBadge(account)}
+                  {/* A shared mailbox is often connected by one person and answered by another. */}
+                  {teamMembers.length > 0 && (
+                    <label className={styles.handlerField}>
+                      <span>Emails handled by</span>
+                      <select
+                        className={styles.select}
+                        value={account.handledByUserId ?? ''}
+                        onChange={(e) => void handleSetOutlookHandler(account.email, e.target.value || null)}
+                      >
+                        <option value="">Me (whoever connected it)</option>
+                        {teamMembers.map((member) => (
+                          <option key={member.id} value={member.id}>
+                            {member.name}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  )}
                 </div>
                 <div className={styles.accountActions}>
                   {!account.isActive && (

@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { chatService, type StreamController } from '@/services/chatService';
 import { generateId } from '@/utils/id';
-import type { ChatMessage, Conversation } from '@/types';
+import type { ChatMessage, Conversation, MessageAttachment } from '@/types';
 
 export type ConversationFilter = 'all' | 'pinned' | 'favorites' | 'archived';
 
@@ -29,7 +29,7 @@ interface ChatState {
   // sendMessage's own `agentId ?? activeAgentId ?? undefined` fallback picks
   // this up on the very next message, identical to a real @mention.
   setPendingAgent: (agentId: string) => void;
-  sendMessage: (text: string, agentId?: string) => Promise<void>;
+  sendMessage: (text: string, agentId?: string, attachments?: MessageAttachment[]) => Promise<void>;
   stopGeneration: () => void;
   regenerate: () => Promise<void>;
   toggleConversationFlag: (id: string, flag: 'pinned' | 'favorite' | 'archived') => Promise<void>;
@@ -53,6 +53,7 @@ function streamAssistantReply(
   prompt: string,
   isNewConversation: boolean,
   agentId?: string,
+  attachmentIds?: string[],
 ) {
   const placeholderId = generateId('msg');
   set((state) => ({
@@ -149,6 +150,7 @@ function streamAssistantReply(
     },
     isNewConversation,
     agentId,
+    attachmentIds,
   );
 
   set({ streamController: controller });
@@ -206,7 +208,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     set({ activeAgentId: agentId });
   },
 
-  async sendMessage(text, agentId) {
+  async sendMessage(text, agentId, attachments) {
     const { activeConversationId, activeAgentId } = get();
     const isNewConversation = !activeConversationId;
     // An explicit @mention (agentId passed in) always wins; otherwise stay
@@ -226,6 +228,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       content: text,
       status: 'complete',
       createdAt: new Date().toISOString(),
+      attachments: attachments?.length ? attachments : undefined,
     };
 
     set((state) => ({
@@ -236,7 +239,14 @@ export const useChatStore = create<ChatState>((set, get) => ({
       activeAgentId: resolvedAgentId ?? null,
     }));
 
-    streamAssistantReply(set, workingId, text, isNewConversation, resolvedAgentId);
+    streamAssistantReply(
+      set,
+      workingId,
+      text,
+      isNewConversation,
+      resolvedAgentId,
+      attachments?.map((a) => a.id),
+    );
   },
 
   stopGeneration() {

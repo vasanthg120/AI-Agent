@@ -41,6 +41,9 @@ interface UsageGroup {
  * routes/chat.py, once before run_agent() and once after — never from
  * inside the LLM call loop itself.
  */
+// Below this a wallet counts as empty.
+const MIN_AVAILABLE_CREDITS = 0.01;
+
 @Injectable()
 export class ReservationService {
   private readonly logger = new Logger(ReservationService.name);
@@ -76,11 +79,15 @@ export class ReservationService {
       return { reservationId: existing._id.toString(), estimatedCredits: existing.estimatedCredits, availableCredits: summary.availableCredits };
     }
 
-    const ceiling = this.config.get<number>('billing.reservationCeilingCredits') ?? 500;
+    const ceiling = this.config.get<number>('billing.reservationCeilingCredits') ?? 25;
     const walletDoc = await this.wallet.getOrCreateWallet(organizationId);
     const walletId = walletDoc._id.toString();
 
-    let ok = await this.wallet.tryReserve(walletId, ceiling);
+    // The hold is the ceiling, or whatever is left when less than that is
+    // available — a wallet with credits in it can always spend them. Only a
+    // wallet with nothing left is "exhausted".
+    let held = await this.holdUpTo(walletId, ceiling);
+    let ok = held > 0;
 
     if (!ok && walletDoc.autoPay?.enabled) {
       // "Required" = the actual shortfall against the reservation ceiling,
@@ -95,7 +102,8 @@ export class ReservationService {
       const shortfall = Math.max(ceiling - available, 0);
       const recharged = await this.autoPay.attemptRecharge(organizationId, 'insufficient_balance', shortfall);
       if (recharged) {
-        ok = await this.wallet.tryReserve(walletId, ceiling);
+        held = await this.holdUpTo(walletId, ceiling);
+        ok = held > 0;
       }
     }
 
@@ -106,7 +114,7 @@ export class ReservationService {
           code: 'INSUFFICIENT_BALANCE',
           message: 'Your Haive Credits are exhausted. Add credits or enable Auto Recharge to continue using Haive AI.',
           availableCredits: summary.availableCredits,
-          requiredCredits: ceiling,
+          requiredCredits: MIN_AVAILABLE_CREDITS,
           autoPayEnabled: walletDoc.autoPay?.enabled ?? false,
         },
         HttpStatus.PAYMENT_REQUIRED,
@@ -120,13 +128,26 @@ export class ReservationService {
       requestId,
       conversationId,
       userId,
-      estimatedCredits: ceiling,
+      estimatedCredits: held,
       status: 'pending',
       expiresAt: new Date(Date.now() + timeoutMinutes * 60_000),
     });
 
     const postReserveSummary = await this.wallet.getSummary(organizationId, this.defaultThreshold());
-    return { reservationId: reservation._id.toString(), estimatedCredits: ceiling, availableCredits: postReserveSummary.availableCredits };
+    return { reservationId: reservation._id.toString(), estimatedCredits: held, availableCredits: postReserveSummary.availableCredits };
+  }
+
+  /** Holds min(ceiling, what is available) and returns the amount held — 0
+   * when the wallet has nothing left. Re-read and retried a couple of times,
+   * since another request can take part of the balance in between. */
+  private async holdUpTo(walletId: string, ceiling: number): Promise<number> {
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const available = await this.wallet.availableCredits(walletId);
+      if (available < MIN_AVAILABLE_CREDITS) return 0;
+      const amount = Math.min(ceiling, Math.floor(available * 100) / 100);
+      if (await this.wallet.tryReserve(walletId, amount)) return amount;
+    }
+    return 0;
   }
 
   /** Extends a still-pending reservation's expiresAt — for a job whose real

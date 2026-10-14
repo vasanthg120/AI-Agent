@@ -12,5 +12,6 @@ import { GorillaDashService } from './gorilladash.service';
   imports: [HttpModule.register({ timeout: 20_000 }), AuthModule, IntegrationsModule],
   controllers: [GorillaDashController],
   providers: [GorillaDashService],
+  exports: [GorillaDashService],
 })
 export class GorillaDashModule {}

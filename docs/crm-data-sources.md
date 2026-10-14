@@ -104,14 +104,23 @@ API: `GET /data-sources/overview` (anyone), `PUT /data-sources/preferences`
 
 ### Frontend
 
-- `stores/dataSourceStore.ts`, `hooks/useDataSources.ts`,
-  `services/dataSourcesService.ts`; `axiosClient` sends `X-Data-Source`.
-- `components/data-sources/DataSourceSwitcher.tsx` (top bar),
-  `MetricGate` / `SourceLine` (dashboard), `CustomizeDashboardModal`.
-- `features/settings/tabs/DataSourcesSettings.tsx` — sources, default, sync now,
-  field mapping, won/lost + stages, capabilities, naming and sync interval.
-- Switching source clears cached results and remounts the page, so nothing from
-  the previous source can linger.
+The existing screens (dashboards, cards, charts, routes, layout) are
+unchanged, and so are the dashboard endpoints and their response shape. This
+layer works behind them as a compatibility layer:
+
+- Each CRM's adapter maps its records onto HaiVE's existing model.
+- Dashboards read the organization's **default** source. The app sends no
+  source header, so the backend falls back to the default.
+- A metric a CRM can't provide comes back as the existing screens already show
+  it (0 / empty); it is never invented.
+
+The only new screen is `features/settings/tabs/DataSourcesSettings.tsx`, plus
+the Gorilla Dash and Zapier dialogs. It covers sources, choosing the default,
+sync now, field mapping, won/lost and stages, capabilities, naming and sync
+interval. `services/dataSourcesService.ts` backs it.
+
+The backend still accepts `X-Data-Source` (`default` | a source id |
+`unified`) for API clients, but no screen sends it.
 
 ## 3. Adding another CRM
 
@@ -263,3 +272,45 @@ each?".
 
 Existing Hoops history is only reachable through Hoops' own API (ask Hoops for
 access). Gorilla Dash history is covered by the direct integration (§6).
+
+## 8. Provider-aware integrations (Pantheras CRM, Hoops CRM, Gorilla Dash)
+
+The Integrations page is the one place CRMs are connected and managed
+(`backend/src/crm-integrations/`, frontend `features/integrations/`).
+
+- **Naming.** The CRM formerly shown as "Customized Haive CRM" / "CRM" is
+  **Pantheras CRM**. Its connector id stays `prospectconnect` (credentials may
+  also be saved as `crm`).
+- **Two ways records arrive** (`provider-catalog.ts` → `connection`):
+  - `pull`: HaiVE reads the CRM through its python adapter (Pantheras, Gorilla
+    Dash, HubSpot, Salesforce, Zoho).
+  - `push`: the CRM sends each new record to a HaiVE webhook (Hoops, generic
+    Zapier sources).
+- **Hoops CRM** is a push provider because Hoops publishes no API to read
+  from. Its only documented way out is its Zapier app (an API key generated in
+  Hoops → Settings → Integrations): triggers *New Customer* and *New Job*,
+  actions *Create Customer* and *Create Job*. SalesDocs (quotes), payments and
+  pre-existing records are not available and are never invented. If Hoops
+  provides API documentation later, add a pull adapter in `crm_adapters.py`
+  and switch its `connection`.
+- **Setup is provider-aware.** `CrmIntegrationsService.SETUP` says what each
+  CRM asks for, what it provides and what it can't. A pull CRM is saved only
+  if a first page of data can be read (`POST /sync/crm/discover`), and nothing
+  is synced until the mapping has been reviewed (`skipSync`).
+- **Mapping** (`mapping-intelligence.service.ts`):
+  - a suggestion per HaiVE field with a confidence and reason — from the saved
+    mapping, from field names and example values, and (on request, billed)
+    from the AI for what is still unsure;
+  - a preview on the CRM's own sample records (`crm_source_samples`);
+  - validation (a record-ID field is required; one CRM field can't feed two
+    HaiVE fields);
+  - versions with restore (`crm_mapping_versions`).
+  Suggestions never change a mapping by themselves.
+- **Sync history and errors.** Every sync and every pushed delivery is
+  recorded in `crm_sync_runs`. A failure is stored three ways: a plain message
+  (`sync.lastError`), a kind (`auth` / `mapping` / `unreachable` /
+  `rate_limit` / `other`) that decides the next step offered, and the
+  technical detail, shown only behind "View technical details".
+- **Adding a CRM**: a catalog entry, a python adapter (pull) or nothing
+  (push), and a `SETUP` entry. Dashboards, reports, AI tools and the
+  Integrations page need no changes.

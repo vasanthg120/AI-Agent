@@ -11,17 +11,17 @@ import { UpdateDataSourceDto } from './dto/update-data-source.dto';
 import { METRICS, MetricDefinition, crmMetricSupport } from './metric-catalog';
 import {
   CANONICAL_FIELDS,
-  CRM_INTEGRATION_PROVIDERS,
   CRM_MODULES,
   CRM_PROVIDERS,
   CrmModule,
   CrmProviderDefinition,
   FieldMappings,
   MirroredModule,
+  PUSH_PROVIDERS,
   crmProviderForIntegration,
 } from './provider-catalog';
 import { DataSource, DataSourceDocument } from './schemas/data-source.schema';
-import { WEBHOOK_PROVIDER, webhookInfo } from './webhook-info';
+import { isPushProvider, webhookInfo } from './webhook-info';
 
 const NATIVE_KEY = 'haive';
 const CACHE_TTL_MS = 30_000;
@@ -104,6 +104,8 @@ export class DataSourcesService implements OnApplicationBootstrap {
 
   async migrateAll(): Promise<void> {
     await this.dropLegacyIndexes();
+    await this.renameProviders();
+    await this.fillEmptyMappings();
     const orgIds = (
       await this.connection
         .collection('organizations')
@@ -117,6 +119,41 @@ export class DataSourcesService implements OnApplicationBootstrap {
       } catch (err) {
         this.logger.error(`Data sources for org ${organizationId} could not be prepared: ${(err as Error).message}`);
       }
+    }
+  }
+
+  /** One-off, idempotent: the CRM formerly shown as "Customized Haive CRM" is
+   * Pantheras CRM (only where an administrator hasn't renamed the source), and
+   * a Zapier source that was set up for Hoops becomes the Hoops CRM provider. */
+  private async renameProviders(): Promise<void> {
+    await this.sourceModel.updateMany({ provider: 'prospectconnect', label: { $in: ['Customized Haive CRM', 'CRM'] } }, { $set: { label: CRM_PROVIDERS.prospectconnect.label } }).exec();
+    const hoopsLike = await this.sourceModel.find({ provider: 'zapier', label: /^hoops/i }).exec();
+    for (const source of hoopsLike) {
+      // One Hoops source per organization; a second look-alike stays a generic Zapier source.
+      if (await this.sourceModel.exists({ organizationId: source.organizationId, key: 'hoops' })) continue;
+      await this.sourceModel
+        .updateOne({ _id: source._id }, { $set: { provider: 'hoops', key: 'hoops', label: CRM_PROVIDERS.hoops.label, terminology: CRM_PROVIDERS.hoops.terminology } })
+        .exec();
+      await this.connection.collection('crm_deals').updateMany({ dataSourceId: source._id.toString() }, { $set: { sourceProvider: 'hoops' } });
+      await this.connection.collection('crm_contacts').updateMany({ dataSourceId: source._id.toString() }, { $set: { sourceProvider: 'hoops' } });
+    }
+  }
+
+  /** Idempotent: a module a source maps nothing for gets its provider's default mapping, once the
+   * provider has one (e.g. Pantheras CRM contacts, synced since 2026-10-14). A module with any field
+   * mapped is the administrator's and is never touched. */
+  private async fillEmptyMappings(): Promise<void> {
+    const sources = await this.sourceModel.find({}, { provider: 1, fieldMappings: 1 }).exec();
+    for (const source of sources) {
+      const defaults = CRM_PROVIDERS[source.provider]?.fieldMappings ?? {};
+      const set: Record<string, unknown> = {};
+      for (const { module } of MIRRORED) {
+        const saved = source.fieldMappings?.[module];
+        if (Object.keys(defaults[module] ?? {}).length > 0 && Object.keys(saved ?? {}).length === 0) set[`fieldMappings.${module}`] = defaults[module];
+      }
+      if (Object.keys(set).length === 0) continue;
+      await this.sourceModel.updateOne({ _id: source._id }, { $set: set }).exec();
+      this.logger.log(`Data source ${source._id.toString()} (${source.provider}) now maps ${Object.keys(set).join(', ')} by default.`);
     }
   }
 
@@ -141,10 +178,12 @@ export class DataSourcesService implements OnApplicationBootstrap {
    * workspace source always, one source per connected CRM, disconnected ones
    * kept (their history stays viewable) but marked, exactly one default. */
   async reconcile(organizationId: string): Promise<void> {
-    const credentials = await this.connection
-      .collection('integration_credentials')
-      .find({ organizationId, provider: { $in: CRM_INTEGRATION_PROVIDERS } }, { projection: { provider: 1 } })
-      .toArray();
+    const credentials = (
+      await this.connection
+        .collection('integration_credentials')
+        .find({ organizationId }, { projection: { provider: 1 } })
+        .toArray()
+    ).filter((cred) => crmProviderForIntegration(String(cred.provider)));
 
     await this.ensureSource(organizationId, CRM_PROVIDERS.haive_native, NATIVE_KEY);
     const connectedKeys = new Set<string>();
@@ -164,24 +203,14 @@ export class DataSourcesService implements OnApplicationBootstrap {
         {
           organizationId,
           key: { $nin: [NATIVE_KEY, ...connectedKeys] },
-          provider: { $ne: WEBHOOK_PROVIDER },
+          provider: { $nin: PUSH_PROVIDERS },
           status: 'active',
         },
         { $set: { status: 'disconnected', isDefault: false } },
       )
       .exec();
 
-    const sources = await this.sourceModel.find({ organizationId }).exec();
-    const activeDefault = sources.find((s) => s.isDefault && s.status === 'active');
-    if (!activeDefault) {
-      // Prefer a connected external CRM (that's where the business's data is);
-      // otherwise the HaiVE workspace.
-      const pick = sources.find((s) => s.status === 'active' && s.key !== NATIVE_KEY) ?? sources.find((s) => s.key === NATIVE_KEY);
-      if (pick) {
-        await this.sourceModel.updateMany({ organizationId, _id: { $ne: pick._id } }, { $set: { isDefault: false } }).exec();
-        await this.sourceModel.updateOne({ _id: pick._id }, { $set: { isDefault: true } }).exec();
-      }
-    }
+    await this.ensureUsefulDefault(organizationId);
     this.cache.delete(organizationId);
   }
 
@@ -274,12 +303,50 @@ export class DataSourcesService implements OnApplicationBootstrap {
 
   // ---- per-request scope --------------------------------------------------
 
+  /**
+   * The dashboards show the default source, so it must be the one holding the
+   * organization's data. Unless an administrator picked the default
+   * themselves:
+   *  - a connected CRM replaces the HaiVE workspace as the default (e.g. a CRM
+   *    connected after sign-up, when the workspace was the only source);
+   *  - an empty CRM default gives way to the CRM with the most records (e.g.
+   *    an app added through Zapier that hasn't sent anything yet).
+   * Returns whether the default changed.
+   */
+  private async ensureUsefulDefault(organizationId: string): Promise<boolean> {
+    const sources = await this.sourceModel.find({ organizationId }).sort({ createdAt: 1 }).exec();
+    const active = sources.filter((s) => s.status === 'active');
+    if (active.length === 0) return false;
+    const current = active.find((s) => s.isDefault);
+    if (current && (current.metadata as Record<string, unknown> | undefined)?.defaultChosenBy === 'admin') return false;
+
+    const counts = await this.recordCounts(organizationId);
+    const total = (s: DataSourceDocument) => {
+      const own = Object.values(counts.get(s._id.toString()) ?? {}).reduce((a, b) => a + b, 0);
+      // Untagged records belong to the HaiVE workspace (see dataSourceScopePlugin).
+      return s.key === NATIVE_KEY ? own + Object.values(counts.get('') ?? {}).reduce((a, b) => a + b, 0) : own;
+    };
+    // A connected CRM is where the business's data is: it's preferred over the
+    // HaiVE workspace, and among CRMs the one holding the most records (oldest on a tie).
+    const crms = active.filter((s) => s.key !== NATIVE_KEY);
+    if (current && current.key !== NATIVE_KEY && (total(current) > 0 || crms.every((s) => total(s) === 0))) return false;
+    const pick = crms.length > 0 ? [...crms].sort((a, b) => total(b) - total(a))[0] : active.find((s) => s.key === NATIVE_KEY);
+    if (!pick || pick._id.equals(current?._id)) return false;
+    await this.sourceModel.updateMany({ organizationId, _id: { $ne: pick._id } }, { $set: { isDefault: false } }).exec();
+    await this.sourceModel.updateOne({ _id: pick._id }, { $set: { isDefault: true } }).exec();
+    this.logger.log(`Default data source for org ${organizationId} is now "${pick.label}" (the previous one held no records).`);
+    return true;
+  }
+
   private async sourcesFor(organizationId: string): Promise<DataSourceDocument[]> {
     const hit = this.cache.get(organizationId);
     if (hit && Date.now() - hit.at < CACHE_TTL_MS) return hit.sources;
     let sources = await this.sourceModel.find({ organizationId }).sort({ createdAt: 1 }).exec();
     if (!sources.some((s) => s.key === NATIVE_KEY)) {
       await this.reconcile(organizationId);
+      sources = await this.sourceModel.find({ organizationId }).sort({ createdAt: 1 }).exec();
+    } else if (await this.ensureUsefulDefault(organizationId)) {
+      // e.g. a newly connected CRM's first sync just filled it.
       sources = await this.sourceModel.find({ organizationId }).sort({ createdAt: 1 }).exec();
     }
     this.cache.set(organizationId, { at: Date.now(), sources });
@@ -487,7 +554,7 @@ export class DataSourcesService implements OnApplicationBootstrap {
       availableFields: s.availableFields ?? {},
       // The webhook key's hash stays server-side; admins see where records go instead.
       metadata: Object.fromEntries(Object.entries(s.metadata ?? {}).filter(([k]) => !k.startsWith('webhookKey'))),
-      webhook: s.provider === WEBHOOK_PROVIDER ? webhookInfo(s, this.webhookBaseUrl) : undefined,
+      webhook: isPushProvider(s.provider) ? webhookInfo(s, this.webhookBaseUrl) : undefined,
       defaults: {
         fieldMappings: (CRM_PROVIDERS[s.provider] ?? CRM_PROVIDERS.custom).fieldMappings,
         statusMapping: (CRM_PROVIDERS[s.provider] ?? CRM_PROVIDERS.custom).statusMapping,
@@ -585,8 +652,12 @@ export class DataSourcesService implements OnApplicationBootstrap {
 
     if (dto.isDefault === true) {
       if (source.status !== 'active') throw new BadRequestException('A disconnected source can’t be the default.');
-      await this.sourceModel.updateMany({ organizationId, _id: { $ne: source._id } }, { $set: { isDefault: false } }).exec();
+      await this.sourceModel
+        .updateMany({ organizationId, _id: { $ne: source._id } }, { $set: { isDefault: false }, $unset: { 'metadata.defaultChosenBy': '' } })
+        .exec();
       set.isDefault = true;
+      // Chosen by a person: never switched automatically (ensureUsefulDefault).
+      set['metadata.defaultChosenBy'] = 'admin';
     }
     // What a record means changed — incremental CRMs must re-read everything,
     // not just what changed since the last sync.

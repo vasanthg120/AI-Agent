@@ -12,7 +12,7 @@ import { useAuthStore } from '@/stores/authStore';
 import { useChatStore } from '@/stores/chatStore';
 import { NAV_GROUPS } from '@/constants/navigation';
 import { ROUTES } from '@/constants/routes';
-import { hasRole } from '@/utils/roles';
+import { canSeeNavItem } from '@/utils/access';
 import styles from './CommandPalette.module.css';
 
 interface Action {
@@ -69,7 +69,7 @@ export function CommandPalette() {
     ];
     for (const group of NAV_GROUPS) {
       for (const item of group.items) {
-        if (item.hideForRoles?.some((r) => hasRole(user, r))) continue;
+        if (!canSeeNavItem(user, item)) continue;
         list.push({ id: item.id, label: item.label, section: group.label ?? 'More', icon: item.icon, onSelect: () => go(item.path) });
       }
     }

@@ -24,6 +24,14 @@ exports.default = () => ({
             .trim()
             .replace(/\/+$/, ''),
     },
+    chat: {
+        attachments: {
+            maxFileBytes: parseInt(process.env.CHAT_ATTACHMENT_MAX_MB ?? '25', 10) * 1024 * 1024,
+            maxPerMessage: parseInt(process.env.CHAT_ATTACHMENT_MAX_PER_MESSAGE ?? '5', 10),
+            maxPerConversation: parseInt(process.env.CHAT_ATTACHMENT_MAX_PER_CONVERSATION ?? '10', 10),
+            retentionDays: parseInt(process.env.CHAT_ATTACHMENT_RETENTION_DAYS ?? '30', 10),
+        },
+    },
     gorilladash: {
         apiBaseUrl: (process.env.GORILLADASH_API_BASE_URL ?? 'https://api.gorilladash.com').trim().replace(/\/+$/, ''),
     },
@@ -38,6 +46,7 @@ exports.default = () => ({
         user: process.env.SMTP_USER ?? '',
         password: process.env.SMTP_PASSWORD ?? '',
         from: process.env.MAIL_FROM || process.env.SMTP_USER || '',
+        appUrl: process.env.APP_URL || (process.env.CORS_ORIGIN ?? '').split(',')[0].trim(),
     },
     webPush: {
         publicKey: process.env.VAPID_PUBLIC_KEY ?? '',
@@ -84,7 +93,7 @@ exports.default = () => ({
         targetGrossMargin: parseFloat(process.env.TARGET_GROSS_MARGIN ?? '0.5'),
         freeTrialCredits: parseInt(process.env.FREE_TRIAL_CREDITS ?? '20', 10),
         autoRechargeDefault: (process.env.AUTO_RECHARGE_DEFAULT ?? 'true').toLowerCase() === 'true',
-        reservationCeilingCredits: parseInt(process.env.RESERVATION_CEILING_CREDITS ?? '500', 10),
+        reservationCeilingCredits: parseInt(process.env.RESERVATION_CEILING_CREDITS ?? '25', 10),
         reservationTimeoutMinutes: parseInt(process.env.RESERVATION_TIMEOUT_MINUTES ?? '10', 10),
         lowBalanceThresholdCredits: parseInt(process.env.LOW_BALANCE_THRESHOLD_CREDITS ?? '200', 10),
         currency: (process.env.BILLING_CURRENCY ?? 'INR').toUpperCase(),

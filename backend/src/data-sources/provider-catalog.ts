@@ -134,6 +134,7 @@ export const CANONICAL_FIELDS: Record<MirroredModule, CanonicalField[]> = {
       label: 'Company',
       hint: 'Company the contact works for.',
     },
+    { key: 'createdAt', label: 'Created', hint: 'When the contact was created in the CRM.' },
   ],
   accounts: [
     {
@@ -166,12 +167,16 @@ export interface Terminology {
   account: string;
 }
 
-export type CrmProviderId = 'haive_native' | 'prospectconnect' | 'hubspot' | 'salesforce' | 'zoho' | 'gorilladash' | 'zapier' | 'custom';
+export type CrmProviderId = 'haive_native' | 'prospectconnect' | 'hubspot' | 'salesforce' | 'zoho' | 'gorilladash' | 'hoops' | 'zapier' | 'custom';
+
+// How a provider's records reach HaiVE: pulled by the sync through its API
+// adapter, pushed to a HaiVE webhook by the provider (or an automation in
+// front of it), or neither (HaiVE's own records).
+export type CrmConnection = 'pull' | 'push' | 'none';
 
 export interface CrmProviderDefinition {
   id: CrmProviderId;
-  // Shown to customers. The customised CRM is deliberately white-labelled —
-  // its vendor's name never reaches the UI (see provider-rules.ts).
+  // Shown to customers.
   label: string;
   description: string;
   // integration_credentials.provider values that mean "this CRM is connected".
@@ -182,6 +187,8 @@ export interface CrmProviderDefinition {
   statusMapping: StatusMapping;
   // Whether HaiVE can pull this provider's records into its dashboards.
   syncSupported: boolean;
+  // Defaults to 'pull' when syncSupported, otherwise 'none'.
+  connection?: CrmConnection;
 }
 
 const DEFAULT_TERMS: Terminology = {
@@ -206,8 +213,10 @@ export const CRM_PROVIDERS: Record<CrmProviderId, CrmProviderDefinition> = {
   },
   prospectconnect: {
     id: 'prospectconnect',
-    label: 'Customized Haive CRM',
-    description: 'Your customised CRM, synced every few minutes.',
+    // Pantheras CRM (its connector id stays "prospectconnect" — stored on
+    // existing credentials and data sources).
+    label: 'Pantheras CRM',
+    description: 'Pantheras CRM — deals, quotations, payments and customers, synced every few minutes.',
     integrationProviders: ['crm', 'prospectconnect'],
     modules: ['deals', 'quotes', 'contacts', 'accounts', 'pipelines', 'owners', 'notes', 'tags', 'products'],
     terminology: DEFAULT_TERMS,
@@ -240,6 +249,15 @@ export const CRM_PROVIDERS: Record<CrmProviderId, CrmProviderDefinition> = {
         customerEmail: 'client_details.email',
         customerPhone: 'client_details.phone',
         expirationDate: 'expiration_date',
+        createdAt: 'date_created',
+      },
+      // "name" is first_name + last_name, put together by the sync (Pantheras sends no full name).
+      contacts: {
+        externalId: 'id',
+        name: 'name',
+        email: 'email',
+        phone: 'phone',
+        company: 'company_name',
         createdAt: 'date_created',
       },
     },
@@ -389,6 +407,25 @@ export const CRM_PROVIDERS: Record<CrmProviderId, CrmProviderDefinition> = {
     statusMapping: { won: [], lost: [] },
     syncSupported: true,
   },
+  // Hoops (hoopscrm.com) has no public API to read from: the only supported
+  // way out is its Zapier app (API key generated in Hoops → Settings →
+  // Integrations), whose triggers are "New Customer" and "New Job". So Hoops
+  // is a push provider — each new customer/job is posted to this source's
+  // webhook as it's created; SalesDocs (quotes), payments and records that
+  // already exist are not available from Hoops and are never invented. Field
+  // names come from the first record received (guessMappings), then editable.
+  hoops: {
+    id: 'hoops',
+    label: 'Hoops CRM',
+    description: 'Hoops — new customers and jobs, sent to HaiVE as they are created.',
+    integrationProviders: [],
+    modules: ['deals', 'contacts'],
+    terminology: { deal: 'Job', quote: 'SalesDoc', contact: 'Customer', account: 'Company' },
+    fieldMappings: {},
+    statusMapping: { won: ['won', 'completed', 'complete', 'invoiced', 'paid'], lost: ['lost', 'cancelled', 'canceled', 'declined'] },
+    syncSupported: false,
+    connection: 'push',
+  },
   // Any app in the organization's Zapier account (Hoops, …): a Zap's trigger
   // ("New Customer", "New Job") posts each new record to this source's own
   // webhook (see webhook-sources.service.ts). Push-only — nothing to sync, and
@@ -408,6 +445,7 @@ export const CRM_PROVIDERS: Record<CrmProviderId, CrmProviderDefinition> = {
       lost: ['lost', 'cancelled', 'canceled', 'closed lost'],
     },
     syncSupported: false,
+    connection: 'push',
   },
   custom: {
     id: 'custom',
@@ -422,10 +460,26 @@ export const CRM_PROVIDERS: Record<CrmProviderId, CrmProviderDefinition> = {
   },
 };
 
+// "gorilla_dash", "Gorilla-Dash" and "gorilladash" are the same CRM: integration
+// names are compared without case or separators, so a CRM connected from the
+// generic Integrations page under a slightly different name is still found.
+function integrationKey(name: string): string {
+  return name.toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
 /** Which CRM an integration_credentials.provider value belongs to, if any. */
 export function crmProviderForIntegration(integrationProvider: string): CrmProviderDefinition | null {
-  const needle = integrationProvider.toLowerCase();
-  return Object.values(CRM_PROVIDERS).find((p) => p.integrationProviders.includes(needle)) ?? null;
+  const needle = integrationKey(integrationProvider);
+  return Object.values(CRM_PROVIDERS).find((p) => p.integrationProviders.some((name) => integrationKey(name) === needle)) ?? null;
 }
+
+export function connectionOf(provider: CrmProviderDefinition): CrmConnection {
+  return provider.connection ?? (provider.syncSupported ? 'pull' : 'none');
+}
+
+/** Providers whose records are pushed to a HaiVE webhook (no credential in HaiVE, nothing to pull). */
+export const PUSH_PROVIDERS: CrmProviderId[] = Object.values(CRM_PROVIDERS)
+  .filter((p) => p.connection === 'push')
+  .map((p) => p.id);
 
 export const CRM_INTEGRATION_PROVIDERS: string[] = Object.values(CRM_PROVIDERS).flatMap((p) => p.integrationProviders);
