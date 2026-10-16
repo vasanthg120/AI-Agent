@@ -11,6 +11,7 @@ const axios_1 = require("@nestjs/axios");
 const common_1 = require("@nestjs/common");
 const mongoose_1 = require("@nestjs/mongoose");
 const auth_module_1 = require("../auth/auth.module");
+const cloud_files_module_1 = require("../cloud-files/cloud-files.module");
 const users_module_1 = require("../users/users.module");
 const outlook_controller_1 = require("./outlook.controller");
 const outlook_connection_schema_1 = require("./schemas/outlook-connection.schema");
@@ -29,6 +30,7 @@ exports.OutlookModule = OutlookModule = __decorate([
             axios_1.HttpModule.register({ timeout: 15_000 }),
             auth_module_1.AuthModule,
             users_module_1.UsersModule,
+            cloud_files_module_1.CloudFilesModule,
         ],
         controllers: [outlook_controller_1.OutlookController],
         providers: [outlook_service_1.OutlookService],

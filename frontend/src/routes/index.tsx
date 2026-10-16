@@ -32,6 +32,7 @@ const CallCopilotPage = lazy(() =>
 const MyCustomerActivityPage = lazy(() =>
   import('@/features/deal-performance/MyCustomerActivityPage').then((m) => ({ default: m.MyCustomerActivityPage })),
 );
+const FilesPage = lazy(() => import('@/features/files/FilesPage').then((m) => ({ default: m.FilesPage })));
 const CustomersPage = lazy(() =>
   import('@/features/customers/CustomersPage').then((m) => ({ default: m.CustomersPage })),
 );
@@ -178,6 +179,8 @@ export function AppRoutes() {
               {/* New Inquiries became part of Customers; old links and bookmarks land there. */}
               <Route path="/inquiries" element={<Navigate to={ROUTES.customers} replace />} />
             </Route>
+            {/* Everyone: their own Google Drive / OneDrive, and company folders shared with their role (checked by the API). */}
+            <Route path={ROUTES.files} element={<FilesPage />} />
             <Route element={<RequireRole role={['owner', 'admin']} />}>
               <Route path={ROUTES.finance} element={<FinancePage />} />
             </Route>

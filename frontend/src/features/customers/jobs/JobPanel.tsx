@@ -15,13 +15,13 @@ import {
 } from '@/services/customerJobsService';
 import { extractErrorMessage } from '@/utils/errors';
 import { formatDate } from '../format';
-import { CommentsTab, FilesTab, TasksTab } from '../panel/WorkspaceTabs';
+import { CommentsTab, FilesTab } from '../panel/WorkspaceTabs';
 import { StageChip } from '../StageChip';
 import panelStyles from '../panel/panel.module.css';
 import { EntriesTab, JobActivityTab, JobDetailTab, ProofsTab } from './JobTabs';
 import styles from './jobs.module.css';
 
-export type JobPanelTab = 'detail' | 'orders' | 'proofs' | 'files' | 'comments' | 'tasks' | 'shipping' | 'activity';
+export type JobPanelTab = 'detail' | 'orders' | 'proofs' | 'files' | 'comments' | 'shipping' | 'activity';
 
 // What whoever opens the panel already knows about the job: shown at once, until the rest has loaded.
 export interface JobPreview {
@@ -149,7 +149,7 @@ export function JobPanel({
   const remove = async () => {
     if (!jobId || !data) return;
     const sure = window.confirm(
-      `Delete job ${data.number}? Its statuses, purchase orders and shipping are deleted with it. Its comments, tasks and files stay with the customer. This can’t be undone.`,
+      `Delete job ${data.number}? Its statuses, purchase orders and shipping are deleted with it. Its comments and files stay with the customer. This can’t be undone.`,
     );
     if (!sure) return;
     try {
@@ -167,7 +167,6 @@ export function JobPanel({
 
   const attached = workspace.data;
   const proofs = attached?.files.filter((file) => file.kind === 'proof') ?? [];
-  const openTasks = attached?.tasks.filter((t) => t.status === 'open').length ?? 0;
   const count = (n: number | undefined) => (n ? ` (${n})` : '');
   const tabs = [
     { id: 'detail', label: 'Job detail' },
@@ -175,7 +174,6 @@ export function JobPanel({
     { id: 'proofs', label: `Proofs${count(proofs.length)}` },
     { id: 'files', label: `Files${count(attached ? attached.files.length - proofs.length : 0)}` },
     { id: 'comments', label: `Comments${count(attached?.notes.length)}` },
-    { id: 'tasks', label: `Tasks${count(openTasks)}` },
     { id: 'shipping', label: `Shipping${count(data?.shipments.length)}` },
     { id: 'activity', label: 'Activity' },
   ];
@@ -371,7 +369,6 @@ export function JobPanel({
           )}
           {tab === 'files' && <FilesTab api={api} workspace={workspace} onChanged={changed} of="job" />}
           {tab === 'comments' && <CommentsTab api={api} workspace={workspace} onChanged={changed} of="job" />}
-          {tab === 'tasks' && <TasksTab api={api} workspace={workspace} onChanged={changed} of="job" />}
           {tab === 'shipping' && <EntriesTab kind="shipping" job={data} busy={busy} run={apply} />}
           {tab === 'activity' && <JobActivityTab job={data} />}
         </div>

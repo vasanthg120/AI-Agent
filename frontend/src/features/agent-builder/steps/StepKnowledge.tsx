@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import toast from 'react-hot-toast';
 import { FiCheckCircle, FiUploadCloud } from 'react-icons/fi';
+import { CloudPickButton } from '@/components/cloud-files';
 import { Badge, SectionCard } from '@/components/ui';
 import { extractErrorMessage } from '@/utils/errors';
 import { businessKnowledgeDocumentsService, type BusinessKnowledgeDocument } from '@/services/businessKnowledgeDocumentsService';
@@ -60,6 +61,14 @@ export function StepKnowledge({ form }: { form: FormState }) {
           disabled={uploading}
           onChange={(e) => void handleUpload(e.target.files?.[0])}
           className={styles.fileInput}
+        />
+        <CloudPickButton
+          accept=".pdf,.docx,.doc,.xlsx,.xls,.csv,.pptx,.txt,.md,.html"
+          maxBytes={25 * 1024 * 1024}
+          disabled={uploading}
+          onPick={async (files) => {
+            for (const file of files) await handleUpload(file);
+          }}
         />
         {uploaded.length > 0 && (
           <div className={styles.uploadedList}>

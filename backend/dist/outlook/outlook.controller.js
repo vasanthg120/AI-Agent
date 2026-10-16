@@ -19,12 +19,14 @@ const config_1 = require("@nestjs/config");
 const jwt_1 = require("@nestjs/jwt");
 const jwt_auth_guard_1 = require("../common/guards/jwt-auth.guard");
 const current_user_decorator_1 = require("../common/decorators/current-user.decorator");
+const cloud_connections_service_1 = require("../cloud-files/cloud-connections.service");
 const outlook_service_1 = require("./outlook.service");
 let OutlookController = OutlookController_1 = class OutlookController {
-    constructor(outlookService, jwtService, config) {
+    constructor(outlookService, jwtService, config, cloudConnections) {
         this.outlookService = outlookService;
         this.jwtService = jwtService;
         this.config = config;
+        this.cloudConnections = cloudConnections;
         this.logger = new common_1.Logger(OutlookController_1.name);
     }
     getEmails() {
@@ -41,6 +43,9 @@ let OutlookController = OutlookController_1 = class OutlookController {
         return { url: this.outlookService.buildAuthorizeUrl(state) };
     }
     async callback(code, state, error, errorDescription) {
+        const cloud = this.cloudConnections.readState(state);
+        if (cloud)
+            return { url: await this.cloudConnections.finish(cloud, code, error, errorDescription), statusCode: 302 };
         const frontendUrl = this.config.get('corsOrigin');
         if (error || !code || !state) {
             this.logger.warn(`Outlook callback missing params (error=${error}, description=${errorDescription})`);
@@ -225,6 +230,7 @@ exports.OutlookController = OutlookController = OutlookController_1 = __decorate
     (0, common_1.Controller)('outlook'),
     __metadata("design:paramtypes", [outlook_service_1.OutlookService,
         jwt_1.JwtService,
-        config_1.ConfigService])
+        config_1.ConfigService,
+        cloud_connections_service_1.CloudConnectionsService])
 ], OutlookController);
 //# sourceMappingURL=outlook.controller.js.map

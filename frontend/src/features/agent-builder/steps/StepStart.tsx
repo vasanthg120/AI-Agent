@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import toast from 'react-hot-toast';
 import { FiEdit3, FiFileText, FiGrid, FiUpload } from 'react-icons/fi';
+import { CloudPickButton } from '@/components/cloud-files';
 import { Button, Card } from '@/components/ui';
 import { extractErrorMessage } from '@/utils/errors';
 import { agentRolesService } from '@/services/agentRolesService';
@@ -123,6 +124,7 @@ export function StepStart({ onComplete }: { onComplete: (patch: Partial<FormStat
           onChange={(e) => setFile(e.target.files?.[0] ?? null)}
           className={styles.fileInput}
         />
+        <CloudPickButton multiple={false} accept={ACCEPTED_EXTENSIONS} maxBytes={25 * 1024 * 1024} onPick={(files) => setFile(files[0] ?? null)} />
         {file && <span className={styles.fileName}>{file.name}</span>}
         <Button type="button" disabled={!file} loading={busy} onClick={() => void handleDocument()}>
           Generate Configuration

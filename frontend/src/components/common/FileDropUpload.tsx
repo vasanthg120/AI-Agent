@@ -3,6 +3,7 @@ import toast from 'react-hot-toast';
 import { AnimatePresence, motion } from 'framer-motion';
 import clsx from 'clsx';
 import { FiFile, FiUploadCloud, FiX } from 'react-icons/fi';
+import { CloudPickButton } from '@/components/cloud-files';
 import { Button } from '@/components/ui';
 import { extractErrorMessage } from '@/utils/errors';
 import styles from './FileDropUpload.module.css';
@@ -22,13 +23,15 @@ export interface FileDropUploadProps<T> {
   onUploaded: (result: T) => void;
   /** Toast text for a finished file; defaults to "<name> uploaded". */
   successMessage?: (file: File, result: T) => string;
+  /** The largest file the upload takes (the server's limit); files picked from the cloud above it are skipped. */
+  maxBytes?: number;
 }
 
 // Drag-and-drop (or click-to-browse) dropzone → a queue the user can prune
 // → sequential upload with a live progress bar. Files go up one at a time,
 // not in parallel, so a batch never piles up concurrent server-side AI
 // extraction calls; each file gets its own toast.
-export function FileDropUpload<T>({ accept, hint, upload, onUploaded, successMessage }: FileDropUploadProps<T>) {
+export function FileDropUpload<T>({ accept, hint, upload, onUploaded, successMessage, maxBytes = 25 * 1024 * 1024 }: FileDropUploadProps<T>) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [files, setFiles] = useState<File[]>([]);
   const [dragging, setDragging] = useState(false);
@@ -109,6 +112,10 @@ export function FileDropUpload<T>({ accept, hint, upload, onUploaded, successMes
         <span className={styles.title}>{dragging ? 'Drop to add' : 'Drag files here, or click to browse'}</span>
         <span className={styles.hint}>{hint}</span>
       </button>
+      {/* Or from the cloud: fetched through HaiVE into the same queue, as copies. */}
+      <div className={styles.cloud}>
+        <CloudPickButton accept={accept} maxBytes={maxBytes} disabled={uploading} onPick={(picked) => addFiles(picked)} />
+      </div>
 
       <AnimatePresence initial={false}>
         {files.length > 0 && (

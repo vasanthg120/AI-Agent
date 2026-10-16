@@ -172,6 +172,17 @@ export interface CustomerStats {
   paymentPending: number;
   outstanding: number;
   needsFollowUp: number;
+  /** An open inquiry or a quotation awaiting a decision, not lost. */
+  open: number;
+  /** An open inquiry nobody has emailed or quoted since. */
+  notActioned: number;
+  /** We wrote; they haven't answered. */
+  noReply: number;
+  /** Nothing planned to follow up (the Follow-up chip's "No follow-up"). */
+  noFollowUp: number;
+  /** The Order or Inquiry chip says "Converted". */
+  converted: number;
+  lost: number;
 }
 
 export interface CustomerQuery {
@@ -255,8 +266,18 @@ const VIEWS: Record<string, (p: CustomerProfile) => boolean> = {
   payment_pending: (p) => p.flags.includes('payment_pending') || p.flags.includes('payment_overdue'),
   payment_overdue: (p) => p.flags.includes('payment_overdue'),
   follow_up: (p) => p.flags.includes('reply_needed') || p.flags.includes('follow_up_required'),
-  converted: (p) => p.orders.count > 0,
+  // What the board's chips say "Converted": the Order chip (ordered, nothing open since) or the Inquiry chip (it became an order).
+  converted: (p) => stageStatus(p, 'order') === 'converted' || stageStatus(p, 'inquiry') === 'converted',
   not_converted: (p) => p.orders.count === 0,
+  // Something still under way: an open inquiry, or a quotation awaiting a decision — and not lost.
+  open: (p) => (p.inquiries.open || p.flags.includes('quote_pending')) && !isLost(p),
+  // An open inquiry nobody has done anything about: no email, no quotation, no status set by hand.
+  not_actioned: (p) => p.inquiries.open && !p.inquiries.actioned,
+  // We wrote and they haven't answered (the Email chip's "No reply yet").
+  no_reply: (p) => stageStatus(p, 'email') === 'follow_up',
+  // The Follow-up chip says "No follow-up": nothing planned (no follow-up, no email reminder) and not marked "not needed".
+  no_follow_up: (p) => stageStatus(p, 'followUp') === 'none',
+  lost: (p) => isLost(p),
   active: (p) => p.active,
   inactive: (p) => !p.active,
 };
@@ -264,6 +285,13 @@ const VIEWS: Record<string, (p: CustomerProfile) => boolean> = {
 // The board's filters: what each one reads off a customer. "none" stands for having no such thing.
 const NONE = 'none';
 const stageStatus = (p: CustomerProfile, key: StageKey) => p.stages.find((s) => s.key === key)?.status ?? NONE;
+/**
+ * No order, and the CRM says lost (every deal lost, every decided quotation rejected, nothing asked since) — or the
+ * team said so by hand: the inquiry "Not interested", or the quotation "Rejected" with no inquiry still open.
+ */
+const isLost = (p: CustomerProfile) =>
+  p.orders.count === 0 &&
+  (p.crm.status === 'lost' || stageStatus(p, 'inquiry') === 'not_interested' || (stageStatus(p, 'quote') === 'rejected' && !p.inquiries.open));
 
 /** What each status can be set to by hand, as the panel's dropdowns offer it. */
 export type StatusOptions = Record<StageKey, { status: string; label: string; tone: StageTone }[]>;
@@ -848,6 +876,12 @@ export class CustomerDirectoryService {
       paymentPending: count('payment_pending'),
       outstanding: inSource.reduce((sum, e) => sum + (e.profile.payment.outstanding ?? 0), 0),
       needsFollowUp: count('follow_up'),
+      open: count('open'),
+      notActioned: count('not_actioned'),
+      noReply: count('no_reply'),
+      noFollowUp: count('no_follow_up'),
+      converted: count('converted'),
+      lost: count('lost'),
     };
     const pageSize = Math.min(Math.max(Number(query.pageSize) || 25, 1), 100);
     const page = Math.max(Number(query.page) || 1, 1);
@@ -1032,8 +1066,8 @@ export class CustomerDirectoryService {
     for (const task of tasks) {
       const [added, done] = [asDate(task.createdAt), asDate(task.completedAt)];
       if (added)
-        events.push({ at: added, kind: 'task', title: `Task added${by(task.createdByName)}`, detail: short(task.title), attention: task.status === 'open' });
-      if (done && task.status === 'done') events.push({ at: done, kind: 'task', title: 'Task done', detail: short(task.title) });
+        events.push({ at: added, kind: 'task', title: `Follow-up set${by(task.createdByName)}`, detail: short(task.title), attention: task.status === 'open' });
+      if (done && task.status === 'done') events.push({ at: done, kind: 'task', title: 'Follow-up done', detail: short(task.title) });
     }
     for (const file of files) {
       const at = asDate(file.uploadDate);

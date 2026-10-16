@@ -34,3 +34,13 @@ export const CALL_RECORDING_UPLOAD_INTERCEPTOR_OPTIONS = {
   storage: diskStorage({ destination: os.tmpdir() }),
   limits: { fileSize: CALL_RECORDING_UPLOAD_SIZE_LIMIT_BYTES },
 };
+
+// Uploads into Google Drive / OneDrive (cloud-files). Disk storage for the same
+// reason as call recordings; the service sends the file up in pieces and deletes
+// the temp file when it is done, whether the upload worked or not.
+export const CLOUD_UPLOAD_SIZE_LIMIT_BYTES = 100 * 1024 * 1024;
+
+export const CLOUD_UPLOAD_INTERCEPTOR_OPTIONS = {
+  storage: diskStorage({ destination: os.tmpdir() }),
+  limits: { fileSize: CLOUD_UPLOAD_SIZE_LIMIT_BYTES, files: 1 },
+};

@@ -42,6 +42,7 @@ import { extractErrorMessage } from '@/utils/errors';
 import { isAiRoleAccount, isSalesperson } from '@/utils/access';
 import { usersService, type AdminUser } from '@/services/usersService';
 import { useAuthStore } from '@/stores/authStore';
+import { CloudStorageSection } from './CloudStorageSection';
 import { CrmManageModal } from './CrmManageModal';
 import { CrmSetupWizard } from './CrmSetupWizard';
 import { IntegrationCard, LetterLogo, type CardTone } from './IntegrationCard';
@@ -804,6 +805,9 @@ export function IntegrationsPage() {
           {mailCard('gmail', gmailStatus, gmailAccounts, handleConnectGmail, () => setGmailModalOpen(true))}
         </div>
       </section>
+
+      {/* Each person's own Drive / OneDrive (and, for admins, the company's) — for every account, AI-role ones included. */}
+      <CloudStorageSection />
 
       {!emailOnly && (
         <>

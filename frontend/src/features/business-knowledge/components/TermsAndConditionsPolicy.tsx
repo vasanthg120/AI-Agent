@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import toast from 'react-hot-toast';
 import { FiCheckCircle, FiFileText, FiRefreshCw, FiUpload } from 'react-icons/fi';
+import { CloudPickButton } from '@/components/cloud-files';
 import { Badge, Button, Spinner } from '@/components/ui';
 import { extractErrorMessage } from '@/utils/errors';
 import { businessKnowledgeDocumentsService, type BusinessKnowledgeDocument } from '@/services/businessKnowledgeDocumentsService';
@@ -92,19 +93,31 @@ export function TermsAndConditionsPolicy({ canEdit }: { canEdit: boolean }) {
 
       {!doc ? (
         canEdit ? (
-          <div
-            className={styles.tcDropzone}
-            role="button"
-            tabIndex={0}
-            onClick={() => !busy && fileInputRef.current?.click()}
-            onKeyDown={(e) => {
-              if ((e.key === 'Enter' || e.key === ' ') && !busy) fileInputRef.current?.click();
-            }}
-          >
-            <span className={styles.tcDropzoneIcon}>{busy ? <Spinner size={18} /> : <FiUpload size={18} />}</span>
-            <span className={styles.tcDropzoneText}>{busy ? 'Uploading…' : 'Click to upload your Terms & Conditions document'}</span>
-            <span className={styles.tcDropzoneHint}>PDF, DOCX, PPTX, XLSX, CSV, HTML, TXT, MD, or image</span>
-          </div>
+          <>
+            <div
+              className={styles.tcDropzone}
+              role="button"
+              tabIndex={0}
+              onClick={() => !busy && fileInputRef.current?.click()}
+              onKeyDown={(e) => {
+                if ((e.key === 'Enter' || e.key === ' ') && !busy) fileInputRef.current?.click();
+              }}
+            >
+              <span className={styles.tcDropzoneIcon}>{busy ? <Spinner size={18} /> : <FiUpload size={18} />}</span>
+              <span className={styles.tcDropzoneText}>{busy ? 'Uploading…' : 'Click to upload your Terms & Conditions document'}</span>
+              <span className={styles.tcDropzoneHint}>PDF, DOCX, PPTX, XLSX, CSV, HTML, TXT, MD, or image</span>
+            </div>
+            <CloudPickButton
+              multiple={false}
+              accept={ACCEPTED_EXTENSIONS}
+              maxBytes={25 * 1024 * 1024}
+              disabled={busy}
+              label="Or choose it from Google Drive or OneDrive"
+              onPick={(files) => {
+                if (files[0]) void handleFileSelected(files[0]);
+              }}
+            />
+          </>
         ) : (
           <div className={styles.emptyState}>No Terms & Conditions document has been uploaded yet.</div>
         )

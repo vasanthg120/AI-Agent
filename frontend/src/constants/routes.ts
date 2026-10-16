@@ -13,6 +13,8 @@ export const ROUTES = {
   businessKnowledge: '/business-knowledge',
   emailIntelligence: '/ai-email-inbox',
   customers: '/customers',
+  // Google Drive / OneDrive file manager (features/files).
+  files: '/files',
   finance: '/finance',
   reporting: '/reporting',
   todoEod: '/todo-eod',

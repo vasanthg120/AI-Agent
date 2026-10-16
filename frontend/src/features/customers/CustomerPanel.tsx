@@ -1,10 +1,9 @@
 import { useEffect, useState } from 'react';
-import dayjs from 'dayjs';
+import dayjs, { type Dayjs } from 'dayjs';
 import toast from 'react-hot-toast';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   FiAlertCircle,
-  FiCheckSquare,
   FiChevronDown,
   FiCopy,
   FiCpu,
@@ -13,7 +12,7 @@ import {
   FiPaperclip,
   FiPhone,
 } from 'react-icons/fi';
-import { Button, Drawer, Dropdown, EmptyState, Skeleton, Tabs } from '@/components/ui';
+import { Button, Drawer, Dropdown, EmptyState, Input, Modal, Skeleton, Tabs } from '@/components/ui';
 import type { DropdownItem } from '@/components/ui';
 import { customersService, type CustomerDetail, type Stage, type StageKey } from '@/services/customersService';
 import { extractErrorMessage } from '@/utils/errors';
@@ -22,10 +21,12 @@ import { DetailsTab } from './panel/DetailsTab';
 import { DocumentsTab } from './panel/DocumentsTab';
 import { MailTab } from './panel/MailTab';
 import { StageMenu } from './panel/StageMenu';
-import { CommentsTab, FilesTab, TasksTab } from './panel/WorkspaceTabs';
+import { customerCloudService } from '@/services/customerCloudService';
+import { CustomerDocuments } from './panel/CustomerDocuments';
+import { CommentsTab } from './panel/WorkspaceTabs';
 import styles from './panel/panel.module.css';
 
-export type PanelTab = 'details' | 'documents' | 'mail' | 'activity' | 'comments' | 'tasks' | 'files';
+export type PanelTab = 'details' | 'documents' | 'mail' | 'activity' | 'comments' | 'files';
 
 // What whoever opens the panel already knows about the customer: shown at once, until the rest has loaded.
 export interface CustomerPreview {
@@ -70,6 +71,8 @@ export function CustomerPanel({
   // The quotation or invoice being read in full, inside "Quotes & orders".
   const [documentId, setDocumentId] = useState<string | null>(null);
   const [analyzing, setAnalyzing] = useState(false);
+  // "Pick another date…" on the Follow-up status.
+  const [pickingDate, setPickingDate] = useState(false);
   // The status being saved: its menu waits until the board has caught up.
   const [savingStage, setSavingStage] = useState<StageKey | null>(null);
   const detailKey = ['customers', 'detail', customerId];
@@ -82,6 +85,12 @@ export function CustomerPanel({
   const workspace = useQuery({
     queryKey: ['customers', 'workspace', customerId],
     queryFn: () => customersService.workspace(customerId!),
+    enabled: !!customerId,
+  });
+  // Their Google Drive / OneDrive folders and attached files: counted on the same tab as HaiVE's files.
+  const cloudDocs = useQuery({
+    queryKey: ['customer-cloud', customerId],
+    queryFn: () => customerCloudService.overview(customerId!),
     enabled: !!customerId,
   });
 
@@ -148,9 +157,9 @@ export function CustomerPanel({
       label ? `${stage.title} set to ${label}` : `${stage.title} follows your connected systems again`,
     );
   };
-  const scheduleFollowUp = (daysFromToday: number) => {
+  const scheduleFollowUp = (daysFromToday: number) => scheduleFollowUpOn(dayjs().add(daysFromToday, 'day'));
+  const scheduleFollowUpOn = (day: Dayjs) => {
     if (!customerId) return;
-    const day = dayjs().add(daysFromToday, 'day');
     void act(
       'followUp',
       // The middle of that day, so it is that day wherever it is read.
@@ -159,7 +168,7 @@ export function CustomerPanel({
           title: 'Follow up',
           dueDate: day.hour(12).minute(0).second(0).toISOString(),
         }),
-      daysFromToday === 0 ? 'Follow-up set for today' : `Follow-up set for ${day.format('ddd D MMM')}`,
+      day.isSame(dayjs(), 'day') ? 'Follow-up set for today' : `Follow-up set for ${day.format('ddd D MMM')}`,
     );
   };
   const finishFollowUps = () => {
@@ -180,8 +189,7 @@ export function CustomerPanel({
     { id: 'mail', label: `Emails${count(data?.emails.length)}` },
     { id: 'activity', label: 'Activity' },
     { id: 'comments', label: `Comments${count(counts?.notes.length)}` },
-    { id: 'tasks', label: `Tasks${count(openTasks)}` },
-    { id: 'files', label: `Files${count(counts?.files.length)}` },
+    { id: 'files', label: `Files & documents${count((counts?.files.length ?? 0) + (cloudDocs.data?.links.length ?? 0) + (cloudDocs.data?.folders.length ?? 0))}` },
   ];
 
   const actions: DropdownItem[] = data
@@ -229,7 +237,6 @@ export function CustomerPanel({
           separatorBefore: true,
           onSelect: () => goTo('comments'),
         },
-        { id: 'task', label: 'Add task', icon: <FiCheckSquare />, onSelect: () => goTo('tasks') },
         { id: 'file', label: 'Upload file', icon: <FiPaperclip />, onSelect: () => goTo('files') },
       ]
     : [];
@@ -323,7 +330,7 @@ export function CustomerPanel({
                           openTasks,
                           reminders: data.followUps.filter((f) => f.status === 'pending').length,
                           onSchedule: scheduleFollowUp,
-                          onPickDate: () => goTo('tasks'),
+                          onPickDate: () => setPickingDate(true),
                           onDone: finishFollowUps,
                           onShowReminders: () => goTo('mail'),
                         }
@@ -385,10 +392,53 @@ export function CustomerPanel({
           {tab === 'comments' && (
             <CommentsTab api={api} workspace={workspace} onChanged={changed} onOpenJob={onOpenJob} />
           )}
-          {tab === 'tasks' && <TasksTab api={api} workspace={workspace} onChanged={changed} onOpenJob={onOpenJob} />}
-          {tab === 'files' && <FilesTab api={api} workspace={workspace} onChanged={changed} onOpenJob={onOpenJob} />}
+          {tab === 'files' && (
+            <CustomerDocuments
+              customerId={customerId}
+              folderName={data.company ?? data.name}
+              quotations={data.documents
+                .filter((d) => d.kind === 'quotation')
+                .map((d) => ({ id: d.id, label: d.number ? `Quotation ${d.number}` : (d.title ?? 'Quotation') }))}
+              api={api}
+              workspace={workspace}
+              onChanged={changed}
+              onOpenJob={onOpenJob}
+            />
+          )}
         </div>
       )}
+      <FollowUpDateDialog open={pickingDate} onClose={() => setPickingDate(false)} onPick={scheduleFollowUpOn} />
     </Drawer>
+  );
+}
+
+/** A follow-up on a day of one's choosing (the Follow-up status's "Pick another date…"). */
+function FollowUpDateDialog({ open, onClose, onPick }: { open: boolean; onClose: () => void; onPick: (day: Dayjs) => void }) {
+  const tomorrow = () => dayjs().add(1, 'day').format('YYYY-MM-DD');
+  const [value, setValue] = useState(tomorrow);
+  useEffect(() => {
+    if (open) setValue(tomorrow());
+  }, [open]);
+  return (
+    <Modal open={open} onClose={onClose} title="Follow up on…" description="The day to follow up with this customer. It shows on the board until it is marked done.">
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (!value) return;
+          onPick(dayjs(value));
+          onClose();
+        }}
+      >
+        <Input type="date" label="Follow-up date" value={value} min={dayjs().format('YYYY-MM-DD')} onChange={(e) => setValue(e.target.value)} />
+        <div className={styles.dialogActions}>
+          <Button type="button" variant="ghost" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button type="submit" disabled={!value}>
+            Set follow-up
+          </Button>
+        </div>
+      </form>
+    </Modal>
   );
 }

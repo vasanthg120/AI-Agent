@@ -97,6 +97,24 @@ export default () => ({
       redirectUri: process.env.GOOGLE_REDIRECT_URI ?? 'http://localhost:3000/gmail/callback',
     },
   },
+  // Google Drive and OneDrive (backend/src/cloud-files). OneDrive uses the same
+  // Azure app registration as Outlook AND its already-registered return
+  // address (/outlook/callback, which hands a cloud-files `state` over to
+  // CloudConnectionsService) — no extra Azure setup for the redirect. Google
+  // Drive needs its own OAuth client with the Drive API enabled; until its keys
+  // are set the Integrations page shows it as not set up.
+  cloudFiles: {
+    google: {
+      clientId: process.env.GOOGLE_DRIVE_CLIENT_ID ?? '',
+      clientSecret: process.env.GOOGLE_DRIVE_CLIENT_SECRET ?? '',
+      redirectUri: process.env.GOOGLE_DRIVE_REDIRECT_URI ?? 'http://localhost:3000/cloud-files/google/callback',
+    },
+    microsoft: {
+      clientId: process.env.MS_GRAPH_CLIENT_ID ?? '',
+      clientSecret: process.env.MS_GRAPH_CLIENT_SECRET ?? '',
+      redirectUri: process.env.MS_GRAPH_REDIRECT_URI ?? 'http://localhost:3000/outlook/callback',
+    },
+  },
   // Separate from `integrations.google`/`integrations.msGraph` above —
   // those are per-user delegated Gmail/Outlook *mailbox* connections
   // (different scopes, different app registration in most setups). These

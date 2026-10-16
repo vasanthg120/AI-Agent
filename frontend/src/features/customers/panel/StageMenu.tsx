@@ -84,7 +84,7 @@ export function StageMenu({
     if (byHand)
       items.push({
         id: 'automatic',
-        label: 'Automatic — from tasks and reminders',
+        label: 'Automatic — from follow-ups and email reminders',
         icon: <FiRefreshCw />,
         onSelect: () => onSet(null),
       });

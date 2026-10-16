@@ -21,6 +21,7 @@ import {
 } from 'react-icons/fi';
 import type { IconType } from 'react-icons';
 import clsx from 'clsx';
+import { CloudPickButton } from '@/components/cloud-files';
 import { Button } from '@/components/ui';
 import {
   customerJobsService,
@@ -649,6 +650,7 @@ export function ProofsTab({
         >
           {uploading > 0 ? `Uploading ${uploading}…` : 'Upload proof'}
         </Button>
+        <CloudPickButton label="From the cloud" maxBytes={limits?.maxFileBytes} disabled={uploading > 0} onPick={(files) => upload(files)} />
         <input
           ref={input}
           type="file"

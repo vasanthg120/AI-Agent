@@ -311,6 +311,8 @@ export interface CustomerFile {
   kind: 'file' | 'proof';
   proofStatus?: string;
   proofNote?: string;
+  // A copy made from a Google Drive / OneDrive file.
+  copiedFrom?: 'google_drive' | 'onedrive';
 }
 
 // A task from the To-Do list that names one of this customer's records.
@@ -418,6 +420,17 @@ export interface CustomerStats {
   paymentPending: number;
   outstanding: number;
   needsFollowUp: number;
+  // An open inquiry or a quotation awaiting a decision, not lost.
+  open: number;
+  // An open inquiry nobody has emailed or quoted since.
+  notActioned: number;
+  // We wrote; they haven't answered.
+  noReply: number;
+  // Nothing planned to follow up (the Follow-up chip's "No follow-up").
+  noFollowUp: number;
+  // The Order or Inquiry chip says "Converted".
+  converted: number;
+  lost: number;
 }
 
 export type CustomerSort =

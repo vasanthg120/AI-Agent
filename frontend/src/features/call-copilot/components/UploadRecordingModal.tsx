@@ -3,6 +3,7 @@ import type { DragEvent } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import clsx from 'clsx';
 import { FiAlertCircle, FiCheck, FiFileText, FiMusic, FiUploadCloud } from 'react-icons/fi';
+import { CloudPickButton } from '@/components/cloud-files';
 import { Button, Modal } from '@/components/ui';
 import { callCopilotService, type CallSummaryResult, type CoachingReport } from '@/services/callCopilotService';
 import { VOICE_LANGUAGES } from '@/services/voiceService';
@@ -255,6 +256,18 @@ export function UploadRecordingModal({ open, onClose, onProcessed }: UploadRecor
                   </span>
                   <span className={styles.dropHint}>MP3, WAV, M4A, OGG, WebM or MP4 audio</span>
                 </button>
+                {/* A recording kept in Google Drive / OneDrive: fetched through HaiVE, then processed the same way. */}
+                <div className={styles.cloudPick}>
+                  <CloudPickButton
+                    multiple={false}
+                    accept=".mp3,.wav,.m4a,.ogg,.webm,.mp4"
+                    maxBytes={300 * 1024 * 1024}
+                    label="Or choose it from Google Drive or OneDrive"
+                    onPick={(files) => {
+                      if (files[0]) void handleFileSelected(files[0]);
+                    }}
+                  />
+                </div>
               </motion.div>
             )}
           </>

@@ -32,6 +32,7 @@ import { GorillaDashModule } from './gorilladash/gorilladash.module';
 import { ZapierModule } from './zapier/zapier.module';
 import { CrmIntegrationsModule } from './crm-integrations/crm-integrations.module';
 import { CustomerIntelligenceModule } from './customer-intelligence/customer-intelligence.module';
+import { CloudFilesModule } from './cloud-files/cloud-files.module';
 import { CallCopilotModule } from './call-copilot/call-copilot.module';
 import { BusinessKnowledgeModule } from './business-knowledge/business-knowledge.module';
 import { EmailIntelligenceModule } from './email-intelligence/email-intelligence.module';
@@ -94,6 +95,7 @@ import { HealthController } from './health/health.controller';
     ZapierModule,
     CrmIntegrationsModule,
     CustomerIntelligenceModule,
+    CloudFilesModule,
     CallCopilotModule,
     BusinessKnowledgeModule,
     EmailIntelligenceModule,

@@ -2,6 +2,7 @@ import { BadRequestException, ForbiddenException, Injectable, NotFoundException 
 import { InjectConnection } from '@nestjs/mongoose';
 import { Connection, Types } from 'mongoose';
 import { JwtPayload } from '../auth/jwt-payload.interface';
+import { assertAcceptableFile, cleanFileName } from '../common/file-names';
 import { GridFsService } from '../common/gridfs/gridfs.service';
 import { UPLOAD_FILE_SIZE_LIMIT_BYTES } from '../common/upload-limits';
 import { CustomerDirectoryService, FILES_BUCKET, JOBS_COLLECTION, NOTES_COLLECTION, STATUSES_COLLECTION, TASKS_COLLECTION } from './customer-directory.service';
@@ -13,10 +14,7 @@ const STATUS_HISTORY_LIMIT = 60;
 
 const LIST_LIMIT = 200;
 const MAX_FILES_PER_CUSTOMER = 50;
-const MAX_FILENAME = 160;
 const LINKED_TASK_LIMIT = 50;
-// Files are only ever handed back as downloads, never shown in the page — but nothing that runs is taken in.
-const REFUSED_EXTENSIONS = new Set(['exe', 'msi', 'bat', 'cmd', 'com', 'scr', 'ps1', 'vbs', 'js', 'jar', 'sh', 'app', 'dll', 'html', 'htm', 'hta', 'lnk']);
 
 type Doc = Record<string, any>;
 
@@ -78,6 +76,8 @@ export interface CustomerFile {
   kind: 'file' | 'proof';
   proofStatus?: string;
   proofNote?: string;
+  /** A copy made from a Google Drive / OneDrive file (customer-cloud.service.ts): which provider. */
+  copiedFrom?: 'google_drive' | 'onedrive';
 }
 
 /** A task from the To-Do list (written by the daily report) that names one of this customer's records. */
@@ -187,6 +187,7 @@ export class CustomerWorkspaceService {
       mine: text(meta.uploadedBy) === callerId,
       ...(text(meta.jobId) ? { jobId: text(meta.jobId) } : {}),
       kind: meta.kind === 'proof' ? 'proof' : 'file',
+      ...(meta.copiedFrom?.provider === 'google_drive' || meta.copiedFrom?.provider === 'onedrive' ? { copiedFrom: meta.copiedFrom.provider } : {}),
       ...(meta.kind === 'proof'
         ? { proofStatus: text(meta.proofStatus) || 'awaiting', ...(text(meta.proofNote) ? { proofNote: text(meta.proofNote) } : {}) }
         : {}),
@@ -417,17 +418,9 @@ export class CustomerWorkspaceService {
     kind: 'file' | 'proof' = 'file',
   ): Promise<CustomerFile> {
     if (!upload?.buffer?.length) throw new BadRequestException('Choose a file to upload.');
-    // A browser sends the name as typed; keep the last path part, without anything a header or a folder could choke on.
-    const name = (upload.originalname ?? '')
-      .split(/[\\/]/)
-      .pop()!
-      .replace(/[\u0000-\u001f\u007f"<>|:*?]/g, '')
-      .trim()
-      .slice(-MAX_FILENAME);
-    if (!name) throw new BadRequestException('That file has no usable name.');
-    const extension = name.includes('.') ? name.split('.').pop()!.toLowerCase() : '';
-    if (REFUSED_EXTENSIONS.has(extension))
-      throw new BadRequestException(`.${extension} files can’t be attached. Attach a document, an image or an archive instead.`);
+    // Files are only ever handed back as downloads, never shown in the page — but nothing that runs is taken in.
+    const name = cleanFileName(upload.originalname);
+    assertAcceptableFile(name);
     const organizationId = caller.organizationId;
     const customer = await this.target(organizationId, customerId, job);
     // The limit is the customer's, whichever job a file is attached on.

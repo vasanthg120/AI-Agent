@@ -5,10 +5,12 @@ import dayjs from 'dayjs';
 import toast from 'react-hot-toast';
 import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
+  FiActivity,
   FiAlertCircle,
   FiAlignJustify,
   FiArrowDown,
-  FiCheckSquare,
+  FiBellOff,
+  FiCheckCircle,
   FiChevronLeft,
   FiChevronRight,
   FiClock,
@@ -31,6 +33,7 @@ import {
   FiSearch,
   FiUserCheck,
   FiUsers,
+  FiXCircle,
 } from 'react-icons/fi';
 import type { IconType } from 'react-icons';
 import clsx from 'clsx';
@@ -74,9 +77,17 @@ import { TYPE_VARIANT } from './status';
 import styles from './customers.module.css';
 import jobStyles from './jobs/jobs.module.css';
 
-// The numbers that matter, each one a filter: click to see just those customers.
-const TILES: { id: string; label: string; hint: string; icon: IconType; count: (s: CustomerStats) => number }[] = [
+// The numbers that matter, each one a filter: click to see just those customers. Two rows of six:
+// where the work stands (open, untouched, unanswered, unplanned), then how it ends (orders, payment, lost).
+const TILES: { id: string; label: string; hint: string; icon: IconType; count: (s: CustomerStats) => number; urgent?: boolean }[] = [
   { id: 'all', label: 'All customers', hint: 'Everyone in the selected source', icon: FiUsers, count: (s) => s.total },
+  {
+    id: 'open',
+    label: 'Open',
+    hint: 'An open inquiry or a quotation awaiting a decision — not lost',
+    icon: FiActivity,
+    count: (s) => s.open,
+  },
   {
     id: 'open_inquiry',
     label: 'Open inquiries',
@@ -85,11 +96,34 @@ const TILES: { id: string; label: string; hint: string; icon: IconType; count: (
     count: (s) => s.openInquiries,
   },
   {
-    id: 'existing',
-    label: 'Existing',
-    hint: 'Have ordered at least once',
-    icon: FiUserCheck,
-    count: (s) => s.existing,
+    id: 'not_actioned',
+    label: 'Not actioned',
+    hint: 'An open inquiry nobody has emailed or sent a quotation to yet',
+    icon: FiAlertCircle,
+    count: (s) => s.notActioned,
+    urgent: true,
+  },
+  {
+    id: 'no_reply',
+    label: 'No reply',
+    hint: 'You emailed them and they haven’t answered',
+    icon: FiMail,
+    count: (s) => s.noReply,
+  },
+  {
+    id: 'no_follow_up',
+    label: 'No follow-up',
+    hint: 'Nothing planned to follow up with them',
+    icon: FiBellOff,
+    count: (s) => s.noFollowUp,
+  },
+  {
+    id: 'follow_up',
+    label: 'Needs follow-up',
+    hint: 'A reply is owed, or it is time to chase',
+    icon: FiClock,
+    count: (s) => s.needsFollowUp,
+    urgent: true,
   },
   {
     id: 'quote_pending',
@@ -106,23 +140,42 @@ const TILES: { id: string; label: string; hint: string; icon: IconType; count: (
     count: (s) => s.paymentPending,
   },
   {
-    id: 'follow_up',
-    label: 'Needs follow-up',
-    hint: 'A reply is owed, or it is time to chase',
-    icon: FiClock,
-    count: (s) => s.needsFollowUp,
+    id: 'existing',
+    label: 'Existing',
+    hint: 'Have ordered at least once',
+    icon: FiUserCheck,
+    count: (s) => s.existing,
+  },
+  {
+    id: 'converted',
+    label: 'Converted',
+    hint: 'Ordered, with nothing open since — or their inquiry became an order',
+    icon: FiCheckCircle,
+    count: (s) => s.converted,
+  },
+  {
+    id: 'lost',
+    label: 'Lost',
+    hint: 'No order, and the deal was lost, the quotation rejected or the inquiry marked not interested',
+    icon: FiXCircle,
+    count: (s) => s.lost,
   },
 ];
 
-// Every way to narrow the table (the tiles above are shortcuts to six of them).
+// Every way to narrow the table (the tiles above are shortcuts to most of them).
 const VIEWS: { id: string; label: string }[] = [
   { id: 'all', label: 'All customers' },
+  { id: 'open', label: 'Open' },
   { id: 'open_inquiry', label: 'Open inquiries' },
+  { id: 'not_actioned', label: 'Not actioned' },
+  { id: 'no_reply', label: 'No reply' },
+  { id: 'no_follow_up', label: 'No follow-up' },
   { id: 'new', label: 'New customers' },
   { id: 'existing', label: 'Existing customers' },
   { id: 'returning', label: 'Returning customers' },
   { id: 'converted', label: 'Converted' },
   { id: 'not_converted', label: 'Not converted' },
+  { id: 'lost', label: 'Lost' },
   { id: 'active', label: 'Active' },
   { id: 'inactive', label: 'Inactive' },
   { id: 'quote_pending', label: 'Quote pending' },
@@ -154,7 +207,7 @@ const COLUMNS: { id: ColumnId; label: string; hint: string; sort?: CustomerSort 
   {
     id: 'followUp',
     label: 'Follow-up',
-    hint: 'Reminders on their emails and your team’s tasks that are still to do',
+    hint: 'Reminders on their emails and follow-ups that are still to do',
     sort: 'followUp',
   },
   { id: 'next', label: 'Next step', hint: 'What to do now, and why', sort: 'urgency' },
@@ -648,7 +701,9 @@ const CustomersBoard = memo(function CustomersBoard({
       <div className={styles.tiles} role="tablist" aria-label="Filter customers">
         {TILES.map((tile) => {
           const active = view === tile.id;
-          const attention = tile.id === 'follow_up' && tile.count(stats) > 0;
+          // A backend from before a tile existed sends no count for it: 0, not a broken number.
+          const value = tile.count(stats) ?? 0;
+          const attention = !!tile.urgent && value > 0;
           return (
             <button
               key={tile.id}
@@ -664,7 +719,7 @@ const CustomersBoard = memo(function CustomersBoard({
               </span>
               <span className={styles.tileText}>
                 <strong>
-                  <AnimatedNumber value={tile.count(stats)} duration={0.45} />
+                  <AnimatedNumber value={value} duration={0.45} />
                 </strong>
                 <span>{tile.label}</span>
               </span>
@@ -1044,7 +1099,6 @@ function rowActions(customer: Customer, onOpen: (tab?: PanelTab) => void): Dropd
       separatorBefore: true,
       onSelect: () => onOpen('comments'),
     },
-    { id: 'task', label: 'Add task', icon: <FiCheckSquare />, onSelect: () => onOpen('tasks') },
   );
   return items;
 }

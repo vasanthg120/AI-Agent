@@ -1089,7 +1089,7 @@
   }
 }
 
-/* ---- the tiles: six in a row down to a small laptop, three across below that, a row to swipe on a phone ---- */
+/* ---- the tiles: two rows of six down to a small laptop, four across below that, a row to swipe on a phone ---- */
 
 @container customers-page (max-width: 1040px) {
   .tiles {
@@ -1110,7 +1110,7 @@
 
 @container customers-page (max-width: 860px) {
   .tiles {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(4, minmax(0, 1fr));
   }
 }
 
