@@ -51,18 +51,36 @@ import ui from './integrations.module.css';
 
 type CardStatus = 'connected' | 'disconnected' | 'error' | 'loading';
 
-// OAuth-based platforms (Salesforce, Slack, HubSpot, ...) aren't offered
-// here deliberately — this wizard is only for auth styles that need no
+// Most OAuth-based platforms (Slack, HubSpot, ...) aren't offered here
+// deliberately — this wizard is primarily for auth styles that need no
 // dedicated consent flow/app registration (see backend/src/integrations/
 // auth-methods.ts's comment). Each of those needs its own integration, the
-// way Outlook/Gmail/the login providers already have.
+// way Outlook/Gmail/Zoho/Salesforce (CRM section above) already have.
 const AUTH_TYPE_LABELS: Record<AuthType, string> = {
   apiKey: 'API Key',
   apiKeyBaseUrl: 'Base URL + API Key',
   bearer: 'Bearer Token',
   basic: 'Username + Password (Basic Auth)',
   customHeaders: 'Custom Headers',
+  // Never actually selectable (see selectableAuthTypesFor below) — 'oauth2'
+  // only exists in provider-rules.ts so Zoho/Salesforce's own internal
+  // connectWithOAuth() call passes assertAllowed(); this label is a fallback
+  // only, in case that ever changes.
+  oauth2: 'OAuth (use the CRM card above)',
 };
+
+// 'oauth2' is never a typeable form in this generic modal — it has no
+// access-token input built for it, and Zoho/Salesforce's real OAuth (the
+// CRM section's "Connect with Zoho/Salesforce" button) is always the
+// correct path. Filtering it out here means a provider whose ONLY allowed
+// auth type is oauth2 (Zoho) correctly falls through to the "nothing to
+// configure here" closed state below, same as Outlook/Gmail; a provider
+// that also allows a manual fallback (Salesforce: bearer) still shows that
+// one option.
+function selectableAuthTypesFor(rule: ProviderRule | null): AuthType[] {
+  const types = rule?.allowedAuthTypes.length ? rule.allowedAuthTypes : AUTH_TYPES;
+  return types.filter((type) => type !== 'oauth2');
+}
 
 const AUTH_TYPES: AuthType[] = ['apiKeyBaseUrl', 'apiKey', 'bearer', 'basic', 'customHeaders'];
 
@@ -75,6 +93,8 @@ const CRM_LOGO: Record<string, string> = {
   prospectconnect: '/integrations/pantheras.png',
   hoops: '/integrations/hoops.png',
   gorilladash: '/integrations/gorilla-dash.png',
+  zoho: '/integrations/zoho.svg',
+  salesforce: '/integrations/salesforce.svg',
 };
 const MODULE_TERM: Record<string, string> = { deals: 'deal', quotes: 'quote', contacts: 'contact', accounts: 'account' };
 const pluralOf = (word: string) => (/(s|x|ch|sh)$/i.test(word) ? `${word}es` : /[^aeiou]y$/i.test(word) ? `${word.slice(0, -1)}ies` : `${word}s`);
@@ -251,6 +271,43 @@ export function IntegrationsPage() {
     setSearchParams((prev) => {
       const next = new URLSearchParams(prev);
       next.delete('outlook');
+      return next;
+    }, { replace: true });
+  }, [searchParams]);
+
+  // Landing back here after the full-page Zoho/Salesforce OAuth round trip
+  // (see backend/src/zoho/zoho.controller.ts and
+  // backend/src/salesforce/salesforce.controller.ts's callback, which
+  // redirect to /settings/integrations?crm=<provider>_<connected|error>).
+  // On success, opens the same CrmSetupWizard every other CRM's connect()
+  // leads into — the backend's callback already ran the equivalent of that
+  // flow's "save credentials, read a first page, confirm it works" step
+  // (ZohoService/SalesforceService.handleCallback), so the wizard picks up
+  // straight at the 'data' step (see CrmSetupWizard's own effect for how it
+  // detects this) rather than showing the connect form again.
+  useEffect(() => {
+    const crmResult = searchParams.get('crm');
+    if (!crmResult) return;
+    const [provider, outcome] = crmResult.split('_', 2) as [string, 'connected' | 'error' | undefined];
+    const label = provider === 'zoho' ? 'Zoho CRM' : provider === 'salesforce' ? 'Salesforce' : provider;
+
+    if (outcome === 'connected') {
+      toast.success(`${label} connected`);
+      crmIntegrationsService
+        .list()
+        .then((list) => {
+          void queryClient.invalidateQueries({ queryKey: ['crm-integrations'] });
+          const connected = list.find((i) => i.id === provider);
+          if (connected) setSetupFor(connected);
+        })
+        .catch(() => undefined);
+    } else {
+      toast.error(`Couldn't connect ${label} — nothing was saved. Please try again.`);
+    }
+
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      next.delete('crm');
       return next;
     }, { replace: true });
   }, [searchParams]);
@@ -905,7 +962,7 @@ export function IntegrationsPage() {
               </div>
             )}
 
-            {!customProviderRule?.dedicatedFlowPath && (
+            {!customProviderRule?.dedicatedFlowPath && selectableAuthTypesFor(customProviderRule).length > 0 && (
               <>
                 <div>
                   <span className={styles.fieldLabel}>Authentication method</span>
@@ -917,13 +974,11 @@ export function IntegrationsPage() {
                       setCustomTestResult(null);
                     }}
                   >
-                    {(customProviderRule?.allowedAuthTypes.length ? customProviderRule.allowedAuthTypes : AUTH_TYPES).map(
-                      (type) => (
-                        <option key={type} value={type}>
-                          {AUTH_TYPE_LABELS[type]}
-                        </option>
-                      ),
-                    )}
+                    {selectableAuthTypesFor(customProviderRule).map((type) => (
+                      <option key={type} value={type}>
+                        {AUTH_TYPE_LABELS[type]}
+                      </option>
+                    ))}
                   </select>
                 </div>
 
@@ -1006,7 +1061,7 @@ export function IntegrationsPage() {
               </>
             )}
 
-            {customProviderRule?.dedicatedFlowPath && (
+            {(customProviderRule?.dedicatedFlowPath || selectableAuthTypesFor(customProviderRule).length === 0) && (
               <Button variant="ghost" onClick={() => setCustomModalOpen(false)}>
                 Close
               </Button>

@@ -35,4 +35,19 @@ export const adminIntegrationsService = {
     const { data } = await adminAxiosClient.post<{ ok: boolean; message: string }>(`/integrations/admin/${provider}/verify`);
     return data;
   },
+
+  // Gmail's own Google OAuth app (Client ID/Secret) — a different shape
+  // from the AI providers above (no apiKey, no /verify ping; see
+  // backend/src/integrations/admin-integrations.controller.ts's own comment
+  // on why). One platform-wide app for every organization's Gmail
+  // mailboxes — ordinary customer users never see this, only reach the
+  // read-only integrationsService.getGmailAppStatus() boolean check.
+  async getGmailAppCredentialsStatus(): Promise<{ configured: boolean; clientId?: string; clientSecretMasked?: string }> {
+    const { data } = await adminAxiosClient.get('/integrations/admin/gmail/app-credentials');
+    return data;
+  },
+
+  async saveGmailAppCredentials(payload: { clientId: string; clientSecret: string }): Promise<void> {
+    await adminAxiosClient.post('/integrations/admin/gmail/app-credentials', payload);
+  },
 };

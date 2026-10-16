@@ -50,19 +50,25 @@ export const PROVIDER_RULES: Record<string, ProviderRule> = {
     dedicatedFlowPath: '/gmail',
     note: 'Use the Gmail card above — it already handles Google OAuth.',
   },
-  // Salesforce officially supports OAuth, JWT bearer, and username+password+
-  // security-token — never a bare API key. No dedicated OAuth flow is built
-  // yet (unlike Outlook/Gmail), so until it is, Bearer (for a JWT you mint
-  // externally) is the closest fit already available; API key is refused.
+  // Real dedicated OAuth now exists (see ../salesforce/) — connect it from
+  // the CRM card on the Integrations page, same as Outlook/Gmail. 'bearer'
+  // stays allowed (not removed) as a fallback for a manually-minted JWT,
+  // same limitation it always had: no refresh, so it needs re-pasting when
+  // it expires. 'oauth2' is never meant to be picked from the generic
+  // Custom Integration dropdown — it's reachable only via connectWithOAuth(),
+  // called by salesforce.service.ts's own callback, never by a typed form.
   salesforce: {
     label: 'Salesforce',
-    allowedAuthTypes: ['bearer'],
-    note: 'Salesforce does not support API keys — OAuth is the recommended method (not yet built as a dedicated flow); Bearer accepts a JWT if you have one.',
+    allowedAuthTypes: ['bearer', 'oauth2'],
+    note: 'Use the Salesforce card in the CRM section above — it handles OAuth with automatic token refresh. Bearer here accepts a manually-minted JWT with no refresh, for advanced/sandbox use only.',
   },
+  // Real dedicated OAuth now exists (see ../zoho/) — connect it from the CRM
+  // card on the Integrations page. See the Salesforce entry above for why
+  // 'oauth2' is listed but not meant for the generic form.
   zoho: {
     label: 'Zoho CRM',
-    allowedAuthTypes: [],
-    note: 'Zoho CRM only supports OAuth — not yet built as a dedicated flow here.',
+    allowedAuthTypes: ['oauth2'],
+    note: 'Use the Zoho CRM card in the CRM section above — it handles OAuth with automatic token refresh.',
   },
   hubspot: {
     label: 'HubSpot',

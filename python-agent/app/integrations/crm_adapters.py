@@ -21,7 +21,7 @@ from urllib.parse import urlparse
 
 import requests
 
-from app.integrations import prospectconnect
+from app.integrations import oauth_refresh, prospectconnect
 from app.memory import integration_store
 
 logger = logging.getLogger(__name__)
@@ -129,6 +129,8 @@ def _auth_token(creds: dict) -> str | None:
         headers = credentials.get("headers") or {}
         value = next((v for k, v in headers.items() if k.lower() == "authorization"), None)
         return str(value).split(" ", 1)[-1] if value else None
+    if auth_type == "oauth2":
+        return credentials.get("accessToken") or None
     return None
 
 
@@ -314,18 +316,39 @@ class _RestAdapter(Adapter):
 
     def __init__(self, source: dict):
         super().__init__(source)
-        creds = integration_store.get_credentials(source.get("integrationProvider") or self.provider, self.organization_id)
+        provider_name = source.get("integrationProvider") or self.provider
+        creds = integration_store.get_credentials(provider_name, self.organization_id)
         if not creds:
             raise AdapterError(f"{source.get('label') or self.provider} is not connected (no credentials found).")
+
+        self.oauth_meta: dict = {}
+        if creds.get("authType") == "oauth2":
+            # get_credentials() above returns whatever access token was last
+            # saved, which is frequently already expired by the time a sync
+            # run reaches it (Zoho: ~1h; Salesforce: long-lived but not
+            # indefinite) — oauth2 providers need a live, refreshed token on
+            # every run, not just at connect time. See oauth_refresh.py.
+            refreshed = oauth_refresh.get_valid_oauth_credentials(provider_name, self.organization_id)
+            if not refreshed:
+                raise AdapterError(f"{source.get('label') or self.provider} needs to be reconnected (its access was revoked or expired).")
+            creds = {**creds, "credentials": {"accessToken": refreshed["accessToken"]}}
+            self.oauth_meta = refreshed.get("oauthMeta") or {}
+
         token = _auth_token(creds)
         if not token:
             raise AdapterError("The saved credentials have no usable token — reconnect using a bearer token or API key.")
         self.token = token
-        base = creds.get("baseUrl") or self.default_base_url
+        base = self._resolve_base_url(creds)
         if not base:
             raise AdapterError("No base URL is configured for this CRM.")
         parsed = urlparse(base)
         self.base_url = f"{parsed.scheme}://{parsed.netloc}"
+
+    # Overridden by ZohoAdapter/SalesforceAdapter — their actual API host is
+    # learned from the OAuth token response (api_domain/instance_url), never
+    # the same for every customer, unlike HubSpot's fixed default_base_url.
+    def _resolve_base_url(self, creds: dict) -> str:
+        return creds.get("baseUrl") or self.default_base_url
 
     def _get(self, url: str, params: dict | None = None, headers: dict | None = None) -> dict:
         response = requests.get(url, params=params, headers=headers or self.headers(), timeout=TIMEOUT)
@@ -370,6 +393,14 @@ class SalesforceAdapter(_RestAdapter):
     _objects = {"deals": "Opportunity", "contacts": "Contact", "accounts": "Account"}
     api_version = "v59.0"
 
+    def _resolve_base_url(self, creds: dict) -> str:
+        # instance_url is per-customer (e.g. https://my-org.my.salesforce.com)
+        # and only known after the OAuth token exchange/refresh — never a
+        # fixed default like HubSpot's. Falls back to a manually-pasted
+        # baseUrl for the legacy bearer-JWT connection style this adapter
+        # also still supports (see provider-rules.ts's note on Salesforce).
+        return self.oauth_meta.get("instanceUrl") or super()._resolve_base_url(creds)
+
     def pages(self, module: str) -> Iterator[list[dict]]:
         fields = sorted({"Id", *[p for p in (self.mappings.get(module) or {}).values() if p]})
         query = f"SELECT {', '.join(fields)} FROM {self._objects[module]} ORDER BY CreatedDate DESC"
@@ -389,6 +420,12 @@ class ZohoAdapter(_RestAdapter):
     modules = ("deals", "contacts", "accounts")
     default_base_url = "https://www.zohoapis.com"
     _objects = {"deals": "Deals", "contacts": "Contacts", "accounts": "Accounts"}
+
+    def _resolve_base_url(self, creds: dict) -> str:
+        # api_domain is data-center-specific (e.g. https://www.zohoapis.eu for
+        # an EU account) and only known from the OAuth token response — never
+        # assume every customer is on the default .com domain.
+        return self.oauth_meta.get("apiDomain") or super()._resolve_base_url(creds)
 
     def headers(self) -> dict:
         return {"Authorization": f"Zoho-oauthtoken {self.token}", "Accept": "application/json"}

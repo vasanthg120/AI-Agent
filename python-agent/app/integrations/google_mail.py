@@ -1,4 +1,6 @@
+import base64
 import hashlib
+from email.mime.text import MIMEText
 
 import requests
 
@@ -65,3 +67,45 @@ def list_recent_messages(access_token: str, top: int = 10) -> list[dict]:
             }
         )
     return results
+
+
+def reply_to_message(access_token: str, message_id: str, comment: str) -> None:
+    """Sends a reply to the ORIGINAL SENDER ONLY, in the same thread —
+    mirrors ms_graph.reply_to_message's contract (messageId + comment in,
+    nothing out, raises on failure) even though the underlying mechanics
+    differ: unlike Graph's one-call /reply endpoint, Gmail has no dedicated
+    reply endpoint at all — a reply is just a normal /messages/send call
+    whose threadId matches the original message and whose In-Reply-To/
+    References headers point at it (the same RFC 2822 convention every mail
+    client uses for threading); Gmail does the quoting/subject-prefixing
+    itself in the web UI, not the API, so this app handles the "Re:" prefix
+    manually. Requires the gmail.send scope (see gmail.service.ts's
+    GMAIL_SCOPES) — a token issued before that scope existed fails this call
+    with a real 403, which the caller should surface honestly, same as
+    Graph's Mail.Send-missing case."""
+    original = gmail_get(
+        f"/messages/{message_id}",
+        access_token,
+        params={"format": "metadata", "metadataHeaders": ["Subject", "From", "Message-ID", "References"]},
+    )
+    headers = {h["name"]: h["value"] for h in original.get("payload", {}).get("headers", [])}
+    subject = headers.get("Subject", "")
+    if not subject.lower().startswith("re:"):
+        subject = f"Re: {subject}"
+    original_message_id = headers.get("Message-ID", "")
+
+    mime = MIMEText(comment)
+    mime["To"] = headers.get("From", "")
+    mime["Subject"] = subject
+    if original_message_id:
+        mime["In-Reply-To"] = original_message_id
+        mime["References"] = f"{headers.get('References', '')} {original_message_id}".strip()
+
+    raw = base64.urlsafe_b64encode(mime.as_bytes()).decode("ascii")
+    response = requests.post(
+        f"{GMAIL_BASE}/messages/send",
+        headers={"Authorization": f"Bearer {access_token}"},
+        json={"raw": raw, "threadId": original.get("threadId", message_id)},
+        timeout=15,
+    )
+    response.raise_for_status()

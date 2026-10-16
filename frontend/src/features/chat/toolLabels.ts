@@ -10,6 +10,7 @@ export const TOOL_LABELS: Record<string, string> = {
   crm_account: 'Checking account details…',
   crm_quote: 'Checking quotes…',
   crm_source_records: 'Reading records from that data source…',
+  crm_create_task: 'Creating a CRM task…',
   zapier: 'Working with your Zapier apps…',
   integration_capabilities: 'Checking what’s connected…',
   gorilladash_lookup: 'Checking Gorilla Dash…',

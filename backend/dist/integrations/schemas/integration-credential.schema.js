@@ -41,6 +41,30 @@ __decorate([
 __decorate([
     (0, mongoose_1.Prop)(),
     __metadata("design:type", String)
+], IntegrationCredential.prototype, "refreshTokenEncrypted", void 0);
+__decorate([
+    (0, mongoose_1.Prop)(),
+    __metadata("design:type", Date)
+], IntegrationCredential.prototype, "tokenExpiresAt", void 0);
+__decorate([
+    (0, mongoose_1.Prop)({ type: Object }),
+    __metadata("design:type", Object)
+], IntegrationCredential.prototype, "oauthMeta", void 0);
+__decorate([
+    (0, mongoose_1.Prop)(),
+    __metadata("design:type", String)
+], IntegrationCredential.prototype, "status", void 0);
+__decorate([
+    (0, mongoose_1.Prop)(),
+    __metadata("design:type", String)
+], IntegrationCredential.prototype, "oauthClientId", void 0);
+__decorate([
+    (0, mongoose_1.Prop)(),
+    __metadata("design:type", String)
+], IntegrationCredential.prototype, "oauthClientSecretEncrypted", void 0);
+__decorate([
+    (0, mongoose_1.Prop)(),
+    __metadata("design:type", String)
 ], IntegrationCredential.prototype, "healthCheckPath", void 0);
 __decorate([
     (0, mongoose_1.Prop)({ type: Number }),

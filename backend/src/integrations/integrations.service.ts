@@ -167,6 +167,207 @@ export class IntegrationsService {
     return { connected: true, authType, baseUrl: dto.baseUrl };
   }
 
+  /** Saves an OAuth2 CRM connection (Zoho/Salesforce — see ../zoho/,
+   * ../salesforce/) after their dedicated controller's callback already
+   * completed the authorization-code exchange. Parallel to connectWithAuth()
+   * above but for the one authType (oauth2) that carries a refresh token +
+   * expiry + provider-specific metadata those other auth styles never need —
+   * kept as its own method rather than overloading connectWithAuth's DTO so
+   * every existing caller of that method is completely unaffected. */
+  async connectWithOAuth(
+    organizationId: string,
+    provider: string,
+    tokens: { accessToken: string; refreshToken: string; expiresInSeconds: number; oauthMeta?: Record<string, string>; baseUrl?: string },
+    options: { skipSync?: boolean } = {},
+  ): Promise<{ connected: true }> {
+    this.assertAllowed(provider, 'oauth2');
+    await this.credentialModel.findOneAndUpdate(
+      { organizationId, provider },
+      {
+        organizationId,
+        provider,
+        authType: 'oauth2',
+        credentialsEncrypted: this.encryption.encrypt(JSON.stringify({ accessToken: tokens.accessToken })),
+        refreshTokenEncrypted: this.encryption.encrypt(tokens.refreshToken),
+        tokenExpiresAt: new Date(Date.now() + tokens.expiresInSeconds * 1000),
+        oauthMeta: tokens.oauthMeta,
+        baseUrl: tokens.baseUrl,
+        // A fresh connect/reconnect through this same path is also how a
+        // needs_reauth row recovers — explicitly clearing it here (not just
+        // relying on the field being absent from this update) covers the
+        // reconnect case, where the existing doc already has it set.
+        status: 'connected',
+        apiKey: undefined,
+      },
+      { upsert: true },
+    );
+    if (options.skipSync) {
+      if (crmProviderForIntegration(provider)) await this.dataSources.reconcile(organizationId);
+    } else {
+      this.triggerCrmSyncIfApplicable(organizationId, provider);
+    }
+    return { connected: true };
+  }
+
+  /** Saves (or replaces) an organization's OWN OAuth app credentials for a
+   * provider — currently only Zoho (see zoho.service.ts's resolveAppCredentials)
+   * — BEFORE any OAuth round trip happens. A narrow $set, deliberately not a
+   * full upsert like connectWithOAuth()/connectWithAuth() above: this must
+   * never clear an already-connected row's accessToken/refreshToken/
+   * tokenExpiresAt/status (an org replacing their app credentials after
+   * connecting shouldn't silently disconnect them — the next refresh will
+   * simply start using the new client id/secret). The secret is encrypted
+   * the same way every other secret in this collection is; the client id is
+   * plaintext (not a secret — Zoho/Google/Microsoft client ids are visible
+   * in the browser's own address bar during the OAuth redirect). */
+  async saveOAuthAppCredentials(
+    organizationId: string,
+    provider: string,
+    app: { clientId: string; clientSecret: string; meta?: Record<string, string> },
+  ): Promise<void> {
+    await this.credentialModel.findOneAndUpdate(
+      { organizationId, provider },
+      {
+        $set: {
+          organizationId,
+          provider,
+          oauthClientId: app.clientId,
+          oauthClientSecretEncrypted: this.encryption.encrypt(app.clientSecret),
+          ...(app.meta ? { oauthMeta: app.meta } : {}),
+        },
+      },
+      { upsert: true },
+    );
+  }
+
+  /** Status for the credential-entry modal — never returns the real secret,
+   * only whether one is on file and a fixed masked placeholder, same
+   * "don't even decrypt just to mask" approach status()/listCustom() above
+   * already use for apiKey. */
+  async getOAuthAppCredentialsStatus(
+    organizationId: string,
+    provider: string,
+  ): Promise<{ configured: boolean; clientId?: string; clientSecretMasked?: string; meta?: Record<string, string> }> {
+    const doc = await this.credentialModel.findOne({ organizationId, provider }, { oauthClientId: 1, oauthClientSecretEncrypted: 1, oauthMeta: 1 });
+    if (!doc?.oauthClientId || !doc?.oauthClientSecretEncrypted) return { configured: false };
+    return { configured: true, clientId: doc.oauthClientId, clientSecretMasked: '••••••••••••', meta: doc.oauthMeta };
+  }
+
+  /** Decrypted app credentials for internal, server-side use ONLY (building
+   * the authorize URL and exchanging the code — zoho.service.ts) — never
+   * exposed over HTTP; getOAuthAppCredentialsStatus() above is the
+   * HTTP-facing, masked equivalent. Returns null if the organization hasn't
+   * configured its own app, so the caller can fall back to the platform's
+   * shared app credentials. */
+  async resolveOAuthAppCredentials(
+    organizationId: string,
+    provider: string,
+  ): Promise<{ clientId: string; clientSecret: string; meta?: Record<string, string> } | null> {
+    const doc = await this.credentialModel.findOne({ organizationId, provider }, { oauthClientId: 1, oauthClientSecretEncrypted: 1, oauthMeta: 1 });
+    if (!doc?.oauthClientId || !doc?.oauthClientSecretEncrypted) return null;
+    return { clientId: doc.oauthClientId, clientSecret: this.encryption.decrypt(doc.oauthClientSecretEncrypted), meta: doc.oauthMeta };
+  }
+
+  /** Refreshes an oauth2 credential if its access token is expired/near
+   * expiry, persists the result, and returns the (possibly refreshed)
+   * decrypted token — called from resolveAuth() below so every consumer of
+   * that method (DynamicExecutorService, Test Connection) transparently gets
+   * a live token without having to know Zoho/Salesforce tokens expire at
+   * all. Mirrors python-agent's app/integrations/oauth_refresh.py exactly
+   * (same buffer, same needs_reauth-on-failure behavior) — that copy exists
+   * because the CRM sync engine reads Mongo directly from Python rather than
+   * through this service; both must agree on the stored shape, not the
+   * refresh call path itself. Returns null (never throws) on any failure —
+   * callers fall back to whatever was already on file, which will then fail
+   * its own request with a normal 401 rather than a confusing 500 here. */
+  private async refreshOAuthToken(doc: IntegrationCredentialDocument): Promise<string | null> {
+    const EXPIRY_BUFFER_MS = 60_000;
+    if (doc.tokenExpiresAt && doc.tokenExpiresAt.getTime() > Date.now() + EXPIRY_BUFFER_MS) {
+      const current = JSON.parse(this.encryption.decrypt(doc.credentialsEncrypted!)) as AuthCredentials;
+      return current.accessToken ?? null;
+    }
+    if (doc.status === 'needs_reauth' || !doc.refreshTokenEncrypted) return null;
+
+    try {
+      const refreshToken = this.encryption.decrypt(doc.refreshTokenEncrypted);
+      const oauthMeta = doc.oauthMeta ?? {};
+      let refreshed: { accessToken: string; expiresInSeconds: number; oauthMeta: Record<string, string> };
+
+      if (doc.provider === 'zoho') {
+        const base = oauthMeta.accountsServer || this.config.get<string>('integrations.zoho.accountsBaseUrl') || 'https://accounts.zoho.com';
+        // The organization's own Zoho API Console app (see
+        // POST /zoho/app-credentials) takes priority over Haive's shared
+        // platform app — a refresh MUST use the same client id/secret the
+        // original authorization was issued under, or Zoho rejects it even
+        // with a valid refresh token. Falls back to the platform env vars
+        // only for an org that never configured its own (backward
+        // compatible with every connection made before this existed).
+        const clientId = doc.oauthClientId || this.config.get<string>('integrations.zoho.clientId') || '';
+        const clientSecret = doc.oauthClientSecretEncrypted
+          ? this.encryption.decrypt(doc.oauthClientSecretEncrypted)
+          : this.config.get<string>('integrations.zoho.clientSecret') || '';
+        const { data } = await firstValueFrom(
+          this.http.post<{ access_token?: string; expires_in?: number; api_domain?: string; error?: string }>(
+            `${base.replace(/\/$/, '')}/oauth/v2/token`,
+            new URLSearchParams({
+              grant_type: 'refresh_token',
+              refresh_token: refreshToken,
+              client_id: clientId,
+              client_secret: clientSecret,
+            }).toString(),
+            { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } },
+          ),
+        );
+        if (!data.access_token) throw new Error(data.error ?? 'Zoho did not return an access token');
+        refreshed = {
+          accessToken: data.access_token,
+          expiresInSeconds: data.expires_in ?? 3600,
+          oauthMeta: { ...oauthMeta, apiDomain: data.api_domain ?? oauthMeta.apiDomain ?? '' },
+        };
+      } else if (doc.provider === 'salesforce') {
+        const base = oauthMeta.authBaseUrl || this.config.get<string>('integrations.salesforce.authBaseUrl') || 'https://login.salesforce.com';
+        const { data } = await firstValueFrom(
+          this.http.post<{ access_token?: string; instance_url?: string; error?: string; error_description?: string }>(
+            `${base.replace(/\/$/, '')}/services/oauth2/token`,
+            new URLSearchParams({
+              grant_type: 'refresh_token',
+              refresh_token: refreshToken,
+              client_id: this.config.get<string>('integrations.salesforce.clientId') ?? '',
+              client_secret: this.config.get<string>('integrations.salesforce.clientSecret') ?? '',
+            }).toString(),
+            { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } },
+          ),
+        );
+        if (!data.access_token) throw new Error(data.error_description ?? data.error ?? 'Salesforce did not return an access token');
+        refreshed = {
+          accessToken: data.access_token,
+          // Salesforce doesn't return expires_in on refresh — same fixed,
+          // conservative 2h re-check window python-agent's oauth_refresh.py uses.
+          expiresInSeconds: 7200,
+          oauthMeta: { ...oauthMeta, instanceUrl: data.instance_url ?? oauthMeta.instanceUrl ?? '' },
+        };
+      } else {
+        return null;
+      }
+
+      await this.credentialModel.updateOne(
+        { _id: doc._id },
+        {
+          $set: {
+            credentialsEncrypted: this.encryption.encrypt(JSON.stringify({ accessToken: refreshed.accessToken })),
+            tokenExpiresAt: new Date(Date.now() + refreshed.expiresInSeconds * 1000),
+            oauthMeta: refreshed.oauthMeta,
+          },
+        },
+      );
+      return refreshed.accessToken;
+    } catch (err) {
+      this.logger.warn(`OAuth refresh failed for provider=${doc.provider} org=${doc.organizationId} — marking needs_reauth: ${(err as Error).message}`);
+      await this.credentialModel.updateOne({ _id: doc._id }, { $set: { status: 'needs_reauth' } });
+      return null;
+    }
+  }
+
   /** Routes to connect() or connectWithAuth() above based on whether the
    * request set authType — the single HTTP entry point (see
    * IntegrationsController), kept as one endpoint so the API surface
@@ -300,6 +501,15 @@ export class IntegrationsService {
   ): Promise<{ integrationId: Types.ObjectId; authType: AuthType; credentials: AuthCredentials; baseUrl?: string } | null> {
     const doc = await this.credentialModel.findOne({ organizationId, provider });
     if (!doc) return null;
+    if (doc.authType === 'oauth2') {
+      const accessToken = await this.refreshOAuthToken(doc);
+      return {
+        integrationId: doc._id,
+        authType: doc.authType,
+        credentials: { accessToken: accessToken ?? undefined },
+        baseUrl: doc.oauthMeta?.apiDomain || doc.oauthMeta?.instanceUrl || doc.baseUrl,
+      };
+    }
     if (doc.authType) {
       return {
         integrationId: doc._id,

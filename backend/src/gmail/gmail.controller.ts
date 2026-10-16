@@ -18,13 +18,23 @@ export class GmailController {
     private config: ConfigService,
   ) {}
 
+  // Any authenticated user — a read-only "is Gmail available at all" check,
+  // not the admin-only credential status (see admin-integrations.controller.ts's
+  // GET gmail/app-credentials for that). Drives IntegrationsPage.tsx showing
+  // either the normal Connect button or "ask your administrator" messaging.
+  @UseGuards(JwtAuthGuard)
+  @Get('app-status')
+  async getAppStatus() {
+    return { configured: await this.gmailService.isAppConfigured() };
+  }
+
   @UseGuards(JwtAuthGuard)
   @Get('connect-url')
-  getConnectUrl(@CurrentUser() user: JwtPayload) {
+  async getConnectUrl(@CurrentUser() user: JwtPayload) {
     // Short-lived JWT as OAuth `state` — carries the user id through the
     // Google redirect round-trip without needing a server session.
     const state = this.jwtService.sign({ sub: user.sub }, { expiresIn: '10m' });
-    return { url: this.gmailService.buildAuthorizeUrl(state) };
+    return { url: await this.gmailService.buildAuthorizeUrl(state) };
   }
 
   @Get('callback')

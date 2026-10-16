@@ -24,13 +24,14 @@ import { ADMIN_ROUTES } from '@/constants/routes';
 import integrationsStyles from '../integrations/IntegrationsPage.module.css';
 import shared from './adminShared.module.css';
 
-type TabId = 'company' | 'taxes' | 'migration' | 'aiProvider' | 'providerPricing';
+type TabId = 'company' | 'taxes' | 'migration' | 'aiProvider' | 'providerPricing' | 'gmailOAuth';
 const TABS: { id: TabId; label: string }[] = [
   { id: 'company', label: 'Company & Invoicing' },
   { id: 'taxes', label: 'Tax Rates' },
   { id: 'migration', label: 'Wallet Migration' },
   { id: 'aiProvider', label: 'AI Provider' },
   { id: 'providerPricing', label: 'Provider Pricing' },
+  { id: 'gmailOAuth', label: 'Gmail OAuth' },
 ];
 
 function CompanySettingsTab() {
@@ -671,6 +672,118 @@ function AiProviderTab() {
   );
 }
 
+// Gmail's own Google OAuth app — the ONE platform-wide credential pair every
+// organization's Gmail mailbox connections authorize against (see
+// gmail.service.ts's resolveAppCredentials and this tab's own backend,
+// admin-integrations.controller.ts's gmail/app-credentials routes). Not an
+// AiProviderCard (that component is built for exactly one apiKey field;
+// this needs a Client ID + Client Secret pair, Google's actual OAuth app
+// shape) but same visual language/card chrome, same "never shown again
+// once saved" secret-masking convention. An ordinary customer user never
+// reaches this — only a platform admin, via this Admin-haive page.
+function GmailOAuthTab() {
+  const [status, setStatus] = useState<{ configured: boolean; clientId?: string } | 'loading' | 'error'>('loading');
+  const [modalOpen, setModalOpen] = useState(false);
+  const [clientId, setClientId] = useState('');
+  const [clientSecret, setClientSecret] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  const load = () => {
+    adminIntegrationsService
+      .getGmailAppCredentialsStatus()
+      .then(setStatus)
+      .catch((error) => {
+        setStatus('error');
+        toast.error(extractErrorMessage(error));
+      });
+  };
+
+  useEffect(load, []);
+
+  const openModal = () => {
+    setClientId('');
+    setClientSecret('');
+    setModalOpen(true);
+  };
+
+  const save = async () => {
+    if (clientId.trim().length < 10 || clientSecret.trim().length < 10) {
+      toast.error('Enter both the Client ID and Client Secret.');
+      return;
+    }
+    setSaving(true);
+    try {
+      await adminIntegrationsService.saveGmailAppCredentials({ clientId: clientId.trim(), clientSecret: clientSecret.trim() });
+      toast.success('Gmail OAuth app saved — every organization can now connect Gmail.');
+      setModalOpen(false);
+      setClientSecret('');
+      load();
+    } catch (error) {
+      toast.error(extractErrorMessage(error));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const configured = status !== 'loading' && status !== 'error' && status.configured;
+
+  return (
+    <div style={{ maxWidth: 420 }}>
+      <Card className={integrationsStyles.card}>
+        <div className={integrationsStyles.cardHeader}>
+          <span className={integrationsStyles.logoTile}>
+            <img src="/integrations/gmail.svg" alt="" />
+          </span>
+          <div className={integrationsStyles.cardTitleRow}>
+            <div className={integrationsStyles.cardName}>Gmail OAuth App</div>
+            <div className={integrationsStyles.cardCategory}>Google Cloud</div>
+          </div>
+          {status === 'loading' && <Badge variant="neutral">Checking...</Badge>}
+          {status === 'error' && <Badge variant="danger" dot>Error</Badge>}
+          {status !== 'loading' && status !== 'error' && (
+            <Badge variant={configured ? 'success' : 'neutral'} dot>
+              {configured ? 'Configured' : 'Not configured'}
+            </Badge>
+          )}
+        </div>
+        <p className={integrationsStyles.cardDescription}>
+          The one Google Cloud OAuth app every organization's Gmail mailbox connections authorize against. Without this
+          configured, "Connect Gmail" on the customer Settings → Integrations page tells users to contact an administrator
+          instead of attempting to connect.
+        </p>
+        {configured && status !== 'loading' && status !== 'error' && (
+          <div className={integrationsStyles.keyPreview}>Client ID: {status.clientId}</div>
+        )}
+        <div className={integrationsStyles.cardFooter}>
+          <Button size="sm" leftIcon={<FiKey />} onClick={openModal}>
+            {configured ? 'Replace Credentials' : 'Connect'}
+          </Button>
+        </div>
+      </Card>
+
+      <Modal
+        open={modalOpen}
+        onClose={() => setModalOpen(false)}
+        title="Gmail OAuth App"
+        description="From Google Cloud Console → APIs & Services → Credentials, a Web Application OAuth client with the Gmail API enabled. The Client Secret is encrypted at rest and never shown again after saving."
+      >
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
+          <Input label="Client ID" value={clientId} onChange={(e) => setClientId(e.target.value)} autoFocus />
+          <Input label="Client Secret" type="password" value={clientSecret} onChange={(e) => setClientSecret(e.target.value)} leftIcon={<FiKey />} />
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 'var(--space-2)' }}>
+            <Button variant="ghost" onClick={() => setModalOpen(false)}>
+              Cancel
+            </Button>
+            <Button loading={saving} onClick={save}>
+              Save
+            </Button>
+          </div>
+        </div>
+      </Modal>
+    </div>
+  );
+}
+
 const emptyProviderPricingForm: CreateProviderPricingPayload & { marginMode: 'global' | 'override' } = {
   provider: '',
   model: '',
@@ -905,6 +1018,7 @@ export function AdminSettingsPage() {
       {tab === 'migration' && <WalletMigrationTab />}
       {tab === 'aiProvider' && <AiProviderTab />}
       {tab === 'providerPricing' && <ProviderPricingTab />}
+      {tab === 'gmailOAuth' && <GmailOAuthTab />}
     </div>
   );
 }

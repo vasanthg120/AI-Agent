@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import toast from 'react-hot-toast';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { FiAlertTriangle, FiCheckCircle, FiClock, FiInfo, FiKey, FiLoader, FiXCircle } from 'react-icons/fi';
+import { FiAlertTriangle, FiCheckCircle, FiClock, FiExternalLink, FiInfo, FiKey, FiLoader, FiXCircle } from 'react-icons/fi';
 import { Button, CopyableText, Input, Modal, Stepper } from '@/components/ui';
 import { env } from '@/config/env';
 import {
@@ -78,15 +78,40 @@ export function CrmSetupWizard({ integration, onClose }: Props) {
   const queryClient = useQueryClient();
   const provider = integration?.id ?? '';
   const push = integration?.connection === 'push';
+  const oauth = integration?.setup.authMethod === 'oauth';
+  // Only Zoho supports "bring your own API Console app" today — Salesforce
+  // still only uses the platform's shared app, unchanged (see
+  // zoho.service.ts's own comment on why this was built Zoho-specific).
+  const isZoho = provider === 'zoho';
   const [step, setStep] = useState<Step>('connect');
   const [values, setValues] = useState<Record<string, string>>({});
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [redirecting, setRedirecting] = useState(false);
   const [error, setError] = useState<IntegrationError | null>(null);
   const [current, setCurrent] = useState<CrmIntegration | null>(integration);
   const [discovery, setDiscovery] = useState<Discovery | null>(null);
   const [webhookKey, setWebhookKey] = useState<string | null>(null);
   const [syncResult, setSyncResult] = useState<{ status: string; error?: string; counts?: Record<string, number> } | null>(null);
+
+  // Zoho's own API Console app (Client ID/Secret/data center) — collected
+  // once, before the first redirect, since Zoho's app registry is per-data-
+  // center with no cross-DC visibility (a platform-shared app can't cover
+  // every customer's region). Falls back to the platform app transparently
+  // if the organization never fills this in (see zoho.service.ts's
+  // resolveAppCredentials) — this form is only shown when nothing resolves.
+  const [zohoAppForm, setZohoAppForm] = useState(false);
+  const [zohoClientId, setZohoClientId] = useState('');
+  const [zohoClientSecret, setZohoClientSecret] = useState('');
+  const [zohoRegion, setZohoRegion] = useState('us');
+  const [zohoAccountsServerUrl, setZohoAccountsServerUrl] = useState('');
+  const [savingZohoApp, setSavingZohoApp] = useState(false);
+
+  const { data: zohoAppStatus, refetch: refetchZohoAppStatus } = useQuery({
+    queryKey: ['zoho-app-credentials'],
+    queryFn: () => crmIntegrationsService.getZohoAppCredentialsStatus(),
+    enabled: isZoho && !!integration,
+  });
 
   // A fresh wizard each time it's opened for an integration.
   useEffect(() => {
@@ -98,8 +123,21 @@ export function CrmSetupWizard({ integration, onClose }: Props) {
     setDiscovery(null);
     setWebhookKey(null);
     setSyncResult(null);
-    // Already set up but still waiting for its first record: pick up at the "send records" step.
-    setStep(integration.source && integration.connection === 'push' ? 'data' : 'connect');
+    setZohoAppForm(false);
+    setZohoClientId('');
+    setZohoClientSecret('');
+    setZohoRegion('us');
+    setZohoAccountsServerUrl('');
+    // Already set up but still waiting for its first record: pick up at the
+    // "send records" step (push CRMs). An OAuth CRM (Zoho/Salesforce) that
+    // already has a source when this wizard opens got there via the
+    // provider's own redirect-based callback (see IntegrationsPage.tsx's
+    // crm=<provider>_connected handling) — that callback already ran the
+    // "save credentials, read a first page, confirm it works" step
+    // connect() runs synchronously for every other CRM, so this also jumps
+    // straight to 'data' instead of re-showing a connect step with nothing
+    // to submit.
+    setStep(integration.source && (integration.connection === 'push' || oauth) ? 'data' : 'connect');
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [integration?.id]);
 
@@ -150,6 +188,62 @@ export function CrmSetupWizard({ integration, onClose }: Props) {
     }
   };
 
+  // Zoho/Salesforce: no fields to submit — sends the browser to the
+  // provider's own consent screen. The round trip back (full page
+  // navigation, not an XHR) lands on IntegrationsPage.tsx's
+  // crm=<provider>_connected handling, which reopens this same wizard
+  // already past 'connect' (see the reset effect above).
+  const connectOAuth = async () => {
+    if (provider !== 'zoho' && provider !== 'salesforce') return;
+    setRedirecting(true);
+    setError(null);
+    try {
+      window.location.href = await crmIntegrationsService.getOAuthConnectUrl(provider);
+    } catch (err) {
+      const apiError = integrationErrorOf(err);
+      // zohoAppStatus should already have caught this (the form shows
+      // automatically when !configured) — this is the fallback for a race
+      // (e.g. the org's own app credentials were deleted in another tab
+      // between loading the status and clicking Connect).
+      if (isZoho && apiError?.code === 'ZOHO_APP_CREDENTIALS_REQUIRED') {
+        setZohoAppForm(true);
+        void refetchZohoAppStatus();
+      } else {
+        setError(apiError ?? { message: extractErrorMessage(err), kind: 'other' });
+      }
+      setRedirecting(false);
+    }
+  };
+
+  const saveZohoApp = async () => {
+    if (!zohoClientId.trim() || !zohoClientSecret.trim()) {
+      setError({ message: 'Enter both the Client ID and Client Secret.', kind: 'other' });
+      return;
+    }
+    if (zohoRegion === 'other' && !zohoAccountsServerUrl.trim()) {
+      setError({ message: 'Enter your Zoho accounts server address.', kind: 'other' });
+      return;
+    }
+    setSavingZohoApp(true);
+    setError(null);
+    try {
+      await crmIntegrationsService.saveZohoAppCredentials({
+        clientId: zohoClientId.trim(),
+        clientSecret: zohoClientSecret.trim(),
+        region: zohoRegion,
+        accountsServerUrl: zohoRegion === 'other' ? zohoAccountsServerUrl.trim() : undefined,
+      });
+      await refetchZohoAppStatus();
+      setZohoAppForm(false);
+      setZohoClientSecret('');
+      toast.success('Zoho app credentials saved');
+    } catch (err) {
+      setError(integrationErrorOf(err) ?? { message: extractErrorMessage(err), kind: 'other' });
+    } finally {
+      setSavingZohoApp(false);
+    }
+  };
+
   const replaceKey = async () => {
     setBusy(true);
     try {
@@ -196,7 +290,122 @@ export function CrmSetupWizard({ integration, onClose }: Props) {
       <div className={styles.stack}>
         <Stepper steps={steps} currentId={step} completedIds={completed} />
 
-        {step === 'connect' && (
+        {step === 'connect' && oauth && (
+          <div className={styles.stack}>
+            <div className={styles.twoLists}>
+              <div>
+                <strong>What HaiVE gets</strong>
+                <ul className={styles.checkList}>
+                  {integration.setup.provides.map((item) => (
+                    <li key={item}>{item}</li>
+                  ))}
+                </ul>
+              </div>
+              {integration.setup.limitations.length > 0 && (
+                <div>
+                  <strong>Good to know</strong>
+                  <ul className={styles.noteList}>
+                    {integration.setup.limitations.map((item) => (
+                      <li key={item}>{item}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
+
+            <p className={styles.note}>
+              <FiInfo aria-hidden /> You’ll sign in to {label} and approve access. HaiVE never sees your {label} password — only an
+              access token, stored encrypted, that {label} can revoke at any time. Nothing is synced until you’ve reviewed the mapping.
+            </p>
+
+            {isZoho && zohoAppStatus === undefined && <p className={styles.note}>Checking your Zoho app settings…</p>}
+
+            {isZoho && zohoAppStatus && (zohoAppForm || !zohoAppStatus.configured) ? (
+              <>
+                <p className={styles.note}>
+                  <FiKey aria-hidden /> Zoho's app registry is separate per data center — enter the Client ID and Client Secret from{' '}
+                  <strong>your own</strong> Zoho API Console app (api-console.zoho.&#123;region&#125;), and the data center it was
+                  registered in.
+                </p>
+                <Input
+                  label="Client ID"
+                  value={zohoClientId}
+                  onChange={(e) => setZohoClientId(e.target.value)}
+                  autoComplete="off"
+                />
+                <Input
+                  label="Client Secret"
+                  type="password"
+                  value={zohoClientSecret}
+                  onChange={(e) => setZohoClientSecret(e.target.value)}
+                  autoComplete="new-password"
+                  leftIcon={<FiKey />}
+                />
+                <div>
+                  <span className={styles.fieldLabel}>Data center</span>
+                  <select className={styles.select} value={zohoRegion} onChange={(e) => setZohoRegion(e.target.value)}>
+                    {Object.entries(zohoAppStatus.dataCenters).map(([key, dc]) => (
+                      <option key={key} value={key}>
+                        {dc.label}
+                      </option>
+                    ))}
+                    <option value="other">Other (enter accounts server address)</option>
+                  </select>
+                </div>
+                {zohoRegion === 'other' && (
+                  <Input
+                    label="Zoho accounts server address"
+                    placeholder="https://accounts.zoho.com.cn"
+                    value={zohoAccountsServerUrl}
+                    onChange={(e) => setZohoAccountsServerUrl(e.target.value)}
+                  />
+                )}
+                {error && <ErrorNotice error={error} />}
+                <div className={styles.footer}>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    onClick={() => (zohoAppStatus.configured ? setZohoAppForm(false) : close())}
+                    disabled={savingZohoApp}
+                  >
+                    Cancel
+                  </Button>
+                  <Button type="button" loading={savingZohoApp} onClick={() => void saveZohoApp()}>
+                    Save &amp; continue
+                  </Button>
+                </div>
+              </>
+            ) : (
+              <>
+                {isZoho && zohoAppStatus?.configured && (
+                  <p className={styles.note}>
+                    <FiCheckCircle aria-hidden /> Using your own Zoho app (Client ID: {zohoAppStatus.clientId}) —{' '}
+                    <button type="button" className={styles.linkButton} onClick={() => setZohoAppForm(true)}>
+                      change
+                    </button>
+                  </p>
+                )}
+                {error && (
+                  <ErrorNotice error={error}>
+                    <Button size="sm" variant="secondary" loading={redirecting} onClick={() => void connectOAuth()}>
+                      Try again
+                    </Button>
+                  </ErrorNotice>
+                )}
+                <div className={styles.footer}>
+                  <Button type="button" variant="ghost" onClick={close} disabled={redirecting}>
+                    Cancel
+                  </Button>
+                  <Button type="button" leftIcon={<FiExternalLink />} loading={redirecting} onClick={() => void connectOAuth()}>
+                    Connect with {label}
+                  </Button>
+                </div>
+              </>
+            )}
+          </div>
+        )}
+
+        {step === 'connect' && !oauth && (
           <form
             className={styles.stack}
             onSubmit={(e) => {

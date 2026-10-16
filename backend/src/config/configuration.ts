@@ -1,3 +1,22 @@
+// Gmail OAuth callback URL — resolved here, never defaulted to localhost.
+// Silently generating a wrong redirect_uri produces a confusing Google
+// "redirect_uri_mismatch" instead of a clear Haive config error; see
+// GmailService.resolveCallbackUrl, which refuses outright (a real,
+// user-facing error) when this comes back empty or invalid rather than ever
+// reaching Google with it. Prefers an explicit GOOGLE_REDIRECT_URI; falls
+// back to this backend's own public address — the same
+// PUBLIC_API_BASE_URL/CALLING_PUBLIC_BASE_URL/PLIVO_PUBLIC_BASE_URL
+// convention already used by dataSources.webhookBaseUrl below — plus the
+// fixed /gmail/callback path. Empty when neither is set.
+function resolveGmailRedirectUri(): string {
+  const explicit = (process.env.GOOGLE_REDIRECT_URI ?? '').trim();
+  if (explicit) return explicit;
+  const publicBase = (process.env.PUBLIC_API_BASE_URL ?? process.env.CALLING_PUBLIC_BASE_URL ?? process.env.PLIVO_PUBLIC_BASE_URL ?? '')
+    .trim()
+    .replace(/\/+$/, '');
+  return publicBase ? `${publicBase}/gmail/callback` : '';
+}
+
 export default () => ({
   port: parseInt(process.env.PORT ?? '3000', 10),
   nodeEnv: process.env.NODE_ENV ?? 'development',
@@ -94,7 +113,36 @@ export default () => ({
     google: {
       clientId: process.env.GOOGLE_CLIENT_ID ?? '',
       clientSecret: process.env.GOOGLE_CLIENT_SECRET ?? '',
-      redirectUri: process.env.GOOGLE_REDIRECT_URI ?? 'http://localhost:3000/gmail/callback',
+      redirectUri: resolveGmailRedirectUri(),
+    },
+    // CRM OAuth connections (see ../zoho/, ../salesforce/) — same per-org
+    // credential storage as every other CRM provider (integration_credentials,
+    // authType 'oauth2'; see auth-methods.ts), not a dedicated per-user
+    // mailbox schema like msGraph/google above, since a CRM connection here
+    // is already one-per-organization.
+    zoho: {
+      clientId: process.env.ZOHO_CLIENT_ID ?? '',
+      clientSecret: process.env.ZOHO_CLIENT_SECRET ?? '',
+      redirectUri: process.env.ZOHO_REDIRECT_URI ?? 'http://localhost:3000/zoho/callback',
+      // Zoho runs separate data centers per region (.com/.eu/.in/.com.au/.jp)
+      // with NO single global authorize endpoint that redirects correctly for
+      // every customer — unlike Microsoft/Google's one authority URL. Defaults
+      // to the US DC; an org on another DC sets this to their accounts server
+      // (e.g. https://accounts.zoho.eu) before connecting. See the Entra-style
+      // per-tenant note in zoho.service.ts for why this can't be auto-detected
+      // ahead of the very first authorize redirect.
+      accountsBaseUrl: process.env.ZOHO_ACCOUNTS_BASE_URL ?? 'https://accounts.zoho.com',
+    },
+    salesforce: {
+      clientId: process.env.SALESFORCE_CLIENT_ID ?? '',
+      clientSecret: process.env.SALESFORCE_CLIENT_SECRET ?? '',
+      redirectUri: process.env.SALESFORCE_REDIRECT_URI ?? 'http://localhost:3000/salesforce/callback',
+      // 'login.salesforce.com' resolves both production AND sandbox orgs
+      // today (Salesforce's own documented behavior: it redirects a sandbox
+      // user to test.salesforce.com automatically mid-flow) — test.salesforce.com
+      // only needs to be set explicitly for a deployment that ONLY ever
+      // connects sandbox orgs.
+      authBaseUrl: process.env.SALESFORCE_AUTH_BASE_URL ?? 'https://login.salesforce.com',
     },
   },
   // Separate from `integrations.google`/`integrations.msGraph` above —

@@ -75,6 +75,19 @@ class Settings:
     google_client_id: str = os.environ.get("GOOGLE_CLIENT_ID", "")
     google_client_secret: str = os.environ.get("GOOGLE_CLIENT_SECRET", "")
 
+    # CRM OAuth token refresh (see app/integrations/oauth_refresh.py) — this
+    # app's own copy of the same app credentials the NestJS backend holds
+    # (backend/src/config/configuration.ts's integrations.zoho/.salesforce),
+    # mirroring exactly how ms_graph_client_id/secret above are independently
+    # duplicated for Outlook's own lazy-refresh-on-read in outlook_store.py.
+    zoho_client_id: str = os.environ.get("ZOHO_CLIENT_ID", "")
+    zoho_client_secret: str = os.environ.get("ZOHO_CLIENT_SECRET", "")
+    zoho_accounts_base_url: str = os.environ.get("ZOHO_ACCOUNTS_BASE_URL", "https://accounts.zoho.com")
+
+    salesforce_client_id: str = os.environ.get("SALESFORCE_CLIENT_ID", "")
+    salesforce_client_secret: str = os.environ.get("SALESFORCE_CLIENT_SECRET", "")
+    salesforce_auth_base_url: str = os.environ.get("SALESFORCE_AUTH_BASE_URL", "https://login.salesforce.com")
+
     whatsapp_phone_number_id: str = os.environ.get("WHATSAPP_PHONE_NUMBER_ID", "")
     whatsapp_access_token: str = os.environ.get("WHATSAPP_ACCESS_TOKEN", "")
 

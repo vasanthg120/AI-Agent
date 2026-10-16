@@ -3,10 +3,33 @@ from datetime import datetime, timedelta
 import requests
 
 from app.config import settings
-from app.encryption import decrypt_token, encrypt
+from app.encryption import decrypt, decrypt_token, encrypt
 from app.memory.mongo_client import get_db
 
 TOKEN_ENDPOINT = "https://oauth2.googleapis.com/token"
+
+# Same fixed sentinel backend/src/integrations/admin-integrations.controller.ts
+# uses for every platform-wide credential (Anthropic/Sarvam/ElevenLabs/Groq,
+# and now Gmail's own Google OAuth app) — one shared app for every
+# organization's Gmail mailboxes, configured only by a Haive platform admin,
+# stored in the SAME integration_credentials collection Zoho/Salesforce's
+# oauth_refresh.py already reads, just under this fixed scope instead of a
+# real organizationId.
+PLATFORM_SCOPE = "platform"
+
+
+def _resolve_app_credentials() -> tuple[str, str]:
+    """The platform's Google OAuth app — admin-configured
+    (POST /integrations/admin/gmail/app-credentials) takes priority, falling
+    back to GOOGLE_CLIENT_ID/GOOGLE_CLIENT_SECRET env vars only for a
+    deployment that configured those before this existed (same precedence
+    gmail.service.ts's resolveAppCredentials uses on the Node side — both
+    must agree, since a connection's refresh token is only valid against
+    whichever client_id it was actually issued under)."""
+    doc = get_db().integration_credentials.find_one({"organizationId": PLATFORM_SCOPE, "provider": "gmail"})
+    if doc and doc.get("oauthClientId") and doc.get("oauthClientSecretEncrypted"):
+        return doc["oauthClientId"], decrypt(doc["oauthClientSecretEncrypted"])
+    return settings.google_client_id, settings.google_client_secret
 
 
 def get_connection(user_id: str) -> dict | None:
@@ -41,11 +64,12 @@ def get_valid_access_token(user_id: str) -> str | None:
 
 
 def _refresh(connection: dict) -> dict | None:
+    client_id, client_secret = _resolve_app_credentials()
     response = requests.post(
         TOKEN_ENDPOINT,
         data={
-            "client_id": settings.google_client_id,
-            "client_secret": settings.google_client_secret,
+            "client_id": client_id,
+            "client_secret": client_secret,
             "grant_type": "refresh_token",
             "refresh_token": decrypt_token(connection["refreshToken"]),
         },

@@ -1,6 +1,7 @@
 import { BadRequestException, Body, Controller, Delete, Get, Param, Post, UseGuards } from '@nestjs/common';
 import { AdminJwtAuthGuard } from '../common/guards/admin-jwt-auth.guard';
 import { ConnectIntegrationDto } from './dto/connect-integration.dto';
+import { SaveOAuthAppCredentialsDto } from './dto/save-oauth-app-credentials.dto';
 import { IntegrationsService, PLATFORM_PROVIDERS, PlatformProvider } from './integrations.service';
 
 // Anthropic, Sarvam, ElevenLabs, and Groq are all platform-wide AI provider
@@ -103,6 +104,33 @@ export class AdminIntegrationsController {
   @Delete('groq')
   disconnectGroq() {
     return this.integrationsService.disconnect(PLATFORM_INTEGRATION_SCOPE, 'groq');
+  }
+
+  // Gmail's own Google OAuth app (Client ID/Secret) — a different kind of
+  // platform credential from the AI providers above (there's no "ping to
+  // verify" for an OAuth client, and reads/writes go through
+  // saveOAuthAppCredentials/getOAuthAppCredentialsStatus, not
+  // connectFromDto/status, which assume a single apiKey/authType shape).
+  // Same PLATFORM_INTEGRATION_SCOPE, same AdminJwtAuthGuard — an ordinary
+  // customer user can never reach this controller at all (see
+  // gmail.controller.ts's own GET /gmail/app-status for the read-only,
+  // customer-facing "is it configured" check this backs). One platform-wide
+  // app for every organization's Gmail mailboxes, same as Outlook/Gmail's
+  // existing per-user-delegated-auth-against-one-shared-app design — Google
+  // has no per-tenant data-center fragmentation to justify Zoho's per-
+  // organization app pattern (see zoho.service.ts), so this deliberately
+  // does NOT duplicate that shape.
+  @Post('gmail/app-credentials')
+  saveGmailAppCredentials(@Body() dto: SaveOAuthAppCredentialsDto) {
+    return this.integrationsService.saveOAuthAppCredentials(PLATFORM_INTEGRATION_SCOPE, 'gmail', {
+      clientId: dto.clientId.trim(),
+      clientSecret: dto.clientSecret.trim(),
+    });
+  }
+
+  @Get('gmail/app-credentials')
+  getGmailAppCredentialsStatus() {
+    return this.integrationsService.getOAuthAppCredentialsStatus(PLATFORM_INTEGRATION_SCOPE, 'gmail');
   }
 
   // "Configured" (the GET .../status routes above) vs "actually reachable

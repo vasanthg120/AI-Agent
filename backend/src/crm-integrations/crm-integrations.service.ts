@@ -27,12 +27,19 @@ export interface SetupField {
 
 interface ProviderSetup {
   // What the customer is asked for. Empty for a push provider: nothing is typed into HaiVE.
+  // Also empty for an OAuth provider (authMethod: 'oauth' below) — there's
+  // no form at all, the "Connect" step redirects to the provider instead.
   fields: SetupField[];
   // Plain-language list of what this CRM gives HaiVE, and what it can't.
   provides: string[];
   limitations: string[];
   // Push providers: how records get here, step by step.
   steps?: string[];
+  // Set for Zoho/Salesforce (see ../zoho/, ../salesforce/): the frontend's
+  // "Connect" step renders a redirect button instead of fields — `fields` is
+  // always [] when this is set. Undefined means the existing typed-credential
+  // form (every other provider here).
+  authMethod?: 'oauth';
 }
 
 // What each CRM needs to connect — the one place the Integrations page's
@@ -71,10 +78,22 @@ const SETUP: Partial<Record<CrmProviderId, ProviderSetup>> = {
       'In the Zap’s Data, include the record’s id and the fields you want in HaiVE, then test the step and turn the Zap on.',
     ],
   },
+  zoho: {
+    fields: [],
+    authMethod: 'oauth',
+    provides: ['Deals and pipeline stages', 'Contacts', 'Accounts', 'Automatic token refresh — no re-entering credentials'],
+    limitations: ['No quotations module — Zoho CRM has no separate quote object synced today.'],
+  },
+  salesforce: {
+    fields: [],
+    authMethod: 'oauth',
+    provides: ['Opportunities and pipeline stages', 'Contacts', 'Accounts', 'Automatic token refresh — no re-entering credentials'],
+    limitations: ['No quotations module — Salesforce Opportunities are read as deals; Salesforce Quotes are not synced today.'],
+  },
 };
 
 // The CRMs offered on the Integrations page, in this order.
-const OFFERED: CrmProviderId[] = ['prospectconnect', 'hoops', 'gorilladash'];
+const OFFERED: CrmProviderId[] = ['prospectconnect', 'hoops', 'gorilladash', 'zoho', 'salesforce'];
 
 export interface CrmIntegrationView {
   id: string;
@@ -220,6 +239,15 @@ export class CrmIntegrationsService {
    */
   async connect(organizationId: string, provider: string, credentials: Record<string, string>) {
     const definition = this.definition(provider);
+    if (definition.setup.authMethod === 'oauth') {
+      // Zoho/Salesforce never reach this method under normal use — the
+      // frontend's "Connect" step redirects to GET /zoho/connect-url or
+      // /salesforce/connect-url instead of submitting this form (see
+      // CrmSetupWizard.tsx). Guards a stale client/direct API call with a
+      // clear message rather than the generic "can't be connected from here
+      // yet" below, which would be actively misleading once it IS connectable.
+      throw new BadRequestException(`${definition.label} connects via "Connect with ${definition.label}" above, not a typed form.`);
+    }
     if (connectionOf(definition) === 'push') {
       const created = await this.webhookSources.create(organizationId, { provider: definition.id });
       return { integration: await this.view(organizationId, provider), webhookKey: created.key };

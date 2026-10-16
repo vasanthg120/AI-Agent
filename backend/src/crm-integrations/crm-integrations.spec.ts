@@ -86,6 +86,8 @@ describe('CRM integrations (real Mongo)', () => {
       ['prospectconnect', 'not_connected'],
       ['hoops', 'not_connected'],
       ['gorilladash', 'not_connected'],
+      ['zoho', 'not_connected'],
+      ['salesforce', 'not_connected'],
     ]);
     // Each CRM asks only for what it needs.
     expect(before[0].setup.fields.map((f) => f.key)).toEqual(['apiToken', 'baseUrl']);

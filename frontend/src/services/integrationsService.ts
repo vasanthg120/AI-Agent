@@ -342,6 +342,18 @@ export const integrationsService = {
     return data.url;
   },
 
+  // Unlike Outlook/Zoho/Salesforce, Gmail's OAuth app is a single
+  // platform-wide credential a Haive admin configures (see
+  // adminIntegrationsService.ts's getGmailAppCredentialsStatus/
+  // saveGmailAppCredentials) — an ordinary customer user can only ever
+  // check whether it's configured, never see or set it. Drives
+  // IntegrationsPage.tsx showing the normal Connect button vs. an
+  // "ask your administrator" message.
+  async getGmailAppStatus(): Promise<{ configured: boolean }> {
+    const { data } = await axiosClient.get<{ configured: boolean }>('/gmail/app-status');
+    return data;
+  },
+
   async getGmailAccounts(): Promise<GmailAccount[]> {
     const { data } = await axiosClient.get<GmailAccount[]>('/gmail/accounts');
     return data;

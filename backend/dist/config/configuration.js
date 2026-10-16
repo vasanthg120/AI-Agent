@@ -1,5 +1,14 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
+function resolveGmailRedirectUri() {
+    const explicit = (process.env.GOOGLE_REDIRECT_URI ?? '').trim();
+    if (explicit)
+        return explicit;
+    const publicBase = (process.env.PUBLIC_API_BASE_URL ?? process.env.CALLING_PUBLIC_BASE_URL ?? process.env.PLIVO_PUBLIC_BASE_URL ?? '')
+        .trim()
+        .replace(/\/+$/, '');
+    return publicBase ? `${publicBase}/gmail/callback` : '';
+}
 exports.default = () => ({
     port: parseInt(process.env.PORT ?? '3000', 10),
     nodeEnv: process.env.NODE_ENV ?? 'development',
@@ -67,7 +76,19 @@ exports.default = () => ({
         google: {
             clientId: process.env.GOOGLE_CLIENT_ID ?? '',
             clientSecret: process.env.GOOGLE_CLIENT_SECRET ?? '',
-            redirectUri: process.env.GOOGLE_REDIRECT_URI ?? 'http://localhost:3000/gmail/callback',
+            redirectUri: resolveGmailRedirectUri(),
+        },
+        zoho: {
+            clientId: process.env.ZOHO_CLIENT_ID ?? '',
+            clientSecret: process.env.ZOHO_CLIENT_SECRET ?? '',
+            redirectUri: process.env.ZOHO_REDIRECT_URI ?? 'http://localhost:3000/zoho/callback',
+            accountsBaseUrl: process.env.ZOHO_ACCOUNTS_BASE_URL ?? 'https://accounts.zoho.com',
+        },
+        salesforce: {
+            clientId: process.env.SALESFORCE_CLIENT_ID ?? '',
+            clientSecret: process.env.SALESFORCE_CLIENT_SECRET ?? '',
+            redirectUri: process.env.SALESFORCE_REDIRECT_URI ?? 'http://localhost:3000/salesforce/callback',
+            authBaseUrl: process.env.SALESFORCE_AUTH_BASE_URL ?? 'https://login.salesforce.com',
         },
     },
     oauth: {

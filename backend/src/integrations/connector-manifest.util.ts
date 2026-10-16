@@ -65,5 +65,13 @@ export function buildManifestCredentials(
       const value = template.replace(/\{\{\s*api_key\s*\}\}/gi, secrets.apiKeyValue ?? '');
       return { headers: { [headerName]: value } };
     }
+    case 'oauth2':
+      // Unreachable in practice: resolveManifestAuthType() above never
+      // returns 'oauth2' — a connector manifest only ever describes a static
+      // header/token template (see its own doc comment), never a full OAuth
+      // consent flow. Zoho/Salesforce's real OAuth (../zoho/, ../salesforce/)
+      // bypasses this whole file. Only present so this switch stays
+      // exhaustive against auth-methods.ts's AuthType union.
+      throw new Error('OAuth2 connections cannot be created by importing a connector manifest.');
   }
 }

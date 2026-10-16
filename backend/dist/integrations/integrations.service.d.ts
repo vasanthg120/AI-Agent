@@ -49,6 +49,34 @@ export declare class IntegrationsService {
         authType: AuthType;
         baseUrl?: string;
     }>;
+    connectWithOAuth(organizationId: string, provider: string, tokens: {
+        accessToken: string;
+        refreshToken: string;
+        expiresInSeconds: number;
+        oauthMeta?: Record<string, string>;
+        baseUrl?: string;
+    }, options?: {
+        skipSync?: boolean;
+    }): Promise<{
+        connected: true;
+    }>;
+    saveOAuthAppCredentials(organizationId: string, provider: string, app: {
+        clientId: string;
+        clientSecret: string;
+        meta?: Record<string, string>;
+    }): Promise<void>;
+    getOAuthAppCredentialsStatus(organizationId: string, provider: string): Promise<{
+        configured: boolean;
+        clientId?: string;
+        clientSecretMasked?: string;
+        meta?: Record<string, string>;
+    }>;
+    resolveOAuthAppCredentials(organizationId: string, provider: string): Promise<{
+        clientId: string;
+        clientSecret: string;
+        meta?: Record<string, string>;
+    } | null>;
+    private refreshOAuthToken;
     connectFromDto(organizationId: string, provider: string, dto: ConnectIntegrationDto): Promise<{
         connected: true;
         maskedKey: string;

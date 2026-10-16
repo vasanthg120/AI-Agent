@@ -98,4 +98,6 @@ def build_auth_headers(auth_type: str, credentials: dict) -> dict:
         return {"Authorization": f"Basic {encoded}"}
     if auth_type == "customHeaders":
         return credentials.get("headers", {})
+    if auth_type == "oauth2":
+        return {"Authorization": f"Bearer {credentials.get('accessToken', '')}"}
     return {}

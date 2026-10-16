@@ -63,6 +63,18 @@ declare const _default: () => {
             clientSecret: string;
             redirectUri: string;
         };
+        zoho: {
+            clientId: string;
+            clientSecret: string;
+            redirectUri: string;
+            accountsBaseUrl: string;
+        };
+        salesforce: {
+            clientId: string;
+            clientSecret: string;
+            redirectUri: string;
+            authBaseUrl: string;
+        };
     };
     oauth: {
         google: {

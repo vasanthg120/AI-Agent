@@ -12,6 +12,7 @@ export const TOOL_PICKER_OPTIONS: { name: string; label: string }[] = [
   { name: 'crm_product', label: 'CRM Products' },
   { name: 'crm_quote', label: 'CRM Quotes' },
   { name: 'crm_source_records', label: 'CRM records by data source' },
+  { name: 'crm_create_task', label: 'Create CRM tasks (Zoho / Salesforce)' },
   { name: 'zapier', label: 'Zapier apps (Hoops, …)' },
   { name: 'gorilladash_lookup', label: 'Gorilla Dash (read)' },
   { name: 'gorilladash_action', label: 'Gorilla Dash (create / update leads, email)' },

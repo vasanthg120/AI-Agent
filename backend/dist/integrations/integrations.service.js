@@ -88,6 +88,118 @@ let IntegrationsService = IntegrationsService_1 = class IntegrationsService {
         }
         return { connected: true, authType, baseUrl: dto.baseUrl };
     }
+    async connectWithOAuth(organizationId, provider, tokens, options = {}) {
+        this.assertAllowed(provider, 'oauth2');
+        await this.credentialModel.findOneAndUpdate({ organizationId, provider }, {
+            organizationId,
+            provider,
+            authType: 'oauth2',
+            credentialsEncrypted: this.encryption.encrypt(JSON.stringify({ accessToken: tokens.accessToken })),
+            refreshTokenEncrypted: this.encryption.encrypt(tokens.refreshToken),
+            tokenExpiresAt: new Date(Date.now() + tokens.expiresInSeconds * 1000),
+            oauthMeta: tokens.oauthMeta,
+            baseUrl: tokens.baseUrl,
+            status: 'connected',
+            apiKey: undefined,
+        }, { upsert: true });
+        if (options.skipSync) {
+            if ((0, provider_catalog_1.crmProviderForIntegration)(provider))
+                await this.dataSources.reconcile(organizationId);
+        }
+        else {
+            this.triggerCrmSyncIfApplicable(organizationId, provider);
+        }
+        return { connected: true };
+    }
+    async saveOAuthAppCredentials(organizationId, provider, app) {
+        await this.credentialModel.findOneAndUpdate({ organizationId, provider }, {
+            $set: {
+                organizationId,
+                provider,
+                oauthClientId: app.clientId,
+                oauthClientSecretEncrypted: this.encryption.encrypt(app.clientSecret),
+                ...(app.meta ? { oauthMeta: app.meta } : {}),
+            },
+        }, { upsert: true });
+    }
+    async getOAuthAppCredentialsStatus(organizationId, provider) {
+        const doc = await this.credentialModel.findOne({ organizationId, provider }, { oauthClientId: 1, oauthClientSecretEncrypted: 1, oauthMeta: 1 });
+        if (!doc?.oauthClientId || !doc?.oauthClientSecretEncrypted)
+            return { configured: false };
+        return { configured: true, clientId: doc.oauthClientId, clientSecretMasked: '••••••••••••', meta: doc.oauthMeta };
+    }
+    async resolveOAuthAppCredentials(organizationId, provider) {
+        const doc = await this.credentialModel.findOne({ organizationId, provider }, { oauthClientId: 1, oauthClientSecretEncrypted: 1, oauthMeta: 1 });
+        if (!doc?.oauthClientId || !doc?.oauthClientSecretEncrypted)
+            return null;
+        return { clientId: doc.oauthClientId, clientSecret: this.encryption.decrypt(doc.oauthClientSecretEncrypted), meta: doc.oauthMeta };
+    }
+    async refreshOAuthToken(doc) {
+        const EXPIRY_BUFFER_MS = 60_000;
+        if (doc.tokenExpiresAt && doc.tokenExpiresAt.getTime() > Date.now() + EXPIRY_BUFFER_MS) {
+            const current = JSON.parse(this.encryption.decrypt(doc.credentialsEncrypted));
+            return current.accessToken ?? null;
+        }
+        if (doc.status === 'needs_reauth' || !doc.refreshTokenEncrypted)
+            return null;
+        try {
+            const refreshToken = this.encryption.decrypt(doc.refreshTokenEncrypted);
+            const oauthMeta = doc.oauthMeta ?? {};
+            let refreshed;
+            if (doc.provider === 'zoho') {
+                const base = oauthMeta.accountsServer || this.config.get('integrations.zoho.accountsBaseUrl') || 'https://accounts.zoho.com';
+                const clientId = doc.oauthClientId || this.config.get('integrations.zoho.clientId') || '';
+                const clientSecret = doc.oauthClientSecretEncrypted
+                    ? this.encryption.decrypt(doc.oauthClientSecretEncrypted)
+                    : this.config.get('integrations.zoho.clientSecret') || '';
+                const { data } = await (0, rxjs_1.firstValueFrom)(this.http.post(`${base.replace(/\/$/, '')}/oauth/v2/token`, new URLSearchParams({
+                    grant_type: 'refresh_token',
+                    refresh_token: refreshToken,
+                    client_id: clientId,
+                    client_secret: clientSecret,
+                }).toString(), { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }));
+                if (!data.access_token)
+                    throw new Error(data.error ?? 'Zoho did not return an access token');
+                refreshed = {
+                    accessToken: data.access_token,
+                    expiresInSeconds: data.expires_in ?? 3600,
+                    oauthMeta: { ...oauthMeta, apiDomain: data.api_domain ?? oauthMeta.apiDomain ?? '' },
+                };
+            }
+            else if (doc.provider === 'salesforce') {
+                const base = oauthMeta.authBaseUrl || this.config.get('integrations.salesforce.authBaseUrl') || 'https://login.salesforce.com';
+                const { data } = await (0, rxjs_1.firstValueFrom)(this.http.post(`${base.replace(/\/$/, '')}/services/oauth2/token`, new URLSearchParams({
+                    grant_type: 'refresh_token',
+                    refresh_token: refreshToken,
+                    client_id: this.config.get('integrations.salesforce.clientId') ?? '',
+                    client_secret: this.config.get('integrations.salesforce.clientSecret') ?? '',
+                }).toString(), { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }));
+                if (!data.access_token)
+                    throw new Error(data.error_description ?? data.error ?? 'Salesforce did not return an access token');
+                refreshed = {
+                    accessToken: data.access_token,
+                    expiresInSeconds: 7200,
+                    oauthMeta: { ...oauthMeta, instanceUrl: data.instance_url ?? oauthMeta.instanceUrl ?? '' },
+                };
+            }
+            else {
+                return null;
+            }
+            await this.credentialModel.updateOne({ _id: doc._id }, {
+                $set: {
+                    credentialsEncrypted: this.encryption.encrypt(JSON.stringify({ accessToken: refreshed.accessToken })),
+                    tokenExpiresAt: new Date(Date.now() + refreshed.expiresInSeconds * 1000),
+                    oauthMeta: refreshed.oauthMeta,
+                },
+            });
+            return refreshed.accessToken;
+        }
+        catch (err) {
+            this.logger.warn(`OAuth refresh failed for provider=${doc.provider} org=${doc.organizationId} — marking needs_reauth: ${err.message}`);
+            await this.credentialModel.updateOne({ _id: doc._id }, { $set: { status: 'needs_reauth' } });
+            return null;
+        }
+    }
     connectFromDto(organizationId, provider, dto) {
         if (dto.authType)
             return this.connectWithAuth(organizationId, provider, dto);
@@ -179,6 +291,15 @@ let IntegrationsService = IntegrationsService_1 = class IntegrationsService {
         const doc = await this.credentialModel.findOne({ organizationId, provider });
         if (!doc)
             return null;
+        if (doc.authType === 'oauth2') {
+            const accessToken = await this.refreshOAuthToken(doc);
+            return {
+                integrationId: doc._id,
+                authType: doc.authType,
+                credentials: { accessToken: accessToken ?? undefined },
+                baseUrl: doc.oauthMeta?.apiDomain || doc.oauthMeta?.instanceUrl || doc.baseUrl,
+            };
+        }
         if (doc.authType) {
             return {
                 integrationId: doc._id,

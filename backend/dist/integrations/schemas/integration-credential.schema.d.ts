@@ -5,8 +5,14 @@ export declare class IntegrationCredential {
     provider: string;
     apiKey?: string;
     baseUrl?: string;
-    authType?: 'apiKey' | 'apiKeyBaseUrl' | 'bearer' | 'basic' | 'customHeaders';
+    authType?: 'apiKey' | 'apiKeyBaseUrl' | 'bearer' | 'basic' | 'customHeaders' | 'oauth2';
     credentialsEncrypted?: string;
+    refreshTokenEncrypted?: string;
+    tokenExpiresAt?: Date;
+    oauthMeta?: Record<string, string>;
+    status?: 'connected' | 'needs_reauth';
+    oauthClientId?: string;
+    oauthClientSecretEncrypted?: string;
     healthCheckPath?: string;
     budgetUsd?: number;
     budgetPeriod?: 'monthly' | 'total';

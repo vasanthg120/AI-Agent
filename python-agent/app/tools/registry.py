@@ -15,6 +15,7 @@ from app.tools import (
     crm_source_records_tool,
     crm_tag_tool,
     crm_tool,
+    crm_write_tool,
     database_tool,
     document_tool,
     email_tool,
@@ -55,6 +56,7 @@ _MODULES = [
     gorilladash_lookup_tool,
     gorilladash_action_tool,
     crm_source_records_tool,
+    crm_write_tool,
     zapier_tool,
 ]
 
