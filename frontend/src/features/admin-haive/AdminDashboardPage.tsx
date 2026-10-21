@@ -16,12 +16,24 @@ import {
 import { Button, SectionCard, Skeleton, StatTile } from '@/components/ui';
 import { billingAdminService, type AdminAnalytics, type AdminDashboard } from '@/services/billingAdminService';
 import { aiUsageAdminService, type AnthropicUsageSummary } from '@/services/aiUsageAdminService';
+import { useAdminAuthStore } from '@/stores/adminAuthStore';
 import { extractErrorMessage } from '@/utils/errors';
 import { formatNumber } from '@/utils/format';
 import { ADMIN_ROUTES } from '@/constants/routes';
 import { AdminRangeControl } from './AdminRangeControl';
 import { AdminLineChart } from './components/AdminLineChart';
 import styles from './AdminDashboardPage.module.css';
+
+// Same time-of-day greeting the customer dashboard's hero uses (see
+// DashboardHeroHeader.tsx's own greeting()) — copied rather than imported
+// since that component lives in a different feature folder and pulls in
+// unrelated deal/store-filter dependencies this page has no use for.
+function greeting(): string {
+  const hour = new Date().getHours();
+  if (hour < 12) return 'Good morning';
+  if (hour < 18) return 'Good afternoon';
+  return 'Good evening';
+}
 
 // Compact summary only — the full breakdown (charts, model/org tables,
 // request history) lives on its own page (AdminAiUsagePage.tsx) per the
@@ -78,6 +90,7 @@ function AiProviderUsageCard({ days }: { days: number }) {
 }
 
 export function AdminDashboardPage() {
+  const admin = useAdminAuthStore((state) => state.admin);
   const [days, setDays] = useState(30);
   const [dashboard, setDashboard] = useState<AdminDashboard | null>(null);
   const [analytics, setAnalytics] = useState<AdminAnalytics | null>(null);
@@ -103,9 +116,16 @@ export function AdminDashboardPage() {
         </span>
         <div className={styles.topRow}>
           <div>
-            <h1 className={styles.title}>Dashboard</h1>
-            <p className={styles.subtitle}>Platform-wide activity across every organization.</p>
+            <h1 className={styles.title}>
+              {greeting()}
+              {admin?.name ? `, ${admin.name}` : ''}
+            </h1>
+            <p className={styles.subtitle}>Here's what's happening across the platform today.</p>
           </div>
+        </div>
+
+        <div className={styles.toolbar}>
+          <span className={styles.toolbarLabel}>Reporting period</span>
           <AdminRangeControl days={days} onChange={setDays} />
         </div>
       </div>

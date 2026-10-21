@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useLocation, useSearchParams } from 'react-router-dom';
 import toast from 'react-hot-toast';
@@ -104,6 +104,13 @@ export function IntegrationsPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   // Under Settings the layout already shows this page's title; on its own route the page shows it itself.
   const insideSettings = useLocation().pathname.startsWith('/settings');
+  // Guards the outlook=/crm= redirect-result effects below against firing
+  // their toast twice for the same value — React StrictMode double-invokes
+  // effects on mount, and since setSearchParams's URL update isn't visible
+  // to the second invocation yet, both would otherwise see the same
+  // unconsumed param and double-toast.
+  const handledOutlookResult = useRef<string | null>(null);
+  const handledCrmResult = useRef<string | null>(null);
   const [outlookAccounts, setOutlookAccounts] = useState<OutlookAccount[]>([]);
   // Who a mailbox can be handed to. Only admins can list users; for everyone else the picker is simply not shown.
   const [teamMembers, setTeamMembers] = useState<AdminUser[]>([]);
@@ -244,7 +251,8 @@ export function IntegrationsPage() {
   // section (personal accounts, or the admin-consent prompt) is right there.
   useEffect(() => {
     const outlookResult = searchParams.get('outlook');
-    if (!outlookResult) return;
+    if (!outlookResult || handledOutlookResult.current === outlookResult) return;
+    handledOutlookResult.current = outlookResult;
 
     switch (outlookResult) {
       case 'connected':
@@ -287,7 +295,8 @@ export function IntegrationsPage() {
   // detects this) rather than showing the connect form again.
   useEffect(() => {
     const crmResult = searchParams.get('crm');
-    if (!crmResult) return;
+    if (!crmResult || handledCrmResult.current === crmResult) return;
+    handledCrmResult.current = crmResult;
     const [provider, outcome] = crmResult.split('_', 2) as [string, 'connected' | 'error' | undefined];
     const label = provider === 'zoho' ? 'Zoho CRM' : provider === 'salesforce' ? 'Salesforce' : provider;
 

@@ -1,46 +1,46 @@
+
 .shell {
-  /* Its own accent (cool slate-blue) instead of the customer app's orange —
-     a deliberate, immediate visual signal that this is the internal ops
-     console, not the product. Everything else (bg/text/border/spacing/
-     radius/font) still comes straight from variables.css. */
-  --admin-accent: #5b8def;
-  --admin-accent-soft: rgba(91, 141, 239, 0.14);
-  --admin-accent-hover: #4a78d6;
+  --admin-accent: #ed7e2c;
+  --admin-accent-soft: rgba(237, 126, 44, 0.12);
 
   position: relative;
   display: flex;
-  height: 100vh;
   width: 100%;
+  height: 100vh;
   overflow: hidden;
   background: var(--color-bg-app);
   color: var(--color-text-primary);
   font-family: var(--font-sans);
 }
 
-.sidebar {
-  /* Same dark-scope token swap the customer app's Sidebar.module.css uses
-     (see its own comment) — redefines the generic semantic tokens so any
-     shared UI primitive rendered inside (Dropdown, Tooltip, etc.) picks up
-     correct dark colors automatically. brand/nav rules below additionally
-     reference the --sidebar-* tokens directly, matching that file exactly. */
+.sidebar,
+.mobileSidebar {
   --color-text-primary: var(--sidebar-text);
   --color-text-secondary: var(--sidebar-text-secondary);
   --color-text-muted: var(--sidebar-text-muted);
   --color-bg-app: var(--sidebar-bg);
+  --color-bg-surface-elevated: var(--sidebar-surface-elevated);
   --color-bg-hover: var(--sidebar-hover-bg);
   --color-bg-active: var(--sidebar-active-bg);
   --color-border: var(--sidebar-border);
   --color-border-strong: var(--sidebar-border-strong);
 
-  width: 252px;
-  height: 100%;
-  flex-shrink: 0;
   background: var(--sidebar-bg);
-  border-right: 1px solid var(--sidebar-border-strong);
+  color: var(--sidebar-text);
   display: flex;
   flex-direction: column;
-  padding: var(--space-5) var(--space-3) var(--space-5);
+  flex-shrink: 0;
   overflow: hidden;
+}
+
+.sidebar {
+  position: relative;
+  z-index: 1;
+  width: var(--sidebar-width);
+  height: 100%;
+  padding: var(--space-4) var(--space-3) var(--space-3);
+  border-right: 1px solid var(--sidebar-border-strong);
+  box-shadow: var(--shadow-lg);
 }
 
 .brand {
@@ -48,46 +48,63 @@
   align-items: center;
   gap: var(--space-3);
   padding: 0 var(--space-3) var(--space-6);
-}
-
-.brandMark {
-  width: 32px;
-  height: 32px;
-  border-radius: var(--radius-md);
-  background: var(--admin-accent-soft);
-  color: var(--admin-accent);
-  display: flex;
-  align-items: center;
-  justify-content: center;
   flex-shrink: 0;
 }
 
+.brandMark {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  flex-shrink: 0;
+  border-radius: var(--radius-md);
+  background: var(--admin-accent-soft);
+  color: var(--admin-accent);
+}
+
 .brandMarkImg {
+  display: block;
   width: 22px;
   height: 22px;
   object-fit: contain;
-  display: block;
 }
 
 .brandTitle {
+  color: var(--sidebar-text);
   font-size: var(--text-md);
   font-weight: 600;
-  color: var(--sidebar-text);
   line-height: 1.2;
 }
 
 .brandSubtitle {
-  font-size: var(--text-xs);
   color: var(--sidebar-text-muted);
+  font-size: var(--text-xs);
 }
 
 .nav {
+  flex: 1 1 auto;
+  min-height: 56px;
+  padding: var(--space-2);
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--sidebar-border-strong) transparent;
   display: flex;
   flex-direction: column;
   gap: var(--space-4);
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
+}
+
+.nav::-webkit-scrollbar {
+  width: 6px;
+}
+
+.nav::-webkit-scrollbar-thumb {
+  background: var(--sidebar-border-strong);
+  border-radius: var(--radius-full);
+}
+
+.nav::-webkit-scrollbar-track {
+  background: transparent;
 }
 
 .navSection {
@@ -97,73 +114,171 @@
 }
 
 .navSectionLabel {
-  font-size: 10.5px;
-  letter-spacing: 0.07em;
-  text-transform: uppercase;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: calc(100% - 2 * var(--space-1));
+  margin: 0 var(--space-1);
+  padding: var(--space-2) var(--space-3) var(--space-1);
   color: var(--sidebar-text-muted);
-  padding: 0 var(--space-3);
-  margin-bottom: var(--space-1);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
 }
 
 .navItem {
   position: relative;
+  isolation: isolate;
   display: flex;
   align-items: center;
   gap: var(--space-3);
-  padding: 8px var(--space-3);
+  padding: 6px var(--space-2);
+  margin: 0 var(--space-1);
   border-radius: var(--radius-md);
   color: var(--sidebar-text-secondary);
   font-size: var(--text-sm);
+  font-weight: 500;
+  white-space: nowrap;
   text-decoration: none;
-  transition: background var(--duration-fast) var(--ease-out), color var(--duration-fast) var(--ease-out);
+  transition:
+    background var(--duration-normal) var(--ease-out),
+    color var(--duration-normal) var(--ease-out);
 }
 
 .navItem:hover {
-  background: var(--sidebar-hover-bg);
+  background: rgba(225, 222, 212, 0.05);
   color: var(--sidebar-text);
 }
 
-/* Subtle left accent bar + soft tint active-state treatment — same
-   recipe as the customer app's Sidebar.module.css .navItemActive. */
-.navItemActive {
-  background: var(--sidebar-active-bg);
-  color: var(--sidebar-active-text);
+.navItem:focus-visible,
+.navMoreButton:focus-visible,
+.userRow:focus-visible,
+.menuButton:focus-visible {
+  outline: 2px solid var(--brand-accent-primary);
+  outline-offset: 1px;
+}
+
+.navItemActive,
+.navItemActive:hover {
+  background: transparent;
+  color: var(--sidebar-text);
   font-weight: 600;
 }
 
-.navItemActive::before {
+.navPill {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: var(--radius-md);
+  background: linear-gradient(
+    90deg,
+    rgba(237, 126, 44, 0.2) 0%,
+    rgba(237, 126, 44, 0.07) 100%
+  );
+  box-shadow: inset 0 0 0 1px rgba(237, 126, 44, 0.22);
+}
+
+.navPill::before {
   content: '';
   position: absolute;
-  left: 2px;
-  top: 20%;
-  bottom: 20%;
+  left: -1px;
+  top: 22%;
+  bottom: 22%;
   width: 3px;
   border-radius: var(--radius-full);
   background: var(--brand-accent-primary);
+  box-shadow: 0 0 10px rgba(237, 126, 44, 0.7);
+}
+
+.navIconTile {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  flex-shrink: 0;
+  border-radius: 9px;
+  background: rgba(225, 222, 212, 0.05);
+  transition:
+    background var(--duration-normal) var(--ease-out),
+    color var(--duration-normal) var(--ease-out),
+    transform var(--duration-slow) var(--ease-out),
+    box-shadow var(--duration-normal) var(--ease-out);
+}
+
+.navItem:hover .navIconTile {
+  transform: scale(1.07);
+  color: var(--brand-accent-primary);
+  background: rgba(237, 126, 44, 0.1);
+}
+
+.navItemActive .navIconTile,
+.navItemActive:hover .navIconTile {
+  background: var(--gradient-accent);
+  color: var(--color-text-inverse);
+  box-shadow: 0 4px 14px rgba(237, 126, 44, 0.35);
+}
+
+.navIcon {
+  font-size: 16px;
+  flex-shrink: 0;
+}
+
+.navLabel {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.navMoreButton {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+  margin: 0 0 var(--space-1);
+  padding: var(--space-2) var(--space-3);
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--sidebar-text-muted);
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-align: left;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: color var(--duration-fast) var(--ease-out);
+}
+
+.navMoreButton:hover {
+  color: var(--sidebar-text);
 }
 
 .mainColumn {
-  flex: 1;
-  min-width: 0;
   display: flex;
+  flex: 1;
   flex-direction: column;
+  min-width: 0;
 }
 
 .topbar {
-  height: var(--topbar-height);
-  flex-shrink: 0;
   display: flex;
   align-items: center;
   gap: var(--space-4);
+  height: var(--topbar-height);
+  flex-shrink: 0;
   padding: 0 var(--space-6);
   border-bottom: 1px solid var(--color-border);
   background: var(--color-bg-surface);
 }
 
 .topbarTitle {
+  flex: 1;
   font-size: var(--text-md);
   font-weight: 600;
-  flex: 1;
 }
 
 .menuButton {
@@ -172,8 +287,9 @@
   justify-content: center;
   width: 34px;
   height: 34px;
-  border-radius: var(--radius-md);
+  flex-shrink: 0;
   border: none;
+  border-radius: var(--radius-md);
   background: transparent;
   color: var(--color-text-primary);
   cursor: pointer;
@@ -183,80 +299,154 @@
   background: var(--color-bg-hover);
 }
 
-.userTrigger {
+.content {
+  flex: 1;
+  min-height: 0;
+  padding: var(--space-6);
+  overflow-y: auto;
+}
+
+.footer {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  flex-shrink: 0;
+  margin-top: var(--space-2);
+  padding: var(--space-3);
+  border-top: 1px solid var(--sidebar-border);
+}
+
+.footer .userDropdownWrapper {
+  display: block;
+}
+
+.userRow {
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  padding: 6px 10px 6px 6px;
-  border-radius: var(--radius-full);
-  border: 1px solid var(--color-border);
-  background: var(--color-bg-surface-elevated);
-  color: var(--color-text-primary);
+  width: 100%;
+  padding: var(--space-2);
+  border: 1px solid var(--sidebar-border);
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--sidebar-text);
+  text-align: left;
   cursor: pointer;
-  font-size: var(--text-sm);
+  transition:
+    background var(--duration-normal) var(--ease-out),
+    border-color var(--duration-normal) var(--ease-out);
 }
 
-.userAvatar {
-  width: 22px;
-  height: 22px;
-  border-radius: 50%;
-  background: var(--admin-accent-soft);
-  color: var(--admin-accent);
-  display: flex;
-  align-items: center;
-  justify-content: center;
+.userRow:hover {
+  border-color: var(--sidebar-border-strong);
+  background: var(--sidebar-hover-bg);
+}
+
+.userText {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
 }
 
 .userName {
-  max-width: 140px;
+  display: block;
   overflow: hidden;
+  color: var(--sidebar-text);
+  font-size: var(--text-sm);
+  font-weight: 600;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.content {
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
-  padding: var(--space-6);
+.userEmail {
+  display: block;
+  overflow: hidden;
+  color: var(--sidebar-text-muted);
+  font-size: var(--text-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.userChevron {
+  flex-shrink: 0;
+  color: var(--sidebar-text-muted);
+  font-size: 14px;
 }
 
 .mobileBackdrop {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.5);
   z-index: var(--z-sidebar);
   display: flex;
+  background: rgba(0, 0, 0, 0.5);
 }
 
 .mobileSidebar {
-  /* Same dark-scope token swap as .sidebar, so the mobile drawer matches
-     the desktop sidebar's colors instead of the (unrelated, light) generic
-     --color-bg-sidebar token. */
-  --color-text-primary: var(--sidebar-text);
-  --color-text-secondary: var(--sidebar-text-secondary);
-  --color-text-muted: var(--sidebar-text-muted);
-  --color-bg-hover: var(--sidebar-hover-bg);
-  --color-bg-active: var(--sidebar-active-bg);
-  --color-border: var(--sidebar-border);
-  --color-border-strong: var(--sidebar-border-strong);
-
   width: 280px;
+  max-width: calc(100vw - 48px);
   height: 100%;
-  background: var(--sidebar-bg);
-  padding: var(--space-5) var(--space-3);
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-5);
+  padding: var(--space-4) var(--space-3) var(--space-3);
+  gap: 0;
   overflow-y: auto;
+  box-shadow: var(--shadow-lg);
+  animation: adminDrawerIn var(--duration-normal) var(--ease-out);
 }
 
 .mobileSidebarHeader {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: var(--space-2);
+  flex-shrink: 0;
 }
 
 .mobileSidebarHeader .brand {
-  padding: 0;
+  min-width: 0;
+  padding: 0 var(--space-2) var(--space-6);
+}
+
+.mobileSidebarHeader .menuButton {
+  color: var(--sidebar-text);
+  align-self: flex-start;
+}
+
+@keyframes adminDrawerIn {
+  from {
+    transform: translateX(-12px);
+    opacity: 0.8;
+  }
+
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+@media (max-width: 640px) {
+  .topbar {
+    padding-right: var(--space-4);
+    padding-left: var(--space-4);
+  }
+
+  .content {
+    padding: var(--space-4);
+  }
+
+  .footer {
+    padding-right: var(--space-2);
+    padding-left: var(--space-2);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .navItem,
+  .navIconTile,
+  .userRow,
+  .navPill {
+    transition: none;
+  }
+
+  .mobileSidebar {
+    animation: none;
+  }
 }

@@ -234,14 +234,14 @@
 .navItem:hover .navIconTile {
   transform: scale(1.07);
   color: var(--brand-accent-primary);
-  background: rgba(237, 126, 44, 0.1);
+  background: #ed7e2c1a;    
 }
 
 .navItemActive .navIconTile,
 .navItemActive:hover .navIconTile {
   background: var(--gradient-accent);
   color: var(--color-text-inverse);
-  box-shadow: 0 4px 14px rgba(237, 126, 44, 0.35);
+  box-shadow: 0 4px 14px #ed7e2c59;
 }
 
 .navIcon {
