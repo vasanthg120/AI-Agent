@@ -15,7 +15,6 @@ const AdminPaymentsPage = lazy(() => import('./payments/AdminPaymentsPage').then
 const AdminPlansPage = lazy(() => import('./catalog/AdminPlansPage').then((m) => ({ default: m.AdminPlansPage })));
 const AdminSubscriptionsPage = lazy(() => import('./subscriptions/AdminSubscriptionsPage').then((m) => ({ default: m.AdminSubscriptionsPage })));
 const AdminInvoicesPage = lazy(() => import('./invoices/AdminInvoicesPage').then((m) => ({ default: m.AdminInvoicesPage })));
-const AdminAnalyticsPage = lazy(() => import('./AdminAnalyticsPage').then((m) => ({ default: m.AdminAnalyticsPage })));
 const AdminAiUsagePage = lazy(() => import('./AdminAiUsagePage').then((m) => ({ default: m.AdminAiUsagePage })));
 const AdminPaymentSettingsPage = lazy(() => import('./AdminPaymentSettingsPage').then((m) => ({ default: m.AdminPaymentSettingsPage })));
 const AdminUsersManagementPage = lazy(() => import('./AdminUsersManagementPage').then((m) => ({ default: m.AdminUsersManagementPage })));
@@ -32,15 +31,16 @@ function Fallback() {
 // Self-contained subtree — mounted once at /Admin-haive/* in the top-level
 // routes/index.tsx, entirely outside AppLayout/ProtectedRoute.
 //
-// Features, Entitlements, Prices & Currencies, Coupons, Refunds, and Credit
-// Ledger routes were removed here per an explicit request to drop these
-// admin surfaces (see adminNav.ts's own comment) — their page components
-// (catalog/AdminFeaturesPage.tsx, catalog/AdminEntitlementsPage.tsx,
+// Features, Entitlements, Prices & Currencies, Coupons, Refunds, Credit
+// Ledger, and Analytics routes were removed here per an explicit request to
+// drop these admin surfaces (see adminNav.ts's own comment) — their page
+// components (catalog/AdminFeaturesPage.tsx, catalog/AdminEntitlementsPage.tsx,
 // catalog/AdminPricesPage.tsx, catalog/AdminCouponsPage.tsx,
-// refunds/AdminRefundsPage.tsx, ledger/AdminLedgerPage.tsx) and every backend
-// controller/service/schema behind them are untouched; visiting one of these
-// URLs directly now just falls through to the catch-all redirect below,
-// exactly like any other unknown /Admin-haive/* path.
+// refunds/AdminRefundsPage.tsx, ledger/AdminLedgerPage.tsx,
+// AdminAnalyticsPage.tsx) and every backend controller/service/schema behind
+// them are untouched; visiting one of these URLs directly now just falls
+// through to the catch-all redirect below, exactly like any other unknown
+// /Admin-haive/* path.
 export function AdminRoutes() {
   return (
     <Suspense fallback={<Fallback />}>
@@ -66,7 +66,6 @@ export function AdminRoutes() {
             <Route path="payments" element={<AdminPaymentsPage />} />
             <Route path="payment-settings" element={<AdminPaymentSettingsPage />} />
             <Route path="invoices" element={<AdminInvoicesPage />} />
-            <Route path="analytics" element={<AdminAnalyticsPage />} />
             <Route path="ai-usage" element={<AdminAiUsagePage />} />
             <Route path="admin-users" element={<AdminUsersManagementPage />} />
             <Route path="settings" element={<AdminSettingsPage />} />

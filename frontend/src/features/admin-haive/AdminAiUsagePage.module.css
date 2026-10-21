@@ -19,6 +19,36 @@
   font-size: var(--text-sm);
 }
 
+.chartStack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+/* Same colored-dot legend pattern already used elsewhere in this app for a
+   multi-series chart (see analytics-dashboard's MonthlySalesPerformanceCard/
+   DealSplitDonut) — reused here, not reinvented. */
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-4);
+  font-size: var(--text-xs);
+  color: var(--color-text-secondary);
+}
+
+.legendItem {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
 .metaRow {
   display: flex;
   flex-wrap: wrap;
@@ -51,12 +81,34 @@
   color: var(--color-text-muted);
 }
 
+/* Rounded "pill" chip — matches the reference Claude Console filter row's
+   button shape (full radius instead of the app's usual --radius-md). */
 .filterTrigger {
-  padding: 8px 12px;
+  padding: 8px 14px;
   border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-full);
   background: var(--color-bg-surface-elevated);
   color: var(--color-text-primary);
   font-size: var(--text-sm);
+  font-weight: 500;
   cursor: pointer;
+  transition: border-color var(--duration-fast) var(--ease-out), background var(--duration-fast) var(--ease-out);
+}
+
+.filterTrigger:hover {
+  border-color: var(--color-border-strong);
+  background: var(--color-bg-hover);
+}
+
+/* The one real, genuinely page-wide control (the day-range window every
+   section's data is fetched with) + Refresh, grouped into a bordered card
+   row — same pill-row visual weight as the reference's filter bar. */
+.filterBar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-bg-surface-elevated);
 }

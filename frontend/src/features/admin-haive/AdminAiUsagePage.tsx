@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import toast from 'react-hot-toast';
 import { FiCpu, FiDatabase, FiDollarSign, FiRefreshCw, FiSearch, FiZap } from 'react-icons/fi';
-import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
+import { Area, AreaChart, Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { Badge, Button, Dropdown, Input, Modal, SectionCard, Skeleton, StatTile } from '@/components/ui';
 import {
   aiUsageAdminService,
@@ -34,65 +34,111 @@ function FilterDropdown({ label, value, options, onChange }: { label: string; va
   );
 }
 
+// Input/Output series colors — #5b8def (blue) + #ed7e2c (the app's own
+// --brand-accent-primary, not the previous #fbbf24 amber). Swapped after
+// running dataviz's validate_palette.js: the old amber failed the
+// lightness-band and contrast-vs-surface checks (too washed out against a
+// white card — exactly the "barely visible" look that prompted this fix).
+// This blue/brand-orange pair passes every check (CVD ΔE 27-33, normal-
+// vision ΔE 31).
+const TOKEN_COLORS = { input: '#5b8def', output: '#ed7e2c' };
+
 // Two-series (input/output) area chart — AdminLineChart.tsx only supports one
 // series (date/value), so this is a small sibling rather than a change to
 // that shared component's contract. Same recharts library, same visual
-// recipe (gradient fill, CartesianGrid, tooltip styling) as AdminLineChart.
+// recipe (gradient fill, CartesianGrid, tooltip styling) as AdminLineChart,
+// now with a legend (mandatory once there's more than one series — identity
+// was color-only before), recessive axes/gridlines, readable tick spacing on
+// wider ranges, and hover markers/crosshair instead of the bare default line.
 function TokenUsageChart({ data }: { data: AnthropicUsageTimeseriesPoint[] }) {
   if (data.length === 0) {
     return <div className={styles.chartEmpty}>No data in this range yet.</div>;
   }
+  // Aim for ~6 evenly spaced x-axis labels regardless of range length,
+  // instead of recharts' default auto-skip (which, on a 20+ day range,
+  // was only ever showing the first and last date — see the screenshot
+  // this was reported against).
+  const tickInterval = Math.max(0, Math.ceil(data.length / 6) - 1);
   return (
-    <ResponsiveContainer width="100%" height={220}>
-      <AreaChart data={data}>
-        <defs>
-          <linearGradient id="fill-input-tokens" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="5%" stopColor="#5b8def" stopOpacity={0.35} />
-            <stop offset="95%" stopColor="#5b8def" stopOpacity={0} />
-          </linearGradient>
-          <linearGradient id="fill-output-tokens" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="5%" stopColor="#fbbf24" stopOpacity={0.35} />
-            <stop offset="95%" stopColor="#fbbf24" stopOpacity={0} />
-          </linearGradient>
-        </defs>
-        <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
-        <XAxis dataKey="date" stroke="var(--color-text-muted)" fontSize={11} />
-        <YAxis stroke="var(--color-text-muted)" fontSize={11} tickFormatter={(v: number) => formatNumber(v)} />
-        <Tooltip
-          formatter={(value: number, name: string) => [formatNumber(value), name === 'inputTokens' ? 'Input' : 'Output']}
-          contentStyle={{ background: 'var(--color-bg-surface)', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-md)', color: 'var(--color-text-primary)' }}
-          labelStyle={{ color: 'var(--color-text-primary)' }}
-        />
-        <Area type="monotone" dataKey="inputTokens" name="inputTokens" stroke="#5b8def" strokeWidth={2} fill="url(#fill-input-tokens)" />
-        <Area type="monotone" dataKey="outputTokens" name="outputTokens" stroke="#fbbf24" strokeWidth={2} fill="url(#fill-output-tokens)" />
-      </AreaChart>
-    </ResponsiveContainer>
+    <div className={styles.chartStack}>
+      <div className={styles.legend}>
+        <span className={styles.legendItem}>
+          <span className={styles.dot} style={{ background: TOKEN_COLORS.input }} />
+          Input tokens
+        </span>
+        <span className={styles.legendItem}>
+          <span className={styles.dot} style={{ background: TOKEN_COLORS.output }} />
+          Output tokens
+        </span>
+      </div>
+      <ResponsiveContainer width="100%" height={220}>
+        <AreaChart data={data}>
+          <defs>
+            <linearGradient id="fill-input-tokens" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="5%" stopColor={TOKEN_COLORS.input} stopOpacity={0.3} />
+              <stop offset="95%" stopColor={TOKEN_COLORS.input} stopOpacity={0} />
+            </linearGradient>
+            <linearGradient id="fill-output-tokens" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="5%" stopColor={TOKEN_COLORS.output} stopOpacity={0.3} />
+              <stop offset="95%" stopColor={TOKEN_COLORS.output} stopOpacity={0} />
+            </linearGradient>
+          </defs>
+          <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" vertical={false} />
+          <XAxis dataKey="date" stroke="var(--color-text-muted)" fontSize={11} axisLine={false} tickLine={false} interval={tickInterval} />
+          <YAxis stroke="var(--color-text-muted)" fontSize={11} axisLine={false} tickLine={false} tickFormatter={(v: number) => formatNumber(v)} />
+          <Tooltip
+            formatter={(value: number, name: string) => [formatNumber(value), name === 'inputTokens' ? 'Input' : 'Output']}
+            contentStyle={{ background: 'var(--color-bg-surface)', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-md)', color: 'var(--color-text-primary)' }}
+            labelStyle={{ color: 'var(--color-text-primary)' }}
+            cursor={{ stroke: 'var(--color-border-strong)', strokeDasharray: '3 3' }}
+          />
+          <Area
+            type="monotone"
+            dataKey="inputTokens"
+            name="inputTokens"
+            stroke={TOKEN_COLORS.input}
+            strokeWidth={2}
+            fill="url(#fill-input-tokens)"
+            activeDot={{ r: 5 }}
+          />
+          <Area
+            type="monotone"
+            dataKey="outputTokens"
+            name="outputTokens"
+            stroke={TOKEN_COLORS.output}
+            strokeWidth={2}
+            fill="url(#fill-output-tokens)"
+            activeDot={{ r: 5 }}
+          />
+        </AreaChart>
+      </ResponsiveContainer>
+    </div>
   );
 }
 
+// Bar chart (not the area/gradient style the other two charts on this page
+// use) — matches the reference Claude Console "Daily token cost" chart's
+// bar style. Same single real `cost` series as before; only the chart type
+// changed, not the data it's fed.
 function CostOverTimeChart({ data }: { data: AnthropicUsageTimeseriesPoint[] }) {
   if (data.length === 0) {
     return <div className={styles.chartEmpty}>No data in this range yet.</div>;
   }
+  const tickInterval = Math.max(0, Math.ceil(data.length / 6) - 1);
   return (
     <ResponsiveContainer width="100%" height={220}>
-      <AreaChart data={data}>
-        <defs>
-          <linearGradient id="fill-cost" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="5%" stopColor="#5b8def" stopOpacity={0.35} />
-            <stop offset="95%" stopColor="#5b8def" stopOpacity={0} />
-          </linearGradient>
-        </defs>
-        <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
-        <XAxis dataKey="date" stroke="var(--color-text-muted)" fontSize={11} />
-        <YAxis stroke="var(--color-text-muted)" fontSize={11} tickFormatter={(v: number) => `$${v.toFixed(0)}`} />
+      <BarChart data={data}>
+        <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" vertical={false} />
+        <XAxis dataKey="date" stroke="var(--color-text-muted)" fontSize={11} axisLine={false} tickLine={false} interval={tickInterval} />
+        <YAxis stroke="var(--color-text-muted)" fontSize={11} axisLine={false} tickLine={false} tickFormatter={(v: number) => `$${v.toFixed(0)}`} />
         <Tooltip
           formatter={(value: number) => [`$${value.toFixed(2)}`, 'Cost']}
           contentStyle={{ background: 'var(--color-bg-surface)', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-md)', color: 'var(--color-text-primary)' }}
           labelStyle={{ color: 'var(--color-text-primary)' }}
+          cursor={{ fill: 'var(--color-bg-hover)' }}
         />
-        <Area type="monotone" dataKey="cost" stroke="#5b8def" strokeWidth={2} fill="url(#fill-cost)" />
-      </AreaChart>
+        <Bar dataKey="cost" fill="#5b8def" radius={[3, 3, 0, 0]} />
+      </BarChart>
     </ResponsiveContainer>
   );
 }
@@ -237,8 +283,13 @@ export function AdminAiUsagePage() {
             inside AdminRangeControl) refuses to shrink below its natural
             content width on a narrow screen and clips instead of wrapping/
             scrolling in place (see Tabs.module.css's own comment on the
-            same flexbox min-width:auto trap). */}
-        <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 'var(--space-3)', minWidth: 0, maxWidth: '100%' }}>
+            same flexbox min-width:auto trap). Styled as a filter-bar card
+            (same real `days` control + Refresh this page already had —
+            this is the one filter that genuinely applies to every section
+            below, unlike Model/Organization, which stay scoped to Request
+            History since the summary/chart/breakdown endpoints don't
+            accept those params). */}
+        <div className={styles.filterBar} style={{ flexWrap: 'wrap', minWidth: 0, maxWidth: '100%' }}>
           <AdminRangeControl days={days} onChange={setDays} />
           <Button variant="secondary" size="sm" leftIcon={<FiRefreshCw />} loading={refreshing} onClick={handleRefresh}>
             Refresh
