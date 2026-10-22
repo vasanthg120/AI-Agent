@@ -54,6 +54,20 @@
   color: var(--color-text-primary);
 }
 
+.dateRangeBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-surface);
+  color: var(--color-text-secondary);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  white-space: nowrap;
+}
+
 .subtitle {
   margin: 2px 0 0;
   font-size: var(--text-sm);

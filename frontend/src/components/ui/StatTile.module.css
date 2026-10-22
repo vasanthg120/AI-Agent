@@ -7,6 +7,31 @@
     background var(--duration-normal) var(--ease-out), transform var(--duration-normal) var(--ease-out);
 }
 
+/* Plain wrapper — a block element changes nothing about how existing
+   (non-sparkline) tiles stack their icon/value/label/trend. */
+.body {
+  min-width: 0;
+}
+
+/* Only applied when a real sparkline is passed in — every existing caller
+   that doesn't pass one keeps the original vertical layout untouched. */
+.tileWithSparkline {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.tileWithSparkline .body {
+  flex: 1;
+}
+
+.sparkline {
+  width: 72px;
+  height: 40px;
+  flex-shrink: 0;
+}
+
 
 .tileActive,
 .tileActive:hover {
