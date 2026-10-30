@@ -92,6 +92,11 @@ export declare class IntegrationsService {
     }>;
     status(organizationId: string, provider: string): Promise<IntegrationStatus>;
     listCustom(organizationId: string): Promise<IntegrationSummary[]>;
+    mergeOAuthMeta(organizationId: string, provider: string, patch: Record<string, string>): Promise<void>;
+    saveSecondaryCredentials(organizationId: string, provider: string, creds: {
+        username: string;
+        password: string;
+    }): Promise<void>;
     disconnect(organizationId: string, provider: string): Promise<void>;
     testConnection(organizationId: string, provider: string, dto: TestConnectionDto): Promise<{
         ok: boolean;
@@ -102,6 +107,11 @@ export declare class IntegrationsService {
         authType: AuthType;
         credentials: AuthCredentials;
         baseUrl?: string;
+        oauthMeta?: Record<string, string>;
+        secondaryCredentials?: {
+            username: string;
+            password: string;
+        };
     } | null>;
     listConnected(organizationId: string): Promise<{
         integrationId: Types.ObjectId;

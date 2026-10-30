@@ -84,6 +84,28 @@ exports.default = () => ({
             redirectUri: process.env.ZOHO_REDIRECT_URI ?? 'http://localhost:3000/zoho/callback',
             accountsBaseUrl: process.env.ZOHO_ACCOUNTS_BASE_URL ?? 'https://accounts.zoho.com',
         },
+        xero: {
+            clientId: process.env.XERO_CLIENT_ID ?? '',
+            clientSecret: process.env.XERO_CLIENT_SECRET ?? '',
+            redirectUri: process.env.XERO_REDIRECT_URI ?? 'http://localhost:3000/xero/callback',
+        },
+        zohobooks: {
+            clientId: process.env.ZOHO_BOOKS_CLIENT_ID ?? '',
+            clientSecret: process.env.ZOHO_BOOKS_CLIENT_SECRET ?? '',
+            redirectUri: process.env.ZOHO_BOOKS_REDIRECT_URI ?? 'http://localhost:3000/zohobooks/callback',
+            accountsBaseUrl: process.env.ZOHO_BOOKS_ACCOUNTS_BASE_URL ?? 'https://accounts.zoho.com',
+        },
+        zohopayroll: {
+            clientId: process.env.ZOHO_PAYROLL_CLIENT_ID ?? '',
+            clientSecret: process.env.ZOHO_PAYROLL_CLIENT_SECRET ?? '',
+            redirectUri: process.env.ZOHO_PAYROLL_REDIRECT_URI ?? 'http://localhost:3000/zohopayroll/callback',
+            accountsBaseUrl: process.env.ZOHO_PAYROLL_ACCOUNTS_BASE_URL ?? 'https://accounts.zoho.com',
+        },
+        myob: {
+            clientId: process.env.MYOB_CLIENT_ID ?? '',
+            clientSecret: process.env.MYOB_CLIENT_SECRET ?? '',
+            redirectUri: process.env.MYOB_REDIRECT_URI ?? 'https://localhost:3000/myob/callback',
+        },
         salesforce: {
             clientId: process.env.SALESFORCE_CLIENT_ID ?? '',
             clientSecret: process.env.SALESFORCE_CLIENT_SECRET ?? '',
@@ -120,7 +142,7 @@ exports.default = () => ({
         currency: (process.env.BILLING_CURRENCY ?? 'INR').toUpperCase(),
         usdToCurrencyRate: parseFloat(process.env.USD_TO_CURRENCY_RATE ?? ((process.env.BILLING_CURRENCY ?? 'INR').toUpperCase() === 'USD' ? '1' : '83')),
         autoPayMaxConsecutiveFailures: parseInt(process.env.AUTOPAY_MAX_CONSECUTIVE_FAILURES ?? '3', 10),
-        orgScopingEnabled: (process.env.BILLING_ORG_SCOPED_WALLETS ?? 'false').toLowerCase() === 'true',
+        orgScopingEnabled: (process.env.BILLING_ORG_SCOPED_WALLETS ?? 'true').toLowerCase() === 'true',
         subscriptionRenewalGraceAttempts: parseInt(process.env.SUBSCRIPTION_RENEWAL_GRACE_ATTEMPTS ?? '3', 10),
         paymentMode: (process.env.PAYMENT_MODE ?? 'test').toLowerCase() === 'live' ? 'live' : 'test',
         activePaymentProvider: (process.env.ACTIVE_PAYMENT_PROVIDER ?? 'razorpay').toLowerCase(),

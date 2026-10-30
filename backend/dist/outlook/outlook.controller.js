@@ -36,9 +36,9 @@ let OutlookController = OutlookController_1 = class OutlookController {
     getContacts() {
         return this.outlookService.getContacts();
     }
-    getConnectUrl(user) {
+    async getConnectUrl(user) {
         const state = this.jwtService.sign({ sub: user.sub, organizationId: user.organizationId }, { expiresIn: '10m' });
-        return { url: this.outlookService.buildAuthorizeUrl(state) };
+        return { url: await this.outlookService.buildAuthorizeUrl(state) };
     }
     async callback(code, state, error, errorDescription) {
         const frontendUrl = this.config.get('corsOrigin');
@@ -58,9 +58,9 @@ let OutlookController = OutlookController_1 = class OutlookController {
             return { url: `${frontendUrl}/integrations?outlook=error`, statusCode: 302 };
         }
     }
-    getAdminConsentUrl(user) {
+    async getAdminConsentUrl(user) {
         const state = this.jwtService.sign({ sub: user.sub, organizationId: user.organizationId, email: user.email }, { expiresIn: '10m' });
-        return { url: this.outlookService.buildAdminConsentUrl(state) };
+        return { url: await this.outlookService.buildAdminConsentUrl(state) };
     }
     async adminConsentCallback(tenant, adminConsent, state, error, errorDescription) {
         const frontendUrl = this.config.get('corsOrigin');
@@ -128,7 +128,7 @@ __decorate([
     __param(0, (0, current_user_decorator_1.CurrentUser)()),
     __metadata("design:type", Function),
     __metadata("design:paramtypes", [Object]),
-    __metadata("design:returntype", void 0)
+    __metadata("design:returntype", Promise)
 ], OutlookController.prototype, "getConnectUrl", null);
 __decorate([
     (0, common_1.Get)('callback'),
@@ -147,7 +147,7 @@ __decorate([
     __param(0, (0, current_user_decorator_1.CurrentUser)()),
     __metadata("design:type", Function),
     __metadata("design:paramtypes", [Object]),
-    __metadata("design:returntype", void 0)
+    __metadata("design:returntype", Promise)
 ], OutlookController.prototype, "getAdminConsentUrl", null);
 __decorate([
     (0, common_1.Get)('admin-consent-callback'),

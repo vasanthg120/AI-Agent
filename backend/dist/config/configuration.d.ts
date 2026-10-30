@@ -69,6 +69,28 @@ declare const _default: () => {
             redirectUri: string;
             accountsBaseUrl: string;
         };
+        xero: {
+            clientId: string;
+            clientSecret: string;
+            redirectUri: string;
+        };
+        zohobooks: {
+            clientId: string;
+            clientSecret: string;
+            redirectUri: string;
+            accountsBaseUrl: string;
+        };
+        zohopayroll: {
+            clientId: string;
+            clientSecret: string;
+            redirectUri: string;
+            accountsBaseUrl: string;
+        };
+        myob: {
+            clientId: string;
+            clientSecret: string;
+            redirectUri: string;
+        };
         salesforce: {
             clientId: string;
             clientSecret: string;

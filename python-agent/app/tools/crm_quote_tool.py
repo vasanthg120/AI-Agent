@@ -58,6 +58,8 @@ def _fetch_raw_quotes(*, limit=25, search="", start_after=0, deal_id=None, organ
 
 def run(tool_input: dict, context: dict) -> str:
     organization_id = context.get("organization_id")
+    if not organization_id:
+        return "No organization context available."
     base_url, api_key = prospectconnect.resolve_credentials(organization_id, context.get("user_id", ""))
     if not base_url or not api_key:
         return "No CRM is connected yet. Ask the user to connect one via the Integrations page."

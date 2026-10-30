@@ -166,6 +166,46 @@ let IntegrationsService = IntegrationsService_1 = class IntegrationsService {
                     oauthMeta: { ...oauthMeta, apiDomain: data.api_domain ?? oauthMeta.apiDomain ?? '' },
                 };
             }
+            else if (doc.provider === 'zohobooks') {
+                const base = oauthMeta.accountsServer || this.config.get('integrations.zohobooks.accountsBaseUrl') || 'https://accounts.zoho.com';
+                const clientId = doc.oauthClientId || this.config.get('integrations.zohobooks.clientId') || '';
+                const clientSecret = doc.oauthClientSecretEncrypted
+                    ? this.encryption.decrypt(doc.oauthClientSecretEncrypted)
+                    : this.config.get('integrations.zohobooks.clientSecret') || '';
+                const { data } = await (0, rxjs_1.firstValueFrom)(this.http.post(`${base.replace(/\/$/, '')}/oauth/v2/token`, new URLSearchParams({
+                    grant_type: 'refresh_token',
+                    refresh_token: refreshToken,
+                    client_id: clientId,
+                    client_secret: clientSecret,
+                }).toString(), { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }));
+                if (!data.access_token)
+                    throw new Error(data.error ?? 'Zoho Books did not return an access token');
+                refreshed = {
+                    accessToken: data.access_token,
+                    expiresInSeconds: data.expires_in ?? 3600,
+                    oauthMeta: { ...oauthMeta, booksApiDomain: data.api_domain ?? oauthMeta.booksApiDomain ?? '' },
+                };
+            }
+            else if (doc.provider === 'zohopayroll') {
+                const base = oauthMeta.accountsServer || this.config.get('integrations.zohopayroll.accountsBaseUrl') || 'https://accounts.zoho.com';
+                const clientId = doc.oauthClientId || this.config.get('integrations.zohopayroll.clientId') || '';
+                const clientSecret = doc.oauthClientSecretEncrypted
+                    ? this.encryption.decrypt(doc.oauthClientSecretEncrypted)
+                    : this.config.get('integrations.zohopayroll.clientSecret') || '';
+                const { data } = await (0, rxjs_1.firstValueFrom)(this.http.post(`${base.replace(/\/$/, '')}/oauth/v2/token`, new URLSearchParams({
+                    grant_type: 'refresh_token',
+                    refresh_token: refreshToken,
+                    client_id: clientId,
+                    client_secret: clientSecret,
+                }).toString(), { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }));
+                if (!data.access_token)
+                    throw new Error(data.error ?? 'Zoho Payroll did not return an access token');
+                refreshed = {
+                    accessToken: data.access_token,
+                    expiresInSeconds: data.expires_in ?? 3600,
+                    oauthMeta: { ...oauthMeta, payrollApiDomain: data.api_domain ?? oauthMeta.payrollApiDomain ?? '' },
+                };
+            }
             else if (doc.provider === 'salesforce') {
                 const base = oauthMeta.authBaseUrl || this.config.get('integrations.salesforce.authBaseUrl') || 'https://login.salesforce.com';
                 const { data } = await (0, rxjs_1.firstValueFrom)(this.http.post(`${base.replace(/\/$/, '')}/services/oauth2/token`, new URLSearchParams({
@@ -182,6 +222,39 @@ let IntegrationsService = IntegrationsService_1 = class IntegrationsService {
                     oauthMeta: { ...oauthMeta, instanceUrl: data.instance_url ?? oauthMeta.instanceUrl ?? '' },
                 };
             }
+            else if (doc.provider === 'xero') {
+                const saved = await this.resolveOAuthAppCredentials('platform', 'xero');
+                const clientId = saved?.clientId || this.config.get('integrations.xero.clientId') || '';
+                const clientSecret = saved?.clientSecret || this.config.get('integrations.xero.clientSecret') || '';
+                const { data } = await (0, rxjs_1.firstValueFrom)(this.http.post('https://identity.xero.com/connect/token', new URLSearchParams({
+                    grant_type: 'refresh_token',
+                    refresh_token: refreshToken,
+                    client_id: clientId,
+                    client_secret: clientSecret,
+                }).toString(), { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }));
+                if (!data.access_token)
+                    throw new Error(data.error ?? 'Xero did not return an access token');
+                refreshed = {
+                    accessToken: data.access_token,
+                    refreshToken: data.refresh_token,
+                    expiresInSeconds: data.expires_in ?? 1800,
+                    oauthMeta,
+                };
+            }
+            else if (doc.provider === 'myob') {
+                const saved = await this.resolveOAuthAppCredentials('platform', 'myob');
+                const clientId = saved?.clientId || this.config.get('integrations.myob.clientId') || '';
+                const clientSecret = saved?.clientSecret || this.config.get('integrations.myob.clientSecret') || '';
+                const { data } = await (0, rxjs_1.firstValueFrom)(this.http.post('https://secure.myob.com/oauth2/v1/authorize', new URLSearchParams({
+                    grant_type: 'refresh_token',
+                    refresh_token: refreshToken,
+                    client_id: clientId,
+                    client_secret: clientSecret,
+                }).toString(), { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }));
+                if (!data.access_token)
+                    throw new Error(data.error ?? 'MYOB did not return an access token');
+                refreshed = { accessToken: data.access_token, expiresInSeconds: data.expires_in ?? 1200, oauthMeta };
+            }
             else {
                 return null;
             }
@@ -190,6 +263,7 @@ let IntegrationsService = IntegrationsService_1 = class IntegrationsService {
                     credentialsEncrypted: this.encryption.encrypt(JSON.stringify({ accessToken: refreshed.accessToken })),
                     tokenExpiresAt: new Date(Date.now() + refreshed.expiresInSeconds * 1000),
                     oauthMeta: refreshed.oauthMeta,
+                    ...(refreshed.refreshToken ? { refreshTokenEncrypted: this.encryption.encrypt(refreshed.refreshToken) } : {}),
                 },
             });
             return refreshed.accessToken;
@@ -237,6 +311,15 @@ let IntegrationsService = IntegrationsService_1 = class IntegrationsService {
             baseUrl: doc.baseUrl,
             connectedAt: doc.createdAt,
         }));
+    }
+    async mergeOAuthMeta(organizationId, provider, patch) {
+        const sets = {};
+        for (const [key, value] of Object.entries(patch))
+            sets[`oauthMeta.${key}`] = value;
+        await this.credentialModel.updateOne({ organizationId, provider }, { $set: sets });
+    }
+    async saveSecondaryCredentials(organizationId, provider, creds) {
+        await this.credentialModel.updateOne({ organizationId, provider }, { $set: { secondaryCredentialsEncrypted: this.encryption.encrypt(JSON.stringify(creds)) } });
     }
     async disconnect(organizationId, provider) {
         this.assertAllowed(provider);
@@ -297,7 +380,15 @@ let IntegrationsService = IntegrationsService_1 = class IntegrationsService {
                 integrationId: doc._id,
                 authType: doc.authType,
                 credentials: { accessToken: accessToken ?? undefined },
-                baseUrl: doc.oauthMeta?.apiDomain || doc.oauthMeta?.instanceUrl || doc.baseUrl,
+                baseUrl: doc.oauthMeta?.apiDomain ||
+                    doc.oauthMeta?.instanceUrl ||
+                    (doc.oauthMeta?.booksApiDomain ? `${doc.oauthMeta.booksApiDomain.replace(/\/$/, '')}/books/v3` : undefined) ||
+                    (doc.oauthMeta?.payrollApiDomain ? `${doc.oauthMeta.payrollApiDomain.replace(/\/$/, '')}/payroll/v1` : undefined) ||
+                    doc.baseUrl,
+                oauthMeta: doc.oauthMeta,
+                secondaryCredentials: doc.secondaryCredentialsEncrypted
+                    ? JSON.parse(this.encryption.decrypt(doc.secondaryCredentialsEncrypted))
+                    : undefined,
             };
         }
         if (doc.authType) {

@@ -2,6 +2,7 @@ import { HttpService } from '@nestjs/axios';
 import { ConfigService } from '@nestjs/config';
 import { Model } from 'mongoose';
 import { EncryptionService } from '../common/encryption/encryption.service';
+import { IntegrationsService } from '../integrations/integrations.service';
 import { UsersService } from '../users/users.service';
 import { OutlookConnectionDocument } from './schemas/outlook-connection.schema';
 import { MicrosoftTenantAuthorizationDocument } from './schemas/microsoft-tenant-authorization.schema';
@@ -23,10 +24,12 @@ export declare class OutlookService {
     private http;
     private encryption;
     private usersService;
+    private integrations;
     private connectionModel;
     private tenantAuthModel;
-    constructor(config: ConfigService, http: HttpService, encryption: EncryptionService, usersService: UsersService, connectionModel: Model<OutlookConnectionDocument>, tenantAuthModel: Model<MicrosoftTenantAuthorizationDocument>);
+    constructor(config: ConfigService, http: HttpService, encryption: EncryptionService, usersService: UsersService, integrations: IntegrationsService, connectionModel: Model<OutlookConnectionDocument>, tenantAuthModel: Model<MicrosoftTenantAuthorizationDocument>);
     private get configured();
+    private resolveAppCredentials;
     getEmails(): Promise<{
         id: string;
         from: string;
@@ -36,8 +39,8 @@ export declare class OutlookService {
     getCalendarEvents(): Promise<never[]>;
     getContacts(): Promise<never[]>;
     private placeholderEmails;
-    buildAuthorizeUrl(state: string): string;
-    buildAdminConsentUrl(state: string): string;
+    buildAuthorizeUrl(state: string): Promise<string>;
+    buildAdminConsentUrl(state: string): Promise<string>;
     recordTenantAuthorization(tenantId: string, organizationId: string, userId: string, userEmail: string): Promise<void>;
     getTenantAuthorizationStatus(organizationId: string): Promise<{
         authorized: boolean;

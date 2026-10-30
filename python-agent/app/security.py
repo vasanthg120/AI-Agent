@@ -33,3 +33,22 @@ def get_current_user(request: Request) -> dict:
     if "sub" not in payload:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid token payload")
     return payload
+
+
+def assert_user_id_matches(user_id: str, user: dict) -> None:
+    """Rejects a request-body/form user_id that doesn't match the
+    authenticated token's own `sub`.
+
+    Several routes (app.routes.chat's ChatRequest.user_id,
+    app.routes.roles's RoleGenerateRequest/RoleGenerateFromDescriptionRequest
+    user_id) take a caller-supplied user_id alongside get_current_user's
+    token — needed because the real identity-bearing value for some of
+    those (billing attribution, Qdrant document ownership, Mem0 memory)
+    predates this check and was never re-derived from the token directly.
+    NestJS (the only intended caller — see get_current_user's own docstring)
+    always sends the JWT's own sub as user_id, so this never rejects
+    legitimate traffic; it only closes the direct-call impersonation path
+    for whichever identity-sensitive operation that route's user_id drives.
+    """
+    if user_id != user.get("sub"):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "user_id does not match the authenticated session.")

@@ -133,6 +133,48 @@ export default () => ({
       // ahead of the very first authorize redirect.
       accountsBaseUrl: process.env.ZOHO_ACCOUNTS_BASE_URL ?? 'https://accounts.zoho.com',
     },
+    // Xero — one platform-wide app (same pattern as integrations.google
+    // above, not Zoho's per-org app below): Xero has a single global API
+    // host with no per-region data-center fragmentation, so there's no
+    // reason to ask each organization to register their own Xero app.
+    xero: {
+      clientId: process.env.XERO_CLIENT_ID ?? '',
+      clientSecret: process.env.XERO_CLIENT_SECRET ?? '',
+      redirectUri: process.env.XERO_REDIRECT_URI ?? 'http://localhost:3000/xero/callback',
+    },
+    // Zoho Books — same per-org "bring your own app" + regional data-center
+    // pattern as integrations.zoho below (ZOHO_DATA_CENTERS is shared), but
+    // a SEPARATE credential/app registration from Zoho CRM: an organization
+    // connecting both products brings two app registrations (even if, in
+    // Zoho's own console, they happen to pick the same one — Haive never
+    // assumes that), per the explicit "independently of the existing Zoho
+    // CRM integration" requirement.
+    zohobooks: {
+      clientId: process.env.ZOHO_BOOKS_CLIENT_ID ?? '',
+      clientSecret: process.env.ZOHO_BOOKS_CLIENT_SECRET ?? '',
+      redirectUri: process.env.ZOHO_BOOKS_REDIRECT_URI ?? 'http://localhost:3000/zohobooks/callback',
+      accountsBaseUrl: process.env.ZOHO_BOOKS_ACCOUNTS_BASE_URL ?? 'https://accounts.zoho.com',
+    },
+    // Zoho Payroll — same per-org "bring your own app" + regional
+    // data-center pattern as zohobooks above (confirmed against Zoho's own
+    // current docs at zoho.com/payroll/api/v1/: www.zohoapis.com/payroll/v1
+    // base, same Zoho-oauthtoken scheme, same per-region data centers), and
+    // a SEPARATE credential/app registration from both Zoho CRM and Zoho
+    // Books — same "never assume a shared registration" reasoning.
+    zohopayroll: {
+      clientId: process.env.ZOHO_PAYROLL_CLIENT_ID ?? '',
+      clientSecret: process.env.ZOHO_PAYROLL_CLIENT_SECRET ?? '',
+      redirectUri: process.env.ZOHO_PAYROLL_REDIRECT_URI ?? 'http://localhost:3000/zohopayroll/callback',
+      accountsBaseUrl: process.env.ZOHO_PAYROLL_ACCOUNTS_BASE_URL ?? 'https://accounts.zoho.com',
+    },
+    // MYOB — one platform-wide app, same reasoning as Xero above (no
+    // regional app-registry fragmentation). MYOB's own docs call this an
+    // "API key", not a client_id, but it's the same OAuth2 client_id value.
+    myob: {
+      clientId: process.env.MYOB_CLIENT_ID ?? '',
+      clientSecret: process.env.MYOB_CLIENT_SECRET ?? '',
+      redirectUri: process.env.MYOB_REDIRECT_URI ?? 'https://localhost:3000/myob/callback',
+    },
     salesforce: {
       clientId: process.env.SALESFORCE_CLIENT_ID ?? '',
       clientSecret: process.env.SALESFORCE_CLIENT_SECRET ?? '',
@@ -222,13 +264,18 @@ export default () => ({
     autoPayMaxConsecutiveFailures: parseInt(process.env.AUTOPAY_MAX_CONSECUTIVE_FAILURES ?? '3', 10),
     // Phase 0 of the org-scoped billing extension (see
     // billing-migration.service.ts and billing.controller.ts's tenantKey()):
-    // every BillingController route passes user.sub as the wallet's tenant
-    // key today (see that controller's own header comment) — flipping this
-    // to true switches it to the real user.organizationId instead. Stays
-    // false until a dry-run + real migration
-    // (POST /billing/admin/migrate-organization-wallets) has been run in
-    // this environment; default off means zero behavior change.
-    orgScopingEnabled: (process.env.BILLING_ORG_SCOPED_WALLETS ?? 'false').toLowerCase() === 'true',
+    // every BillingController route passes this as the wallet's tenant key.
+    // Defaults to true — org-wide pooled wallets, shared by every authorized
+    // user in an organization, is the intended standing model (one admin
+    // connects/pays, every employee's usage draws from and is attributed
+    // against the same organization wallet). Before enabling this in a
+    // deployment that has existing per-user wallets (i.e. upgrading from
+    // before this default changed), run a dry-run of
+    // POST /billing/admin/migrate-organization-wallets first to repoint them
+    // onto the real organizationId — set BILLING_ORG_SCOPED_WALLETS=false
+    // explicitly to stay on the old per-user behavior until that migration
+    // has been run.
+    orgScopingEnabled: (process.env.BILLING_ORG_SCOPED_WALLETS ?? 'true').toLowerCase() === 'true',
     // Phase 2 (subscriptions, see subscription-renewal.service.ts): how many
     // consecutive renewal charge failures a BillingSubscription tolerates
     // (staying 'past_due', retried every cron tick) before it's marked

@@ -30,8 +30,27 @@ export class DealOwnerMapping {
   @Prop()
   externalOwnerLabel?: string;
 
-  @Prop({ required: true, index: true })
-  ownerId: string;
+  // The single auto-assignable owner when linkedUserIds (below) has exactly
+  // one entry — undefined when more than one user is linked (ambiguous: no
+  // deal-specific signal says which of them a given deal belongs to, see
+  // deal-owner-mapping.service.ts's own upsertMapping comment). Every
+  // existing single-user mapping already has this set and is completely
+  // unaffected — it only ever becomes undefined for a NEWLY created
+  // multi-user mapping. Changed from required to optional for this reason;
+  // no migration needed, since every row ever written before this existed
+  // already satisfies "exactly one entry" by construction.
+  @Prop({ index: true })
+  ownerId?: string;
+
+  // Every HaiVE user associated with this external salesperson — the full
+  // set an admin has linked (1 or more; see DealOwnerMappingService's own
+  // comment on why "linked" is an association, not automatic ownership).
+  // Always equals [ownerId] when ownerId is set. Absent/empty on any row
+  // written before this field existed — callers must treat that the same
+  // as [ownerId] (see DealOwnerMappingService.listExternalOwners), never as
+  // "no linked users at all" for a row that plainly has an ownerId.
+  @Prop({ type: [String], default: [] })
+  linkedUserIds: string[];
 
   @Prop({ required: true })
   mappedBy: string;

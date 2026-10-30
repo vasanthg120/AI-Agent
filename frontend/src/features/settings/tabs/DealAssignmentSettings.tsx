@@ -53,7 +53,9 @@ export function DealAssignmentSettings() {
   const [assigning, setAssigning] = useState<Record<string, boolean>>({});
   const [flash, setFlash] = useState<Record<string, number>>({});
   const [mappingsOpen, setMappingsOpen] = useState(false);
-  const [mappingChoice, setMappingChoice] = useState<Record<string, string>>({});
+  // Pending (unsaved) linked-user selection per external owner ref — an
+  // explicit Save action is required, never auto-applied as the admin picks.
+  const [mappingChoice, setMappingChoice] = useState<Record<string, string[]>>({});
   const [mappingBusy, setMappingBusy] = useState<string | null>(null);
 
   // Typing refetches once the user pauses, not on every keystroke.
@@ -182,19 +184,42 @@ export function DealAssignmentSettings() {
     }
   };
 
-  const handleLinkOwner = async (row: ExternalOwnerRow, ownerId: string) => {
-    if (!ownerId) return;
+  // Linking establishes an association, never ownership on its own: with
+  // exactly one user this behaves exactly as before (immediately assigns
+  // every matching deal); with more than one, nothing is assigned — the
+  // deals stay exactly as they are until explicitly assigned below. Going
+  // from 2+ users down to exactly 1 re-enables auto-assignment, which is
+  // why that specific transition is confirmed first.
+  const handleLinkOwner = async (row: ExternalOwnerRow, ownerIds: string[]) => {
+    if (ownerIds.length === 0) return;
+    const wasAmbiguous = (row.mapping?.linkedUserIds.length ?? 0) > 1;
+    if (wasAmbiguous && ownerIds.length === 1) {
+      const name = employeeName(ownerIds[0]) ?? 'this user';
+      const proceed = window.confirm(
+        `Only ${name} will remain linked to ${row.externalOwnerLabel ?? 'this CRM owner'}. This will immediately assign all ${row.dealCount} of their deals to ${name}, and future synced deals from this salesperson will be too. Continue?`,
+      );
+      if (!proceed) return;
+    }
     setMappingBusy(row.externalOwnerRef);
     try {
       const result = await dealsService.upsertOwnerMapping({
         provider: row.provider,
         externalOwnerRef: row.externalOwnerRef,
         externalOwnerLabel: row.externalOwnerLabel,
-        ownerId,
+        ownerIds,
       });
-      toast.success(
-        `${row.externalOwnerLabel ?? 'CRM owner'} linked to ${result.mapping?.ownerName ?? employeeName(ownerId)} — ${result.dealCount} deal${result.dealCount === 1 ? '' : 's'} assigned`,
-      );
+      if (ownerIds.length === 1) {
+        const name = result.mapping?.ownerName ?? employeeName(ownerIds[0]);
+        toast.success(`${row.externalOwnerLabel ?? 'CRM owner'} linked to ${name} — ${result.dealCount} deal${result.dealCount === 1 ? '' : 's'} assigned`);
+      } else {
+        const names = ownerIds.map((id) => employeeName(id) ?? 'someone').join(', ');
+        toast.success(`${row.externalOwnerLabel ?? 'CRM owner'} linked to ${names} — existing deals are unchanged until assigned individually below`);
+      }
+      setMappingChoice((prev) => {
+        const next = { ...prev };
+        delete next[row.externalOwnerRef];
+        return next;
+      });
       void queryClient.invalidateQueries({ queryKey: ['deal-owner-mappings'] });
       void queryClient.invalidateQueries({ queryKey: ['deal-assignment'] });
       refreshCounts();
@@ -243,7 +268,7 @@ export function DealAssignmentSettings() {
         <SettingsSection
           icon={<FiLink />}
           title="Link CRM owners"
-          description="Deals synced from your CRM carry the CRM's own owner. Link each one to a HaiVE user once, and all of their deals — now and future syncs — are assigned automatically."
+          description="Deals synced from your CRM carry the CRM's own owner. Link one HaiVE user and all of their deals — now and future syncs — are assigned automatically. Link several eligible users instead to record who could own this salesperson's deals without assigning any of them yet; assign those deals individually in the table below."
           actions={
             unlinked.length > 0 ? <Badge variant="warning">{unlinked.length} not linked</Badge> : <Badge variant="success">All linked</Badge>
           }
@@ -262,7 +287,9 @@ export function DealAssignmentSettings() {
                 transition={{ duration: 0.25, ease: [0.16, 1, 0.3, 1] }}
               >
                 {[...unlinked, ...mappings.filter((m) => m.mapping)].map((m) => {
-                  const choice = mappingChoice[m.externalOwnerRef] ?? m.mapping?.ownerId ?? '';
+                  const savedLinkedIds = m.mapping?.linkedUserIds ?? [];
+                  const choice = mappingChoice[m.externalOwnerRef] ?? savedLinkedIds;
+                  const sameAsSaved = choice.length === savedLinkedIds.length && choice.every((id) => savedLinkedIds.includes(id));
                   return (
                     <div key={`${m.provider}:${m.externalOwnerRef}`} className={styles.mappingRow}>
                       <div className={styles.mappingWho}>
@@ -271,9 +298,12 @@ export function DealAssignmentSettings() {
                           {m.provider} · {m.dealCount} deal{m.dealCount === 1 ? '' : 's'}
                         </span>
                       </div>
-                      {m.mapping ? (
+                      {m.mapping && m.mapping.linkedUsers.length > 0 ? (
                         <span className={styles.linked}>
-                          <FiCheck /> {m.mapping.ownerName ?? 'Linked'}
+                          <FiCheck />{' '}
+                          {m.mapping.linkedUsers.length === 1
+                            ? m.mapping.ownerName ?? 'Linked'
+                            : `${m.mapping.linkedUsers.map((u) => u.name ?? 'Unknown').join(', ')} (not assigned yet)`}
                         </span>
                       ) : m.suggestedOwnerId && !mappingChoice[m.externalOwnerRef] ? (
                         <Button
@@ -282,33 +312,26 @@ export function DealAssignmentSettings() {
                           variant="outline"
                           leftIcon={<FiLink />}
                           loading={mappingBusy === m.externalOwnerRef}
-                          onClick={() => void handleLinkOwner(m, m.suggestedOwnerId!)}
+                          onClick={() => void handleLinkOwner(m, [m.suggestedOwnerId!])}
                         >
                           Link to {m.suggestedOwnerName}
                         </Button>
                       ) : null}
                       <div className={styles.mappingPick}>
-                        <select
-                          className={styles.select}
-                          value={choice}
-                          aria-label={`HaiVE user for ${m.externalOwnerLabel ?? m.externalOwnerRef}`}
-                          onChange={(e) => setMappingChoice((prev) => ({ ...prev, [m.externalOwnerRef]: e.target.value }))}
-                        >
-                          <option value="">{m.mapping ? 'Change to…' : 'Choose a user…'}</option>
-                          {employees.map((e) => (
-                            <option key={e.id} value={e.id}>
-                              {e.name}
-                            </option>
-                          ))}
-                        </select>
+                        <MultiSelectDropdown
+                          label={m.mapping ? 'Linked users' : 'Choose users…'}
+                          options={employeeOptions}
+                          selected={choice}
+                          onChange={(values) => setMappingChoice((prev) => ({ ...prev, [m.externalOwnerRef]: values }))}
+                        />
                         <Button
                           type="button"
                           size="sm"
-                          disabled={!mappingChoice[m.externalOwnerRef] || mappingChoice[m.externalOwnerRef] === m.mapping?.ownerId}
+                          disabled={choice.length === 0 || sameAsSaved}
                           loading={mappingBusy === m.externalOwnerRef}
-                          onClick={() => void handleLinkOwner(m, mappingChoice[m.externalOwnerRef])}
+                          onClick={() => void handleLinkOwner(m, choice)}
                         >
-                          {m.mapping ? 'Relink' : 'Link'}
+                          {m.mapping ? 'Save' : 'Link'}
                         </Button>
                       </div>
                     </div>

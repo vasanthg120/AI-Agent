@@ -36,13 +36,13 @@ export class OutlookController {
 
   @UseGuards(JwtAuthGuard)
   @Get('connect-url')
-  getConnectUrl(@CurrentUser() user: JwtPayload) {
+  async getConnectUrl(@CurrentUser() user: JwtPayload) {
     // Short-lived JWT as OAuth `state` — carries the user id (and org, so
     // the callback below can attribute the connection to the right
     // organization for the org-wide accounts view) through the Microsoft
     // redirect round-trip without needing a server session.
     const state = this.jwtService.sign({ sub: user.sub, organizationId: user.organizationId }, { expiresIn: '10m' });
-    return { url: this.outlookService.buildAuthorizeUrl(state) };
+    return { url: await this.outlookService.buildAuthorizeUrl(state) };
   }
 
   @Get('callback')
@@ -79,12 +79,12 @@ export class OutlookController {
   // whether this has happened — Microsoft enforces it automatically.
   @UseGuards(JwtAuthGuard)
   @Get('admin-consent-url')
-  getAdminConsentUrl(@CurrentUser() user: JwtPayload) {
+  async getAdminConsentUrl(@CurrentUser() user: JwtPayload) {
     const state = this.jwtService.sign(
       { sub: user.sub, organizationId: user.organizationId, email: user.email },
       { expiresIn: '10m' },
     );
-    return { url: this.outlookService.buildAdminConsentUrl(state) };
+    return { url: await this.outlookService.buildAdminConsentUrl(state) };
   }
 
   @Get('admin-consent-callback')

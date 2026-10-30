@@ -21,6 +21,7 @@ const mongoose_1 = require("@nestjs/mongoose");
 const mongoose_2 = require("mongoose");
 const rxjs_1 = require("rxjs");
 const encryption_service_1 = require("../common/encryption/encryption.service");
+const integrations_service_1 = require("../integrations/integrations.service");
 const users_service_1 = require("../users/users.service");
 const outlook_connection_schema_1 = require("./schemas/outlook-connection.schema");
 const microsoft_tenant_authorization_schema_1 = require("./schemas/microsoft-tenant-authorization.schema");
@@ -30,17 +31,33 @@ function isAdminConsentRequiredError(errorDescription) {
         return false;
     return /AADSTS90094|admin approval|admin consent/i.test(errorDescription);
 }
+const PLATFORM_INTEGRATION_SCOPE = 'platform';
 let OutlookService = class OutlookService {
-    constructor(config, http, encryption, usersService, connectionModel, tenantAuthModel) {
+    constructor(config, http, encryption, usersService, integrations, connectionModel, tenantAuthModel) {
         this.config = config;
         this.http = http;
         this.encryption = encryption;
         this.usersService = usersService;
+        this.integrations = integrations;
         this.connectionModel = connectionModel;
         this.tenantAuthModel = tenantAuthModel;
     }
     get configured() {
         return Boolean(this.config.get('integrations.msGraph.clientId'));
+    }
+    async resolveAppCredentials() {
+        const saved = await this.integrations.resolveOAuthAppCredentials(PLATFORM_INTEGRATION_SCOPE, 'outlook');
+        if (saved)
+            return saved;
+        const envClientId = this.config.get('integrations.msGraph.clientId');
+        const envClientSecret = this.config.get('integrations.msGraph.clientSecret');
+        if (!envClientId || !envClientSecret) {
+            throw new common_1.BadRequestException({
+                code: 'OUTLOOK_APP_CREDENTIALS_REQUIRED',
+                message: 'Outlook is not available yet — ask your Haive administrator to configure Microsoft OAuth.',
+            });
+        }
+        return { clientId: envClientId, clientSecret: envClientSecret };
     }
     async getEmails() {
         if (!this.configured)
@@ -63,11 +80,11 @@ let OutlookService = class OutlookService {
             },
         ];
     }
-    buildAuthorizeUrl(state) {
-        const clientId = this.config.get('integrations.msGraph.clientId');
+    async buildAuthorizeUrl(state) {
+        const { clientId } = await this.resolveAppCredentials();
         const redirectUri = this.config.get('integrations.msGraph.redirectUri');
         const params = new URLSearchParams({
-            client_id: clientId ?? '',
+            client_id: clientId,
             response_type: 'code',
             redirect_uri: redirectUri ?? '',
             response_mode: 'query',
@@ -75,13 +92,13 @@ let OutlookService = class OutlookService {
             prompt: 'select_account',
             state,
         });
-        return `https://login.microsoftonline.com/organizations/oauth2/v2.0/authorize?${params.toString()}`;
+        return `https://login.microsoftonline.com/common/oauth2/v2.0/authorize?${params.toString()}`;
     }
-    buildAdminConsentUrl(state) {
-        const clientId = this.config.get('integrations.msGraph.clientId');
+    async buildAdminConsentUrl(state) {
+        const { clientId } = await this.resolveAppCredentials();
         const redirectUri = this.config.get('integrations.msGraph.adminConsentRedirectUri');
         const params = new URLSearchParams({
-            client_id: clientId ?? '',
+            client_id: clientId,
             redirect_uri: redirectUri ?? '',
             state,
         });
@@ -201,15 +218,14 @@ let OutlookService = class OutlookService {
         }
     }
     tokenEndpoint() {
-        return `https://login.microsoftonline.com/organizations/oauth2/v2.0/token`;
+        return `https://login.microsoftonline.com/common/oauth2/v2.0/token`;
     }
     async exchangeCode(code) {
-        const clientId = this.config.get('integrations.msGraph.clientId');
-        const clientSecret = this.config.get('integrations.msGraph.clientSecret');
+        const { clientId, clientSecret } = await this.resolveAppCredentials();
         const redirectUri = this.config.get('integrations.msGraph.redirectUri');
         const body = new URLSearchParams({
-            client_id: clientId ?? '',
-            client_secret: clientSecret ?? '',
+            client_id: clientId,
+            client_secret: clientSecret,
             grant_type: 'authorization_code',
             code,
             redirect_uri: redirectUri ?? '',
@@ -230,12 +246,13 @@ let OutlookService = class OutlookService {
 exports.OutlookService = OutlookService;
 exports.OutlookService = OutlookService = __decorate([
     (0, common_1.Injectable)(),
-    __param(4, (0, mongoose_1.InjectModel)(outlook_connection_schema_1.OutlookConnection.name)),
-    __param(5, (0, mongoose_1.InjectModel)(microsoft_tenant_authorization_schema_1.MicrosoftTenantAuthorization.name)),
+    __param(5, (0, mongoose_1.InjectModel)(outlook_connection_schema_1.OutlookConnection.name)),
+    __param(6, (0, mongoose_1.InjectModel)(microsoft_tenant_authorization_schema_1.MicrosoftTenantAuthorization.name)),
     __metadata("design:paramtypes", [config_1.ConfigService,
         axios_1.HttpService,
         encryption_service_1.EncryptionService,
         users_service_1.UsersService,
+        integrations_service_1.IntegrationsService,
         mongoose_2.Model,
         mongoose_2.Model])
 ], OutlookService);

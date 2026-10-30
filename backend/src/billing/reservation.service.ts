@@ -64,9 +64,10 @@ export class ReservationService {
    * user's own id. Exposed here so callers that reserve() directly with a
    * real organizationId (business knowledge, email intelligence, finance,
    * customer activity) draw from the exact same wallet as chat and the
-   * Billing page — which, with BILLING_ORG_SCOPED_WALLETS left at its
-   * documented `false` default, is the per-user wallet — instead of a
-   * separate org-keyed wallet the Billing UI never shows or lets top up. */
+   * Billing page — with BILLING_ORG_SCOPED_WALLETS left at its default
+   * `true`, that's the shared organization wallet every authorized user
+   * draws from; only a deployment that's explicitly opted back to per-user
+   * wallets (pending migration) gets a separate wallet per caller here. */
   resolveTenantKey(organizationId: string, userId: string): string {
     return this.config.get<boolean>('billing.orgScopingEnabled') ? organizationId : userId;
   }
@@ -167,7 +168,7 @@ export class ReservationService {
     await reservation.save();
   }
 
-  async settle(requestId: string): Promise<SettleResult> {
+  async settle(requestId: string, concurrentRetryDepth = 0): Promise<SettleResult> {
     const reservation = await this.reservationModel.findOne({ requestId });
     if (!reservation) {
       throw new HttpException(`No reservation found for requestId ${requestId}`, HttpStatus.NOT_FOUND);
@@ -184,60 +185,151 @@ export class ReservationService {
       return { creditsCharged: 0, balanceCredits: summary.balanceCredits, lowBalanceWarning: summary.lowBalance };
     }
 
-    const groups = await this.summarizeUsage(requestId);
-    const totalCostUsd = groups.reduce((sum, g) => sum + g.costUsd, 0);
-    // Each group is priced at ITS OWN resolved margin (ProviderPricing.
-    // marginOverridePct when set, else the global default) and converted to
-    // credits independently, THEN summed — never summing USD cost across
-    // groups first and applying one blended margin, since two groups in the
-    // same turn (e.g. Anthropic + Sarvam) can legitimately have different
-    // margins. marginOverridePct is a 0-100 percentage; providerCostToCustomerCredits
-    // takes a 0-1 fraction, hence the /100.
-    let creditsCharged = 0;
-    for (const group of groups) {
-      const marginFraction = group.marginOverridePct !== undefined ? group.marginOverridePct / 100 : undefined;
-      creditsCharged += await this.pricing.providerCostToCustomerCredits(group.costUsd, marginFraction);
+    // Atomically claim the pending->settling transition before doing any of
+    // the real work below — the status checks above only guard a sequential
+    // retry (the same caller calling settle() again after it already
+    // finished); two genuinely CONCURRENT settle() calls for the same
+    // requestId could otherwise both read status:'pending' from the
+    // findOne() above before either writes, both proceed, and both call
+    // wallet.settleUsage() — double-debiting the wallet. The filter here is
+    // the check, same idiom as WalletService.tryReserve's atomic $expr
+    // guard. 'settling' (not 'settled') is deliberate — see the two-phase
+    // try/catch below for why the irreversible/reversible boundary matters.
+    const claimed = await this.reservationModel.findOneAndUpdate(
+      { requestId, status: 'pending' },
+      { $set: { status: 'settling', settlingAt: new Date() } },
+    );
+    if (!claimed) {
+      return this.waitForConcurrentSettlement(requestId, reservation.organizationId, concurrentRetryDepth);
     }
-    creditsCharged = Math.round(creditsCharged * 100) / 100;
 
-    const walletDoc = await this.wallet.settleUsage(reservation.walletId, reservation.estimatedCredits, creditsCharged);
+    let creditsCharged: number;
+    let walletDoc: Awaited<ReturnType<WalletService['settleUsage']>>;
+    let groups: UsageGroup[];
+    try {
+      // --- Phase 1: compute the charge and debit the wallet. Nothing here
+      // is irreversible until wallet.settleUsage() returns successfully —
+      // any failure up to and including that call is safe to revert the
+      // claim for (below) and let a retry redo from scratch. ---
+      groups = await this.summarizeUsage(requestId);
+      // Each group is priced at ITS OWN resolved margin (ProviderPricing.
+      // marginOverridePct when set, else the global default) and converted
+      // to credits independently, THEN summed — never summing USD cost
+      // across groups first and applying one blended margin, since two
+      // groups in the same turn (e.g. Anthropic + Sarvam) can legitimately
+      // have different margins. marginOverridePct is a 0-100 percentage;
+      // providerCostToCustomerCredits takes a 0-1 fraction, hence the /100.
+      let computed = 0;
+      for (const group of groups) {
+        const marginFraction = group.marginOverridePct !== undefined ? group.marginOverridePct / 100 : undefined;
+        computed += await this.pricing.providerCostToCustomerCredits(group.costUsd, marginFraction);
+      }
+      creditsCharged = Math.round(computed * 100) / 100;
 
-    // The GLOBAL default margin, for backward-compat with any existing
-    // reporting that reads this top-level field — a group actually charged
-    // at its own ProviderPricing.marginOverridePct is separately recorded
-    // per-row in byProvider below, never blended into this one number.
-    const resolvedGlobalMarginPct = (await this.pricing.getTargetGrossMargin()).times(100).toNumber();
-    await this.wallet.recordUsageTransaction(walletDoc, requestId, creditsCharged, {
-      requestId,
-      providerCostUsd: totalCostUsd,
-      marginPct: resolvedGlobalMarginPct,
-      executionCount: groups.length,
-      // Provider-identifying (admin-only): raw provider/model names, plus
-      // the actual margin percentage applied to this specific group
-      // (its own override, or the global default recorded above).
-      byProvider: groups.map((g) => ({
-        provider: g.provider,
-        model: g.model,
-        inputTokens: g.inputTokens,
-        outputTokens: g.outputTokens,
-        marginPct: g.marginOverridePct ?? resolvedGlobalMarginPct,
-      })),
-      // Non-identifying token totals — these ARE customer-facing ("Haive
-      // Input/Output/Total Tokens"), unlike everything else in this
-      // metadata object. billing.service.ts's listCustomerTransactions
-      // reads exactly these two fields and nothing else from here.
-      totalInputTokens: groups.reduce((sum, g) => sum + g.inputTokens, 0),
-      totalOutputTokens: groups.reduce((sum, g) => sum + g.outputTokens, 0),
-    }, reservation.userId);
+      walletDoc = await this.wallet.settleUsage(reservation.walletId, reservation.estimatedCredits, creditsCharged);
+    } catch (err) {
+      // Phase 1 failed before any debit happened — revert the claim so a
+      // retry (by this caller or python-agent's own retry logic) redoes
+      // the whole computation from scratch instead of leaving the
+      // reservation permanently stuck at 'settling' with its
+      // reservedCredits hold never released.
+      await this.reservationModel.updateOne({ _id: reservation._id, status: 'settling' }, { $set: { status: 'pending' }, $unset: { settlingAt: '' } });
+      throw err;
+    }
 
-    reservation.status = 'settled';
-    reservation.settledCredits = creditsCharged;
-    reservation.settledAt = new Date();
-    await reservation.save();
+    // --- Phase 2: the debit above is DONE and irreversible — status must
+    // reach 'settled' and the correct charge must be reported to the
+    // caller no matter what happens below; never revert to 'pending' past
+    // this point (that would let a retry re-debit the wallet). Each step
+    // is independently best-effort: a failure here means this one
+    // bookkeeping write didn't keep up with a real, already-correct
+    // charge — logged loudly for manual follow-up, never thrown, and
+    // never allowed to make this method report anything other than the
+    // true, already-happened charge. ---
+    try {
+      await this.reservationModel.updateOne({ _id: reservation._id }, { $set: { status: 'settled', settledCredits: creditsCharged, settledAt: new Date() } });
+    } catch (err) {
+      this.logger.error(
+        `CRITICAL: wallet ${reservation.walletId} debited ${creditsCharged} credits for requestId ${requestId} (org ${reservation.organizationId}) but the reservation's own status update failed — it will remain stuck at 'settling' until manually repaired: ${(err as Error).message}`,
+      );
+    }
+
+    try {
+      const totalCostUsd = groups.reduce((sum, g) => sum + g.costUsd, 0);
+      // The GLOBAL default margin, for backward-compat with any existing
+      // reporting that reads this top-level field — a group actually
+      // charged at its own ProviderPricing.marginOverridePct is separately
+      // recorded per-row in byProvider below, never blended into this one
+      // number.
+      const resolvedGlobalMarginPct = (await this.pricing.getTargetGrossMargin()).times(100).toNumber();
+      await this.wallet.recordUsageTransaction(walletDoc, requestId, creditsCharged, {
+        requestId,
+        providerCostUsd: totalCostUsd,
+        marginPct: resolvedGlobalMarginPct,
+        executionCount: groups.length,
+        // Provider-identifying (admin-only): raw provider/model names, plus
+        // the actual margin percentage applied to this specific group
+        // (its own override, or the global default recorded above).
+        byProvider: groups.map((g) => ({
+          provider: g.provider,
+          model: g.model,
+          inputTokens: g.inputTokens,
+          outputTokens: g.outputTokens,
+          marginPct: g.marginOverridePct ?? resolvedGlobalMarginPct,
+        })),
+        // Non-identifying token totals — these ARE customer-facing ("Haive
+        // Input/Output/Total Tokens"), unlike everything else in this
+        // metadata object. billing.service.ts's listCustomerTransactions
+        // reads exactly these two fields and nothing else from here.
+        totalInputTokens: groups.reduce((sum, g) => sum + g.inputTokens, 0),
+        totalOutputTokens: groups.reduce((sum, g) => sum + g.outputTokens, 0),
+      }, reservation.userId);
+    } catch (err) {
+      this.logger.error(
+        `Wallet debited ${creditsCharged} credits for requestId ${requestId} (org ${reservation.organizationId}) but recordUsageTransaction failed — the customer-facing usage history/admin reporting will be missing this one line item: ${(err as Error).message}`,
+      );
+    }
 
     const threshold = walletDoc.lowBalanceThresholdCredits ?? this.defaultThreshold();
     const available = walletDoc.balanceCredits - walletDoc.reservedCredits;
     return { creditsCharged, balanceCredits: walletDoc.balanceCredits, lowBalanceWarning: available <= threshold };
+  }
+
+  /** Reached only when settle()'s atomic claim lost to a concurrent caller
+   * — resolves to whatever that other caller's attempt actually produces,
+   * never guesses or double-charges. Polls briefly (~1s) since real
+   * settlement is a handful of fast DB/CPU operations, not a slow external
+   * call: 'settled'/'released' are terminal (return their real outcome);
+   * 'pending' means the other attempt failed Phase 1 and reverted (see
+   * settle()'s catch block above) with nobody left retrying it, so this
+   * caller claims it and settles it itself instead of waiting forever for
+   * a caller that already gave up — bounded to a few hops
+   * (concurrentRetryDepth) so a pathologically-failing requestId can't
+   * recurse forever. Still 'settling' after the whole poll window usually
+   * means the winner is just slow (not stuck) — reports a conservative
+   * zero rather than guessing; the next settle() call (python-agent's own
+   * retry, or this one called again) will pick up wherever it actually
+   * landed, per the idempotent checks at the top of settle(). */
+  private async waitForConcurrentSettlement(requestId: string, organizationId: string, concurrentRetryDepth: number): Promise<SettleResult> {
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      const doc = await this.reservationModel.findOne({ requestId }, { status: 1, settledCredits: 1 });
+      if (!doc) break;
+      if (doc.status === 'settled') {
+        const summary = await this.wallet.getSummary(organizationId, this.defaultThreshold());
+        return { creditsCharged: doc.settledCredits ?? 0, balanceCredits: summary.balanceCredits, lowBalanceWarning: summary.lowBalance };
+      }
+      if (doc.status === 'released') {
+        const summary = await this.wallet.getSummary(organizationId, this.defaultThreshold());
+        return { creditsCharged: 0, balanceCredits: summary.balanceCredits, lowBalanceWarning: summary.lowBalance };
+      }
+      if (doc.status === 'pending') {
+        if (concurrentRetryDepth >= 3) break;
+        return this.settle(requestId, concurrentRetryDepth + 1);
+      }
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    const summary = await this.wallet.getSummary(organizationId, this.defaultThreshold());
+    return { creditsCharged: 0, balanceCredits: summary.balanceCredits, lowBalanceWarning: summary.lowBalance };
   }
 
   async release(requestId: string): Promise<{ released: boolean }> {
@@ -316,6 +408,30 @@ export class ReservationService {
       reservation.releasedAt = new Date();
       await reservation.save();
       this.logger.warn(`Swept expired reservation ${reservation.requestId} (org ${reservation.organizationId})`);
+    }
+
+    // Observability only, deliberately never auto-mutated here: settle()'s
+    // own try/catch already reverts 'settling' back to 'pending' for any
+    // ordinary (thrown-exception) failure, so a reservation should only
+    // ever be visibly 'settling' for the few hundred ms the real work
+    // takes. One still showing up 10+ minutes later almost always means
+    // the process crashed between the claim and that catch block running
+    // at all (not a caught failure) — at that point the wallet may or may
+    // not have already been debited (summarizeUsage/settleUsage ran, or
+    // didn't), so this sweep can't safely guess which and auto-reverting
+    // could double-debit on a retry. Surfacing it loudly for a human to
+    // check wallet_transactions for this requestId (present = already
+    // correctly charged, safe to manually flip to 'settled'; absent = safe
+    // to manually flip back to 'pending' for a clean retry) is the
+    // correct, bounded scope for this pass — not a reason to block it.
+    const staleSettling = await this.reservationModel
+      .find({ status: 'settling', settlingAt: { $lt: new Date(Date.now() - 10 * 60_000) } })
+      .limit(50)
+      .exec();
+    for (const reservation of staleSettling) {
+      this.logger.error(
+        `Reservation ${reservation.requestId} (org ${reservation.organizationId}, wallet ${reservation.walletId}) has been stuck at 'settling' since ${reservation.settlingAt?.toISOString()} — likely a process crash mid-settlement. Needs manual check: if a matching wallet_transactions row exists for this requestId, the charge already happened (flip status to 'settled'); if not, it's safe to flip back to 'pending' for a clean retry.`,
+      );
     }
   }
 }

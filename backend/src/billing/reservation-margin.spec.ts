@@ -27,6 +27,8 @@ const TEST_PREFIX = `jest-reservation-margin-${Date.now()}`;
 describe('ReservationService.settle — dynamic margin (real Mongo)', () => {
   let connection: Connection;
   let reservationService: ReservationService;
+  let walletService: WalletService;
+  let pricingService: PricingService;
   let walletModel: Model<WalletDocument>;
   let reservationModel: Model<CreditReservationDocument>;
   let executionModel: Model<AgentExecutionDocument>;
@@ -77,6 +79,8 @@ describe('ReservationService.settle — dynamic margin (real Mongo)', () => {
 
     connection = moduleRef.get(getModelToken(Wallet.name)).db;
     reservationService = moduleRef.get(ReservationService);
+    walletService = moduleRef.get(WalletService);
+    pricingService = moduleRef.get(PricingService);
     walletModel = moduleRef.get(getModelToken(Wallet.name));
     reservationModel = moduleRef.get(getModelToken(CreditReservation.name));
     executionModel = moduleRef.get(getModelToken(AgentExecution.name));
@@ -226,6 +230,103 @@ describe('ReservationService.settle — dynamic margin (real Mongo)', () => {
     // Only ONE AI_USAGE debit should have happened — balance dropped by
     // creditsCharged exactly once, not twice.
     expect(finalWallet!.balanceCredits).toBe(10_000 - first.creditsCharged);
+  });
+
+  it('settle() called genuinely concurrently for the same requestId never double-debits the wallet', async () => {
+    const org = `${TEST_PREFIX}-concurrent`;
+    const requestId = `${TEST_PREFIX}-concurrent-req`;
+    const provider = `${TEST_PREFIX}-concurrent-provider`; // fake, never-seeded — see TEST 8's comment
+    const wallet = await seedReservation(org, requestId);
+    await executionModel.create({ organizationId: org, requestId, kind: 'llm', provider, model: 'claude-x', costUsd: 1, occurredAt: new Date() });
+
+    // Unlike the sequential idempotent-retry test above (one call finishes
+    // before the next starts), this fires both at once — the exact race the
+    // atomic pending->settled claim in settle() guards against. Without it,
+    // both calls could read status:'pending' before either writes and both
+    // would call wallet.settleUsage(), debiting twice.
+    const [first, second] = await Promise.all([reservationService.settle(requestId), reservationService.settle(requestId)]);
+    expect(first.creditsCharged).toBeCloseTo(2, 10);
+    expect(second.creditsCharged).toBeCloseTo(2, 10);
+
+    const finalWallet = await walletModel.findById(wallet._id).exec();
+    expect(finalWallet!.balanceCredits).toBe(10_000 - first.creditsCharged);
+
+    // recordUsageTransaction stores the chat turn's requestId under the
+    // WalletTransaction's `reservationId` field (see wallet.service.ts's
+    // own positional-arg naming) — not `requestId`.
+    const transactionCount = await transactionModel.countDocuments({ organizationId: org, reservationId: requestId });
+    expect(transactionCount).toBe(1);
+  });
+
+  it('a failure BEFORE the wallet debit (Phase 1) reverts the claim to pending — retry succeeds and the wallet is debited exactly once', async () => {
+    const org = `${TEST_PREFIX}-fail-pre-debit`;
+    const requestId = `${TEST_PREFIX}-fail-pre-debit-req`;
+    const provider = `${TEST_PREFIX}-fail-pre-debit-provider`;
+    const wallet = await seedReservation(org, requestId);
+    await executionModel.create({ organizationId: org, requestId, kind: 'llm', provider, model: 'claude-x', costUsd: 1, occurredAt: new Date() });
+
+    const pricingSpy = jest.spyOn(pricingService, 'providerCostToCustomerCredits').mockRejectedValueOnce(new Error('simulated pricing failure'));
+
+    // First attempt fails inside Phase 1 (before wallet.settleUsage ever
+    // runs) — settle() must rethrow (so the caller/python-agent knows this
+    // turn wasn't actually charged) rather than silently swallowing it.
+    await expect(reservationService.settle(requestId)).rejects.toThrow('simulated pricing failure');
+
+    // The claim must have been reverted, not left stuck at 'settling'.
+    const afterFailure = await reservationModel.findOne({ requestId }).exec();
+    expect(afterFailure?.status).toBe('pending');
+    expect(afterFailure?.settlingAt).toBeUndefined();
+    // Nothing was debited by the failed attempt.
+    const walletAfterFailure = await walletModel.findById(wallet._id).exec();
+    expect(walletAfterFailure!.balanceCredits).toBe(10_000);
+
+    pricingSpy.mockRestore();
+
+    // A real retry (the mock is gone now) must succeed and charge exactly once.
+    const result = await reservationService.settle(requestId);
+    expect(result.creditsCharged).toBeCloseTo(2, 10);
+
+    const finalWallet = await walletModel.findById(wallet._id).exec();
+    expect(finalWallet!.balanceCredits).toBe(10_000 - result.creditsCharged);
+    const transactionCount = await transactionModel.countDocuments({ organizationId: org, reservationId: requestId });
+    expect(transactionCount).toBe(1);
+  });
+
+  it('a failure AFTER the wallet debit (Phase 2, recordUsageTransaction) still reports the real charge and reaches settled — never reverts, never re-debits on a later call', async () => {
+    const org = `${TEST_PREFIX}-fail-post-debit`;
+    const requestId = `${TEST_PREFIX}-fail-post-debit-req`;
+    const provider = `${TEST_PREFIX}-fail-post-debit-provider`;
+    const wallet = await seedReservation(org, requestId);
+    await executionModel.create({ organizationId: org, requestId, kind: 'llm', provider, model: 'claude-x', costUsd: 1, occurredAt: new Date() });
+
+    const txSpy = jest.spyOn(walletService, 'recordUsageTransaction').mockRejectedValueOnce(new Error('simulated audit-log write failure'));
+
+    // Phase 2 failures are logged, never thrown — the real charge already
+    // happened in Phase 1 and must be reported correctly regardless.
+    const result = await reservationService.settle(requestId);
+    expect(result.creditsCharged).toBeCloseTo(2, 10);
+
+    const reservation = await reservationModel.findOne({ requestId }).exec();
+    expect(reservation?.status).toBe('settled');
+    expect(reservation?.settledCredits).toBeCloseTo(2, 10);
+
+    // The wallet was debited exactly once despite the downstream failure —
+    // and the missing WalletTransaction row (the one, acceptable gap this
+    // design accepts) is confirmed absent rather than assumed.
+    const finalWallet = await walletModel.findById(wallet._id).exec();
+    expect(finalWallet!.balanceCredits).toBe(10_000 - result.creditsCharged);
+    const transactionCount = await transactionModel.countDocuments({ organizationId: org, reservationId: requestId });
+    expect(transactionCount).toBe(0);
+
+    txSpy.mockRestore();
+
+    // A later call for the same requestId must hit the idempotent
+    // 'settled' check at the top of settle() — never redo Phase 1, never
+    // re-debit — even though recordUsageTransaction never succeeded.
+    const second = await reservationService.settle(requestId);
+    expect(second.creditsCharged).toBeCloseTo(2, 10);
+    const walletAfterRetry = await walletModel.findById(wallet._id).exec();
+    expect(walletAfterRetry!.balanceCredits).toBe(10_000 - result.creditsCharged);
   });
 
   it('release() on AI execution failure never charges usage', async () => {

@@ -133,6 +133,57 @@ export class AdminIntegrationsController {
     return this.integrationsService.getOAuthAppCredentialsStatus(PLATFORM_INTEGRATION_SCOPE, 'gmail');
   }
 
+  // Xero's own developer-portal app (Client ID/Secret) — same shape as
+  // Gmail's pair above, for the same reason: Xero has one global API with no
+  // per-tenant data-center fragmentation (unlike Zoho), so one platform-wide
+  // app covers every organization, each of which authorizes its own Xero
+  // tenant(s) against it (see xero.service.ts).
+  @Post('xero/app-credentials')
+  saveXeroAppCredentials(@Body() dto: SaveOAuthAppCredentialsDto) {
+    return this.integrationsService.saveOAuthAppCredentials(PLATFORM_INTEGRATION_SCOPE, 'xero', {
+      clientId: dto.clientId.trim(),
+      clientSecret: dto.clientSecret.trim(),
+    });
+  }
+
+  @Get('xero/app-credentials')
+  getXeroAppCredentialsStatus() {
+    return this.integrationsService.getOAuthAppCredentialsStatus(PLATFORM_INTEGRATION_SCOPE, 'xero');
+  }
+
+  // MYOB's own developer-portal app — same platform-wide shape as Gmail/
+  // Xero above (see myob.service.ts).
+  @Post('myob/app-credentials')
+  saveMyobAppCredentials(@Body() dto: SaveOAuthAppCredentialsDto) {
+    return this.integrationsService.saveOAuthAppCredentials(PLATFORM_INTEGRATION_SCOPE, 'myob', {
+      clientId: dto.clientId.trim(),
+      clientSecret: dto.clientSecret.trim(),
+    });
+  }
+
+  @Get('myob/app-credentials')
+  getMyobAppCredentialsStatus() {
+    return this.integrationsService.getOAuthAppCredentialsStatus(PLATFORM_INTEGRATION_SCOPE, 'myob');
+  }
+
+  // Outlook's Azure App Registration (Client ID/Secret) — same platform-wide
+  // shape as Gmail/Xero/MYOB above (see outlook.service.ts's
+  // resolveAppCredentials). Removes the previous hard MS_GRAPH_CLIENT_SECRET
+  // .env dependency: that env var is now only a backward-compatible fallback
+  // for a deployment that set it before this existed, never required.
+  @Post('outlook/app-credentials')
+  saveOutlookAppCredentials(@Body() dto: SaveOAuthAppCredentialsDto) {
+    return this.integrationsService.saveOAuthAppCredentials(PLATFORM_INTEGRATION_SCOPE, 'outlook', {
+      clientId: dto.clientId.trim(),
+      clientSecret: dto.clientSecret.trim(),
+    });
+  }
+
+  @Get('outlook/app-credentials')
+  getOutlookAppCredentialsStatus() {
+    return this.integrationsService.getOAuthAppCredentialsStatus(PLATFORM_INTEGRATION_SCOPE, 'outlook');
+  }
+
   // "Configured" (the GET .../status routes above) vs "actually reachable
   // right now" — see IntegrationsService.verifyPlatformProvider's own comment.
   // One shared route rather than one per provider, since the check is

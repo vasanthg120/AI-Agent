@@ -5,6 +5,7 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { firstValueFrom } from 'rxjs';
 import { EncryptionService } from '../common/encryption/encryption.service';
+import { IntegrationsService } from '../integrations/integrations.service';
 import { UsersService } from '../users/users.service';
 import { OutlookConnection, OutlookConnectionDocument } from './schemas/outlook-connection.schema';
 import {
@@ -60,6 +61,11 @@ export function isAdminConsentRequiredError(errorDescription?: string): boolean 
   return /AADSTS90094|admin approval|admin consent/i.test(errorDescription);
 }
 
+// Same fixed scope every other platform-wide "bring your own OAuth app"
+// credential uses (gmail.service.ts, xero.service.ts, myob.service.ts) —
+// one Azure App Registration for every organization's Outlook mailboxes.
+const PLATFORM_INTEGRATION_SCOPE = 'platform';
+
 /**
  * Per-user delegated Microsoft Graph auth, against ONE platform-owned Azure
  * App Registration (MS_GRAPH_CLIENT_ID/SECRET below) — every organization
@@ -76,6 +82,7 @@ export class OutlookService {
     private http: HttpService,
     private encryption: EncryptionService,
     private usersService: UsersService,
+    private integrations: IntegrationsService,
     @InjectModel(OutlookConnection.name) private connectionModel: Model<OutlookConnectionDocument>,
     @InjectModel(MicrosoftTenantAuthorization.name)
     private tenantAuthModel: Model<MicrosoftTenantAuthorizationDocument>,
@@ -83,6 +90,34 @@ export class OutlookService {
 
   private get configured(): boolean {
     return Boolean(this.config.get<string>('integrations.msGraph.clientId'));
+  }
+
+  /** The platform's Azure App Registration (Client ID/Secret) — saved via a
+   * Haive platform admin (POST /integrations/admin/outlook/app-credentials,
+   * see admin-integrations.controller.ts), falling back to
+   * MS_GRAPH_CLIENT_ID/MS_GRAPH_CLIENT_SECRET env vars only for a deployment
+   * that configured those before this existed. Backward compatible by
+   * design, not by accident: every already-connected mailbox's refresh
+   * token was minted against whichever app was active when that mailbox
+   * connected, so this must keep resolving the SAME one on every call
+   * rather than silently preferring the DB once both happen to be present —
+   * env vars stay a fully supported fallback, not a temporary shim that
+   * breaks existing connections the moment a platform admin saves DB
+   * credentials for the first time. Throws a clear, user-facing error if
+   * neither is configured, same shape as GMAIL_APP_CREDENTIALS_REQUIRED. */
+  private async resolveAppCredentials(): Promise<{ clientId: string; clientSecret: string }> {
+    const saved = await this.integrations.resolveOAuthAppCredentials(PLATFORM_INTEGRATION_SCOPE, 'outlook');
+    if (saved) return saved;
+
+    const envClientId = this.config.get<string>('integrations.msGraph.clientId');
+    const envClientSecret = this.config.get<string>('integrations.msGraph.clientSecret');
+    if (!envClientId || !envClientSecret) {
+      throw new BadRequestException({
+        code: 'OUTLOOK_APP_CREDENTIALS_REQUIRED',
+        message: 'Outlook is not available yet — ask your Haive administrator to configure Microsoft OAuth.',
+      });
+    }
+    return { clientId: envClientId, clientSecret: envClientSecret };
   }
 
   async getEmails() {
@@ -109,12 +144,12 @@ export class OutlookService {
     ];
   }
 
-  buildAuthorizeUrl(state: string): string {
-    const clientId = this.config.get<string>('integrations.msGraph.clientId');
+  async buildAuthorizeUrl(state: string): Promise<string> {
+    const { clientId } = await this.resolveAppCredentials();
     const redirectUri = this.config.get<string>('integrations.msGraph.redirectUri');
 
     const params = new URLSearchParams({
-      client_id: clientId ?? '',
+      client_id: clientId,
       response_type: 'code',
       redirect_uri: redirectUri ?? '',
       response_mode: 'query',
@@ -125,11 +160,16 @@ export class OutlookService {
       prompt: 'select_account',
       state,
     });
-    // "organizations" (not a specific tenant ID) so any franchise business's
-    // Microsoft 365 tenant can connect — this app is registered as
-    // multi-tenant in Azure AD. Requires the Azure App Registration's
-    // "Supported account types" to be set to multi-tenant.
-    return `https://login.microsoftonline.com/organizations/oauth2/v2.0/authorize?${params.toString()}`;
+    // "common" (not "organizations") so both a franchise business's
+    // Microsoft 365 tenant account AND a plain personal outlook.com/
+    // hotmail.com/live.com mailbox can connect — "organizations" accepts
+    // work/school accounts only and rejects a personal account outright
+    // (Microsoft's AADSTS500200), which is the gap that prompted this
+    // change: "Outlook Online" otherwise never actually covered a personal
+    // consumer mailbox. Requires the Azure App Registration's "Supported
+    // account types" to allow both (multi-tenant + personal Microsoft
+    // accounts) — already required for multi-tenant to work at all.
+    return `https://login.microsoftonline.com/common/oauth2/v2.0/authorize?${params.toString()}`;
   }
 
   /** Microsoft's tenant-wide admin consent endpoint — a tenant admin visits
@@ -142,12 +182,12 @@ export class OutlookService {
    * permissions — admin consent here only covers the same delegated scopes
    * an individual user could already consent to themselves, just granted
    * once for everyone instead of one at a time. */
-  buildAdminConsentUrl(state: string): string {
-    const clientId = this.config.get<string>('integrations.msGraph.clientId');
+  async buildAdminConsentUrl(state: string): Promise<string> {
+    const { clientId } = await this.resolveAppCredentials();
     const redirectUri = this.config.get<string>('integrations.msGraph.adminConsentRedirectUri');
 
     const params = new URLSearchParams({
-      client_id: clientId ?? '',
+      client_id: clientId,
       redirect_uri: redirectUri ?? '',
       state,
     });
@@ -323,17 +363,20 @@ export class OutlookService {
   }
 
   private tokenEndpoint(): string {
-    return `https://login.microsoftonline.com/organizations/oauth2/v2.0/token`;
+    // Must match buildAuthorizeUrl's authority exactly ("common", not
+    // "organizations" — see that method's own comment) — a token exchange
+    // against a different authority than the one the user actually
+    // consented through fails.
+    return `https://login.microsoftonline.com/common/oauth2/v2.0/token`;
   }
 
   private async exchangeCode(code: string): Promise<TokenResponse> {
-    const clientId = this.config.get<string>('integrations.msGraph.clientId');
-    const clientSecret = this.config.get<string>('integrations.msGraph.clientSecret');
+    const { clientId, clientSecret } = await this.resolveAppCredentials();
     const redirectUri = this.config.get<string>('integrations.msGraph.redirectUri');
 
     const body = new URLSearchParams({
-      client_id: clientId ?? '',
-      client_secret: clientSecret ?? '',
+      client_id: clientId,
+      client_secret: clientSecret,
       grant_type: 'authorization_code',
       code,
       redirect_uri: redirectUri ?? '',

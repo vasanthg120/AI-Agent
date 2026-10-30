@@ -98,13 +98,26 @@ export interface ListDealsResult {
 
 // Provider-agnostic external CRM owner mapping — one row per distinct raw
 // owner id seen across this org's synced deals (see backend deal.schema.ts's
-// comment on externalOwnerRef). `mapping` is null until an admin maps it.
+// comment on externalOwnerRef). `mapping` is null until an admin links it to
+// at least one HaiVE user.
 export interface ExternalOwnerRow {
   provider: string;
   externalOwnerRef: string;
   externalOwnerLabel?: string;
   dealCount: number;
-  mapping: { id: string; ownerId: string; ownerName?: string } | null;
+  mapping: {
+    id: string;
+    // Set only when linkedUserIds has exactly one entry — the one user
+    // whose deals get auto-assigned (now and on future syncs). Undefined
+    // when more than one user is linked — linking is an association, not
+    // automatic ownership, so with 2+ users there is no deal-specific
+    // signal saying which one a given deal belongs to; an admin resolves
+    // each one explicitly via manual/bulk assignment on the table below.
+    ownerId?: string;
+    ownerName?: string;
+    linkedUserIds: string[];
+    linkedUsers: { id: string; name?: string }[];
+  } | null;
   // Best-effort employee match on the CRM's raw label — a suggestion only,
   // never applied until the admin explicitly confirms it (see
   // DealAssignmentSettings.tsx). Absent when no single employee matches.
@@ -147,7 +160,9 @@ export interface UpsertOwnerMappingPayload {
   provider: string;
   externalOwnerRef: string;
   externalOwnerLabel?: string;
-  ownerId: string;
+  // Every HaiVE user to link to this external salesperson — a single-
+  // element array behaves identically to the previous single-owner shape.
+  ownerIds: string[];
 }
 
 // Arrays are sent as a single comma-separated query param (matches

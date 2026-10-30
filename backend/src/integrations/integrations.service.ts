@@ -291,7 +291,7 @@ export class IntegrationsService {
     try {
       const refreshToken = this.encryption.decrypt(doc.refreshTokenEncrypted);
       const oauthMeta = doc.oauthMeta ?? {};
-      let refreshed: { accessToken: string; expiresInSeconds: number; oauthMeta: Record<string, string> };
+      let refreshed: { accessToken: string; expiresInSeconds: number; oauthMeta: Record<string, string>; refreshToken?: string };
 
       if (doc.provider === 'zoho') {
         const base = oauthMeta.accountsServer || this.config.get<string>('integrations.zoho.accountsBaseUrl') || 'https://accounts.zoho.com';
@@ -324,6 +324,70 @@ export class IntegrationsService {
           expiresInSeconds: data.expires_in ?? 3600,
           oauthMeta: { ...oauthMeta, apiDomain: data.api_domain ?? oauthMeta.apiDomain ?? '' },
         };
+      } else if (doc.provider === 'zohobooks') {
+        // Same mechanics as the 'zoho' (CRM) branch above — same regional
+        // data-center handling, same refresh token reuse (Zoho's refresh
+        // tokens are long-lived and NOT rotated, unlike Xero below) — but a
+        // fully separate app-credential row (doc.oauthClientId/
+        // oauthClientSecretEncrypted here belong to THIS document, provider
+        // 'zohobooks', never the organization's Zoho CRM row).
+        const base = oauthMeta.accountsServer || this.config.get<string>('integrations.zohobooks.accountsBaseUrl') || 'https://accounts.zoho.com';
+        const clientId = doc.oauthClientId || this.config.get<string>('integrations.zohobooks.clientId') || '';
+        const clientSecret = doc.oauthClientSecretEncrypted
+          ? this.encryption.decrypt(doc.oauthClientSecretEncrypted)
+          : this.config.get<string>('integrations.zohobooks.clientSecret') || '';
+        const { data } = await firstValueFrom(
+          this.http.post<{ access_token?: string; expires_in?: number; api_domain?: string; error?: string }>(
+            `${base.replace(/\/$/, '')}/oauth/v2/token`,
+            new URLSearchParams({
+              grant_type: 'refresh_token',
+              refresh_token: refreshToken,
+              client_id: clientId,
+              client_secret: clientSecret,
+            }).toString(),
+            { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } },
+          ),
+        );
+        if (!data.access_token) throw new Error(data.error ?? 'Zoho Books did not return an access token');
+        refreshed = {
+          accessToken: data.access_token,
+          expiresInSeconds: data.expires_in ?? 3600,
+          // Deliberately NOT the 'apiDomain' key the 'zoho' (CRM) branch
+          // above uses — resolveAuth's baseUrl fallback below checks that
+          // key first and would otherwise resolve Zoho Books requests to
+          // the bare apiDomain root (missing the /books/v3 path) instead of
+          // this provider's own derived URL.
+          oauthMeta: { ...oauthMeta, booksApiDomain: data.api_domain ?? oauthMeta.booksApiDomain ?? '' },
+        };
+      } else if (doc.provider === 'zohopayroll') {
+        // Same mechanics as 'zohobooks' above (own app-credential row,
+        // non-rotating refresh token) — own oauthMeta key (payrollApiDomain,
+        // not apiDomain/booksApiDomain) for the same reason: resolveAuth's
+        // baseUrl fallback chain below checks each key in order and would
+        // otherwise resolve to the wrong provider's derived URL shape.
+        const base = oauthMeta.accountsServer || this.config.get<string>('integrations.zohopayroll.accountsBaseUrl') || 'https://accounts.zoho.com';
+        const clientId = doc.oauthClientId || this.config.get<string>('integrations.zohopayroll.clientId') || '';
+        const clientSecret = doc.oauthClientSecretEncrypted
+          ? this.encryption.decrypt(doc.oauthClientSecretEncrypted)
+          : this.config.get<string>('integrations.zohopayroll.clientSecret') || '';
+        const { data } = await firstValueFrom(
+          this.http.post<{ access_token?: string; expires_in?: number; api_domain?: string; error?: string }>(
+            `${base.replace(/\/$/, '')}/oauth/v2/token`,
+            new URLSearchParams({
+              grant_type: 'refresh_token',
+              refresh_token: refreshToken,
+              client_id: clientId,
+              client_secret: clientSecret,
+            }).toString(),
+            { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } },
+          ),
+        );
+        if (!data.access_token) throw new Error(data.error ?? 'Zoho Payroll did not return an access token');
+        refreshed = {
+          accessToken: data.access_token,
+          expiresInSeconds: data.expires_in ?? 3600,
+          oauthMeta: { ...oauthMeta, payrollApiDomain: data.api_domain ?? oauthMeta.payrollApiDomain ?? '' },
+        };
       } else if (doc.provider === 'salesforce') {
         const base = oauthMeta.authBaseUrl || this.config.get<string>('integrations.salesforce.authBaseUrl') || 'https://login.salesforce.com';
         const { data } = await firstValueFrom(
@@ -346,6 +410,59 @@ export class IntegrationsService {
           expiresInSeconds: 7200,
           oauthMeta: { ...oauthMeta, instanceUrl: data.instance_url ?? oauthMeta.instanceUrl ?? '' },
         };
+      } else if (doc.provider === 'xero') {
+        // Platform-wide app only (see configuration.ts's integrations.xero
+        // comment) — same DB-first, env-fallback precedence Gmail uses, no
+        // per-org app lookup since Xero has nothing like Zoho's per-region
+        // app-registry fragmentation to justify one.
+        const saved = await this.resolveOAuthAppCredentials('platform', 'xero');
+        const clientId = saved?.clientId || this.config.get<string>('integrations.xero.clientId') || '';
+        const clientSecret = saved?.clientSecret || this.config.get<string>('integrations.xero.clientSecret') || '';
+        const { data } = await firstValueFrom(
+          this.http.post<{ access_token?: string; refresh_token?: string; expires_in?: number; error?: string }>(
+            'https://identity.xero.com/connect/token',
+            new URLSearchParams({
+              grant_type: 'refresh_token',
+              refresh_token: refreshToken,
+              client_id: clientId,
+              client_secret: clientSecret,
+            }).toString(),
+            { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } },
+          ),
+        );
+        if (!data.access_token) throw new Error(data.error ?? 'Xero did not return an access token');
+        refreshed = {
+          accessToken: data.access_token,
+          // Xero rotates refresh tokens on every use — the old one is
+          // invalid the moment this response arrives, so it MUST be
+          // overwritten in storage below, unlike Zoho/Salesforce above
+          // (whose refresh tokens are long-lived and reused as-is).
+          refreshToken: data.refresh_token,
+          expiresInSeconds: data.expires_in ?? 1800,
+          oauthMeta,
+        };
+      } else if (doc.provider === 'myob') {
+        // Platform-wide app, same reasoning as Xero — MYOB has no regional
+        // app-registry fragmentation. Token/refresh share one endpoint per
+        // MYOB's own docs (confirmed live, not assumed): POST here with
+        // grant_type=refresh_token instead of authorization_code.
+        const saved = await this.resolveOAuthAppCredentials('platform', 'myob');
+        const clientId = saved?.clientId || this.config.get<string>('integrations.myob.clientId') || '';
+        const clientSecret = saved?.clientSecret || this.config.get<string>('integrations.myob.clientSecret') || '';
+        const { data } = await firstValueFrom(
+          this.http.post<{ access_token?: string; expires_in?: number; error?: string }>(
+            'https://secure.myob.com/oauth2/v1/authorize',
+            new URLSearchParams({
+              grant_type: 'refresh_token',
+              refresh_token: refreshToken,
+              client_id: clientId,
+              client_secret: clientSecret,
+            }).toString(),
+            { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } },
+          ),
+        );
+        if (!data.access_token) throw new Error(data.error ?? 'MYOB did not return an access token');
+        refreshed = { accessToken: data.access_token, expiresInSeconds: data.expires_in ?? 1200, oauthMeta };
       } else {
         return null;
       }
@@ -357,6 +474,7 @@ export class IntegrationsService {
             credentialsEncrypted: this.encryption.encrypt(JSON.stringify({ accessToken: refreshed.accessToken })),
             tokenExpiresAt: new Date(Date.now() + refreshed.expiresInSeconds * 1000),
             oauthMeta: refreshed.oauthMeta,
+            ...(refreshed.refreshToken ? { refreshTokenEncrypted: this.encryption.encrypt(refreshed.refreshToken) } : {}),
           },
         },
       );
@@ -430,6 +548,29 @@ export class IntegrationsService {
     }));
   }
 
+  /** Narrow $set of specific oauthMeta sub-fields without touching the rest
+   * of an oauth2 credential row (or re-sending the access/refresh tokens) —
+   * used for a 2-step OAuth connect where one detail is only decided after
+   * the initial token exchange (currently: Xero's post-connect "which
+   * organisation" tenant selection, see xero.service.ts). */
+  async mergeOAuthMeta(organizationId: string, provider: string, patch: Record<string, string>): Promise<void> {
+    const sets: Record<string, string> = {};
+    for (const [key, value] of Object.entries(patch)) sets[`oauthMeta.${key}`] = value;
+    await this.credentialModel.updateOne({ organizationId, provider }, { $set: sets });
+  }
+
+  /** Saves (or replaces) a provider's secondary credential pair — currently
+   * only MYOB's company-file username/password (see myob.service.ts).
+   * Narrow $set, same reasoning as mergeOAuthMeta above: never touches the
+   * primary oauth2 token/refresh fields, so entering/replacing this doesn't
+   * disturb an otherwise-working connection. */
+  async saveSecondaryCredentials(organizationId: string, provider: string, creds: { username: string; password: string }): Promise<void> {
+    await this.credentialModel.updateOne(
+      { organizationId, provider },
+      { $set: { secondaryCredentialsEncrypted: this.encryption.encrypt(JSON.stringify(creds)) } },
+    );
+  }
+
   async disconnect(organizationId: string, provider: string): Promise<void> {
     this.assertAllowed(provider);
     await this.credentialModel.deleteOne({ organizationId, provider });
@@ -498,7 +639,21 @@ export class IntegrationsService {
   async resolveAuth(
     organizationId: string,
     provider: string,
-  ): Promise<{ integrationId: Types.ObjectId; authType: AuthType; credentials: AuthCredentials; baseUrl?: string } | null> {
+  ): Promise<{
+    integrationId: Types.ObjectId;
+    authType: AuthType;
+    credentials: AuthCredentials;
+    baseUrl?: string;
+    // oauth2 only — provider-specific values a caller may need beyond the
+    // standard Authorization header (e.g. Xero's required Xero-tenant-id
+    // header; see dynamic-executor.service.ts). Absent for every other
+    // authType, same as the underlying schema field.
+    oauthMeta?: Record<string, string>;
+    // Decrypted secondary credential pair (currently only MYOB's
+    // company-file username/password — see saveSecondaryCredentials above).
+    // Absent whenever secondaryCredentialsEncrypted hasn't been set yet.
+    secondaryCredentials?: { username: string; password: string };
+  } | null> {
     const doc = await this.credentialModel.findOne({ organizationId, provider });
     if (!doc) return null;
     if (doc.authType === 'oauth2') {
@@ -507,7 +662,21 @@ export class IntegrationsService {
         integrationId: doc._id,
         authType: doc.authType,
         credentials: { accessToken: accessToken ?? undefined },
-        baseUrl: doc.oauthMeta?.apiDomain || doc.oauthMeta?.instanceUrl || doc.baseUrl,
+        // Zoho Books derives its own baseUrl from booksApiDomain (kept
+        // separate from the 'zoho' CRM branch's apiDomain key above —
+        // Books needs the /books/v3 path appended, CRM does not) so a
+        // refresh that learns a new api_domain is reflected immediately,
+        // same as apiDomain/instanceUrl above.
+        baseUrl:
+          doc.oauthMeta?.apiDomain ||
+          doc.oauthMeta?.instanceUrl ||
+          (doc.oauthMeta?.booksApiDomain ? `${doc.oauthMeta.booksApiDomain.replace(/\/$/, '')}/books/v3` : undefined) ||
+          (doc.oauthMeta?.payrollApiDomain ? `${doc.oauthMeta.payrollApiDomain.replace(/\/$/, '')}/payroll/v1` : undefined) ||
+          doc.baseUrl,
+        oauthMeta: doc.oauthMeta,
+        secondaryCredentials: doc.secondaryCredentialsEncrypted
+          ? (JSON.parse(this.encryption.decrypt(doc.secondaryCredentialsEncrypted)) as { username: string; password: string })
+          : undefined,
       };
     }
     if (doc.authType) {

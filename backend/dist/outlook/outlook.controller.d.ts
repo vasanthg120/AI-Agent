@@ -16,16 +16,16 @@ export declare class OutlookController {
     }[]>;
     getCalendarEvents(): Promise<never[]>;
     getContacts(): Promise<never[]>;
-    getConnectUrl(user: JwtPayload): {
+    getConnectUrl(user: JwtPayload): Promise<{
         url: string;
-    };
+    }>;
     callback(code?: string, state?: string, error?: string, errorDescription?: string): Promise<{
         url: string;
         statusCode: number;
     }>;
-    getAdminConsentUrl(user: JwtPayload): {
+    getAdminConsentUrl(user: JwtPayload): Promise<{
         url: string;
-    };
+    }>;
     adminConsentCallback(tenant?: string, adminConsent?: string, state?: string, error?: string, errorDescription?: string): Promise<{
         url: string;
         statusCode: number;

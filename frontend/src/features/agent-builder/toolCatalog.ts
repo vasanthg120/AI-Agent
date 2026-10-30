@@ -1,4 +1,4 @@
-// Groups the same 18 real python-agent tool identifiers TOOL_PICKER_OPTIONS
+// Groups the same real python-agent tool identifiers TOOL_PICKER_OPTIONS
 // (frontend/src/features/chat/toolPickerOptions.ts) already lists — by
 // system, for the Access & Permissions / Tools & Capabilities steps. Not a
 // second source of truth: every `name` here is one of those exact ids,
@@ -13,7 +13,10 @@ export interface ToolCatalogItem {
   sensitive?: boolean;
   // Which org-level connection this depends on, if any — used by the
   // Access step to show real connection status (undefined = always
-  // available, no external account required).
+  // available, no external account required). Not extended for the
+  // 'integrations' system below — it covers any number of providers
+  // (Xero/Zoho Books/MYOB/Zoho Payroll/custom REST), not one fixed
+  // connection this step already knows how to status-check.
   provider?: 'outlook' | 'gmail' | 'crm' | 'gorilladash' | 'zapier';
 }
 
@@ -79,6 +82,16 @@ export const TOOL_SYSTEMS: ToolSystem[] = [
     description:
       'The apps connected in your Zapier account (e.g. Hoops, Gorilla Dash): see what each offers and run the actions an admin enabled — anything that changes data is always confirmed with you first.',
     tools: [{ name: 'zapier', label: 'Use Zapier app actions', provider: 'zapier', sensitive: true }],
+  },
+  {
+    id: 'integrations',
+    label: 'Connected Integrations',
+    description:
+      'Any system an admin has connected on the Integrations page — Xero, Zoho Books, MYOB, Zoho Payroll, Salesforce/HubSpot custom endpoints, or any other custom REST connection. One org-wide connection serves every authorised person and role; this only controls whether THIS role may use it.',
+    tools: [
+      { name: 'integration_capabilities', label: 'See what’s connected and what it offers' },
+      { name: 'integration_execute', label: 'Read/act on connected integrations', sensitive: true },
+    ],
   },
   {
     id: 'knowledge',

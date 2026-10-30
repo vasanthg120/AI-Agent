@@ -50,4 +50,40 @@ export const adminIntegrationsService = {
   async saveGmailAppCredentials(payload: { clientId: string; clientSecret: string }): Promise<void> {
     await adminAxiosClient.post('/integrations/admin/gmail/app-credentials', payload);
   },
+
+  // Xero's own developer-portal app — same shape as Gmail's pair above, for
+  // the same reason (one platform-wide app, not a per-organization one).
+  async getXeroAppCredentialsStatus(): Promise<{ configured: boolean; clientId?: string; clientSecretMasked?: string }> {
+    const { data } = await adminAxiosClient.get('/integrations/admin/xero/app-credentials');
+    return data;
+  },
+
+  async saveXeroAppCredentials(payload: { clientId: string; clientSecret: string }): Promise<void> {
+    await adminAxiosClient.post('/integrations/admin/xero/app-credentials', payload);
+  },
+
+  // MYOB's own developer-portal app — same platform-wide shape as Xero's
+  // pair above. Separate from the per-connection company-file credential
+  // pair every organization enters for itself (see myobService.ts) — this
+  // is only the OAuth client Haive registers once with MYOB.
+  async getMyobAppCredentialsStatus(): Promise<{ configured: boolean; clientId?: string; clientSecretMasked?: string }> {
+    const { data } = await adminAxiosClient.get('/integrations/admin/myob/app-credentials');
+    return data;
+  },
+
+  async saveMyobAppCredentials(payload: { clientId: string; clientSecret: string }): Promise<void> {
+    await adminAxiosClient.post('/integrations/admin/myob/app-credentials', payload);
+  },
+
+  // Outlook's Azure App Registration — same platform-wide shape as Gmail's
+  // pair above. Removes the need for MS_GRAPH_CLIENT_SECRET in the backend's
+  // .env, which is now only a backward-compatible fallback.
+  async getOutlookAppCredentialsStatus(): Promise<{ configured: boolean; clientId?: string; clientSecretMasked?: string }> {
+    const { data } = await adminAxiosClient.get('/integrations/admin/outlook/app-credentials');
+    return data;
+  },
+
+  async saveOutlookAppCredentials(payload: { clientId: string; clientSecret: string }): Promise<void> {
+    await adminAxiosClient.post('/integrations/admin/outlook/app-credentials', payload);
+  },
 };

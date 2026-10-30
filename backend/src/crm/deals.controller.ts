@@ -132,12 +132,17 @@ export class DealsController {
   @UseGuards(RolesGuard)
   @Roles('owner', 'admin')
   upsertOwnerMapping(@CurrentUser() user: JwtPayload, @Body() dto: UpsertDealOwnerMappingDto) {
+    // ownerIds (new, multi-user) takes precedence when both are somehow
+    // sent; ownerId alone (the original, still-accepted shape) behaves
+    // identically to a one-element ownerIds array.
+    const ownerIds = dto.ownerIds?.length ? dto.ownerIds : dto.ownerId ? [dto.ownerId] : [];
+    if (ownerIds.length === 0) throw new BadRequestException('Provide ownerId or ownerIds.');
     return this.dealOwnerMappingService.upsertMapping(
       user.organizationId,
       dto.provider,
       dto.externalOwnerRef,
       dto.externalOwnerLabel,
-      dto.ownerId,
+      ownerIds,
       user.sub,
     );
   }

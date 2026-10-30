@@ -24,7 +24,7 @@ import { ADMIN_ROUTES } from '@/constants/routes';
 import integrationsStyles from '../integrations/IntegrationsPage.module.css';
 import shared from './adminShared.module.css';
 
-type TabId = 'company' | 'taxes' | 'migration' | 'aiProvider' | 'providerPricing' | 'gmailOAuth';
+type TabId = 'company' | 'taxes' | 'migration' | 'aiProvider' | 'providerPricing' | 'gmailOAuth' | 'outlookOAuth' | 'xeroOAuth' | 'myobOAuth';
 const TABS: { id: TabId; label: string }[] = [
   { id: 'company', label: 'Company & Invoicing' },
   { id: 'taxes', label: 'Tax Rates' },
@@ -32,6 +32,9 @@ const TABS: { id: TabId; label: string }[] = [
   { id: 'aiProvider', label: 'AI Provider' },
   { id: 'providerPricing', label: 'Provider Pricing' },
   { id: 'gmailOAuth', label: 'Gmail OAuth' },
+  { id: 'outlookOAuth', label: 'Outlook OAuth' },
+  { id: 'xeroOAuth', label: 'Xero OAuth' },
+  { id: 'myobOAuth', label: 'MYOB OAuth' },
 ];
 
 function CompanySettingsTab() {
@@ -784,6 +787,332 @@ function GmailOAuthTab() {
   );
 }
 
+// Outlook's Azure App Registration — same shape as GmailOAuthTab above (one
+// platform-wide Client ID/Secret pair every organization's Outlook mailbox
+// connections authorize against). Removes the need for MS_GRAPH_CLIENT_SECRET
+// in the backend's .env, which is now only a backward-compatible fallback
+// (see outlook.service.ts's resolveAppCredentials).
+function OutlookOAuthTab() {
+  const [status, setStatus] = useState<{ configured: boolean; clientId?: string } | 'loading' | 'error'>('loading');
+  const [modalOpen, setModalOpen] = useState(false);
+  const [clientId, setClientId] = useState('');
+  const [clientSecret, setClientSecret] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  const load = () => {
+    adminIntegrationsService
+      .getOutlookAppCredentialsStatus()
+      .then(setStatus)
+      .catch((error) => {
+        setStatus('error');
+        toast.error(extractErrorMessage(error));
+      });
+  };
+
+  useEffect(load, []);
+
+  const openModal = () => {
+    setClientId('');
+    setClientSecret('');
+    setModalOpen(true);
+  };
+
+  const save = async () => {
+    if (clientId.trim().length < 10 || clientSecret.trim().length < 10) {
+      toast.error('Enter both the Application (Client) ID and Client Secret.');
+      return;
+    }
+    setSaving(true);
+    try {
+      await adminIntegrationsService.saveOutlookAppCredentials({ clientId: clientId.trim(), clientSecret: clientSecret.trim() });
+      toast.success('Outlook OAuth app saved — every organization can now connect Outlook.');
+      setModalOpen(false);
+      setClientSecret('');
+      load();
+    } catch (error) {
+      toast.error(extractErrorMessage(error));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const configured = status !== 'loading' && status !== 'error' && status.configured;
+
+  return (
+    <div style={{ maxWidth: 420 }}>
+      <Card className={integrationsStyles.card}>
+        <div className={integrationsStyles.cardHeader}>
+          <span className={integrationsStyles.logoTile}>
+            <img src="/integrations/outlook.svg" alt="" />
+          </span>
+          <div className={integrationsStyles.cardTitleRow}>
+            <div className={integrationsStyles.cardName}>Outlook OAuth App</div>
+            <div className={integrationsStyles.cardCategory}>Azure App Registration</div>
+          </div>
+          {status === 'loading' && <Badge variant="neutral">Checking...</Badge>}
+          {status === 'error' && <Badge variant="danger" dot>Error</Badge>}
+          {status !== 'loading' && status !== 'error' && (
+            <Badge variant={configured ? 'success' : 'neutral'} dot>
+              {configured ? 'Configured' : 'Not configured'}
+            </Badge>
+          )}
+        </div>
+        <p className={integrationsStyles.cardDescription}>
+          The one Azure App Registration every organization's Outlook mailbox connections authorize against. Without
+          this configured (here or via the legacy MS_GRAPH_CLIENT_ID/SECRET environment variables), "Connect Outlook"
+          on the customer Settings → Integrations page tells users to contact an administrator instead of attempting
+          to connect.
+        </p>
+        {configured && status !== 'loading' && status !== 'error' && (
+          <div className={integrationsStyles.keyPreview}>Client ID: {status.clientId}</div>
+        )}
+        <div className={integrationsStyles.cardFooter}>
+          <Button size="sm" leftIcon={<FiKey />} onClick={openModal}>
+            {configured ? 'Replace Credentials' : 'Connect'}
+          </Button>
+        </div>
+      </Card>
+
+      <Modal
+        open={modalOpen}
+        onClose={() => setModalOpen(false)}
+        title="Outlook OAuth App"
+        description="From the Azure Portal → App registrations → your app → Certificates & secrets, create a new client secret and copy its Value (not the Secret ID) immediately — Azure only shows it once. The secret is encrypted at rest and never shown again after saving here."
+      >
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
+          <Input label="Application (Client) ID" value={clientId} onChange={(e) => setClientId(e.target.value)} autoFocus />
+          <Input label="Client Secret Value" type="password" value={clientSecret} onChange={(e) => setClientSecret(e.target.value)} leftIcon={<FiKey />} />
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 'var(--space-2)' }}>
+            <Button variant="ghost" onClick={() => setModalOpen(false)}>
+              Cancel
+            </Button>
+            <Button loading={saving} onClick={save}>
+              Save
+            </Button>
+          </div>
+        </div>
+      </Modal>
+    </div>
+  );
+}
+
+// Xero's own developer-portal app — same shape as GmailOAuthTab above (one
+// platform-wide Client ID/Secret pair every organization's Xero connection
+// authorizes against), copied rather than generalized into a shared
+// component since the two differ slightly in copy/icon and there are only
+// two of them so far.
+function XeroOAuthTab() {
+  const [status, setStatus] = useState<{ configured: boolean; clientId?: string } | 'loading' | 'error'>('loading');
+  const [modalOpen, setModalOpen] = useState(false);
+  const [clientId, setClientId] = useState('');
+  const [clientSecret, setClientSecret] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  const load = () => {
+    adminIntegrationsService
+      .getXeroAppCredentialsStatus()
+      .then(setStatus)
+      .catch((error) => {
+        setStatus('error');
+        toast.error(extractErrorMessage(error));
+      });
+  };
+
+  useEffect(load, []);
+
+  const openModal = () => {
+    setClientId('');
+    setClientSecret('');
+    setModalOpen(true);
+  };
+
+  const save = async () => {
+    if (clientId.trim().length < 10 || clientSecret.trim().length < 10) {
+      toast.error('Enter both the Client ID and Client Secret.');
+      return;
+    }
+    setSaving(true);
+    try {
+      await adminIntegrationsService.saveXeroAppCredentials({ clientId: clientId.trim(), clientSecret: clientSecret.trim() });
+      toast.success('Xero OAuth app saved — every organization can now connect Xero.');
+      setModalOpen(false);
+      setClientSecret('');
+      load();
+    } catch (error) {
+      toast.error(extractErrorMessage(error));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const configured = status !== 'loading' && status !== 'error' && status.configured;
+
+  return (
+    <div style={{ maxWidth: 420 }}>
+      <Card className={integrationsStyles.card}>
+        <div className={integrationsStyles.cardHeader}>
+          <span className={integrationsStyles.logoTile}>
+            <img src="/integrations/xero.svg" alt="" />
+          </span>
+          <div className={integrationsStyles.cardTitleRow}>
+            <div className={integrationsStyles.cardName}>Xero OAuth App</div>
+            <div className={integrationsStyles.cardCategory}>Xero Developer Portal</div>
+          </div>
+          {status === 'loading' && <Badge variant="neutral">Checking...</Badge>}
+          {status === 'error' && <Badge variant="danger" dot>Error</Badge>}
+          {status !== 'loading' && status !== 'error' && (
+            <Badge variant={configured ? 'success' : 'neutral'} dot>
+              {configured ? 'Configured' : 'Not configured'}
+            </Badge>
+          )}
+        </div>
+        <p className={integrationsStyles.cardDescription}>
+          The one Xero Developer app every organization's Accounting → Xero connection authorizes against. Without this
+          configured, "Connect" on the customer Settings → Integrations page tells users to contact an administrator
+          instead of attempting to connect.
+        </p>
+        {configured && status !== 'loading' && status !== 'error' && (
+          <div className={integrationsStyles.keyPreview}>Client ID: {status.clientId}</div>
+        )}
+        <div className={integrationsStyles.cardFooter}>
+          <Button size="sm" leftIcon={<FiKey />} onClick={openModal}>
+            {configured ? 'Replace Credentials' : 'Connect'}
+          </Button>
+        </div>
+      </Card>
+
+      <Modal
+        open={modalOpen}
+        onClose={() => setModalOpen(false)}
+        title="Xero OAuth App"
+        description="From the Xero Developer Portal (developer.xero.com) → My Apps, a Web app OAuth client with the Accounting API scopes enabled. The Client Secret is encrypted at rest and never shown again after saving."
+      >
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
+          <Input label="Client ID" value={clientId} onChange={(e) => setClientId(e.target.value)} autoFocus />
+          <Input label="Client Secret" type="password" value={clientSecret} onChange={(e) => setClientSecret(e.target.value)} leftIcon={<FiKey />} />
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 'var(--space-2)' }}>
+            <Button variant="ghost" onClick={() => setModalOpen(false)}>
+              Cancel
+            </Button>
+            <Button loading={saving} onClick={save}>
+              Save
+            </Button>
+          </div>
+        </div>
+      </Modal>
+    </div>
+  );
+}
+
+// MYOB's own developer-portal app — same platform-wide shape as
+// XeroOAuthTab above. This is only the OAuth client Haive registers once
+// with MYOB; it's unrelated to the company-file username/password every
+// organization enters for itself after connecting (see myob.service.ts's
+// saveCompanyFileCredentials — that pair is per-organization and never
+// touches this platform-wide one).
+function MyobOAuthTab() {
+  const [status, setStatus] = useState<{ configured: boolean; clientId?: string } | 'loading' | 'error'>('loading');
+  const [modalOpen, setModalOpen] = useState(false);
+  const [clientId, setClientId] = useState('');
+  const [clientSecret, setClientSecret] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  const load = () => {
+    adminIntegrationsService
+      .getMyobAppCredentialsStatus()
+      .then(setStatus)
+      .catch((error) => {
+        setStatus('error');
+        toast.error(extractErrorMessage(error));
+      });
+  };
+
+  useEffect(load, []);
+
+  const openModal = () => {
+    setClientId('');
+    setClientSecret('');
+    setModalOpen(true);
+  };
+
+  const save = async () => {
+    if (clientId.trim().length < 10 || clientSecret.trim().length < 10) {
+      toast.error('Enter both the Client ID and Client Secret.');
+      return;
+    }
+    setSaving(true);
+    try {
+      await adminIntegrationsService.saveMyobAppCredentials({ clientId: clientId.trim(), clientSecret: clientSecret.trim() });
+      toast.success('MYOB OAuth app saved — every organization can now connect MYOB.');
+      setModalOpen(false);
+      setClientSecret('');
+      load();
+    } catch (error) {
+      toast.error(extractErrorMessage(error));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const configured = status !== 'loading' && status !== 'error' && status.configured;
+
+  return (
+    <div style={{ maxWidth: 420 }}>
+      <Card className={integrationsStyles.card}>
+        <div className={integrationsStyles.cardHeader}>
+          <span className={integrationsStyles.logoTile}>
+            <img src="/integrations/myob.svg" alt="" />
+          </span>
+          <div className={integrationsStyles.cardTitleRow}>
+            <div className={integrationsStyles.cardName}>MYOB OAuth App</div>
+            <div className={integrationsStyles.cardCategory}>MYOB Developer Portal</div>
+          </div>
+          {status === 'loading' && <Badge variant="neutral">Checking...</Badge>}
+          {status === 'error' && <Badge variant="danger" dot>Error</Badge>}
+          {status !== 'loading' && status !== 'error' && (
+            <Badge variant={configured ? 'success' : 'neutral'} dot>
+              {configured ? 'Configured' : 'Not configured'}
+            </Badge>
+          )}
+        </div>
+        <p className={integrationsStyles.cardDescription}>
+          The one MYOB Developer app every organization's Accounting → MYOB connection authorizes against. Without this
+          configured, "Connect" on the customer Settings → Integrations page tells users to contact an administrator
+          instead of attempting to connect.
+        </p>
+        {configured && status !== 'loading' && status !== 'error' && (
+          <div className={integrationsStyles.keyPreview}>Client ID: {status.clientId}</div>
+        )}
+        <div className={integrationsStyles.cardFooter}>
+          <Button size="sm" leftIcon={<FiKey />} onClick={openModal}>
+            {configured ? 'Replace Credentials' : 'Connect'}
+          </Button>
+        </div>
+      </Card>
+
+      <Modal
+        open={modalOpen}
+        onClose={() => setModalOpen(false)}
+        title="MYOB OAuth App"
+        description="From the MYOB Developer Portal (developer.myob.com) → My Apps, a client registered for the AccountRight API. Redirect URI must be https:// per MYOB's own requirement. The Client Secret is encrypted at rest and never shown again after saving."
+      >
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
+          <Input label="Client ID" value={clientId} onChange={(e) => setClientId(e.target.value)} autoFocus />
+          <Input label="Client Secret" type="password" value={clientSecret} onChange={(e) => setClientSecret(e.target.value)} leftIcon={<FiKey />} />
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 'var(--space-2)' }}>
+            <Button variant="ghost" onClick={() => setModalOpen(false)}>
+              Cancel
+            </Button>
+            <Button loading={saving} onClick={save}>
+              Save
+            </Button>
+          </div>
+        </div>
+      </Modal>
+    </div>
+  );
+}
+
 const emptyProviderPricingForm: CreateProviderPricingPayload & { marginMode: 'global' | 'override' } = {
   provider: '',
   model: '',
@@ -1019,6 +1348,9 @@ export function AdminSettingsPage() {
       {tab === 'aiProvider' && <AiProviderTab />}
       {tab === 'providerPricing' && <ProviderPricingTab />}
       {tab === 'gmailOAuth' && <GmailOAuthTab />}
+      {tab === 'outlookOAuth' && <OutlookOAuthTab />}
+      {tab === 'xeroOAuth' && <XeroOAuthTab />}
+      {tab === 'myobOAuth' && <MyobOAuthTab />}
     </div>
   );
 }

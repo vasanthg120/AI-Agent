@@ -66,7 +66,65 @@ export class DynamicExecutorService {
     // than left to object-spread order accidentally.
     const staticHeaders = Object.fromEntries((endpoint.headers ?? []).map((h) => [h.name, h.value]));
     const authHeaders = buildAuthHeaders(auth.authType, auth.credentials);
-    const headers = { ...staticHeaders, ...authHeaders };
+    // Xero requires this header on every API call in addition to the
+    // standard Authorization: Bearer — unlike Zoho/Salesforce, where the
+    // per-customer API host itself differs (resolved into baseUrl above),
+    // Xero has one fixed global host and distinguishes tenants by this
+    // header instead. Scoped narrowly to this one provider; every other
+    // oauth2 provider's auth.oauthMeta is simply ignored here.
+    const providerHeaders = provider === 'xero' && auth.oauthMeta?.tenantId ? { 'Xero-tenant-id': auth.oauthMeta.tenantId } : {};
+    // Zoho's API rejects the generic 'Bearer <token>' scheme buildAuthHeaders
+    // uses by default for every other oauth2 provider — it specifically
+    // requires 'Zoho-oauthtoken <token>' (see auth-methods.ts's own comment
+    // on this). Zoho CRM's real sync calls never reach this generic path
+    // (crm_adapters.py builds its own correct header in Python), but Zoho
+    // Books has no such separate path — every real Books request DOES go
+    // through here — so this override is load-bearing for Books, and a
+    // correctness fix (not a behavior change) for any admin-configured
+    // custom Zoho CRM endpoint too.
+    const authOverride =
+      (provider === 'zoho' || provider === 'zohobooks' || provider === 'zohopayroll') && auth.authType === 'oauth2' && auth.credentials.accessToken
+        ? { Authorization: `Zoho-oauthtoken ${auth.credentials.accessToken}` }
+        : {};
+    // MYOB needs three headers beyond Authorization: Bearer, confirmed from
+    // MYOB's own current docs (developer.myob.com) — x-myobapi-key (the
+    // OAuth client id, stored at connect time since it's needed again on
+    // every later call, not just the original authorize request) and the
+    // fixed x-myobapi-version, plus x-myobapi-cftoken: a SEPARATE
+    // company-file username/password pair (never the OAuth token), Base64
+    // "username:password" — see myob.service.ts/IntegrationsService.
+    // saveSecondaryCredentials. Omitted entirely until that second
+    // credential pair has actually been entered, so a half-finished MYOB
+    // connection fails with a clear 401 from MYOB rather than a malformed
+    // header.
+    const myobHeaders =
+      provider === 'myob' && auth.oauthMeta?.myobClientId
+        ? {
+            'x-myobapi-key': auth.oauthMeta.myobClientId,
+            'x-myobapi-version': 'v2',
+            ...(auth.secondaryCredentials
+              ? { 'x-myobapi-cftoken': Buffer.from(`${auth.secondaryCredentials.username}:${auth.secondaryCredentials.password}`).toString('base64') }
+              : {}),
+          }
+        : {};
+    const headers = { ...staticHeaders, ...authHeaders, ...providerHeaders, ...authOverride, ...myobHeaders };
+
+    // Zoho Books/Zoho Payroll both require organization_id on every API call
+    // (which "organisation" within the connected Zoho account to read/write
+    // — see zohobooks.service.ts/zohopayroll.service.ts's post-connect
+    // selection) — a query param, not a header, so it's injected here
+    // rather than alongside Xero's header above. An endpoint-supplied
+    // organization_id (if the admin configured one explicitly) is never
+    // overridden. The two providers' selected org ids live under different
+    // oauthMeta keys (booksOrganizationId/payrollOrganizationId), so a
+    // connection to one never leaks its org id into a call for the other.
+    const providerQuery =
+      provider === 'zohobooks' && auth.oauthMeta?.booksOrganizationId
+        ? { organization_id: auth.oauthMeta.booksOrganizationId }
+        : provider === 'zohopayroll' && auth.oauthMeta?.payrollOrganizationId
+          ? { organization_id: auth.oauthMeta.payrollOrganizationId }
+          : {};
+    const query = { ...providerQuery, ...params.query };
 
     const integrationId = auth.integrationId.toString();
     const endpointId = (endpoint._id as { toString(): string }).toString();
@@ -77,7 +135,7 @@ export class DynamicExecutorService {
           method: endpoint.method,
           url,
           headers,
-          params: params.query,
+          params: query,
           data: params.body,
           timeout: endpoint.timeoutMs ?? 15_000,
         }),

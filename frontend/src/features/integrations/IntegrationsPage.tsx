@@ -36,10 +36,15 @@ import {
   type TenantAuthorizationStatus,
   type TestConnectionResult,
 } from '@/services/integrationsService';
-import { crmIntegrationsService, type CrmIntegration } from '@/services/crmIntegrationsService';
+import { crmIntegrationsService, integrationErrorOf, type CrmIntegration } from '@/services/crmIntegrationsService';
+import { xeroService, type XeroStatus, type XeroTenantOption } from '@/services/xeroService';
+import { zohoBooksService, type ZohoBooksAppStatus, type ZohoBooksOrgOption, type ZohoBooksStatus } from '@/services/zohoBooksService';
+import { zohoPayrollService, type ZohoPayrollAppStatus, type ZohoPayrollOrgOption, type ZohoPayrollStatus } from '@/services/zohoPayrollService';
+import { myobService, type MyobStatus } from '@/services/myobService';
 import { formatRelativeTime } from '@/utils/date';
 import { extractErrorMessage } from '@/utils/errors';
 import { isAiRoleAccount, isSalesperson } from '@/utils/access';
+import { isAdmin } from '@/utils/roles';
 import { usersService, type AdminUser } from '@/services/usersService';
 import { useAuthStore } from '@/stores/authStore';
 import { CrmManageModal } from './CrmManageModal';
@@ -101,6 +106,21 @@ const pluralOf = (word: string) => (/(s|x|ch|sh)$/i.test(word) ? `${word}es` : /
 
 export function IntegrationsPage() {
   const currentUser = useAuthStore((state) => state.user);
+  // Connecting/managing CRM, accounting, payroll and custom integrations is
+  // owner/admin-only on the backend (crm-integrations.controller.ts,
+  // integrations.controller.ts, and every provider-specific controller
+  // built this session all gate connect/disconnect/status behind
+  // @Roles('owner'|'admin')) — and UsersSettings.tsx's own role table
+  // already documents this ("Users, AI roles, integrations and other
+  // settings" under every non-admin role's "cannot" list). Gating the
+  // sections here too means a manager/consultant never sees a section they
+  // have no access to, instead of the page firing requests that 403 with
+  // "Insufficient role". Deliberately NOT the same check as emailOnly
+  // below (isAiRoleAccount) — that one is specifically about AI-role
+  // "team member" accounts and drives different subtitle copy; this one
+  // is the general "can this person manage integrations at all" gate and
+  // applies to every non-owner/admin role (manager, consultant, agent_user alike).
+  const canManageIntegrations = isAdmin(currentUser);
   const [searchParams, setSearchParams] = useSearchParams();
   // Under Settings the layout already shows this page's title; on its own route the page shows it itself.
   const insideSettings = useLocation().pathname.startsWith('/settings');
@@ -158,11 +178,73 @@ export function IntegrationsPage() {
     isError: crmFailed,
     error: crmError,
     refetch: refetchCrm,
-  } = useQuery({ queryKey: ['crm-integrations'], queryFn: crmIntegrationsService.list, refetchInterval: 60_000 });
+  } = useQuery({ queryKey: ['crm-integrations'], queryFn: crmIntegrationsService.list, refetchInterval: 60_000, enabled: canManageIntegrations });
   const [setupFor, setSetupFor] = useState<CrmIntegration | null>(null);
   const [manageId, setManageId] = useState<string | null>(null);
   const [syncingId, setSyncingId] = useState<string | null>(null);
 
+  // Accounting — Xero. Same card/status shape as Outlook/Gmail above
+  // (connected/disconnected/error), plus one extra state no mailbox needs:
+  // a connection that exists but hasn't picked which Xero organisation to
+  // use yet (see xero.service.ts's handleCallback on the backend).
+  const [xeroStatus, setXeroStatus] = useState<CardStatus>('loading');
+  const [xeroConnecting, setXeroConnecting] = useState(false);
+  const [xeroDetail, setXeroDetail] = useState<XeroStatus | null>(null);
+  const [xeroTenantModalOpen, setXeroTenantModalOpen] = useState(false);
+  const [selectingTenant, setSelectingTenant] = useState(false);
+  const handledXeroResult = useRef<string | null>(null);
+
+  // Accounting — Zoho Books. Independent of the Zoho CRM card above (its
+  // own app credentials, its own connection) — see zohobooks.service.ts's
+  // own comment. "Bring your own Zoho app" form mirrors CrmSetupWizard's
+  // Zoho CRM credential step exactly (same region/data-center shape), since
+  // Books isn't part of that CRM wizard at all.
+  const [zohoBooksStatus, setZohoBooksStatus] = useState<CardStatus>('loading');
+  const [zohoBooksDetail, setZohoBooksDetail] = useState<ZohoBooksStatus | null>(null);
+  const [zohoBooksConnecting, setZohoBooksConnecting] = useState(false);
+  const [zohoBooksAppStatus, setZohoBooksAppStatus] = useState<ZohoBooksAppStatus | null>(null);
+  const [zohoBooksAppFormOpen, setZohoBooksAppFormOpen] = useState(false);
+  const [zohoBooksClientId, setZohoBooksClientId] = useState('');
+  const [zohoBooksClientSecret, setZohoBooksClientSecret] = useState('');
+  const [zohoBooksRegion, setZohoBooksRegion] = useState('us');
+  const [zohoBooksAccountsServerUrl, setZohoBooksAccountsServerUrl] = useState('');
+  const [savingZohoBooksApp, setSavingZohoBooksApp] = useState(false);
+  const [zohoBooksOrgModalOpen, setZohoBooksOrgModalOpen] = useState(false);
+  const [selectingZohoBooksOrg, setSelectingZohoBooksOrg] = useState(false);
+  const handledZohoBooksResult = useRef<string | null>(null);
+
+  // Accounting — MYOB. Same card shape as Xero/Zoho Books, plus one state
+  // no other provider needs: connected (OAuth succeeded) but not yet usable
+  // until the separate company-file username/password is also entered (see
+  // myob.service.ts's own comment on why MYOB needs a second credential
+  // pair beyond OAuth).
+  const [myobStatus, setMyobStatus] = useState<CardStatus>('loading');
+  const [myobDetail, setMyobDetail] = useState<MyobStatus | null>(null);
+  const [myobConnecting, setMyobConnecting] = useState(false);
+  const [myobCredentialsModalOpen, setMyobCredentialsModalOpen] = useState(false);
+  const [myobCfUsername, setMyobCfUsername] = useState('');
+  const [myobCfPassword, setMyobCfPassword] = useState('');
+  const [savingMyobCredentials, setSavingMyobCredentials] = useState(false);
+  const handledMyobResult = useRef<string | null>(null);
+
+  // Payroll — Zoho Payroll. Same card/credential/org-selection shape as
+  // Zoho Books above (reuses the same "bring your own Zoho app" form and
+  // region/data-center list), but a separate section and a fully separate
+  // credential from both Zoho CRM and Zoho Books — see
+  // zohopayroll.service.ts's own comment.
+  const [zohoPayrollStatus, setZohoPayrollStatus] = useState<CardStatus>('loading');
+  const [zohoPayrollDetail, setZohoPayrollDetail] = useState<ZohoPayrollStatus | null>(null);
+  const [zohoPayrollConnecting, setZohoPayrollConnecting] = useState(false);
+  const [zohoPayrollAppStatus, setZohoPayrollAppStatus] = useState<ZohoPayrollAppStatus | null>(null);
+  const [zohoPayrollAppFormOpen, setZohoPayrollAppFormOpen] = useState(false);
+  const [zohoPayrollClientId, setZohoPayrollClientId] = useState('');
+  const [zohoPayrollClientSecret, setZohoPayrollClientSecret] = useState('');
+  const [zohoPayrollRegion, setZohoPayrollRegion] = useState('us');
+  const [zohoPayrollAccountsServerUrl, setZohoPayrollAccountsServerUrl] = useState('');
+  const [savingZohoPayrollApp, setSavingZohoPayrollApp] = useState(false);
+  const [zohoPayrollOrgModalOpen, setZohoPayrollOrgModalOpen] = useState(false);
+  const [selectingZohoPayrollOrg, setSelectingZohoPayrollOrg] = useState(false);
+  const handledZohoPayrollResult = useRef<string | null>(null);
 
   // Bulk connector import — pastes a whole manifest JSON (base URL + an auth
   // template + modules[].actions[]) and creates the credential plus every
@@ -235,12 +317,90 @@ export function IntegrationsPage() {
       });
   };
 
+  const loadXeroStatus = () => {
+    xeroService
+      .getStatus()
+      .then((status) => {
+        setXeroDetail(status);
+        setXeroStatus(status.connected ? 'connected' : 'disconnected');
+      })
+      .catch((error) => {
+        setXeroStatus('error');
+        toast.error(`Couldn't load Xero status: ${extractErrorMessage(error)}`);
+      });
+  };
+
+  const loadZohoBooksStatus = () => {
+    zohoBooksService
+      .getStatus()
+      .then((status) => {
+        setZohoBooksDetail(status);
+        setZohoBooksStatus(status.connected ? 'connected' : 'disconnected');
+      })
+      .catch((error) => {
+        setZohoBooksStatus('error');
+        toast.error(`Couldn't load Zoho Books status: ${extractErrorMessage(error)}`);
+      });
+  };
+
+  const loadZohoBooksAppStatus = () => {
+    zohoBooksService
+      .getAppCredentialsStatus()
+      .then(setZohoBooksAppStatus)
+      .catch(() => setZohoBooksAppStatus(null));
+  };
+
+  const loadMyobStatus = () => {
+    myobService
+      .getStatus()
+      .then((status) => {
+        setMyobDetail(status);
+        setMyobStatus(status.connected ? 'connected' : 'disconnected');
+      })
+      .catch((error) => {
+        setMyobStatus('error');
+        toast.error(`Couldn't load MYOB status: ${extractErrorMessage(error)}`);
+      });
+  };
+
+  const loadZohoPayrollStatus = () => {
+    zohoPayrollService
+      .getStatus()
+      .then((status) => {
+        setZohoPayrollDetail(status);
+        setZohoPayrollStatus(status.connected ? 'connected' : 'disconnected');
+      })
+      .catch((error) => {
+        setZohoPayrollStatus('error');
+        toast.error(`Couldn't load Zoho Payroll status: ${extractErrorMessage(error)}`);
+      });
+  };
+
+  const loadZohoPayrollAppStatus = () => {
+    zohoPayrollService
+      .getAppCredentialsStatus()
+      .then(setZohoPayrollAppStatus)
+      .catch(() => setZohoPayrollAppStatus(null));
+  };
+
   useEffect(() => {
+    // Mailbox connections stay unconditional — every role manages its own,
+    // regardless of integration-management permission.
     loadOutlookAccounts();
     loadOutlookOrgAccounts();
     loadTenantAuthStatus();
-    loadCustomIntegrations();
     loadGmailAccounts();
+    // Everything else here is owner/admin-only on the backend (see
+    // canManageIntegrations' own comment above) — skipped entirely for
+    // anyone else so the page never fires a request that can only 403.
+    if (!canManageIntegrations) return;
+    loadCustomIntegrations();
+    loadXeroStatus();
+    loadZohoBooksStatus();
+    loadZohoBooksAppStatus();
+    loadMyobStatus();
+    loadZohoPayrollStatus();
+    loadZohoPayrollAppStatus();
   }, []);
 
   // Landing back here after the full-page Microsoft OAuth round trip (see
@@ -317,6 +477,107 @@ export function IntegrationsPage() {
     setSearchParams((prev) => {
       const next = new URLSearchParams(prev);
       next.delete('crm');
+      return next;
+    }, { replace: true });
+  }, [searchParams]);
+
+  // Landing back here after the full-page Xero OAuth round trip (see
+  // backend/src/xero/xero.controller.ts's callback, which redirects to
+  // /settings/integrations?xero=<connected|select_tenant|error>). Same
+  // StrictMode-double-invoke guard as the outlook=/crm= effects above.
+  useEffect(() => {
+    const xeroResult = searchParams.get('xero');
+    if (!xeroResult || handledXeroResult.current === xeroResult) return;
+    handledXeroResult.current = xeroResult;
+
+    if (xeroResult === 'connected') {
+      toast.success('Xero connected');
+      loadXeroStatus();
+    } else if (xeroResult === 'select_tenant') {
+      loadXeroStatus();
+      setXeroTenantModalOpen(true);
+    } else {
+      toast.error('Couldn’t connect Xero — nothing was saved. Please try again.');
+    }
+
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      next.delete('xero');
+      return next;
+    }, { replace: true });
+  }, [searchParams]);
+
+  // Landing back here after the full-page Zoho Books OAuth round trip (see
+  // backend/src/zohobooks/zohobooks.controller.ts's callback).
+  useEffect(() => {
+    const zohoBooksResult = searchParams.get('zohobooks');
+    if (!zohoBooksResult || handledZohoBooksResult.current === zohoBooksResult) return;
+    handledZohoBooksResult.current = zohoBooksResult;
+
+    if (zohoBooksResult === 'connected') {
+      toast.success('Zoho Books connected');
+      loadZohoBooksStatus();
+    } else if (zohoBooksResult === 'select_org') {
+      loadZohoBooksStatus();
+      setZohoBooksOrgModalOpen(true);
+    } else {
+      toast.error('Couldn’t connect Zoho Books — nothing was saved. Please try again.');
+    }
+
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      next.delete('zohobooks');
+      return next;
+    }, { replace: true });
+  }, [searchParams]);
+
+  // Landing back here after the full-page MYOB OAuth round trip (see
+  // backend/src/myob/myob.controller.ts's callback). Unlike Xero/Zoho
+  // Books, there's no "select which organisation" step (MYOB's redirect
+  // already carries the company file id) — instead, a successful connect
+  // opens the company-file-credentials modal directly, since the
+  // connection isn't actually usable until that second pair is entered.
+  useEffect(() => {
+    const myobResult = searchParams.get('myob');
+    if (!myobResult || handledMyobResult.current === myobResult) return;
+    handledMyobResult.current = myobResult;
+
+    if (myobResult === 'connected') {
+      toast.success('MYOB connected — one more step to finish setup.');
+      loadMyobStatus();
+      setMyobCredentialsModalOpen(true);
+    } else {
+      toast.error('Couldn’t connect MYOB — nothing was saved. Please try again.');
+    }
+
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      next.delete('myob');
+      return next;
+    }, { replace: true });
+  }, [searchParams]);
+
+  // Landing back here after the full-page Zoho Payroll OAuth round trip
+  // (see backend/src/zohopayroll/zohopayroll.controller.ts's callback).
+  // Same shape as the zohobooks= effect above.
+  useEffect(() => {
+    const zohoPayrollResult = searchParams.get('zohopayroll');
+    if (!zohoPayrollResult || handledZohoPayrollResult.current === zohoPayrollResult) return;
+    handledZohoPayrollResult.current = zohoPayrollResult;
+
+    if (zohoPayrollResult === 'connected') {
+      toast.success('Zoho Payroll connected');
+      loadZohoPayrollStatus();
+    } else if (zohoPayrollResult === 'select_org') {
+      loadZohoPayrollStatus();
+      setZohoPayrollOrgModalOpen(true);
+    } else {
+      toast.error('Couldn’t connect Zoho Payroll — nothing was saved. Please try again.');
+    }
+
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      next.delete('zohopayroll');
       return next;
     }, { replace: true });
   }, [searchParams]);
@@ -575,6 +836,238 @@ export function IntegrationsPage() {
     }
   };
 
+  const handleConnectXero = async () => {
+    setXeroConnecting(true);
+    try {
+      window.location.href = await xeroService.getConnectUrl();
+    } catch (error) {
+      toast.error(extractErrorMessage(error));
+      setXeroConnecting(false);
+    }
+  };
+
+  const handleSelectXeroTenant = async (tenant: XeroTenantOption) => {
+    setSelectingTenant(true);
+    try {
+      await xeroService.selectTenant(tenant.tenantId);
+      toast.success(`Connected to ${tenant.tenantName}`);
+      setXeroTenantModalOpen(false);
+      loadXeroStatus();
+    } catch (error) {
+      toast.error(extractErrorMessage(error));
+    } finally {
+      setSelectingTenant(false);
+    }
+  };
+
+  const handleDisconnectXero = async () => {
+    try {
+      await xeroService.disconnect();
+      toast.success('Xero disconnected');
+      loadXeroStatus();
+    } catch (error) {
+      toast.error(extractErrorMessage(error));
+    }
+  };
+
+  // Mirrors CrmSetupWizard's connectOAuth() for Zoho CRM exactly: try the
+  // redirect first, and only fall back to the credential-entry form if the
+  // backend reports no app is configured yet (ZOHOBOOKS_APP_CREDENTIALS_REQUIRED)
+  // — avoids an extra round trip for the common case where an app is
+  // already on file.
+  const handleConnectZohoBooks = async () => {
+    setZohoBooksConnecting(true);
+    try {
+      window.location.href = await zohoBooksService.getConnectUrl();
+    } catch (error) {
+      const apiError = integrationErrorOf(error);
+      if (apiError?.code === 'ZOHOBOOKS_APP_CREDENTIALS_REQUIRED') {
+        setZohoBooksAppFormOpen(true);
+      } else {
+        toast.error(apiError?.message ?? extractErrorMessage(error));
+      }
+      setZohoBooksConnecting(false);
+    }
+  };
+
+  const openZohoBooksAppForm = () => {
+    setZohoBooksClientId('');
+    setZohoBooksClientSecret('');
+    setZohoBooksRegion('us');
+    setZohoBooksAccountsServerUrl('');
+    setZohoBooksAppFormOpen(true);
+  };
+
+  const saveZohoBooksApp = async () => {
+    if (!zohoBooksClientId.trim() || !zohoBooksClientSecret.trim()) {
+      toast.error('Enter both the Client ID and Client Secret.');
+      return;
+    }
+    if (zohoBooksRegion === 'other' && !zohoBooksAccountsServerUrl.trim()) {
+      toast.error('Enter your Zoho accounts server address.');
+      return;
+    }
+    setSavingZohoBooksApp(true);
+    try {
+      await zohoBooksService.saveAppCredentials({
+        clientId: zohoBooksClientId.trim(),
+        clientSecret: zohoBooksClientSecret.trim(),
+        region: zohoBooksRegion,
+        accountsServerUrl: zohoBooksRegion === 'other' ? zohoBooksAccountsServerUrl.trim() : undefined,
+      });
+      toast.success('Zoho Books app credentials saved');
+      loadZohoBooksAppStatus();
+      setZohoBooksAppFormOpen(false);
+      await handleConnectZohoBooks();
+    } catch (error) {
+      toast.error(extractErrorMessage(error));
+    } finally {
+      setSavingZohoBooksApp(false);
+    }
+  };
+
+  const handleSelectZohoBooksOrg = async (org: ZohoBooksOrgOption) => {
+    setSelectingZohoBooksOrg(true);
+    try {
+      await zohoBooksService.selectOrganization(org.organizationId);
+      toast.success(`Connected to ${org.name}`);
+      setZohoBooksOrgModalOpen(false);
+      loadZohoBooksStatus();
+    } catch (error) {
+      toast.error(extractErrorMessage(error));
+    } finally {
+      setSelectingZohoBooksOrg(false);
+    }
+  };
+
+  const handleDisconnectZohoBooks = async () => {
+    try {
+      await zohoBooksService.disconnect();
+      toast.success('Zoho Books disconnected');
+      loadZohoBooksStatus();
+    } catch (error) {
+      toast.error(extractErrorMessage(error));
+    }
+  };
+
+  const handleConnectMyob = async () => {
+    setMyobConnecting(true);
+    try {
+      window.location.href = await myobService.getConnectUrl();
+    } catch (error) {
+      toast.error(extractErrorMessage(error));
+      setMyobConnecting(false);
+    }
+  };
+
+  const saveMyobCompanyFileCredentials = async () => {
+    if (!myobCfUsername.trim() || !myobCfPassword.trim()) {
+      toast.error('Enter both the company file username and password.');
+      return;
+    }
+    setSavingMyobCredentials(true);
+    try {
+      await myobService.saveCompanyFileCredentials(myobCfUsername.trim(), myobCfPassword);
+      toast.success('MYOB company file credentials saved — fully connected');
+      setMyobCredentialsModalOpen(false);
+      setMyobCfUsername('');
+      setMyobCfPassword('');
+      loadMyobStatus();
+    } catch (error) {
+      toast.error(extractErrorMessage(error));
+    } finally {
+      setSavingMyobCredentials(false);
+    }
+  };
+
+  const handleDisconnectMyob = async () => {
+    try {
+      await myobService.disconnect();
+      toast.success('MYOB disconnected');
+      loadMyobStatus();
+    } catch (error) {
+      toast.error(extractErrorMessage(error));
+    }
+  };
+
+  // Mirrors handleConnectZohoBooks exactly — try the redirect first, fall
+  // back to the credential-entry form only if the backend reports no app
+  // is configured yet (ZOHOPAYROLL_APP_CREDENTIALS_REQUIRED).
+  const handleConnectZohoPayroll = async () => {
+    setZohoPayrollConnecting(true);
+    try {
+      window.location.href = await zohoPayrollService.getConnectUrl();
+    } catch (error) {
+      const apiError = integrationErrorOf(error);
+      if (apiError?.code === 'ZOHOPAYROLL_APP_CREDENTIALS_REQUIRED') {
+        setZohoPayrollAppFormOpen(true);
+      } else {
+        toast.error(apiError?.message ?? extractErrorMessage(error));
+      }
+      setZohoPayrollConnecting(false);
+    }
+  };
+
+  const openZohoPayrollAppForm = () => {
+    setZohoPayrollClientId('');
+    setZohoPayrollClientSecret('');
+    setZohoPayrollRegion('us');
+    setZohoPayrollAccountsServerUrl('');
+    setZohoPayrollAppFormOpen(true);
+  };
+
+  const saveZohoPayrollApp = async () => {
+    if (!zohoPayrollClientId.trim() || !zohoPayrollClientSecret.trim()) {
+      toast.error('Enter both the Client ID and Client Secret.');
+      return;
+    }
+    if (zohoPayrollRegion === 'other' && !zohoPayrollAccountsServerUrl.trim()) {
+      toast.error('Enter your Zoho accounts server address.');
+      return;
+    }
+    setSavingZohoPayrollApp(true);
+    try {
+      await zohoPayrollService.saveAppCredentials({
+        clientId: zohoPayrollClientId.trim(),
+        clientSecret: zohoPayrollClientSecret.trim(),
+        region: zohoPayrollRegion,
+        accountsServerUrl: zohoPayrollRegion === 'other' ? zohoPayrollAccountsServerUrl.trim() : undefined,
+      });
+      toast.success('Zoho Payroll app credentials saved');
+      loadZohoPayrollAppStatus();
+      setZohoPayrollAppFormOpen(false);
+      await handleConnectZohoPayroll();
+    } catch (error) {
+      toast.error(extractErrorMessage(error));
+    } finally {
+      setSavingZohoPayrollApp(false);
+    }
+  };
+
+  const handleSelectZohoPayrollOrg = async (org: ZohoPayrollOrgOption) => {
+    setSelectingZohoPayrollOrg(true);
+    try {
+      await zohoPayrollService.selectOrganization(org.organizationId);
+      toast.success(`Connected to ${org.name}`);
+      setZohoPayrollOrgModalOpen(false);
+      loadZohoPayrollStatus();
+    } catch (error) {
+      toast.error(extractErrorMessage(error));
+    } finally {
+      setSelectingZohoPayrollOrg(false);
+    }
+  };
+
+  const handleDisconnectZohoPayroll = async () => {
+    try {
+      await zohoPayrollService.disconnect();
+      toast.success('Zoho Payroll disconnected');
+      loadZohoPayrollStatus();
+    } catch (error) {
+      toast.error(extractErrorMessage(error));
+    }
+  };
+
   // Shared across Outlook/Gmail personal + org-wide lists — 'needs_reauth'
   // means python-agent's refresh loop found the grant revoked/expired (see
   // outlook_store.py/gmail_store.py) and reconnecting is the only fix.
@@ -753,6 +1246,274 @@ export function IntegrationsPage() {
       }
     />
   );
+  // Accounting — Xero. Same IntegrationCard shape as the mail cards above;
+  // the one extra wrinkle is "connected but hasn't picked an organisation
+  // yet" (xeroDetail.needsSelection — see xero.service.ts's handleCallback),
+  // shown as its own 'waiting' tone/status rather than folded into
+  // 'connected', since the connection isn't actually usable until resolved.
+  const xeroCard = () => (
+    <IntegrationCard
+      key="xero"
+      logo={<img src="/integrations/xero.svg" alt="" />}
+      name="Xero"
+      tagline="Accounting"
+      tone={
+        xeroStatus === 'connected'
+          ? xeroDetail?.needsSelection
+            ? 'waiting'
+            : 'connected'
+          : xeroStatus === 'error'
+            ? 'attention'
+            : 'idle'
+      }
+      status={
+        xeroStatus === 'connected'
+          ? xeroDetail?.needsSelection
+            ? { label: 'Finish setup', variant: 'warning' }
+            : { label: 'Connected', variant: 'success' }
+          : xeroStatus === 'error'
+            ? { label: 'Needs attention', variant: 'danger' }
+            : undefined
+      }
+      description={
+        xeroStatus === 'connected' || xeroStatus === 'error'
+          ? undefined
+          : 'HaiVE reads invoices, expenses and customer balances from your Xero organisation.'
+      }
+      highlights={
+        xeroStatus === 'connected' || xeroStatus === 'error'
+          ? undefined
+          : ['Invoices and overdue invoices', 'Expenses', 'Customer balances']
+      }
+      facts={
+        xeroStatus === 'connected' && !xeroDetail?.needsSelection && xeroDetail?.tenantName
+          ? [{ icon: FiGlobe, text: xeroDetail.tenantName }]
+          : undefined
+      }
+      problem={xeroStatus === 'error' ? 'HaiVE couldn’t check this connection. Reconnect to restore it.' : undefined}
+      actions={
+        xeroStatus === 'connected' ? (
+          xeroDetail?.needsSelection ? (
+            <Button size="sm" onClick={() => setXeroTenantModalOpen(true)}>
+              Select organisation
+            </Button>
+          ) : (
+            <Button size="sm" variant="ghost" leftIcon={<FiTrash2 />} onClick={() => void handleDisconnectXero()}>
+              Disconnect
+            </Button>
+          )
+        ) : (
+          <Button size="sm" leftIcon={<FiLink />} loading={xeroConnecting || xeroStatus === 'loading'} onClick={() => void handleConnectXero()}>
+            {xeroStatus === 'error' ? 'Reconnect' : 'Connect'}
+          </Button>
+        )
+      }
+    />
+  );
+
+  // Accounting — Zoho Books. Same shape as the Xero card above, plus the
+  // "bring your own Zoho app" facts row Zoho CRM's card doesn't need here
+  // (that lives inside CrmSetupWizard instead) since Books isn't part of
+  // that wizard.
+  const zohoBooksCard = () => (
+    <IntegrationCard
+      key="zohobooks"
+      logo={<img src="/integrations/zohobooks.svg" alt="" />}
+      name="Zoho Books"
+      tagline="Accounting"
+      tone={
+        zohoBooksStatus === 'connected'
+          ? zohoBooksDetail?.needsSelection
+            ? 'waiting'
+            : 'connected'
+          : zohoBooksStatus === 'error'
+            ? 'attention'
+            : 'idle'
+      }
+      status={
+        zohoBooksStatus === 'connected'
+          ? zohoBooksDetail?.needsSelection
+            ? { label: 'Finish setup', variant: 'warning' }
+            : { label: 'Connected', variant: 'success' }
+          : zohoBooksStatus === 'error'
+            ? { label: 'Needs attention', variant: 'danger' }
+            : undefined
+      }
+      description={
+        zohoBooksStatus === 'connected' || zohoBooksStatus === 'error'
+          ? undefined
+          : 'HaiVE reads invoices, expenses and customer balances from your Zoho Books organisation.'
+      }
+      highlights={
+        zohoBooksStatus === 'connected' || zohoBooksStatus === 'error'
+          ? undefined
+          : ['Invoices and overdue invoices', 'Expenses', 'Customer balances']
+      }
+      facts={
+        zohoBooksStatus === 'connected' && !zohoBooksDetail?.needsSelection && zohoBooksDetail?.organizationName
+          ? [{ icon: FiGlobe, text: zohoBooksDetail.organizationName }]
+          : zohoBooksStatus !== 'connected' && zohoBooksAppStatus?.configured
+            ? [{ icon: FiKey, text: `Using your own Zoho app (${zohoBooksAppStatus.clientId})` }]
+            : undefined
+      }
+      problem={zohoBooksStatus === 'error' ? 'HaiVE couldn’t check this connection. Reconnect to restore it.' : undefined}
+      actions={
+        zohoBooksStatus === 'connected' ? (
+          zohoBooksDetail?.needsSelection ? (
+            <Button size="sm" onClick={() => setZohoBooksOrgModalOpen(true)}>
+              Select organisation
+            </Button>
+          ) : (
+            <Button size="sm" variant="ghost" leftIcon={<FiTrash2 />} onClick={() => void handleDisconnectZohoBooks()}>
+              Disconnect
+            </Button>
+          )
+        ) : (
+          <>
+            {zohoBooksAppStatus?.configured && (
+              <Button size="sm" variant="ghost" leftIcon={<FiKey />} onClick={openZohoBooksAppForm}>
+                Change app
+              </Button>
+            )}
+            <Button size="sm" leftIcon={<FiLink />} loading={zohoBooksConnecting || zohoBooksStatus === 'loading'} onClick={() => void handleConnectZohoBooks()}>
+              {zohoBooksStatus === 'error' ? 'Reconnect' : 'Connect'}
+            </Button>
+          </>
+        )
+      }
+    />
+  );
+
+  // Accounting — MYOB. Same shape as the Xero/Zoho Books cards, with its
+  // own "finish setup" state for the company-file credentials step instead
+  // of an organisation picker.
+  const myobCard = () => (
+    <IntegrationCard
+      key="myob"
+      logo={<img src="/integrations/myob.svg" alt="" />}
+      name="MYOB"
+      tagline="Accounting"
+      tone={
+        myobStatus === 'connected'
+          ? myobDetail?.needsCompanyFileCredentials
+            ? 'waiting'
+            : 'connected'
+          : myobStatus === 'error'
+            ? 'attention'
+            : 'idle'
+      }
+      status={
+        myobStatus === 'connected'
+          ? myobDetail?.needsCompanyFileCredentials
+            ? { label: 'Finish setup', variant: 'warning' }
+            : { label: 'Connected', variant: 'success' }
+          : myobStatus === 'error'
+            ? { label: 'Needs attention', variant: 'danger' }
+            : undefined
+      }
+      description={
+        myobStatus === 'connected' || myobStatus === 'error'
+          ? undefined
+          : 'HaiVE reads invoices, customer balances and your general ledger from your MYOB company file.'
+      }
+      highlights={
+        myobStatus === 'connected' || myobStatus === 'error'
+          ? undefined
+          : ['Invoices', 'Customer balances', 'General ledger summaries']
+      }
+      problem={myobStatus === 'error' ? 'HaiVE couldn’t check this connection. Reconnect to restore it.' : undefined}
+      actions={
+        myobStatus === 'connected' ? (
+          myobDetail?.needsCompanyFileCredentials ? (
+            <Button size="sm" onClick={() => setMyobCredentialsModalOpen(true)}>
+              Enter company file login
+            </Button>
+          ) : (
+            <Button size="sm" variant="ghost" leftIcon={<FiTrash2 />} onClick={() => void handleDisconnectMyob()}>
+              Disconnect
+            </Button>
+          )
+        ) : (
+          <Button size="sm" leftIcon={<FiLink />} loading={myobConnecting || myobStatus === 'loading'} onClick={() => void handleConnectMyob()}>
+            {myobStatus === 'error' ? 'Reconnect' : 'Connect'}
+          </Button>
+        )
+      }
+    />
+  );
+
+  // Payroll — Zoho Payroll. Same shape as the zohoBooksCard above (own
+  // "bring your own Zoho app" facts row, own org-selection step), in its
+  // own Payroll section rather than Accounting.
+  const zohoPayrollCard = () => (
+    <IntegrationCard
+      key="zohopayroll"
+      logo={<img src="/integrations/zohopayroll.svg" alt="" />}
+      name="Zoho Payroll"
+      tagline="Payroll"
+      tone={
+        zohoPayrollStatus === 'connected'
+          ? zohoPayrollDetail?.needsSelection
+            ? 'waiting'
+            : 'connected'
+          : zohoPayrollStatus === 'error'
+            ? 'attention'
+            : 'idle'
+      }
+      status={
+        zohoPayrollStatus === 'connected'
+          ? zohoPayrollDetail?.needsSelection
+            ? { label: 'Finish setup', variant: 'warning' }
+            : { label: 'Connected', variant: 'success' }
+          : zohoPayrollStatus === 'error'
+            ? { label: 'Needs attention', variant: 'danger' }
+            : undefined
+      }
+      description={
+        zohoPayrollStatus === 'connected' || zohoPayrollStatus === 'error'
+          ? undefined
+          : 'HaiVE reads your employee directory, departments and pay run history from Zoho Payroll.'
+      }
+      highlights={
+        zohoPayrollStatus === 'connected' || zohoPayrollStatus === 'error'
+          ? undefined
+          : ['Employee directory', 'Departments and designations', 'Pay run history']
+      }
+      facts={
+        zohoPayrollStatus === 'connected' && !zohoPayrollDetail?.needsSelection && zohoPayrollDetail?.organizationName
+          ? [{ icon: FiGlobe, text: zohoPayrollDetail.organizationName }]
+          : zohoPayrollStatus !== 'connected' && zohoPayrollAppStatus?.configured
+            ? [{ icon: FiKey, text: `Using your own Zoho app (${zohoPayrollAppStatus.clientId})` }]
+            : undefined
+      }
+      problem={zohoPayrollStatus === 'error' ? 'HaiVE couldn’t check this connection. Reconnect to restore it.' : undefined}
+      actions={
+        zohoPayrollStatus === 'connected' ? (
+          zohoPayrollDetail?.needsSelection ? (
+            <Button size="sm" onClick={() => setZohoPayrollOrgModalOpen(true)}>
+              Select organisation
+            </Button>
+          ) : (
+            <Button size="sm" variant="ghost" leftIcon={<FiTrash2 />} onClick={() => void handleDisconnectZohoPayroll()}>
+              Disconnect
+            </Button>
+          )
+        ) : (
+          <>
+            {zohoPayrollAppStatus?.configured && (
+              <Button size="sm" variant="ghost" leftIcon={<FiKey />} onClick={openZohoPayrollAppForm}>
+                Change app
+              </Button>
+            )}
+            <Button size="sm" leftIcon={<FiLink />} loading={zohoPayrollConnecting || zohoPayrollStatus === 'loading'} onClick={() => void handleConnectZohoPayroll()}>
+              {zohoPayrollStatus === 'error' ? 'Reconnect' : 'Connect'}
+            </Button>
+          </>
+        )
+      }
+    />
+  );
+
   // The raw connection errors stay out of the card (it says what to do instead); kept for the account dialogs.
   void outlookError;
   void gmailError;
@@ -772,12 +1533,18 @@ export function IntegrationsPage() {
         <div className={ui.pageHeader}>
           <div>
             <h1>Integrations</h1>
-            <p>{emailOnly ? 'Connect your own mailbox for the AI Email Inbox.' : 'Connect the tools your organization uses with HaiVE.'}</p>
+            <p>
+              {emailOnly
+                ? 'Connect your own mailbox for the AI Email Inbox.'
+                : canManageIntegrations
+                  ? 'Connect the tools your organization uses with HaiVE.'
+                  : 'Your organization’s connected tools are set up by an admin.'}
+            </p>
           </div>
         </div>
       )}
 
-      {!emailOnly && (
+      {canManageIntegrations && (
         <>
       <div className={ui.overview}>
         <div>
@@ -871,8 +1638,50 @@ export function IntegrationsPage() {
         </div>
       </section>
 
-      {!emailOnly && (
+      {canManageIntegrations && (
         <>
+      <section className={ui.section} aria-labelledby="integrations-accounting">
+        <div className={ui.sectionHead}>
+          <div className={ui.sectionTitle}>
+            <span className={ui.sectionIcon}>
+              <FiDatabase aria-hidden />
+            </span>
+            <div>
+              <h2 id="integrations-accounting">Accounting</h2>
+              <span>Invoices, expenses and balances from your accounting system.</span>
+            </div>
+          </div>
+          {(xeroStatus === 'connected' ? 1 : 0) + (zohoBooksStatus === 'connected' ? 1 : 0) + (myobStatus === 'connected' ? 1 : 0) > 0 && (
+            <Badge variant="neutral">
+              {(xeroStatus === 'connected' ? 1 : 0) + (zohoBooksStatus === 'connected' ? 1 : 0) + (myobStatus === 'connected' ? 1 : 0)} of 3 connected
+            </Badge>
+          )}
+        </div>
+        <div className={ui.grid}>
+          {xeroCard()}
+          {zohoBooksCard()}
+          {myobCard()}
+        </div>
+      </section>
+
+      <section className={ui.section} aria-labelledby="integrations-payroll">
+        <div className={ui.sectionHead}>
+          <div className={ui.sectionTitle}>
+            <span className={ui.sectionIcon}>
+              <FiDatabase aria-hidden />
+            </span>
+            <div>
+              <h2 id="integrations-payroll">Payroll</h2>
+              <span>Your employee directory and pay run history, read-only.</span>
+            </div>
+          </div>
+          {zohoPayrollStatus === 'connected' && <Badge variant="neutral">1 of 1 connected</Badge>}
+        </div>
+        <div className={ui.grid}>
+          {zohoPayrollCard()}
+        </div>
+      </section>
+
       {/* For a system HaiVE has no dedicated integration for: any REST API,
           by API key, bearer token, basic auth or custom headers. Kept below
           the two things every customer needs. */}
@@ -1313,6 +2122,191 @@ export function IntegrationsPage() {
             <Button leftIcon={<FiPlus />} onClick={handleConnectGmail}>
               Connect New Account
             </Button>
+          </div>
+        </Modal>
+      )}
+
+      {xeroTenantModalOpen && (
+        <Modal
+          open
+          onClose={() => setXeroTenantModalOpen(false)}
+          title="Select your Xero organisation"
+          description="Your Xero sign-in authorized more than one organisation. Choose the one HaiVE should read from."
+        >
+          <div className={styles.accountList}>
+            {(xeroDetail?.tenants ?? []).map((tenant) => (
+              <div key={tenant.tenantId} className={styles.accountRow}>
+                <div className={styles.accountEmail}>{tenant.tenantName}</div>
+                <Button size="sm" loading={selectingTenant} onClick={() => void handleSelectXeroTenant(tenant)}>
+                  Use this one
+                </Button>
+              </div>
+            ))}
+          </div>
+        </Modal>
+      )}
+
+      {zohoBooksAppFormOpen && (
+        <Modal
+          open
+          onClose={() => setZohoBooksAppFormOpen(false)}
+          title="Zoho Books app credentials"
+          description="Zoho's app registry is separate per data center — enter the Client ID and Client Secret from your own Zoho API Console app (api-console.zoho.{region}), and the data center it was registered in. Separate from any Zoho CRM app you may have configured."
+        >
+          <div className={styles.accountList}>
+            <Input label="Client ID" value={zohoBooksClientId} onChange={(e) => setZohoBooksClientId(e.target.value)} autoComplete="off" autoFocus />
+            <Input
+              label="Client Secret"
+              type="password"
+              value={zohoBooksClientSecret}
+              onChange={(e) => setZohoBooksClientSecret(e.target.value)}
+              autoComplete="new-password"
+              leftIcon={<FiKey />}
+            />
+            <div>
+              <span className={styles.fieldLabel}>Data center</span>
+              <select className={styles.select} value={zohoBooksRegion} onChange={(e) => setZohoBooksRegion(e.target.value)}>
+                {Object.entries(zohoBooksAppStatus?.dataCenters ?? {}).map(([key, dc]) => (
+                  <option key={key} value={key}>
+                    {dc.label}
+                  </option>
+                ))}
+                <option value="other">Other (enter accounts server address)</option>
+              </select>
+            </div>
+            {zohoBooksRegion === 'other' && (
+              <Input
+                label="Zoho accounts server address"
+                placeholder="https://accounts.zoho.com.cn"
+                value={zohoBooksAccountsServerUrl}
+                onChange={(e) => setZohoBooksAccountsServerUrl(e.target.value)}
+              />
+            )}
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 'var(--space-2)' }}>
+              <Button variant="ghost" onClick={() => setZohoBooksAppFormOpen(false)} disabled={savingZohoBooksApp}>
+                Cancel
+              </Button>
+              <Button loading={savingZohoBooksApp} onClick={() => void saveZohoBooksApp()}>
+                Save &amp; continue
+              </Button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {zohoBooksOrgModalOpen && (
+        <Modal
+          open
+          onClose={() => setZohoBooksOrgModalOpen(false)}
+          title="Select your Zoho Books organisation"
+          description="Your Zoho sign-in authorized more than one organisation. Choose the one HaiVE should read from."
+        >
+          <div className={styles.accountList}>
+            {(zohoBooksDetail?.orgs ?? []).map((org) => (
+              <div key={org.organizationId} className={styles.accountRow}>
+                <div className={styles.accountEmail}>{org.name}</div>
+                <Button size="sm" loading={selectingZohoBooksOrg} onClick={() => void handleSelectZohoBooksOrg(org)}>
+                  Use this one
+                </Button>
+              </div>
+            ))}
+          </div>
+        </Modal>
+      )}
+
+      {myobCredentialsModalOpen && (
+        <Modal
+          open
+          onClose={() => setMyobCredentialsModalOpen(false)}
+          title="MYOB company file login"
+          description="MYOB requires your company file's own username and password, separate from the account you just signed in with — this is what protects the specific file, and MYOB checks it on every request. Stored encrypted, never shown again."
+        >
+          <div className={styles.accountList}>
+            <Input label="Company file username" value={myobCfUsername} onChange={(e) => setMyobCfUsername(e.target.value)} autoComplete="off" autoFocus />
+            <Input
+              label="Company file password"
+              type="password"
+              value={myobCfPassword}
+              onChange={(e) => setMyobCfPassword(e.target.value)}
+              autoComplete="new-password"
+              leftIcon={<FiKey />}
+            />
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 'var(--space-2)' }}>
+              <Button variant="ghost" onClick={() => setMyobCredentialsModalOpen(false)} disabled={savingMyobCredentials}>
+                Finish later
+              </Button>
+              <Button loading={savingMyobCredentials} onClick={() => void saveMyobCompanyFileCredentials()}>
+                Save
+              </Button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {zohoPayrollAppFormOpen && (
+        <Modal
+          open
+          onClose={() => setZohoPayrollAppFormOpen(false)}
+          title="Zoho Payroll app credentials"
+          description="Zoho's app registry is separate per data center — enter the Client ID and Client Secret from your own Zoho API Console app (api-console.zoho.{region}), and the data center it was registered in. Separate from any Zoho CRM or Zoho Books app you may have configured."
+        >
+          <div className={styles.accountList}>
+            <Input label="Client ID" value={zohoPayrollClientId} onChange={(e) => setZohoPayrollClientId(e.target.value)} autoComplete="off" autoFocus />
+            <Input
+              label="Client Secret"
+              type="password"
+              value={zohoPayrollClientSecret}
+              onChange={(e) => setZohoPayrollClientSecret(e.target.value)}
+              autoComplete="new-password"
+              leftIcon={<FiKey />}
+            />
+            <div>
+              <span className={styles.fieldLabel}>Data center</span>
+              <select className={styles.select} value={zohoPayrollRegion} onChange={(e) => setZohoPayrollRegion(e.target.value)}>
+                {Object.entries(zohoPayrollAppStatus?.dataCenters ?? {}).map(([key, dc]) => (
+                  <option key={key} value={key}>
+                    {dc.label}
+                  </option>
+                ))}
+                <option value="other">Other (enter accounts server address)</option>
+              </select>
+            </div>
+            {zohoPayrollRegion === 'other' && (
+              <Input
+                label="Zoho accounts server address"
+                placeholder="https://accounts.zoho.com.cn"
+                value={zohoPayrollAccountsServerUrl}
+                onChange={(e) => setZohoPayrollAccountsServerUrl(e.target.value)}
+              />
+            )}
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 'var(--space-2)' }}>
+              <Button variant="ghost" onClick={() => setZohoPayrollAppFormOpen(false)} disabled={savingZohoPayrollApp}>
+                Cancel
+              </Button>
+              <Button loading={savingZohoPayrollApp} onClick={() => void saveZohoPayrollApp()}>
+                Save &amp; continue
+              </Button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {zohoPayrollOrgModalOpen && (
+        <Modal
+          open
+          onClose={() => setZohoPayrollOrgModalOpen(false)}
+          title="Select your Zoho Payroll organisation"
+          description="Your Zoho sign-in authorized more than one organisation. Choose the one HaiVE should read from."
+        >
+          <div className={styles.accountList}>
+            {(zohoPayrollDetail?.orgs ?? []).map((org) => (
+              <div key={org.organizationId} className={styles.accountRow}>
+                <div className={styles.accountEmail}>{org.name}</div>
+                <Button size="sm" loading={selectingZohoPayrollOrg} onClick={() => void handleSelectZohoPayrollOrg(org)}>
+                  Use this one
+                </Button>
+              </div>
+            ))}
           </div>
         </Modal>
       )}

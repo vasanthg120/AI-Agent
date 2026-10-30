@@ -94,10 +94,6 @@ export const SETTINGS_NAV: SettingsNavGroup[] = [
         summary: 'Create and tune the AI agents your team works with, and what each one is responsible for.',
         keywords: ['agents', 'persona', 'assistant', 'roles'],
       },
-      // Moved out of the main sidebar nav (was its own top-level page) — same
-      // visibility as the tabs above (open to everyone except agent_user, via
-      // the shared BlockRole wrapping the whole /settings subtree in
-      // routes/index.tsx), no additional requireRoles needed.
       {
         id: 'integrations',
         label: 'Integrations',

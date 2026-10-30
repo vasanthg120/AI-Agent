@@ -70,6 +70,47 @@ export const PROVIDER_RULES: Record<string, ProviderRule> = {
     allowedAuthTypes: ['oauth2'],
     note: 'Use the Zoho CRM card in the CRM section above — it handles OAuth with automatic token refresh.',
   },
+  // Independent credential from Zoho CRM above (see zohobooks.service.ts's
+  // own comment) — same per-org "bring your own app" pattern, no
+  // dedicatedFlowPath (see the xero entry below's comment on why not).
+  zohobooks: {
+    label: 'Zoho Books',
+    allowedAuthTypes: ['oauth2'],
+    note: 'Use the Zoho Books card in the Accounting section above — it handles OAuth with automatic token refresh.',
+  },
+  // Independent credential from both Zoho CRM and Zoho Books above (see
+  // zohopayroll.service.ts's own comment) — same per-org "bring your own
+  // app" pattern, no dedicatedFlowPath (same reasoning as zohobooks above).
+  zohopayroll: {
+    label: 'Zoho Payroll',
+    allowedAuthTypes: ['oauth2'],
+    note: 'Use the Zoho Payroll card in the Payroll section above — it handles OAuth with automatic token refresh.',
+  },
+  // Real dedicated OAuth now exists (see ../myob/) — connect it from the
+  // Accounting card on the Integrations page. Same reasoning as xero below
+  // for not setting dedicatedFlowPath (connectWithOAuth needs this provider
+  // to pass assertAllowed).
+  myob: {
+    label: 'MYOB',
+    allowedAuthTypes: ['oauth2'],
+    note: 'Use the MYOB card in the Accounting section above — it handles OAuth with automatic token refresh.',
+  },
+  // Real dedicated OAuth now exists (see ../xero/) — connect it from the
+  // Accounting card on the Integrations page. No dedicatedFlowPath here
+  // (unlike google/outlook below): those providers' actual per-user mailbox
+  // connection never goes through connectWithOAuth/assertAllowed at all —
+  // only their platform app credentials do — so dedicatedFlowPath's hard
+  // rejection in assertAllowed never applies to them. Xero's real
+  // connection DOES go through connectWithOAuth (same as Zoho/Salesforce
+  // above), so it needs the same shape they use: allowedAuthTypes alone is
+  // enough to steer the generic Custom Integration modal away (see
+  // IntegrationsPage.tsx's selectableAuthTypesFor, which already filters
+  // out 'oauth2' from that modal's own options).
+  xero: {
+    label: 'Xero',
+    allowedAuthTypes: ['oauth2'],
+    note: 'Use the Xero card in the Accounting section above — it handles OAuth with automatic token refresh.',
+  },
   hubspot: {
     label: 'HubSpot',
     allowedAuthTypes: ['bearer'],

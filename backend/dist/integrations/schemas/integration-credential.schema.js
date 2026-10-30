@@ -74,6 +74,10 @@ __decorate([
     (0, mongoose_1.Prop)({ enum: ['monthly', 'total'], default: 'monthly' }),
     __metadata("design:type", String)
 ], IntegrationCredential.prototype, "budgetPeriod", void 0);
+__decorate([
+    (0, mongoose_1.Prop)(),
+    __metadata("design:type", String)
+], IntegrationCredential.prototype, "secondaryCredentialsEncrypted", void 0);
 exports.IntegrationCredential = IntegrationCredential = __decorate([
     (0, mongoose_1.Schema)({ timestamps: true, collection: 'integration_credentials' })
 ], IntegrationCredential);

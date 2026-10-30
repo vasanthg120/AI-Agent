@@ -114,6 +114,17 @@ export class IntegrationCredential {
 
   @Prop({ enum: ['monthly', 'total'], default: 'monthly' })
   budgetPeriod?: 'monthly' | 'total';
+
+  // Generic second credential pair, beyond the primary oauth2 token above —
+  // currently only MYOB needs this (its company-file username/password,
+  // sent as the x-myobapi-cftoken header on every call, a SEPARATE
+  // credential from the OAuth login itself; see myob.service.ts). Encrypted
+  // the same way as credentialsEncrypted. Named generically (not
+  // "myobCredentials") so a future provider with a similar "OAuth plus one
+  // more credential pair" shape can reuse this field rather than adding
+  // its own.
+  @Prop()
+  secondaryCredentialsEncrypted?: string;
 }
 
 export const IntegrationCredentialSchema = SchemaFactory.createForClass(IntegrationCredential);

@@ -58,9 +58,18 @@ export class ChatController {
   sendMessage(@CurrentUser() user: JwtPayload, @Req() req: Request, @Body() dto: SendMessageDto) {
     this.assertAiAccessAllowed(user);
     const bearerToken = (req.headers.authorization ?? '').replace(/^Bearer\s+/i, '');
-    // agent_user accounts only ever see one agent in the mention list anyway
-    // — default new conversations to it so they don't need to @mention.
-    const agentId = dto.agentId ?? (user.roles.includes('agent_user') ? user.assignedAgentId : undefined);
+    // agent_user accounts exist to BE one specific persona (their
+    // assignedAgentId) — listAgents() already only ever shows them that one
+    // option, but that's a UI convenience, not enforcement (see its own
+    // comment): a client-supplied dto.agentId must never override it, or
+    // this account could pick a different persona with broader allowedTools
+    // (including a fully-unrestricted built-in) than the one it was actually
+    // granted. Every other role keeps dto.agentId as-is — AgentRole's
+    // assignedDepartments/assignedUserIds are documented as @mention
+    // visibility only (agent-role.schema.ts), not a security boundary, so
+    // picking an agent outside that list is intentionally allowed for them.
+    const isLockedAgentUser = user.roles.includes('agent_user') && !user.roles.includes('admin');
+    const agentId = isLockedAgentUser ? user.assignedAgentId : dto.agentId;
     return this.chatService.sendMessage(user.sub, user.organizationId, bearerToken, dto.message, dto.conversationId, agentId, dto.attachmentIds);
   }
 

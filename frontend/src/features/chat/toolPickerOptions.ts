@@ -14,6 +14,8 @@ export const TOOL_PICKER_OPTIONS: { name: string; label: string }[] = [
   { name: 'crm_source_records', label: 'CRM records by data source' },
   { name: 'crm_create_task', label: 'Create CRM tasks (Zoho / Salesforce)' },
   { name: 'zapier', label: 'Zapier apps (Hoops, …)' },
+  { name: 'integration_capabilities', label: 'Connected integrations (what’s available)' },
+  { name: 'integration_execute', label: 'Connected integrations (Xero, Zoho Books, MYOB, Zoho Payroll, custom REST)' },
   { name: 'gorilladash_lookup', label: 'Gorilla Dash (read)' },
   { name: 'gorilladash_action', label: 'Gorilla Dash (create / update leads, email)' },
   { name: 'outlook_lookup', label: 'Outlook' },

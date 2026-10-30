@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { Deal, DealDocument } from './schemas/deal.schema';
@@ -16,7 +16,16 @@ export interface ExternalOwnerRow {
   externalOwnerRef: string;
   externalOwnerLabel?: string;
   dealCount: number;
-  mapping: { id: string; ownerId: string; ownerName?: string } | null;
+  mapping: {
+    id: string;
+    // Set only when linkedUserIds has exactly one entry — the auto-
+    // assignable owner. Undefined for an ambiguous (2+ linked users) mapping.
+    ownerId?: string;
+    ownerName?: string;
+    // The full set of linked users — always [ownerId] when ownerId is set.
+    linkedUserIds: string[];
+    linkedUsers: { id: string; name?: string }[];
+  } | null;
   // Best-effort match between this CRM's raw owner label and a current
   // employee's name/email — purely a hint the admin still has to click to
   // confirm (see upsertMapping below); never applied automatically, since a
@@ -194,13 +203,24 @@ export class DealOwnerMappingService {
         const ref = g._id.ref;
         const mapping = mappingByKey.get(`${provider}::${ref}`);
         const suggested = mapping ? undefined : findSuggestedOwner(g.label, users);
+        // Backward compatibility: every mapping written before linkedUserIds
+        // existed has it absent/empty but ownerId set — treat that exactly
+        // as a one-element list, never as "no linked users" for a row that
+        // plainly has an owner. No migration needed for this reason.
+        const linkedUserIds = mapping ? (mapping.linkedUserIds?.length ? mapping.linkedUserIds : mapping.ownerId ? [mapping.ownerId] : []) : [];
         return {
           provider,
           externalOwnerRef: ref,
           externalOwnerLabel: g.label,
           dealCount: g.count,
           mapping: mapping
-            ? { id: mapping._id.toString(), ownerId: mapping.ownerId, ownerName: userNameById.get(mapping.ownerId) }
+            ? {
+                id: mapping._id.toString(),
+                ownerId: mapping.ownerId,
+                ownerName: mapping.ownerId ? userNameById.get(mapping.ownerId) : undefined,
+                linkedUserIds,
+                linkedUsers: linkedUserIds.map((id) => ({ id, name: userNameById.get(id) })),
+              }
             : null,
           suggestedOwnerId: suggested?.id,
           suggestedOwnerName: suggested?.name,
@@ -209,47 +229,87 @@ export class DealOwnerMappingService {
       .sort((a, b) => b.dealCount - a.dealCount);
   }
 
-  // Upserts the mapping AND immediately bulk-applies it to every existing
-  // deal carrying this external owner ref — "ensure deal ownership data is
-  // synchronized accurately", not just recorded for next sync. Overwrites
-  // ownerId even on deals a human previously assigned manually: once a real
-  // mapping exists for this salesperson, it becomes the authoritative
-  // source going forward; a one-off manual override can still be applied
-  // afterward via the existing per-deal Deal Assignment control.
+  // Every user id must belong to this organization and be active — the
+  // same bar deals.controller.ts's assertAssignable already applies to a
+  // single manual assignment, applied here to the whole linked set so a
+  // mapping can never reference a foreign or deactivated account.
+  private async assertEligibleUsers(organizationId: string, userIds: string[]): Promise<void> {
+    const users = await this.usersService.findAll(organizationId);
+    const eligibleIds = new Set(users.filter((u) => u.active !== false).map((u) => u._id.toString()));
+    const invalid = userIds.filter((id) => !eligibleIds.has(id));
+    if (invalid.length > 0) {
+      throw new BadRequestException('One or more selected users are not eligible for assignment in this organization.');
+    }
+  }
+
+  // Upserts the mapping with the given set of linked users. Linking is an
+  // ASSOCIATION, never automatic ownership (see this module's own header
+  // comment): only when the set resolves to exactly one user is there a
+  // reliable deal-specific signal, so only then does this immediately bulk-
+  // apply that owner to every existing deal/quote carrying this external
+  // owner ref — "ensure deal ownership data is synchronized accurately",
+  // not just recorded for next sync, exactly as the single-user case always
+  // has (still overwrites a deal a human previously assigned manually: once
+  // a real unambiguous mapping exists for this salesperson, it becomes the
+  // authoritative source going forward, same as before this change). With
+  // two or more linked users, nothing is bulk-applied — every existing
+  // deal's ownerId, assigned or not, is left completely untouched, and an
+  // admin resolves each one explicitly via the existing per-deal/bulk
+  // assignment controls. Going back down to exactly one re-enables the
+  // single-user behavior (including the bulk-apply) the same way creating
+  // a brand-new single-user mapping does.
   async upsertMapping(
     organizationId: string,
     provider: string,
     externalOwnerRef: string,
     externalOwnerLabel: string | undefined,
-    ownerId: string,
+    ownerIds: string[],
     mappedBy: string,
   ): Promise<ExternalOwnerRow> {
+    const uniqueOwnerIds = [...new Set(ownerIds)];
+    if (uniqueOwnerIds.length === 0) throw new BadRequestException('Link at least one user.');
+    await this.assertEligibleUsers(organizationId, uniqueOwnerIds);
+
+    const resolvedOwnerId = uniqueOwnerIds.length === 1 ? uniqueOwnerIds[0] : undefined;
     const mapping = await this.mappingModel
       .findOneAndUpdate(
         { organizationId, provider, externalOwnerRef },
-        { $set: { externalOwnerLabel, ownerId, mappedBy } },
+        resolvedOwnerId
+          ? { $set: { externalOwnerLabel, ownerId: resolvedOwnerId, linkedUserIds: uniqueOwnerIds, mappedBy } }
+          : { $set: { externalOwnerLabel, linkedUserIds: uniqueOwnerIds, mappedBy }, $unset: { ownerId: '' } },
         { upsert: true, new: true },
       )
       .exec();
 
-    const result = await this.dealModel.updateMany(
-      { organizationId, externalOwnerProvider: provider, externalOwnerRef },
-      { $set: { ownerId } },
-    );
-    // The same person owns the quotations the CRM lists under that owner — a
-    // link made for deals used to leave every synced quotation without a
-    // HaiVE owner, so quote work showed as nobody's.
-    await this.dealModel.db
-      .collection('crm_quotes')
-      .updateMany({ organizationId, sourceProvider: provider, quoteOwner: externalOwnerRef }, { $set: { ownerUserId: ownerId } });
+    let dealCount = 0;
+    if (resolvedOwnerId) {
+      const result = await this.dealModel.updateMany(
+        { organizationId, externalOwnerProvider: provider, externalOwnerRef },
+        { $set: { ownerId: resolvedOwnerId } },
+      );
+      dealCount = result.matchedCount;
+      // The same person owns the quotations the CRM lists under that owner — a
+      // link made for deals used to leave every synced quotation without a
+      // HaiVE owner, so quote work showed as nobody's.
+      await this.dealModel.db
+        .collection('crm_quotes')
+        .updateMany({ organizationId, sourceProvider: provider, quoteOwner: externalOwnerRef }, { $set: { ownerUserId: resolvedOwnerId } });
+    }
 
-    const user = await this.usersService.findById(ownerId);
+    const users = await this.usersService.findAll(organizationId);
+    const userNameById = new Map(users.map((u) => [u._id.toString(), u.name]));
     return {
       provider,
       externalOwnerRef,
       externalOwnerLabel: mapping.externalOwnerLabel,
-      dealCount: result.matchedCount,
-      mapping: { id: mapping._id.toString(), ownerId, ownerName: user?.name },
+      dealCount,
+      mapping: {
+        id: mapping._id.toString(),
+        ownerId: resolvedOwnerId,
+        ownerName: resolvedOwnerId ? userNameById.get(resolvedOwnerId) : undefined,
+        linkedUserIds: uniqueOwnerIds,
+        linkedUsers: uniqueOwnerIds.map((id) => ({ id, name: userNameById.get(id) })),
+      },
     };
   }
 

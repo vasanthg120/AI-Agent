@@ -30,25 +30,26 @@ import { SubscriptionCheckoutDto } from './dto/subscription-checkout.dto';
 // can use. Nothing here ever returns a provider name/model/cost — see
 // billing.service.ts's listCustomerTransactions for the enforcement point.
 //
-// Billing is scoped per USER (user.sub) by default, not per organization —
-// every call below deliberately passes tenantKey(user) as the tenant key into
-// WalletService/ReservationService/AutoPayService/BillingService, none of
-// which care whether that string is actually an org id or a user id; they
-// just use it as an opaque wallet key. Each individual user therefore gets
-// their own wallet, their own one-time free-trial grant, and their own Auto
-// Recharge/saved payment method, matching a ChatGPT-style per-account model
-// rather than a shared company pool.
+// Billing is scoped per ORGANIZATION by default (config.billing.orgScopingEnabled,
+// env BILLING_ORG_SCOPED_WALLETS, defaults true) — every call below passes
+// tenantKey(user) as the tenant key into WalletService/ReservationService/
+// AutoPayService/BillingService, none of which care whether that string is
+// actually an org id or a user id; they just use it as an opaque wallet key.
+// With the default on, every authorized user in an organization shares one
+// wallet, one free-trial grant, and one Auto Recharge/saved payment method —
+// an admin connects/pays once, every employee's usage draws from the same
+// pool. The "actor" identity (who performed the action, e.g.
+// WalletTransaction.createdBy / CreditReservation.userId) always stays
+// user.sub regardless of this flag — which wallet is charged and who
+// triggered the charge are tracked independently.
 //
 // Phase 0 of the org-scoped billing extension (see billing-migration.service.ts)
-// adds tenantKey() below as the ONE place this choice is made — with
-// config.billing.orgScopingEnabled (env BILLING_ORG_SCOPED_WALLETS) left at
-// its default `false`, tenantKey() still returns user.sub and every route
-// below behaves exactly as before. Flipping it to `true` (only after running
-// the migration in this environment) switches every route to the real
-// user.organizationId instead, without any other logic in this file, in
-// WalletService, or in ReservationService changing. The "actor" identity
-// (who performed the action, e.g. WalletTransaction.createdBy /
-// CreditReservation.userId) always stays user.sub regardless of this flag.
+// added tenantKey() below as the ONE place this choice is made. A deployment
+// upgrading from before this default changed, with real pre-existing
+// per-user wallets, should run a dry-run of
+// POST /billing/admin/migrate-organization-wallets first (repoints them onto
+// the real organizationId) and can set BILLING_ORG_SCOPED_WALLETS=false to
+// stay on the old per-user behavior until that's done.
 @UseGuards(JwtAuthGuard)
 @Controller('billing')
 export class BillingController {

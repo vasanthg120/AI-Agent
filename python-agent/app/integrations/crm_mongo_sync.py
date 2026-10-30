@@ -16,7 +16,14 @@ the customised CRM):
 - Deal owners: the CRM's owner id is mirrored into externalOwnerRef (a foreign
   id space), and only becomes a real HaiVE ownerId through an admin mapping in
   Settings -> Deal Assignment (crm_deal_owner_mappings, resolved at sync time).
-  No mapping yet -> ownerId is left untouched, never wiped.
+  No mapping yet -> ownerId is left untouched, never wiped. A mapping linking
+  more than one HaiVE user to the same external salesperson has no ownerId at
+  all (ambiguous — see deal-owner-mapping.service.ts's own comment), so it is
+  excluded entirely at the query below rather than resolving to something
+  arbitrary. A deal whose ownerId was set by an explicit admin/manager
+  assignment (Deal.ownerAssignedManually) is never overwritten by a mapping
+  here either, however many times sync runs again — only a deal with no such
+  flag ever gets a mapped owner applied.
 - Owner labels: the customised CRM's deal list returns a bare owner id, but its
   quotes carry the same user's name — cross-referenced onto
   Deal.externalOwnerLabel. Real data, never guessed.
@@ -146,7 +153,11 @@ def _deal_update(source, store_id, raw, existing_by_external_id, owner_mapping_b
         if label:
             fields["externalOwnerLabel"] = label
         mapped_owner_id = owner_mapping_by_ref.get(str(owner))
-        if mapped_owner_id:
+        # Never overwrite a deal an admin/manager explicitly assigned
+        # (Deal.ownerAssignedManually) — that stays authoritative no matter
+        # how many times sync runs again; only an unflagged deal (never
+        # manually touched) ever gets a mapped owner applied here.
+        if mapped_owner_id and not (existing and existing.get("ownerAssignedManually")):
             fields["ownerId"] = mapped_owner_id
 
     if existing is None or any(existing.get(f) != fields.get(f) for f in _DEAL_ACTIVITY_FIELDS):
@@ -166,13 +177,19 @@ def _sync_deals(source: dict, adapter, seen_fields: set) -> int:
     existing_by_external_id = {
         d["externalId"]: d
         for d in db.crm_deals.find(
-            {**_source_filter(source), "externalId": {"$exists": True}}, {"externalId": 1, **{f: 1 for f in _DEAL_ACTIVITY_FIELDS}}
+            {**_source_filter(source), "externalId": {"$exists": True}},
+            {"externalId": 1, "ownerAssignedManually": 1, **{f: 1 for f in _DEAL_ACTIVITY_FIELDS}},
         )
     }
+    # ownerId exists only on an unambiguous mapping (exactly one linked
+    # user — see deal-owner-mapping.service.ts's own comment); a mapping
+    # linking more than one user has no ownerId at all and is deliberately
+    # excluded here, not resolved to anything arbitrary.
     owner_mapping_by_ref = {
         m["externalOwnerRef"]: m["ownerId"]
         for m in db.crm_deal_owner_mappings.find(
-            {"organizationId": organization_id, "provider": source["provider"]}, {"externalOwnerRef": 1, "ownerId": 1}
+            {"organizationId": organization_id, "provider": source["provider"], "ownerId": {"$exists": True, "$ne": None}},
+            {"externalOwnerRef": 1, "ownerId": 1},
         )
     }
     owner_label_by_ref = {
@@ -293,11 +310,15 @@ def _sync_quotes(source: dict, adapter, seen_fields: set) -> int:
         )
     }
     mapping = (source.get("fieldMappings") or {}).get("quotes") or {}
-    # CRM owner -> HaiVE user, as linked in Settings -> Deal Assignment (shared with deals).
+    # CRM owner -> HaiVE user, as linked in Settings -> Deal Assignment (shared
+    # with deals). ownerId exists only on an unambiguous mapping (exactly one
+    # linked user) — a mapping linking more than one user is excluded here,
+    # same reasoning as _sync_deals' own owner_mapping_by_ref.
     quote_owner_mapping_by_ref = {
         m["externalOwnerRef"]: m["ownerId"]
         for m in db.crm_deal_owner_mappings.find(
-            {"organizationId": source["organizationId"], "provider": source["provider"]}, {"externalOwnerRef": 1, "ownerId": 1}
+            {"organizationId": source["organizationId"], "provider": source["provider"], "ownerId": {"$exists": True, "$ne": None}},
+            {"externalOwnerRef": 1, "ownerId": 1},
         )
     }
     newly_approved: list[str] = []

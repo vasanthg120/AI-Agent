@@ -47,7 +47,12 @@ export class BusinessKnowledgeChatService {
     // conversationId: this endpoint has no chat conversation of its own —
     // 'business-knowledge' is a stable, readable label, never read back for
     // routing (reserve() only persists it on the CreditReservation row).
-    await this.reservations.reserve(organizationId, userId, requestId, 'business-knowledge');
+    // resolveTenantKey(), not organizationId directly — billing is scoped
+    // per billing.orgScopingEnabled same as every other caller here (see
+    // that method's own comment); passing the raw organizationId would
+    // silently charge a different wallet than chat/every other feature
+    // whenever that flag is ever set to its non-default false.
+    await this.reservations.reserve(this.reservations.resolveTenantKey(organizationId, userId), userId, requestId, 'business-knowledge');
 
     try {
       const token = this.jwt.sign({ sub: userId, organizationId }, { expiresIn: '5m' });

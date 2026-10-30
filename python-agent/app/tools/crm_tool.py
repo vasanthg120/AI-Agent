@@ -85,6 +85,8 @@ def _fetch_raw_contacts(*, search_after=0, limit=50, search_text="", fields=None
 def run(tool_input: dict, context: dict) -> str:
     action = tool_input.get("action", "upsert")
     organization_id = context.get("organization_id")
+    if not organization_id:
+        return "No organization context available."
     base_url, api_key = prospectconnect.resolve_credentials(organization_id, context.get("user_id", ""))
 
     if not base_url or not api_key:

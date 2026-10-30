@@ -20,7 +20,7 @@ from app.memory import chat_attachment_store, mem0_client
 from app.memory.conversation_store import get_recent_messages
 from app.models.schemas import ChatRequest, ChatResponse
 from app.observability.guardrails import redact_secrets
-from app.security import get_current_user
+from app.security import assert_user_id_matches, get_current_user
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -33,8 +33,8 @@ def _perf(request_id: str, stage: str, started_at: float) -> None:
     logger.info("[PERF] request_id=%s stage=%s ms=%d", request_id, stage, round((time.monotonic() - started_at) * 1000))
 
 
-def _build_messages(payload: ChatRequest) -> list[dict]:
-    history = get_recent_messages(payload.conversation_id)
+def _build_messages(payload: ChatRequest, organization_id: str | None) -> list[dict]:
+    history = get_recent_messages(payload.conversation_id, payload.user_id, organization_id)
     messages = [{"role": m["role"], "content": m["content"]} for m in history]
     messages.append({"role": "user", "content": payload.message})
     return messages
@@ -77,6 +77,7 @@ def _extract_memory_in_background(user_id: str, message: str, reply: str) -> Non
 
 @router.post("/chat", response_model=ChatResponse)
 def chat(payload: ChatRequest, user: dict = Depends(get_current_user)):
+    assert_user_id_matches(payload.user_id, user)
     organization_id = user.get("organizationId")
     request_id = str(uuid.uuid4())
     turn_started_at = time.monotonic()
@@ -102,7 +103,7 @@ def chat(payload: ChatRequest, user: dict = Depends(get_current_user)):
     try:
         result = run_agent(
             {
-                "messages": _build_messages(payload),
+                "messages": _build_messages(payload, organization_id),
                 "pending_calls": [],
                 "tools_used": [],
                 "rounds": 0,
@@ -138,6 +139,7 @@ def chat(payload: ChatRequest, user: dict = Depends(get_current_user)):
 
 @router.post("/chat/stream")
 def chat_stream(payload: ChatRequest, user: dict = Depends(get_current_user)):
+    assert_user_id_matches(payload.user_id, user)
     organization_id = user.get("organizationId")
     request_id = str(uuid.uuid4())
     turn_started_at = time.monotonic()
@@ -166,7 +168,7 @@ def chat_stream(payload: ChatRequest, user: dict = Depends(get_current_user)):
         return StreamingResponse(error_only(), media_type="text/event-stream")
     _perf(request_id, "reserve", reserve_started_at)
 
-    messages = _build_messages(payload)
+    messages = _build_messages(payload, organization_id)
     persona = resolve_persona(payload.agent_id, organization_id)
 
     def event_source():

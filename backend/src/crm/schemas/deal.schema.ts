@@ -29,6 +29,19 @@ export class Deal {
   @Prop({ index: true })
   ownerId?: string;
 
+  // Set whenever ownerId was set by an explicit admin/manager action
+  // (deals.controller.ts's assign / assign-bulk), never by a DealOwnerMapping
+  // resolving externalOwnerRef automatically. The one thing this protects:
+  // a background CRM re-sync (python-agent's crm_mongo_sync.py) must never
+  // silently overwrite a deliberate human assignment just because it ran
+  // again — it checks this flag before applying a mapped owner. Cleared
+  // (unset) on explicit unassignment, which deliberately opts the deal back
+  // into automatic resolution. Absent on every deal written before this
+  // existed, which is the correct, safe default (treated as "not manually
+  // assigned" — exactly their prior, unprotected behavior, unchanged).
+  @Prop()
+  ownerAssignedManually?: boolean;
+
   // --- External CRM owner mapping (provider-agnostic) ---
   //
   // The raw owner/assigned-user identifier straight from whichever external

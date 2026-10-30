@@ -24,7 +24,12 @@ export class DealsService {
   // regardless of what the caller claims.
   async assignOwner(id: string, organizationId: string, ownerId: string | null, storeId?: string) {
     const filter = { _id: id, organizationId, ...(storeId ? { storeId } : {}) };
-    const update = ownerId ? { $set: { ownerId } } : { $unset: { ownerId: '' } };
+    // ownerAssignedManually marks this as a deliberate human assignment —
+    // see deal.schema.ts's own comment on the field: a background CRM
+    // re-sync checks it before ever applying a mapped owner, so it never
+    // silently overwrites what's set here. Unassigning clears it too,
+    // which deliberately opts the deal back into automatic resolution.
+    const update = ownerId ? { $set: { ownerId, ownerAssignedManually: true } } : { $unset: { ownerId: '', ownerAssignedManually: '' } };
     const updated = await this.dealModel.findOneAndUpdate(filter, update, { new: true }).exec();
     if (!updated) throw new NotFoundException('Deal not found');
     return updated;
@@ -36,7 +41,7 @@ export class DealsService {
   async assignOwnerBulk(ids: string[], organizationId: string, ownerId: string | null, storeId?: string): Promise<{ requested: number; assigned: number }> {
     const unique = [...new Set(ids)];
     const filter = { _id: { $in: unique }, organizationId, ...(storeId ? { storeId } : {}) };
-    const update = ownerId ? { $set: { ownerId } } : { $unset: { ownerId: '' } };
+    const update = ownerId ? { $set: { ownerId, ownerAssignedManually: true } } : { $unset: { ownerId: '', ownerAssignedManually: '' } };
     const result = await this.dealModel.updateMany(filter, update).exec();
     return { requested: unique.length, assigned: result.matchedCount };
   }
