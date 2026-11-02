@@ -74,15 +74,15 @@ def _search_filter(source_types: list[str], user_id: str, organization_id: str |
     scoped = [t for t in source_types if t in _ORG_SCOPED_TYPES]
     unscoped = [t for t in source_types if t not in _ORG_SCOPED_TYPES]
     source = lambda types: qmodels.FieldCondition(key="source_type", match=qmodels.MatchAny(any=types))  # noqa: E731
-    in_organization = qmodels.FieldCondition(key="organization_id", match=qmodels.MatchValue(value=organization_id))
+    in_organization = lambda: qmodels.FieldCondition(key="organization_id", match=qmodels.MatchValue(value=organization_id))  # noqa: E731
 
     branches = []
     if unscoped and user_id and user_id != "*":
         branches.append(qmodels.Filter(must=[source(unscoped), qmodels.FieldCondition(key="user_id", match=qmodels.MatchValue(value=user_id))]))
     if unscoped and organization_id:
-        branches.append(qmodels.Filter(must=[source(unscoped), qmodels.FieldCondition(key="user_id", match=qmodels.MatchValue(value="*")), in_organization]))
+        branches.append(qmodels.Filter(must=[source(unscoped), qmodels.FieldCondition(key="user_id", match=qmodels.MatchValue(value="*")), in_organization()]))
     if scoped and organization_id:
-        branches.append(qmodels.Filter(must=[source(scoped), in_organization]))
+        branches.append(qmodels.Filter(must=[source(scoped), in_organization()]))
 
     if not branches:
         return None
