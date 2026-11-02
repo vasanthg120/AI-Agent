@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import * as nodemailer from 'nodemailer';
-import { dailyReportEmail, notificationEmail, passwordResetOtp, twoFactorEnabledEmail, verifyEmailOtp, welcomeEmail } from './templates';
+import { dailyReportEmail, notificationEmail, passwordResetOtp, twoFactorEnabledEmail, verifyEmailOtp, welcomeEmail, invitationEmail } from './templates';
 import type { DailyReportEmailTask, EmailContent } from './templates';
 
 // Fire-and-forget by design, same fail-open shape as RedisCacheService
@@ -59,6 +59,18 @@ export class MailService {
 
   sendWelcomeEmail(to: string, name: string): Promise<void> {
     return this.send(to, welcomeEmail(name, this.appUrl));
+  }
+
+  /** Where an invitation's link leads. Uses the app address as configured, even
+   * localhost: unlike a convenience link in a welcome email, an invitation can't be
+   * completed without it, and in development localhost is the right address. */
+  invitationLink(token: string): string | undefined {
+    const base = this.appUrl.trim().replace(/\/+$/, '');
+    return base ? `${base}/activate?token=${encodeURIComponent(token)}` : undefined;
+  }
+
+  sendInvitationEmail(to: string, name: string, businessName: string, token: string): Promise<void> {
+    return this.send(to, invitationEmail(name, businessName, this.invitationLink(token)));
   }
 
   sendVerificationOtp(to: string, code: string): Promise<void> {

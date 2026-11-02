@@ -142,7 +142,7 @@ export class PlivoService {
 
   async listLines(organizationId: string, onlyUserId?: string): Promise<PlivoLineView[]> {
     const lines = await this.lineModel.find({ organizationId, ...(onlyUserId ? { userId: onlyUserId } : {}) }).sort({ createdAt: 1 }).exec();
-    const names = new Map((await this.users.findAll(organizationId)).map((u) => [u._id.toString(), u.name]));
+    const names = new Map((await this.users.findAllWithLinkedMembers(organizationId)).map((u) => [u._id.toString(), u.name]));
     return lines.map((line) => ({
       id: line._id.toString(),
       plivoNumber: line.plivoNumber,

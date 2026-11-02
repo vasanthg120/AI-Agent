@@ -132,7 +132,7 @@ export class CustomerWorkspaceService {
   private async team(organizationId: string): Promise<Map<string, string>> {
     const users = await this.connection
       .collection('users')
-      .find({ organizationId, active: { $ne: false }, roles: { $ne: 'superadmin' } }, { projection: { name: 1, email: 1 } })
+      .find({ organizationId, active: { $ne: false }, roles: { $ne: 'superadmin' }, linkedLoginUserId: { $exists: false } }, { projection: { name: 1, email: 1 } })
       .limit(500)
       .toArray();
     return new Map(users.map((u) => [u._id.toString(), text(u.name) || text(u.email) || 'Team member']));

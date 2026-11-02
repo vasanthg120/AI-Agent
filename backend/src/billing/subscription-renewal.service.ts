@@ -1,5 +1,6 @@
 import { Cron, CronExpression } from '@nestjs/schedule';
-import { Inject, Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
+import { NotificationsService } from '../notifications/notifications.service';
 import { ConfigService } from '@nestjs/config';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
@@ -45,7 +46,26 @@ export class SubscriptionRenewalService {
     private invoices: BillingInvoiceService,
     private config: ConfigService,
     private pricing: PricingService,
+    // Optional so a failure to notify can never be a reason renewals don't run.
+    @Optional() private notifications?: NotificationsService,
   ) {}
+
+  /** Tells that business's own owner, nobody else's: a renewal failing in one
+   * account is never news for another. Member records are left out, so a Main
+   * Account owner isn't copied on a sub-account's billing. Never throws: the
+   * renewal has already happened (or failed) by the time this runs. */
+  private async notifyOwner(organizationId: string, kind: 'system' | 'warning' | 'error', title: string, description: string): Promise<void> {
+    if (!this.notifications) return;
+    try {
+      const owners = await this.subscriptionModel.db
+        .collection('users')
+        .find({ organizationId, roles: 'owner', linkedLoginUserId: { $exists: false } }, { projection: { _id: 1 } })
+        .toArray();
+      await Promise.all(owners.map((owner) => this.notifications!.create(owner._id.toString(), { kind, title, description, source: 'billing' }, organizationId)));
+    } catch (err) {
+      this.logger.warn(`Could not send a billing notice for ${organizationId}: ${(err as Error).message}`);
+    }
+  }
 
   @Cron(CronExpression.EVERY_HOUR)
   async processDueRenewals(): Promise<void> {
@@ -72,6 +92,7 @@ export class SubscriptionRenewalService {
         type: 'canceled',
         metadata: { reason: 'period_end' },
       });
+      await this.notifyOwner(subscription.organizationId, 'warning', 'Subscription ended', 'Your subscription has ended as requested. Choose a plan in Billing to subscribe again.');
       return;
     }
 
@@ -160,6 +181,7 @@ export class SubscriptionRenewalService {
       type: 'renewed',
       metadata: { paymentRecordId: record._id.toString(), creditsGranted: price.creditsGranted },
     });
+    await this.notifyOwner(subscription.organizationId, 'system', 'Subscription renewed', 'Your subscription was renewed and your credits have been added. The invoice is in Billing.');
   }
 
   /** currentPeriodEnd is deliberately left untouched on failure — the
@@ -179,6 +201,13 @@ export class SubscriptionRenewalService {
       type: subscription.status === 'expired' ? 'expired' : 'renewal_failed',
       metadata: { reason, attempt: subscription.renewalFailureCount },
     });
+
+    // Retried every hour, so only the first failure and the final expiry notify.
+    if (subscription.status === 'expired') {
+      await this.notifyOwner(subscription.organizationId, 'error', 'Subscription expired', 'We could not renew your subscription, so it has expired. Choose a plan in Billing to continue.');
+    } else if (subscription.renewalFailureCount === 1) {
+      await this.notifyOwner(subscription.organizationId, 'warning', 'Subscription renewal failed', 'We could not renew your subscription. Check your payment method in Billing; we will try again automatically.');
+    }
 
     this.logger.warn(
       `Subscription ${subscription._id.toString()} renewal failed (${reason}), attempt ${subscription.renewalFailureCount}/${maxAttempts} — status now ${subscription.status}.`,

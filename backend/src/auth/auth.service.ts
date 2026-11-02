@@ -1,13 +1,15 @@
 import { randomInt, randomUUID } from 'crypto';
-import { BadRequestException, ConflictException, Injectable, UnauthorizedException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, UnauthorizedException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
 import { AuditService } from '../audit/audit.service';
 import { MailService } from '../mail/mail.service';
 import { OrganizationsService } from '../organizations/organizations.service';
+import { isOrganizationBlocked } from '../organizations/schemas/organization.schema';
+import { InvitationsService } from '../users/invitations.service';
 import { UsersService } from '../users/users.service';
 import { UserDocument } from '../users/schemas/user.schema';
-import { JwtPayload } from './jwt-payload.interface';
+import { JwtPayload, loginIdOf } from './jwt-payload.interface';
 import { OAuthProfile, OAuthProviderName } from './oauth.service';
 import { lookupLocation, parseDeviceLabel } from './session-meta.util';
 
@@ -31,6 +33,7 @@ export class AuthService {
     private jwtService: JwtService,
     private mailService: MailService,
     private auditService: AuditService,
+    private invitations: InvitationsService,
   ) {}
 
   /** Registration always creates a brand-new organization (+ its default
@@ -267,6 +270,72 @@ export class AuthService {
       jti,
     };
     return { accessToken: this.jwtService.sign(payload) };
+  }
+
+  /**
+   * Moves a signed-in person into another business they may enter, without signing
+   * in again. Only a business they really belong to works: their own, or one with a
+   * member record linked to their login — never an id taken on trust from the
+   * browser. The new token keeps the same session (revoking it signs them out
+   * everywhere) and the same expiry (switching can't extend a session).
+   */
+  async switchAccount(caller: JwtPayload, organizationId: string, ip?: string): Promise<{ accessToken: string }> {
+    if (caller.authMethod !== 'session' || !caller.jti) {
+      throw new ForbiddenException('Switching accounts requires a full login session.');
+    }
+    const loginId = loginIdOf(caller);
+    const login = await this.usersService.findById(loginId);
+    if (!login || login.active === false) throw new UnauthorizedException();
+    const target = login.organizationId === organizationId ? login : await this.usersService.findLinkedMember(loginId, organizationId);
+    if (!target || target.active === false) throw new ForbiddenException('You don’t have access to this account.');
+    const org = await this.organizationsService.findOrgStatus(organizationId);
+    if (!org || isOrganizationBlocked(org.status)) throw new ForbiddenException('This account is suspended or archived.');
+
+    const payload: JwtPayload = {
+      sub: target._id.toString(),
+      email: target.email,
+      roles: target.roles,
+      organizationId: target.organizationId,
+      storeId: target.storeId,
+      assignedAgentId: target.assignedAgentId,
+      department: target.department,
+      jti: caller.jti,
+      ...(target.linkedLoginUserId ? { loginUserId: loginId } : {}),
+    };
+    const secondsLeft = caller.exp ? caller.exp - Math.floor(Date.now() / 1000) : 0;
+    const accessToken = secondsLeft > 0 ? this.jwtService.sign(payload, { expiresIn: secondsLeft }) : this.jwtService.sign(payload);
+    void this.auditService.log({
+      userId: loginId,
+      organizationId,
+      method: 'POST',
+      route: '/organizations/switch',
+      statusCode: 200,
+      durationMs: 0,
+      ip,
+      action: 'account.switch',
+      metadata: { fromOrganizationId: caller.organizationId, toOrganizationId: organizationId },
+    });
+    return { accessToken };
+  }
+
+  describeInvitation(token: string) {
+    return this.invitations.describe(token);
+  }
+
+  /** Sets the password chosen on the activation page and signs the person in. */
+  async acceptInvitation(token: string, password: string, meta: SessionMeta = {}): Promise<{ accessToken: string }> {
+    const user = await this.invitations.accept(token, password);
+    void this.auditService.log({
+      userId: user._id.toString(),
+      organizationId: user.organizationId,
+      method: 'POST',
+      route: '/auth/invitation/accept',
+      statusCode: 200,
+      durationMs: 0,
+      ip: meta.ip,
+      action: 'invitation.accept',
+    });
+    return this.issueSessionToken(user, meta);
   }
 
   /** A short-lived, minimal-claim token proving "this is who just supplied

@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { PassportStrategy } from '@nestjs/passport';
 import { ExtractJwt, Strategy } from 'passport-jwt';
 import { OrganizationsService } from '../../organizations/organizations.service';
+import { isOrganizationBlocked } from '../../organizations/schemas/organization.schema';
 import { UsersService } from '../../users/users.service';
 import { JwtPayload } from '../jwt-payload.interface';
 
@@ -60,17 +61,16 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     if (payload.roles?.includes('service')) {
       return { ...payload, authMethod: 'service' };
     }
-    const user = await this.usersService.findById(payload.sub);
-    if (!user || user.active === false) {
-      throw new UnauthorizedException();
-    }
     // The actual revocation check — a session-backed token whose jti no
-    // longer appears in the user's sessions array (revoked, or issued
-    // before this check existed at all) is rejected here, not just when its
-    // own TTL expires.
-    if (!payload.jti || !user.sessions.some((s) => s.jti === payload.jti)) {
+    // longer appears in the login's sessions array (revoked, or issued before
+    // this check existed at all) is rejected here, not just when its own TTL
+    // expires. For someone working in another business this also confirms
+    // their member record there is still active and linked to their login.
+    const session = await this.usersService.resolveSession(payload);
+    if (!session) {
       throw new UnauthorizedException();
     }
+    const { user, login } = session;
     // Organization-level kill switch — previously modeled on the schema
     // (Organization.status) but never actually enforced anywhere (confirmed
     // by a full search: nothing wrote 'suspended' and nothing checked it).
@@ -79,11 +79,11 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     // rather than needing a guard added to each controller individually.
     // Platform admins are on a completely separate AdminJwtStrategy/
     // AdminAccount that never reaches this class, so they're never affected.
-    const org = await this.organizationsService.findOrgById(user.organizationId);
-    if (org?.status === 'suspended') {
+    const org = await this.organizationsService.findOrgStatus(user.organizationId);
+    if (isOrganizationBlocked(org?.status)) {
       throw new UnauthorizedException();
     }
-    void this.usersService.touchSessionIfStale(user._id.toString(), payload.jti);
+    void this.usersService.touchSessionIfStale(login._id.toString(), payload.jti!);
     return {
       sub: user._id.toString(),
       email: user.email,
@@ -96,6 +96,9 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       voiceAccessEnabled: user.voiceAccessEnabled,
       aiAccessEnabled: user.aiAccessEnabled,
       jti: payload.jti,
+      exp: payload.exp,
+      isSubAccount: !!org?.parentOrganizationId,
+      ...(payload.loginUserId ? { loginUserId: payload.loginUserId } : {}),
       authMethod: 'session',
     };
   }

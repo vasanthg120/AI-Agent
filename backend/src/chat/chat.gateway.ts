@@ -45,11 +45,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       // (2FA challenge, OAuth state) has no jti and is rejected the same way
       // a revoked one is.
       if (payload.purpose) throw new Error('special-purpose token');
-      const user = await this.usersService.findById(payload.sub);
-      if (!user || user.active === false) throw new Error('inactive or missing user');
-      if (!payload.jti || !user.sessions.some((s) => s.jti === payload.jti)) {
-        throw new Error('revoked or missing session');
-      }
+      if (!(await this.usersService.resolveSession(payload))) throw new Error('inactive user or revoked session');
       client.data.user = payload;
       client.data.token = token;
       // Per-user room (Socket.IO auto-creates it on first join) — lets

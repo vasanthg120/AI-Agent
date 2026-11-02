@@ -8,6 +8,7 @@ import configuration from './config/configuration';
 import { AuditModule } from './audit/audit.module';
 import { AuthModule } from './auth/auth.module';
 import { OrganizationsModule } from './organizations/organizations.module';
+import { SubAccountsModule } from './sub-accounts/sub-accounts.module';
 import { UsersModule } from './users/users.module';
 import { ChatModule } from './chat/chat.module';
 import { DocumentsModule } from './documents/documents.module';
@@ -71,6 +72,7 @@ import { HealthController } from './health/health.controller';
     MailModule,
     AuthModule,
     OrganizationsModule,
+    SubAccountsModule,
     UsersModule,
     ChatModule,
     DocumentsModule,

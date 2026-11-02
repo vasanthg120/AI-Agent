@@ -30,6 +30,12 @@ export class CreateUserDto {
   @IsString()
   department?: string;
 
+  // Email the person a link to set their own password, instead of creating a
+  // temporary password for the admin to pass on.
+  @IsOptional()
+  @IsBoolean()
+  sendInvite?: boolean;
+
   // Optional at creation — schema defaults to true (voice enabled) when
   // omitted. See update-user.dto.ts's identical field for what this gates.
   @IsOptional()

@@ -15,8 +15,44 @@ export class Organization {
   @Prop({ required: true, unique: true, index: true, lowercase: true, trim: true })
   slug: string;
 
-  @Prop({ enum: ['active', 'suspended'], default: 'active' })
-  status: 'active' | 'suspended';
+  // 'archived' is how a sub-account is "deleted": sign-in stops and it no longer
+  // renews or syncs, but its data stays and its Main Account can restore it.
+  @Prop({ enum: ['active', 'suspended', 'archived'], default: 'active' })
+  status: OrganizationStatus;
+
+  // --- Sub-accounts ---
+  // The Main Account this business belongs to. Absent means this IS a Main
+  // Account — every organization that predates sub-accounts reads that way
+  // with no migration, and account type is always derived from this one field
+  // (see accountTypeOf) so the two can never disagree. One level only: a
+  // sub-account never has sub-accounts of its own.
+  @Prop({ index: true })
+  parentOrganizationId?: string;
+
+  // The sub-account's own owner login. Unset on Main Accounts, where the owner
+  // is simply the user holding the 'owner' role.
+  @Prop()
+  ownerUserId?: string;
+
+  // Who suspended it. A Main Account may lift its own suspension of a
+  // sub-account, but never one set by the HaiVE platform admin.
+  @Prop({ default: false })
+  suspendedByParent: boolean;
+
+  @Prop()
+  archivedAt?: Date;
+
+  // Only sub-accounts fill these in today; the Create Sub-Account form is what
+  // collects them. Kept apart from Store.timezone, which times a store's daily
+  // reports — this is the business's own default.
+  @Prop()
+  timezone?: string;
+
+  @Prop()
+  currency?: string;
+
+  @Prop({ type: Object, default: {} })
+  profile: OrganizationProfile;
 
   // Tenant-level ceiling on notification delivery, not a default — the
   // effective send decision is this AND the target user's own
@@ -36,6 +72,32 @@ export class Organization {
   // any dependency on it.
   @Prop({ type: Object, default: {} })
   voiceSettings: OrganizationVoiceSettings;
+}
+
+export type OrganizationStatus = 'active' | 'suspended' | 'archived';
+
+export interface OrganizationProfile {
+  businessEmail?: string;
+  phoneCountryCode?: string;
+  phone?: string;
+  website?: string;
+  address?: string;
+  city?: string;
+  state?: string;
+  postalCode?: string;
+  // A small image as a data URL (PNG, JPEG or WebP; see sub-accounts' logo check).
+  logo?: string;
+}
+
+export type AccountType = 'main' | 'sub';
+
+export function accountTypeOf(org: { parentOrganizationId?: string }): AccountType {
+  return org.parentOrganizationId ? 'sub' : 'main';
+}
+
+/** Whether a business's status stops everyone in it from signing in or using it. */
+export function isOrganizationBlocked(status: OrganizationStatus | undefined): boolean {
+  return status === 'suspended' || status === 'archived';
 }
 
 export interface OrganizationVoiceSettings {

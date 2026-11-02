@@ -2,7 +2,8 @@ import { Cron, CronExpression } from '@nestjs/schedule';
 import { HttpException, HttpStatus, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectModel } from '@nestjs/mongoose';
-import { Model } from 'mongoose';
+import { Model, Types, isValidObjectId } from 'mongoose';
+import { hasLiveSubscription, subscriptionRequired } from '../sub-accounts/subscription-access';
 import { AgentExecution, AgentExecutionDocument } from '../command-center/schemas/agent-execution.schema';
 import { AutoPayService } from './autopay.service';
 import { PricingService } from './pricing.service';
@@ -67,11 +68,23 @@ export class ReservationService {
    * Billing page — which, with BILLING_ORG_SCOPED_WALLETS left at its
    * documented `false` default, is the per-user wallet — instead of a
    * separate org-keyed wallet the Billing UI never shows or lets top up. */
+  /** A sub-account pays for itself: with no live subscription its AI stops, even
+   * with credits left, including chat and background work that never pass through
+   * SubscriptionLockInterceptor. Main Accounts aren't affected. */
+  private async assertSubscribedIfSubAccount(organizationId: string): Promise<void> {
+    const connection = this.reservationModel.db;
+    if (!isValidObjectId(organizationId)) return;
+    const org = await connection.collection('organizations').findOne({ _id: new Types.ObjectId(organizationId) }, { projection: { parentOrganizationId: 1, status: 1 } });
+    if (!org?.parentOrganizationId) return;
+    if (org.status === 'archived' || !(await hasLiveSubscription(connection, organizationId))) throw subscriptionRequired();
+  }
+
   resolveTenantKey(organizationId: string, userId: string): string {
     return this.config.get<boolean>('billing.orgScopingEnabled') ? organizationId : userId;
   }
 
   async reserve(organizationId: string, userId: string, requestId: string, conversationId: string): Promise<ReserveResult> {
+    await this.assertSubscribedIfSubAccount(organizationId);
     const existing = await this.reservationModel.findOne({ requestId });
     if (existing) {
       // Idempotent retry (e.g. a lost response): don't double-reserve.

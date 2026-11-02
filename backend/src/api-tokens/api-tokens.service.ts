@@ -4,6 +4,7 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { JwtPayload } from '../auth/jwt-payload.interface';
 import { OrganizationsService } from '../organizations/organizations.service';
+import { isOrganizationBlocked } from '../organizations/schemas/organization.schema';
 import { UsersService } from '../users/users.service';
 import { ApiToken, ApiTokenDocument } from './schemas/api-token.schema';
 
@@ -96,15 +97,23 @@ export class ApiTokensService {
     const user = await this.usersService.findById(doc.userId);
     if (!user || user.active === false) return null;
 
+    // A token made while working in another business stops working as soon as
+    // the login behind that member record does.
+    if (user.linkedLoginUserId) {
+      const login = await this.usersService.findById(user.linkedLoginUserId);
+      if (!login || login.active === false) return null;
+    }
+
     // Same organization-suspension gate as JwtStrategy.validate() — a PAT is
     // still a normal user's credential, so a suspended org must block it too.
-    const org = await this.organizationsService.findOrgById(user.organizationId);
-    if (org?.status === 'suspended') return null;
+    const org = await this.organizationsService.findOrgStatus(user.organizationId);
+    if (isOrganizationBlocked(org?.status)) return null;
 
     void this.touchLastUsedIfStale(doc._id.toString(), doc.lastUsedAt);
 
     return {
       sub: user._id.toString(),
+      ...(user.linkedLoginUserId ? { loginUserId: user.linkedLoginUserId } : {}),
       email: user.email,
       roles: user.roles,
       organizationId: user.organizationId,
@@ -116,6 +125,7 @@ export class ApiTokensService {
       // No jti — API tokens aren't sessions, there's nothing to look up in
       // User.sessions for them. authMethod is what RequireSessionAuthGuard
       // reads to block this credential from security-management routes.
+      isSubAccount: !!org?.parentOrganizationId,
       authMethod: 'api_token',
     };
   }

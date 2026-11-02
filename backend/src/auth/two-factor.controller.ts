@@ -4,7 +4,7 @@ import { Throttle } from '@nestjs/throttler';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RequireSessionAuthGuard } from '../common/guards/require-session-auth.guard';
-import { JwtPayload } from './jwt-payload.interface';
+import { JwtPayload, loginIdOf } from './jwt-payload.interface';
 import { TwoFactorVerifyDto } from './dto/two-factor-verify.dto';
 import { TwoFactorReauthDto } from './dto/two-factor-reauth.dto';
 import { TwoFactorLoginVerifyDto } from './dto/two-factor-login-verify.dto';
@@ -23,7 +23,7 @@ export class TwoFactorController {
   @UseGuards(JwtAuthGuard)
   @Get('status')
   getStatus(@CurrentUser() user: JwtPayload) {
-    return this.twoFactorService.getStatus(user.sub);
+    return this.twoFactorService.getStatus(loginIdOf(user));
   }
 
   // RequireSessionAuthGuard here (and on enable below) — not just
@@ -36,21 +36,21 @@ export class TwoFactorController {
   @Throttle(TWO_FACTOR_THROTTLE)
   @Post('setup')
   setup(@CurrentUser() user: JwtPayload) {
-    return this.twoFactorService.setup(user.sub);
+    return this.twoFactorService.setup(loginIdOf(user));
   }
 
   @UseGuards(JwtAuthGuard, RequireSessionAuthGuard)
   @Throttle(TWO_FACTOR_THROTTLE)
   @Post('enable')
   enable(@CurrentUser() user: JwtPayload, @Body() dto: TwoFactorVerifyDto, @Req() req: Request) {
-    return this.twoFactorService.enable(user.sub, dto.code, req.ip);
+    return this.twoFactorService.enable(loginIdOf(user), dto.code, req.ip);
   }
 
   @UseGuards(JwtAuthGuard, RequireSessionAuthGuard)
   @Throttle(TWO_FACTOR_THROTTLE)
   @Post('disable')
   async disable(@CurrentUser() user: JwtPayload, @Body() dto: TwoFactorReauthDto, @Req() req: Request) {
-    await this.twoFactorService.disable(user.sub, dto, user.jti!, req.ip);
+    await this.twoFactorService.disable(loginIdOf(user), dto, user.jti!, req.ip);
     return { success: true };
   }
 
@@ -58,7 +58,7 @@ export class TwoFactorController {
   @Throttle(TWO_FACTOR_THROTTLE)
   @Post('backup-codes/regenerate')
   regenerateBackupCodes(@CurrentUser() user: JwtPayload, @Body() dto: TwoFactorReauthDto, @Req() req: Request) {
-    return this.twoFactorService.regenerateBackupCodes(user.sub, dto, req.ip);
+    return this.twoFactorService.regenerateBackupCodes(loginIdOf(user), dto, req.ip);
   }
 
   // Deliberately unguarded — no session exists yet at this point in the

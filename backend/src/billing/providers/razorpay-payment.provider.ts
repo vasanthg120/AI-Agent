@@ -402,7 +402,13 @@ export class RazorpayPaymentProvider implements PaymentProviderAdapter, OnModule
 
   verifyWebhookSignature(rawBody: Buffer, signatureHeader: string): boolean {
     if (!this.configured || !this.webhookSecret) {
-      // Simulated mode: nothing signs these payloads for real, so there's
+      // Real money with no secret to check against: refuse, because anyone could
+      // otherwise post a "payment captured" that activates a subscription.
+      if (this.configured && this.mode === 'live') {
+        this.logger.error('Refused a Razorpay webhook: live mode needs RAZORPAY_WEBHOOK_SECRET.');
+        return false;
+      }
+      // Simulated or test mode: nothing signs these payloads for real, so there's
       // no signature to check against — the caller (billing-webhook.controller)
       // only reaches real traffic once a webhook secret is set.
       return true;

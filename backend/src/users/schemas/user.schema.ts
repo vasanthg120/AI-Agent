@@ -71,8 +71,38 @@ export class TwoFactorBackupCode {
 
 @Schema({ timestamps: true })
 export class User {
-  @Prop({ required: true, unique: true, lowercase: true, trim: true })
+  // Unique among login accounts only — see isLogin below. The indexes that
+  // enforce this (email_login_unique, email_lookup) are created at startup by
+  // UsersIndexMigration rather than declared here, because they replace the
+  // original global unique index and the order of that swap matters.
+  @Prop({ required: true, lowercase: true, trim: true })
   email: string;
+
+  // --- Member records (one per extra business a person can enter) ---
+  // A person has one login. For each other business they may enter (a Main
+  // Account owner in a sub-account, say) they get a separate User in that
+  // business, linked back to their login here. It has no password, sessions or
+  // 2FA of its own, and it signs in only through its login — see
+  // AuthService.switchAccount. Everything keyed by userId (mailboxes, chats, AI
+  // memory, notifications) is then separate per business by construction,
+  // including in python-agent, rather than relying on every query also
+  // filtering by organization.
+  @Prop({ index: true, sparse: true })
+  linkedLoginUserId?: string;
+
+  // False only on member records. Sign-in, password reset and OAuth only ever
+  // look at login accounts (see UsersService.findByEmail).
+  @Prop({ default: true })
+  isLogin: boolean;
+
+  // --- Invitations (an account activated through an emailed link) ---
+  // SHA-256 of the random token in the link, never the token itself — same
+  // treatment as ApiToken.tokenHash. Cleared when used or replaced.
+  @Prop({ index: true, sparse: true })
+  inviteTokenHash?: string;
+
+  @Prop()
+  inviteExpiresAt?: Date;
 
   // Optional now — an account created via "Sign in with Google/Microsoft/
   // GitHub" (see AuthService.loginWithOAuth) has no password at all until

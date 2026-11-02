@@ -247,6 +247,61 @@ describe('ReservationService.settle — dynamic margin (real Mongo)', () => {
   // A request holds at most the ceiling (500 in this spec) — and when the wallet
   // has less than that, whatever is there. "Exhausted" means nothing is left,
   // not "less than the ceiling": a 500-credit plan used once must keep working.
+  describe('reserve — a sub-account with no live subscription', () => {
+    const orgs = () => connection.collection('organizations');
+    const subscriptions = () => connection.collection('billing_subscriptions');
+
+    async function seedOrg(fields: Record<string, unknown>) {
+      const { insertedId } = await orgs().insertOne({ name: TEST_PREFIX, slug: `${TEST_PREFIX}-${Math.random()}`, status: 'active', ...fields });
+      const id = insertedId.toString();
+      await walletModel.create({ organizationId: id, balanceCredits: 10_000, reservedCredits: 0 });
+      return id;
+    }
+
+    afterAll(async () => {
+      const rows = await orgs().find({ name: TEST_PREFIX }, { projection: { _id: 1 } }).toArray();
+      const ids = rows.map((r) => r._id.toString());
+      await Promise.all([
+        walletModel.deleteMany({ organizationId: { $in: ids } }),
+        reservationModel.deleteMany({ organizationId: { $in: ids } }),
+        subscriptions().deleteMany({ organizationId: { $in: ids } }),
+        orgs().deleteMany({ name: TEST_PREFIX }),
+      ]);
+    });
+
+    it('stops its AI even with credits left, whatever path the request came by', async () => {
+      const sub = await seedOrg({ parentOrganizationId: 'some-main-account' });
+      await expect(reservationService.reserve(sub, 'u1', `${TEST_PREFIX}-lock-1`, 'c1')).rejects.toMatchObject({
+        status: 402,
+        response: expect.objectContaining({ code: 'SUBSCRIPTION_REQUIRED' }),
+      });
+      expect((await walletModel.findOne({ organizationId: sub }))!.reservedCredits).toBe(0);
+    });
+
+    it('works once it has a live subscription, and stops again when it expires', async () => {
+      const sub = await seedOrg({ parentOrganizationId: 'some-main-account' });
+      const { insertedId } = await subscriptions().insertOne({ organizationId: sub, status: 'active' });
+      await expect(reservationService.reserve(sub, 'u1', `${TEST_PREFIX}-lock-2`, 'c1')).resolves.toBeDefined();
+
+      await subscriptions().updateOne({ _id: insertedId }, { $set: { status: 'past_due' } });
+      await expect(reservationService.reserve(sub, 'u1', `${TEST_PREFIX}-lock-3`, 'c1')).resolves.toBeDefined();
+
+      await subscriptions().updateOne({ _id: insertedId }, { $set: { status: 'expired' } });
+      await expect(reservationService.reserve(sub, 'u1', `${TEST_PREFIX}-lock-4`, 'c1')).rejects.toMatchObject({ status: 402 });
+    });
+
+    it('stops at once when archived, even inside a period already paid for', async () => {
+      const sub = await seedOrg({ parentOrganizationId: 'some-main-account', status: 'archived' });
+      await subscriptions().insertOne({ organizationId: sub, status: 'active' });
+      await expect(reservationService.reserve(sub, 'u1', `${TEST_PREFIX}-lock-5`, 'c1')).rejects.toMatchObject({ status: 402 });
+    });
+
+    it('never affects a Main Account, with or without a subscription', async () => {
+      const main = await seedOrg({});
+      await expect(reservationService.reserve(main, 'u1', `${TEST_PREFIX}-lock-6`, 'c1')).resolves.toBeDefined();
+    });
+  });
+
   describe('reserve — a wallet with credits in it can spend them', () => {
     const walletWith = (key: string, balanceCredits: number) => walletModel.create({ organizationId: `${TEST_PREFIX}-${key}`, balanceCredits, reservedCredits: 0 });
 

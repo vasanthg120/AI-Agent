@@ -9,10 +9,11 @@ import { ResendOtpDto } from './dto/resend-otp.dto';
 import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
 import { ChangePasswordDto } from './dto/change-password.dto';
+import { AcceptInvitationDto, VerifyInvitationDto } from './dto/invitation.dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RequireSessionAuthGuard } from '../common/guards/require-session-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
-import { JwtPayload } from './jwt-payload.interface';
+import { JwtPayload, loginIdOf } from './jwt-payload.interface';
 
 // Tighter than the app-wide default (see ThrottlerModule.forRoot in
 // app.module.ts) — these are the two routes a credential-stuffing/brute-force
@@ -66,13 +67,26 @@ export class AuthController {
     return { success: true };
   }
 
+  // Public, like login: the emailed token is what proves who this is.
+  @Throttle(AUTH_THROTTLE)
+  @Post('invitation/verify')
+  verifyInvitation(@Body() dto: VerifyInvitationDto) {
+    return this.authService.describeInvitation(dto.token);
+  }
+
+  @Throttle(AUTH_THROTTLE)
+  @Post('invitation/accept')
+  acceptInvitation(@Body() dto: AcceptInvitationDto, @Req() req: Request) {
+    return this.authService.acceptInvitation(dto.token, dto.password, sessionMeta(req));
+  }
+
   @UseGuards(JwtAuthGuard, RequireSessionAuthGuard)
   @Throttle(AUTH_THROTTLE)
   @Post('change-password')
   async changePassword(@CurrentUser() user: JwtPayload, @Body() dto: ChangePasswordDto, @Req() req: Request) {
     // user.jti is always present here — RequireSessionAuthGuard already
     // rejected any request not authenticated via a real session token.
-    await this.authService.changePassword(user.sub, dto.currentPassword, dto.newPassword, user.jti!, req.ip);
+    await this.authService.changePassword(loginIdOf(user), dto.currentPassword, dto.newPassword, user.jti!, req.ip);
     return { success: true };
   }
 
@@ -86,7 +100,7 @@ export class AuthController {
   @UseGuards(JwtAuthGuard, RequireSessionAuthGuard)
   @Post('logout')
   async logout(@CurrentUser() user: JwtPayload) {
-    await this.authService.logout(user.sub, user.jti!);
+    await this.authService.logout(loginIdOf(user), user.jti!);
     return { success: true };
   }
 }
