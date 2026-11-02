@@ -8,6 +8,7 @@ import { SalesAnalyticsService } from './sales-analytics.service';
 import { DealPerformanceOverviewQueryDto } from './dto/deal-performance-overview-query.dto';
 import { buildDealMatchStage } from './deal-filter.util';
 import { isOwner } from '../common/team-roster';
+import { hoopsSalespersonId, unlinkedHoopsSales } from './hoops-salespeople';
 
 const PRODUCT_BREAKDOWN_CAP = 8;
 
@@ -264,7 +265,7 @@ export class DealPerformanceDashboardService {
   ) {
     const scopeStoreIds = storeConstraint ? [storeConstraint] : storeFilter;
 
-    const [users, rows] = await Promise.all([
+    const [users, rows, hoopsRows] = await Promise.all([
       // The shared team roster (common/team-roster.ts), unless the caller wants every account.
       // "Every account" still means every employee: the owner is never listed as one.
       includeAllRoles
@@ -276,6 +277,23 @@ export class DealPerformanceDashboardService {
           { $group: { _id: { ownerId: '$ownerId', status: '$dealStatus' }, count: { $sum: 1 }, value: { $sum: '$monetaryValue' } } },
         ])
         .exec(),
+      // Hoops salespeople without a HaiVE login, by their Hoops name (hoops-salespeople.ts) —
+      // in the sales views only, not in a list of every account (Agent Activity).
+      includeAllRoles
+        ? Promise.resolve([])
+        : this.dealModel
+            .aggregate<{ _id: { ref: string; status: string }; label?: string; count: number; value: number }>([
+              { $match: { ...match, $and: [...((match.$and as Record<string, unknown>[] | undefined) ?? []), unlinkedHoopsSales()] } },
+              {
+                $group: {
+                  _id: { ref: '$externalOwnerRef', status: '$dealStatus' },
+                  label: { $max: '$externalOwnerLabel' },
+                  count: { $sum: 1 },
+                  value: { $sum: '$monetaryValue' },
+                },
+              },
+            ])
+            .exec(),
     ]);
 
     const employees = users.filter(
@@ -298,9 +316,31 @@ export class DealPerformanceDashboardService {
       byOwner.set(r._id.ownerId, entry);
     }
 
-    return employees
+    const hoopsNames = new Map<string, string>();
+    for (const r of hoopsRows) {
+      const id = hoopsSalespersonId(r._id.ref);
+      const entry = byOwner.get(id) ?? { wonCount: 0, lostCount: 0, openCount: 0, wonValue: 0, openValue: 0 };
+      if (r._id.status === 'won') {
+        entry.wonCount += r.count;
+        entry.wonValue += r.value;
+      } else if (r._id.status === 'lost') {
+        entry.lostCount += r.count;
+      } else {
+        entry.openCount += r.count;
+        entry.openValue += r.value;
+      }
+      byOwner.set(id, entry);
+      if (r.label && !hoopsNames.has(id)) hoopsNames.set(id, r.label);
+      if (!hoopsNames.has(id)) hoopsNames.set(id, 'Hoops salesperson');
+    }
+    const people = [
+      ...employees.map((u) => ({ id: u._id.toString(), name: u.name })),
+      ...[...hoopsNames].map(([id, name]) => ({ id, name })),
+    ];
+
+    return people
       .map((u) => {
-        const id = u._id.toString();
+        const id = u.id;
         const stats = byOwner.get(id) ?? { wonCount: 0, lostCount: 0, openCount: 0, wonValue: 0, openValue: 0 };
         const total = stats.wonCount + stats.lostCount + stats.openCount;
         return {

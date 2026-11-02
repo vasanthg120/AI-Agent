@@ -65,6 +65,12 @@ interface Draft {
   syncIntervalMinutes: number;
 }
 
+/** "7:00pm AEST" — when a nightly CRM's window opens. */
+function windowStart(window: { start: string; label: string }): string {
+  const [h, m] = window.start.split(':').map(Number);
+  return `${h % 12 || 12}:${String(m).padStart(2, '0')}${h < 12 ? 'am' : 'pm'} ${window.label}`;
+}
+
 function draftOf(source: DataSourceAdminView): Draft {
   return {
     label: source.label,
@@ -110,7 +116,11 @@ function SyncLine({ source }: { source: DataSourceAdminView }) {
   return (
     <span className={styles.meta}>
       Synced {timeAgo(lastSyncAt)}
-      {source.sync.enabled ? ` · every ${source.sync.intervalMinutes} min` : ' · automatic sync off'}
+      {!source.sync.enabled
+        ? ' · automatic sync off'
+        : source.sync.window
+          ? ` · once a night, after ${windowStart(source.sync.window)}`
+          : ` · every ${source.sync.intervalMinutes} min`}
     </span>
   );
 }
@@ -720,21 +730,28 @@ export function DataSourcesSettings() {
                     />
                     Sync automatically
                   </label>
-                  <label className={styles.selectField}>
-                    <span>Every</span>
-                    <select
-                      className={styles.select}
-                      value={draft.syncIntervalMinutes}
-                      disabled={!draft.syncEnabled}
-                      onChange={(e) => setDraft((d) => d && { ...d, syncIntervalMinutes: Number(e.target.value) })}
-                    >
-                      {[5, 10, 15, 30, 60, 180, 720, 1440].map((m) => (
-                        <option key={m} value={m}>
-                          {m < 60 ? `${m} minutes` : m === 60 ? '1 hour' : m === 1440 ? '1 day' : `${m / 60} hours`}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
+                  {selected.sync.window ? (
+                    <p className={styles.meta}>
+                      Once a night, after {windowStart(selected.sync.window)} — set by {selected.providerLabel}, which
+                      allows one sync a night.
+                    </p>
+                  ) : (
+                    <label className={styles.selectField}>
+                      <span>Every</span>
+                      <select
+                        className={styles.select}
+                        value={draft.syncIntervalMinutes}
+                        disabled={!draft.syncEnabled}
+                        onChange={(e) => setDraft((d) => d && { ...d, syncIntervalMinutes: Number(e.target.value) })}
+                      >
+                        {[5, 10, 15, 30, 60, 180, 720, 1440].map((m) => (
+                          <option key={m} value={m}>
+                            {m < 60 ? `${m} minutes` : m === 60 ? '1 hour' : m === 1440 ? '1 day' : `${m / 60} hours`}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  )}
                 </>
               )}
               {selected.connectionId && (

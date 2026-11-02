@@ -1,6 +1,7 @@
 import { FilterQuery } from 'mongoose';
 import { Deal } from './schemas/deal.schema';
 import { DealFilterQueryDto } from './dto/deal-filter-query.dto';
+import { HOOPS_SALESPERSON_PREFIX, isHoopsSalesperson, unlinkedHoopsSales } from './hoops-salespeople';
 
 // Single place the Mongo match stage gets built from a DealFilterQueryDto —
 // reused by deals.service.ts's listFiltered/listForExport and
@@ -33,7 +34,16 @@ export function buildDealMatchStage(
     match.storeId = { $in: filters.storeId };
   }
 
-  if (filters.ownerId?.length) match.ownerId = { $in: filters.ownerId };
+  if (filters.ownerId?.length) {
+    // A Hoops salesperson without a HaiVE login is "hoops:<their Hoops id>" (see hoops-salespeople.ts).
+    const hoops = filters.ownerId.filter(isHoopsSalesperson).map((id) => id.slice(HOOPS_SALESPERSON_PREFIX.length));
+    if (hoops.length === 0) {
+      match.ownerId = { $in: filters.ownerId };
+    } else {
+      const users = filters.ownerId.filter((id) => !isHoopsSalesperson(id));
+      match.$or = [...(users.length ? [{ ownerId: { $in: users } }] : []), unlinkedHoopsSales(hoops)];
+    }
+  }
   if (filters.dealStatus?.length) match.dealStatus = { $in: filters.dealStatus };
   if (filters.stageId?.length) match.stageId = { $in: filters.stageId };
   if (filters.leadSource?.length) match.leadSource = { $in: filters.leadSource };

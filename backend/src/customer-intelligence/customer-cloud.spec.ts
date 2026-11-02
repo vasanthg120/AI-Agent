@@ -5,7 +5,7 @@ import { promises as fs } from 'fs';
 import { Connection, Model, Types } from 'mongoose';
 import * as os from 'os';
 import * as path from 'path';
-import { fakeDrive } from '../../test/fake-cloud-drive';
+import { fakeDrive, type FakeNode } from '../../test/fake-cloud-drive';
 import { JwtPayload } from '../auth/jwt-payload.interface';
 import { CloudAccessService } from '../cloud-files/cloud-access.service';
 import { CloudConnectionsService } from '../cloud-files/cloud-connections.service';
@@ -142,9 +142,10 @@ describe('Customer cloud documents (real Mongo)', () => {
     const again = await service.createFolder(owner(), 'cust-a', company, 'sales', 'Acme Traders', true);
     expect(again.folderId).toBe(first.folderId);
     expect(first.subfolders.map((s) => s.label)).toEqual(['Quotations', 'Invoices', 'Contracts', 'Orders', 'General Documents']);
-    const made = Object.values(google.nodes).filter((n) => n.parent === first.folderId);
+    const nodes = Object.values(google.nodes as Record<string, FakeNode>);
+    const made = nodes.filter((n) => n.parent === first.folderId);
     expect(made).toHaveLength(5);
-    expect(Object.values(google.nodes).filter((n) => n.name === 'Acme Traders')).toHaveLength(1);
+    expect(nodes.filter((n) => n.name === 'Acme Traders')).toHaveLength(1);
     expect(await connection.collection(CLOUD_FOLDERS_COLLECTION).countDocuments({ organizationId: org })).toBe(1);
   });
 

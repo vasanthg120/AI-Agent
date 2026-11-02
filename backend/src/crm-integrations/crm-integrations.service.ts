@@ -7,6 +7,8 @@ import { Connection } from 'mongoose';
 import { firstValueFrom } from 'rxjs';
 import { DataSourcesService } from '../data-sources/data-sources.service';
 import { CRM_PROVIDERS, CrmProviderDefinition, CrmProviderId, connectionOf, crmProviderForIntegration } from '../data-sources/provider-catalog';
+import { DataSource } from '../data-sources/schemas/data-source.schema';
+import { SyncWindow, windowOpensLabel, windowSchedule } from '../data-sources/sync-window';
 import { webhookInfo } from '../data-sources/webhook-info';
 import { WebhookSourcesService } from '../data-sources/webhook-sources.service';
 import { GorillaDashService } from '../gorilladash/gorilladash.service';
@@ -16,14 +18,24 @@ import { IntegrationsService } from '../integrations/integrations.service';
 export interface SetupField {
   key: string;
   label: string;
-  type: 'text' | 'password' | 'url';
+  type: 'text' | 'password' | 'url' | 'select';
   hint?: string;
   placeholder?: string;
   required: boolean;
   // Pre-filled, and tucked under "Advanced" — most customers never change it.
   defaultValue?: string;
   advanced?: boolean;
+  // type 'select': the choices.
+  options?: { value: string; label: string }[];
 }
+
+// Hoops: how far back the first import and its nightly history reading go.
+const HOOPS_HISTORY: Record<string, { label: string; days: number | null }> = {
+  '30': { label: 'The last 30 days', days: 30 },
+  '90': { label: 'The last 3 months', days: 90 },
+  '365': { label: 'The last 12 months', days: 365 },
+  all: { label: 'Everything', days: null },
+};
 
 interface ProviderSetup {
   // What the customer is asked for. Empty for a push provider: nothing is typed into HaiVE.
@@ -33,6 +45,10 @@ interface ProviderSetup {
   limitations: string[];
   // Push providers: how records get here, step by step.
   steps?: string[];
+  // Connected with its credentials alone: the provider's own mapping is used
+  // as it is (no review step — still editable later) and the first sync starts
+  // by itself (Hoops: tonight, or now if its nightly window is open).
+  autoSetup?: boolean;
 }
 
 // What each CRM needs to connect — the one place the Integrations page's
@@ -57,21 +73,59 @@ const SETUP: Partial<Record<CrmProviderId, ProviderSetup>> = {
     limitations: ['No quotations, deal values, payments or salesperson — those come from HaiVE’s own quotes when the customer matches.'],
   },
   hoops: {
-    fields: [],
-    provides: ['New customers, as they are created', 'New jobs, as they are created'],
+    fields: [
+      {
+        key: 'apiKey',
+        label: 'API key',
+        type: 'password',
+        required: true,
+        hint: 'In Hoops, open Settings → Integrations and click “Generate API Key” on the Hoops integration.',
+      },
+      {
+        key: 'history',
+        label: 'Bring in quotes from',
+        type: 'select',
+        required: true,
+        defaultValue: '365',
+        advanced: true,
+        hint: 'The first night brings in the last 30 days; older quotes follow a little each night. Every customer is brought in, whatever you choose.',
+        options: Object.entries(HOOPS_HISTORY).map(([value, { label }]) => ({ value, label })),
+      },
+      {
+        key: 'currency',
+        label: 'Currency of your Hoops account',
+        type: 'text',
+        required: true,
+        defaultValue: 'AUD',
+        advanced: true,
+        hint: 'Hoops is Australian and sends amounts without a currency — they are shown in this one (a 3-letter code, e.g. AUD or NZD).',
+      },
+      { key: 'baseUrl', label: 'API address', type: 'url', required: true, defaultValue: 'https://api.hoopscrm.com/rest/api', advanced: true },
+    ],
+    provides: [
+      'Customers and their contacts',
+      'Quotes and SalesDocs — a sale counts as won when the customer accepts it',
+      'Line items, tax and shipping on each quote',
+      'Jobs: whether each sale is in production or completed',
+    ],
     limitations: [
-      'Hoops has no API HaiVE can read from: only new customers and jobs can be sent, through Hoops’ Zapier connection.',
-      'SalesDocs (quotes), payments and records created before you connect are not available from Hoops.',
+      'Hoops lets HaiVE read once a night, after 7:00pm AEST — changes made in Hoops appear the next morning.',
+      'Read only: HaiVE never changes anything in Hoops.',
+      'Voided quotes are kept but never count as sales.',
     ],
-    steps: [
-      'In Hoops, open Settings → Integrations and click “Generate API Key” on the Zapier tile.',
-      'In Zapier, add a connection for “Hoops” and paste that key.',
-      'Create a Zap for each kind of record — Trigger: Hoops “New Customer” (or “New Job”) → Action: “Webhooks by Zapier” → POST, payload type JSON.',
-      'Use the HaiVE address below for that kind of record, and add the header X-HaiVE-Key with the key below.',
-      'In the Zap’s Data, include the record’s id and the fields you want in HaiVE, then test the step and turn the Zap on.',
-    ],
+    autoSetup: true,
   },
 };
+
+function httpsAddress(value: string, what: string): URL {
+  try {
+    const url = new URL(value);
+    if (url.protocol !== 'https:' && url.hostname !== 'localhost') throw new Error('not https');
+    return url;
+  } catch {
+    throw new BadRequestException(`${what} must be a full https:// address.`);
+  }
+}
 
 // The CRMs offered on the Integrations page, in this order.
 const OFFERED: CrmProviderId[] = ['prospectconnect', 'hoops', 'gorilladash'];
@@ -81,6 +135,8 @@ export interface CrmIntegrationView {
   label: string;
   description: string;
   connection: 'pull' | 'push';
+  // Read once a night only (Hoops), and from when — known before it is connected.
+  nightly?: { windowLabel: string };
   setup: ProviderSetup;
   status: 'not_connected' | 'connected' | 'waiting' | 'needs_attention';
   source?: {
@@ -96,6 +152,10 @@ export interface CrmIntegrationView {
     modules: string[];
     error?: { message: string; kind: string; detail?: string };
     webhook?: ReturnType<typeof webhookInfo>;
+    // A CRM read once a night (Hoops): when the next sync runs, and whether "Sync now" can run now.
+    schedule?: { windowLabel: string; nextRunAt: Date; canSyncNow: boolean; reason?: string };
+    // A CRM whose history comes in a little each night (Hoops): how far back it reaches so far.
+    history?: { from: Date | null; importedBackTo: Date | null; complete: boolean };
   };
 }
 
@@ -139,7 +199,15 @@ export class CrmIntegrationsService {
   private async view(organizationId: string, provider: string, counts?: Map<string, Record<string, number>>): Promise<CrmIntegrationView> {
     const definition = this.definition(provider);
     const connection = connectionOf(definition) === 'push' ? 'push' : 'pull';
-    const base = { id: definition.id, label: definition.label, description: definition.description, connection, setup: definition.setup } as const;
+    const nightlyWindow = definition.syncDefaults?.window;
+    const base = {
+      id: definition.id,
+      label: definition.label,
+      description: definition.description,
+      connection,
+      ...(nightlyWindow ? { nightly: { windowLabel: windowOpensLabel(nightlyWindow) } } : {}),
+      setup: definition.setup,
+    } as const;
     const source = await this.sourceOf(organizationId, provider);
     if (!source) return { ...base, status: 'not_connected' };
 
@@ -159,6 +227,10 @@ export class CrmIntegrationsService {
     const sync = (source.sync ?? {}) as Record<string, any>;
     const failing = sync.lastStatus === 'error';
     const health = sync.lastStatus === 'running' ? 'syncing' : failing ? 'failing' : sync.lastSyncAt ? 'healthy' : 'not_synced';
+    const window = sync.window as SyncWindow | undefined;
+    const schedule = window ? windowSchedule(window, String(source.label), sync.lastSuccessAt ? new Date(sync.lastSuccessAt) : undefined) : null;
+    // Quotes are what the history is read for; customers follow the same walk.
+    const walk = (sync.adapterState as DataSource['sync']['adapterState'])?.transactions;
     return {
       ...base,
       // A push source with nothing received yet is set up but still waiting for its first record.
@@ -182,8 +254,36 @@ export class CrmIntegrationsService {
             }
           : undefined,
         webhook: connection === 'push' ? webhookInfo(source as never, this.webhookBaseUrl) : undefined,
+        schedule: schedule
+          ? { windowLabel: windowOpensLabel(schedule.window), nextRunAt: schedule.nextRunAt, canSyncNow: schedule.canSyncNow, reason: schedule.reason }
+          : undefined,
+        history:
+          'historyFrom' in sync
+            ? {
+                from: sync.historyFrom ? new Date(sync.historyFrom) : null,
+                importedBackTo: walk?.oldest ? new Date(walk.oldest) : null,
+                complete: !!walk?.done,
+              }
+            : undefined,
       },
     };
+  }
+
+  /** Hoops: the history chosen when connecting, and the account's currency
+   * (Hoops sends amounts without one). Choosing a different history from last
+   * time starts the reading over: the first night reads the last 30 days
+   * again, then the rest a little each night. */
+  private async applyHoopsChoices(source: Record<string, any>, values: Record<string, string>) {
+    const sync = (source.sync ?? {}) as Record<string, unknown>;
+    const set: Record<string, unknown> = { 'metadata.currency': values.currency.toUpperCase() };
+    let unset: Record<string, ''> | undefined;
+    if (sync.historyChoice !== values.history) {
+      const days = HOOPS_HISTORY[values.history].days;
+      set['sync.historyChoice'] = values.history;
+      set['sync.historyFrom'] = days === null ? null : new Date(Date.now() - days * 86_400_000);
+      if (sync.adapterState) unset = { 'sync.adapterState': '', 'sync.cursor': '' };
+    }
+    await this.connection.collection('crm_data_sources').updateOne({ _id: source._id }, { $set: set, ...(unset ? { $unset: unset } : {}) });
   }
 
   async list(organizationId: string): Promise<CrmIntegrationView[]> {
@@ -250,19 +350,25 @@ export class CrmIntegrationsService {
       // Checks the pair against Gorilla Dash before saving it (and explains a rejected key itself).
       await this.gorillaDash.connect(organizationId, values.apiKey, values.apiSecret, { skipSync: true });
     } else if (provider === 'prospectconnect') {
-      let baseUrl: string;
-      try {
-        const url = new URL(values.baseUrl);
-        if (url.protocol !== 'https:' && url.hostname !== 'localhost') throw new Error('not https');
-        baseUrl = url.origin;
-      } catch {
-        throw new BadRequestException('The server address must be a full https:// address.');
-      }
+      const baseUrl = httpsAddress(values.baseUrl, 'The server address').origin;
       for (const name of previousNames) await this.integrations.disconnect(organizationId, name);
       await this.integrations.connectWithAuth(
         organizationId,
         'prospectconnect',
         { authType: 'bearer', credentials: { bearerToken: values.apiToken.replace(/^Bearer\s+/i, '') }, baseUrl } as ConnectIntegrationDto,
+        { skipSync: true },
+      );
+    } else if (provider === 'hoops') {
+      // Hoops' API lives under a path (…/rest/api): kept, unlike a bare server address.
+      const url = httpsAddress(values.baseUrl, 'The API address');
+      const baseUrl = `${url.origin}${url.pathname.replace(/\/+$/, '')}`;
+      if (!/^[A-Za-z]{3}$/.test(values.currency)) throw new BadRequestException('The currency must be a 3-letter code, such as INR or AUD.');
+      if (!HOOPS_HISTORY[values.history]) throw new BadRequestException('Choose how much history to bring in.');
+      for (const name of previousNames) await this.integrations.disconnect(organizationId, name);
+      await this.integrations.connectWithAuth(
+        organizationId,
+        'hoops',
+        { authType: 'apiKeyBaseUrl', credentials: { apiKey: values.apiKey, headerName: 'x-api-key' }, baseUrl } as ConnectIntegrationDto,
         { skipSync: true },
       );
     } else {
@@ -274,6 +380,7 @@ export class CrmIntegrationsService {
       await rollback();
       throw new BadRequestException(`${definition.label} couldn’t be set up. Please try again.`);
     }
+    if (provider === 'hoops') await this.applyHoopsChoices(source, values);
     let discovery: Awaited<ReturnType<CrmIntegrationsService['discover']>>;
     try {
       discovery = await this.discover(organizationId, source._id.toString());
@@ -295,6 +402,13 @@ export class CrmIntegrationsService {
         kind: discovery.kind ?? 'other',
         detail: discovery.detail,
       });
+    }
+    if (definition.setup.autoSetup) {
+      // Not awaited: the first sync can take minutes. The sync itself decides whether it may run now
+      // (Hoops: only inside its nightly window); if not, the scheduler runs it when it may.
+      void this.dataSources
+        .syncNow(organizationId, source._id.toString())
+        .catch((err) => this.logger.warn(`First ${provider} sync for org ${organizationId} didn't start: ${(err as Error).message}`));
     }
     return { integration: await this.view(organizationId, provider), discovery: discovery.modules ?? {} };
   }

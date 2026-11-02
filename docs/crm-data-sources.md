@@ -209,12 +209,13 @@ To verify with a real key:
 - **Location keys.** A location key gets 403 on `tribes/search` and on other
   locations' enquiries; the connect dialog detects and labels such keys.
 
-## 7. Zapier (Hoops, Gorilla Dash and any other Zapier app)
+## 7. Zapier (any Zapier app)
 
-Zapier has no "read your existing records" for Hoops (triggers New Customer /
-New Job; actions Create Customer / Create Job) or Gorilla Dash (trigger New
-Weekly Digest Article; action Create Enquiry). HaiVE therefore uses Zapier in
-two independent, generic ways. Neither names an individual app in code.
+Zapier has no "read your existing records" for most apps (Hoops: triggers New
+Customer / New Job, actions Create Customer / Create Job; Gorilla Dash: trigger
+New Weekly Digest Article, action Create Enquiry). HaiVE therefore uses Zapier
+in two independent, generic ways. Neither names an individual app in code.
+(Hoops itself is read directly through its Extended API — see §9.)
 
 **1. Connector: AI actions via Zapier MCP** (`backend/src/zapier/`,
 `python-agent/app/integrations/zapier_mcp.py`)
@@ -241,13 +242,13 @@ two independent, generic ways. Neither names an individual app in code.
 (`backend/src/data-sources/webhook-sources.*`, provider `zapier` in
 `provider-catalog.ts`)
 
-- "Add an app" creates a data source, e.g. "Hoops". It has its own key, shown
+- "Add an app" creates a data source, e.g. "Job app". It has its own key, shown
   once; only a SHA-256 hash is stored, and "Replace key" rotates it. It also
   has an address per record type:
   `POST /data-source-webhooks/<sourceId>/<deals|contacts|accounts>` with
   header `X-HaiVE-Key` (or `?key=`).
-- A Zap (trigger: Hoops New Customer → action: Webhooks by Zapier POST, JSON)
-  sends each new record.
+- A Zap (trigger: the app's "New Customer" → action: Webhooks by Zapier POST,
+  JSON) sends each new record.
 - The key identifies exactly one source of one organization, so a request
   can't write anywhere else. Wrong or unknown keys get the same 403, and
   disconnected sources refuse records while keeping their history.
@@ -270,8 +271,8 @@ now starts with that overview plus the Zapier apps and their actions, which
 answers questions like "what CRMs are connected and what can I access from
 each?".
 
-Existing Hoops history is only reachable through Hoops' own API (ask Hoops for
-access). Gorilla Dash history is covered by the direct integration (§6).
+Hoops history comes through its direct integration (§9), Gorilla Dash history
+through its own (§6).
 
 ## 8. Provider-aware integrations (Pantheras CRM, Hoops CRM, Gorilla Dash)
 
@@ -283,16 +284,10 @@ The Integrations page is the one place CRMs are connected and managed
   also be saved as `crm`).
 - **Two ways records arrive** (`provider-catalog.ts` → `connection`):
   - `pull`: HaiVE reads the CRM through its python adapter (Pantheras, Gorilla
-    Dash, HubSpot, Salesforce, Zoho).
-  - `push`: the CRM sends each new record to a HaiVE webhook (Hoops, generic
-    Zapier sources).
-- **Hoops CRM** is a push provider because Hoops publishes no API to read
-  from. Its only documented way out is its Zapier app (an API key generated in
-  Hoops → Settings → Integrations): triggers *New Customer* and *New Job*,
-  actions *Create Customer* and *Create Job*. SalesDocs (quotes), payments and
-  pre-existing records are not available and are never invented. If Hoops
-  provides API documentation later, add a pull adapter in `crm_adapters.py`
-  and switch its `connection`.
+    Dash, Hoops, HubSpot, Salesforce, Zoho).
+  - `push`: an app sends each new record to a HaiVE webhook (generic Zapier
+    sources).
+- **Hoops CRM** is a pull provider read once a night — see §9.
 - **Setup is provider-aware.** `CrmIntegrationsService.SETUP` says what each
   CRM asks for, what it provides and what it can't. A pull CRM is saved only
   if a first page of data can be read (`POST /sync/crm/discover`), and nothing
@@ -314,3 +309,102 @@ The Integrations page is the one place CRMs are connected and managed
 - **Adding a CRM**: a catalog entry, a python adapter (pull) or nothing
   (push), and a `SETUP` entry. Dashboards, reports, AI tools and the
   Integrations page need no changes.
+
+## 9. Hoops CRM (Extended API)
+
+Hoops' invitation-only Extended API (reference dated 19 Oct 2026) is read
+directly. Files: `python-agent/app/integrations/hoops.py` (client, reading
+rules, record shaping), `HoopsAdapter` in `crm_adapters.py`, the "nightly
+sync window" in `crm_mongo_sync.py`, `backend/src/data-sources/sync-window.ts`
+(the same rule, for display), the `hoops` entries in `provider-catalog.ts`,
+`crm-integrations.service.ts` (`SETUP`) and `provider-rules.ts`.
+
+**Connecting** (Integrations → Hoops CRM): the API key (Hoops → Settings →
+Integrations → Generate API Key), how far back to bring in quotes (30 days, 3
+months, 12 months (default), everything), and under Advanced the account's
+currency (Hoops sends none; default INR) and the API address. The key is saved
+as the `hoops` integration (`apiKeyBaseUrl`, header `x-api-key`, encrypted)
+and kept only if a 5-record sample of transactions and of customers can be read
+(2 requests). A Hoops source created in the Zapier era is converted to the API
+source on connecting (Hoops mapping and schedule; its webhook key stops working).
+
+**Hoops' rules, and where each is kept:**
+
+| Rule | How |
+|---|---|
+| One request at a time per account (429 "API call already in progress") | Requests are sequential; a sync of the source can't start while one runs (`sync.runningSince` claim, stale after 45 min); a 429 is retried after 5/15/30/60 s. |
+| At most once a day, after 7:00pm AEST | `sync.window` = 19:00–05:00 at UTC+10 (AEST has no daylight saving). Python refuses every trigger outside it or after a successful sync that night (`status: "deferred"` with the reason and the next opening); a failed night is retried an hour later, at most 3 tries. |
+| Sync incrementally with `since` | `since` = start of the last successful sync (`sync.cursor`); records are upserted on their `_id`, so its inclusiveness is harmless. |
+| Start small; backfill progressively | First night: transactions from the last 30 days (≤ 20 pages). Each later night: 5 more pages down the newest-first list, until the chosen history start. Position in `sync.adapterState`; records created since the last walk shift it down; it restarts 10 places early in case of deletions. Customers: the whole list, 5 pages a night (the history choice applies to quotes only). |
+| `skip`/`limit`, never `page`/`pageSize` | Pages of 50 transactions / 100 customers. |
+| 500 with `timeout: true` | The page size is halved (down to 5) and kept for the rest of that sync. |
+
+**What the records become** (default mapping; the `_` fields are computed in
+`hoops.py`, editable in the mapping editor like any other):
+
+- Each transaction (quote/SalesDoc with its jobs and latest invoice) is a
+  **deal** and that deal's **quotation**, sharing the `_id` (`dealRef: _id`).
+  - Deal: name `#number · customer · reference`, value `total`, owner
+    `ownerId` (→ Settings → Deal Assignment), stage (Quote sent / Accepted /
+    In production / Completed / Voided), line items as product lines.
+  - **Won when the customer accepts the quote**, dated `acceptedAt` (the
+    revenue month); lost when voided (`voidedAt`); open ones carry the quote
+    deadline. Decided with the user on 2026-10-21.
+  - Quotation: status voided / accepted / viewed / sent, approval, number,
+    customer and contact details, tax (`taxTotal`) and shipping as charge
+    lines, the configured currency. **Voided quotations are left out of
+    Reporting** (`QuotationSalesService` excludes `voided` with `draft`).
+- Each **company** customer is an account (domain from website or email).
+  Each contact is a contact with its customer as company; a customer with no
+  contacts is its own contact. Creation dates come from the ids (ObjectIds).
+
+**Read only.** HaiVE never writes to Hoops (the create/update customer
+endpoints are unused).
+
+**Confirmed with live data (21 Oct 2026, Fully Promoted Surry Hills):**
+- A transaction keeps its customer, contact and owner inside `summary`
+  (`summary.customer.name`, `summary.contact.firstName`…, `summary.owner`),
+  not at the top level as the reference shows; both are read. Line-item numbers
+  arrive as text. `number` is a string.
+- Its own `status` is the sale's state: CREATED (draft — not counted as sent),
+  SENT, ACCEPTED (won), LOST (lost, but still a sent quotation in Reporting, as
+  Pantheras' lost ones are), and the account's own steps ("FOLLOW UP 1–3",
+  "Provide Samples!"), which are open quotes at that step and become the deal's
+  pipeline stage. A `voided` flag (or VOID/CANCEL) means not a sale at all:
+  left out of Reporting.
+- Each deal keeps a compact copy of its transaction (`sourceData`: status,
+  flags, job, invoice, summary) — Hoops never triggers the "re-read everything
+  to fill missing details" pass (`rereads_for_details = False`).
+
+**Currency.** Hoops is Australian and sends amounts without a currency: a Hoops
+source is AUD (`provider-catalog.ts` `defaultCurrency`, `metadata.currency`,
+editable under Advanced when connecting). Each CRM's amounts are shown in its
+own currency (`data-sources/scope-currency.ts`): the dashboards, Reporting and
+their exports in the currency of the CRM chosen for dashboards (frontend
+`stores/currencyStore` + `utils/currency`, refreshed by AppLayout from
+`/data-sources/overview`), the Customers page per customer. Reporting reads only
+the CRM chosen for dashboards (`QuotationSalesService` applies the data-source
+scope), so rupees and dollars are never added together. Sales targets are one per
+store/person, month **and currency**: only targets in the shown CRM's currency
+apply (the old unique index is replaced on startup).
+
+**Repair of Zapier-era sources.** A Hoops source without its nightly window (set
+up before the API, whether or not its old webhook key remains) is given the API
+settings on every backend start and on connecting (`upgradeLegacyHoops` /
+`applyProviderSetup`): modules, won/lost words, mapping (extra admin fields
+kept), schedule, AUD. Still unconfirmed: whether sibling quote options share a
+number (each is its own deal today).
+
+**All of Hoops in HaiVE (user, 2026-10-27).**
+- An open quote with no deadline in Hoops is expected 30 days after it was
+  created (`hoops.py` `OPEN_QUOTE_DAYS`), so every open quote is in a month's
+  pipeline; a deadline set in Hoops always wins. Won/lost dates are unchanged.
+- History reads 20 pages a night (1,000 quotes / 2,000 customers), up from 5.
+- Hoops salespeople without a HaiVE login appear in the sales team views
+  (leaderboard, team breakdown, Deal Performance) by their Hoops name, as
+  `hoops:<Hoops id>` (`crm/hoops-salespeople.ts`); the deal filter opens their
+  own sales. A linked Hoops owner is credited to the HaiVE user. Other CRMs'
+  unlinked owners, and Agent Activity's list of accounts, are unchanged.
+- A Hoops sales target is not set automatically: Settings → Sales Targets, in
+  A$, while Hoops is shown on dashboards.
+

@@ -95,6 +95,15 @@ export class Deal {
   @Prop()
   expectedClosingDate?: string;
 
+  // When the deal was closed: the moment HaiVE saw it turn won or lost (a CRM
+  // sync or push seeing the status change, or someone changing it in HaiVE).
+  // Cleared when the deal is reopened; a deal closed again gets the newer time.
+  // Recorded from 2026-10-21 on — a deal closed before that, or one that first
+  // arrived already closed, has none. Revenue is still attributed by
+  // expectedClosingDate; this only says when the closing happened.
+  @Prop()
+  closedAt?: Date;
+
   // Phase 9a: manual-entry-only dimension fields for the Deal Performance
   // dashboard. crm_mongo_sync.py never populates these (the external CRM
   // doesn't expose them) — only natively created/edited deals carry real

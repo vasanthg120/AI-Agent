@@ -35,9 +35,18 @@ describe('Dashboard: overall pipeline, all months (real Mongo)', () => {
     const dealModel = moduleRef.get<Model<DealDocument>>(getModelToken(Deal.name));
     const none = null as never;
     // Only the deals and the store names are read for this figure.
-    service = new AnalyticsDashboardService(dealModel, none, none, none, none, none, none, none, {
-      listStores: async () => [{ _id: 'store-a', name: 'T. Nagar' }],
-    } as never);
+    service = new AnalyticsDashboardService(
+      dealModel,
+      none,
+      none,
+      none,
+      none,
+      none,
+      none,
+      none,
+      { listStores: async () => [{ _id: 'store-a', name: 'T. Nagar' }] } as never,
+      none,
+    );
   });
 
   afterAll(async () => {

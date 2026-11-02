@@ -1,25 +1,68 @@
+# Production overrides for the EC2 server. Used together with docker-compose.yml:
+#
+#   IMAGE_TAG=<git sha> docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --no-build
+#
+# - Every port listens on 127.0.0.1 only: the host's Nginx (deploy/nginx) is the one public door.
+# - The three app images are built on the server by deploy.sh for one commit and tagged with it
+#   (IMAGE_TAG = the git SHA that passed CI), so the previous builds stay on the server and a
+#   rollback is starting the previous tag again — nothing is rebuilt.
+# - Container logs rotate (10 MB × 5 per service) so they can never fill the disk.
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+
 services:
   mongo:
     ports: !override
       - "127.0.0.1:27017:27017"
+    # WiredTiger would otherwise take half the RAM for its cache; 1 GB is ample for this data
+    # and leaves room for the AI service.
+    command: ["mongod", "--wiredTigerCacheSizeGB", "1"]
+    logging: *logging
 
   qdrant:
+    # Pinned to the same minor version as the AI service's qdrant-client (1.12.x): "latest" could
+    # change the server under it on any restart.
+    image: qdrant/qdrant:v1.12.6
     ports: !override
       - "127.0.0.1:6333:6333"
       - "127.0.0.1:6334:6334"
+    logging: *logging
 
   redis:
+    # Persisted (BullMQ job queues live here) and never evicting keys: BullMQ requires "noeviction".
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory", "256mb", "--maxmemory-policy", "noeviction"]
+    volumes:
+      - redis-data:/data
     ports: !override
       - "127.0.0.1:6379:6379"
+    logging: *logging
 
   python-agent:
+    image: haive/python-agent:${IMAGE_TAG:-latest}
     ports: !override
       - "127.0.0.1:8000:8000"
+    logging: *logging
 
   backend:
+    image: haive/backend:${IMAGE_TAG:-latest}
     ports: !override
       - "127.0.0.1:3000:3000"
+    logging: *logging
 
   frontend:
+    image: haive/frontend:${IMAGE_TAG:-latest}
+    # Baked into the bundle when the image is built: from /var/www/AI-Agent/.env on the server.
+    build:
+      args:
+        VITE_API_URL: ${VITE_API_URL:-}
+        VITE_SOCKET_URL: ${VITE_SOCKET_URL:-}
     ports: !override
       - "127.0.0.1:5173:80"
+    logging: *logging
+
+volumes:
+  redis-data:

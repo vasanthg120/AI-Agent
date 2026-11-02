@@ -36,6 +36,9 @@ services:
       MONGO_URI: mongodb://mongo:27017
       QDRANT_URL: http://qdrant:6333
       REDIS_URL: redis://redis:6379/0
+      # Inside this container "localhost" is the agent itself: billing holds, notifications and the
+      # CRM bridge call the backend by its service name.
+      BACKEND_URL: http://backend:3000
     ports:
       - "8000:8000"
     depends_on:

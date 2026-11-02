@@ -28,6 +28,8 @@ export interface SyncState {
   lastError?: string;
   lastCounts?: Record<string, number>;
   supported: boolean;
+  // A CRM read only once a night, inside this window (Hoops) — its schedule is set by the CRM, not here.
+  window?: { utcOffsetMinutes: number; start: string; end: string; label: string };
 }
 
 export interface DataSourceView {
@@ -69,6 +71,8 @@ export interface DataSourcesOverview {
   metrics: MetricAvailability[];
   hiddenMetrics: string[];
   unifiedAvailable: boolean;
+  // What the dashboards' and reports' amounts are in: the shown CRM's currency (Pantheras INR, Hoops AUD).
+  currency: string;
 }
 
 export interface StageMapping {

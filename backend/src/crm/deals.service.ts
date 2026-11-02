@@ -42,7 +42,8 @@ export class DealsService {
   }
 
   create(organizationId: string, dto: CreateDealDto, storeConstraint?: string) {
-    return this.dealModel.create({ organizationId, ...dto, storeId: storeConstraint ?? dto.storeId });
+    const closed = dto.dealStatus === 'won' || dto.dealStatus === 'lost';
+    return this.dealModel.create({ organizationId, ...dto, storeId: storeConstraint ?? dto.storeId, ...(closed ? { closedAt: new Date() } : {}) });
   }
 
   async update(id: string, organizationId: string, dto: UpdateDealDto, storeConstraint?: string) {
@@ -64,7 +65,18 @@ export class DealsService {
       update = { ...update, expectedClosingDate: new Date().toISOString().slice(0, 10) };
     }
 
-    const updated = await this.dealModel.findOneAndUpdate(filter, { $set: update }, { new: true }).exec();
+    // closedAt (see deal.schema.ts) moves only when the status really changes:
+    // re-saving a won deal must not make it look closed again today.
+    let unset: Record<string, ''> | undefined;
+    if (dto.dealStatus !== undefined) {
+      const before = await this.dealModel.findOne(filter).select({ dealStatus: 1 }).lean().exec();
+      if (before && before.dealStatus !== dto.dealStatus) {
+        if (dto.dealStatus === 'open') unset = { closedAt: '' };
+        else update = { ...update, closedAt: new Date() };
+      }
+    }
+
+    const updated = await this.dealModel.findOneAndUpdate(filter, { $set: update, ...(unset ? { $unset: unset } : {}) }, { new: true }).exec();
     if (!updated) throw new NotFoundException('Deal not found');
     return updated;
   }

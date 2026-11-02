@@ -93,6 +93,10 @@ export const PROVIDER_RULES: Record<string, ProviderRule> = {
     label: 'Gorilla Dash',
     allowedAuthTypes: ['basic', 'customHeaders'],
   },
+  // Hoops Extended API: an API key sent as the x-api-key header, with the API's
+  // base address. Connected from Integrations → Hoops (CrmIntegrationsService),
+  // which checks the key by reading a first page before keeping it.
+  hoops: { label: 'Hoops CRM', allowedAuthTypes: ['apiKeyBaseUrl'] },
   // Zapier MCP: the organization's Zapier MCP server connection token, saved
   // by ZapierService only after Zapier accepted it.
   zapier: { label: 'Zapier', allowedAuthTypes: ['bearer'] },

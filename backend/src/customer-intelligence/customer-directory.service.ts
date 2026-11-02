@@ -10,7 +10,7 @@ import { firstValueFrom } from 'rxjs';
 import { JwtPayload } from '../auth/jwt-payload.interface';
 import { ReservationService } from '../billing/reservation.service';
 import { heuristicBusinessName } from '../crm/customer-grouping.util';
-import { DataSourcesService } from '../data-sources/data-sources.service';
+import { DataSourcesService, currencyOf } from '../data-sources/data-sources.service';
 import { CRM_PROVIDERS } from '../data-sources/provider-catalog';
 import { buildCustomerDocuments, CustomerDocument, DocumentCharge, DocumentParty, Journey } from './customer-documents';
 import { CustomerMailService, EmailSummary } from './customer-mail.service';
@@ -367,7 +367,7 @@ export class CustomerDirectoryService {
         .limit(MAX_RECORDS)
         .toArray();
     const [sourceDocs, deals, quotes, invoices, contacts, payments, analyses, openTasks, statusDocs, jobDocs] = await Promise.all([
-      find('crm_data_sources', {}, { label: 1, provider: 1, status: 1, sync: 1 }),
+      find('crm_data_sources', {}, { label: 1, provider: 1, status: 1, sync: 1, metadata: 1, isDefault: 1 }),
       find(
         'crm_deals',
         {},
@@ -455,6 +455,8 @@ export class CustomerDirectoryService {
       };
     });
     const providerOf = new Map(sources.map((s) => [s.id, s.provider]));
+    // Each CRM's amounts are in its own currency (Pantheras INR, Hoops AUD): a customer is shown in theirs.
+    const currencyOfSource = new Map(sourceDocs.map((s) => [s._id.toString(), currencyOf(s as { provider?: string; metadata?: Record<string, unknown> })]));
 
     // ---- every record, with what it says about who the customer is
     const pieces: Piece[] = [];
@@ -547,7 +549,8 @@ export class CustomerDirectoryService {
       paymentsByQuote.get(quotationId)!.push({ quotationId, amount: amount(p.amount), date });
     }
     const paymentsTracked = paymentsByQuote.size > 0 || quotes.some((q) => amount(q.paidAmount) > 0) || invoices.some((i) => lower(i.invoiceStatus) === 'paid');
-    const currency = text(quotes[0]?.currency) || text(invoices[0]?.currency) || 'INR';
+    const defaultSource = sourceDocs.find((s) => s.isDefault);
+    const currency = defaultSource ? currencyOfSource.get(defaultSource._id.toString())! : text(quotes[0]?.currency) || text(invoices[0]?.currency) || 'INR';
 
     // ---- the mail exchanged with every address any of them has used
     const addressesOf = (members: number[]) => [...new Set(members.map((i) => emailKey(pieces[i].identity.email)).filter(Boolean))];
@@ -580,6 +583,9 @@ export class CustomerDirectoryService {
     const entries: Entry[] = [];
     for (const members of groups) {
       const mine = members.map((i) => pieces[i]).sort((a, b) => time(b.date) - time(a.date));
+      // Their quotations' currency first, else that of the CRM their records came from.
+      const ownSource = mine.find((p) => p.kind === 'quote' && p.sourceId)?.sourceId ?? mine.find((p) => p.sourceId)?.sourceId;
+      const customerCurrency = text(mine.find((p) => p.kind === 'quote')?.doc.currency).toUpperCase() || (ownSource && currencyOfSource.get(ownSource)) || currency;
       // The newest record that names something wins; a deal's title is only a fallback for the company.
       const named = [...mine.filter((p) => p.kind !== 'deal'), ...mine.filter((p) => p.kind === 'deal')];
       const pick = (field: keyof MatchIdentity) => named.map((p) => text(p.identity[field])).find(Boolean) || undefined;
@@ -718,7 +724,7 @@ export class CustomerDirectoryService {
 
       const profile = buildCustomerProfile({
         now,
-        currency,
+        currency: customerCurrency,
         paymentsTracked,
         enquiries,
         deals: dealRecords,
@@ -977,7 +983,9 @@ export class CustomerDirectoryService {
         try {
           const result = (await this.dataSources.syncNow(organizationId, source.id)) as Record<string, unknown> | undefined;
           const failed = result?.status === 'error';
-          return { source: source.label, ok: !failed, error: failed ? text(result?.error) || 'The sync failed.' : undefined };
+          // A CRM read once a night (Hoops) says when it will be read instead: not a failure.
+          const note = result?.status === 'deferred' ? text(result?.message) || undefined : undefined;
+          return { source: source.label, ok: !failed, error: failed ? text(result?.error) || 'The sync failed.' : undefined, ...(note ? { note } : {}) };
         } catch (err) {
           this.logger.warn(`Sync of ${source.label} failed: ${(err as Error).message}`);
           return {

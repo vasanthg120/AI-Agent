@@ -506,8 +506,10 @@ const CustomersBoard = memo(function CustomersBoard({
       const { results } = await customersService.sync(source);
       const failed = results.filter((r) => !r.ok);
       for (const r of failed) toast.error(`${r.source}: ${r.error ?? 'The sync failed.'}`, { duration: 8_000 });
-      if (failed.length < results.length)
-        toast.success(failed.length ? 'The other sources are up to date' : 'Customers are up to date');
+      // A CRM read once a night (Hoops): when it will be read.
+      for (const r of results.filter((x) => x.ok && x.note)) toast(`${r.source}: ${r.note}`, { duration: 8_000 });
+      const synced = results.filter((r) => r.ok && !r.note).length;
+      if (synced > 0) toast.success(failed.length ? 'The other sources are up to date' : 'Customers are up to date');
       await queryClient.invalidateQueries({ queryKey: ['customers'] });
     } catch (err) {
       toast.error(extractErrorMessage(err), { duration: 8_000 });

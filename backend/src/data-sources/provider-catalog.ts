@@ -1,3 +1,5 @@
+import type { SyncWindow } from './sync-window';
+
 // What HaiVE knows about each kind of CRM it can take data from — the only
 // place a provider's own vocabulary (object names, field names, the words it
 // uses for a won or lost deal) lives. Everything downstream (dashboards,
@@ -189,6 +191,11 @@ export interface CrmProviderDefinition {
   syncSupported: boolean;
   // Defaults to 'pull' when syncSupported, otherwise 'none'.
   connection?: CrmConnection;
+  // How often a new source of this provider is read. Absent: every 10 minutes.
+  // A window (Hoops) limits reading to once a night inside it — see sync-window.ts.
+  syncDefaults?: { intervalMinutes: number; window?: SyncWindow };
+  // The currency its amounts are in when the CRM doesn't say (Hoops sends none; it is Australian). Absent: INR.
+  defaultCurrency?: string;
 }
 
 const DEFAULT_TERMS: Terminology = {
@@ -407,33 +414,66 @@ export const CRM_PROVIDERS: Record<CrmProviderId, CrmProviderDefinition> = {
     statusMapping: { won: [], lost: [] },
     syncSupported: true,
   },
-  // Hoops (hoopscrm.com) has no public API to read from: the only supported
-  // way out is its Zapier app (API key generated in Hoops → Settings →
-  // Integrations), whose triggers are "New Customer" and "New Job". So Hoops
-  // is a push provider — each new customer/job is posted to this source's
-  // webhook as it's created; SalesDocs (quotes), payments and records that
-  // already exist are not available from Hoops and are never invented. Field
-  // names come from the first record received (guessMappings), then editable.
+  // Hoops (hoopscrm.com), through its invitation-only Extended API (API key
+  // generated in Hoops → Settings → Integrations). Read once a night after
+  // 7:00pm AEST, as Hoops requires (syncDefaults.window). Each transaction — a
+  // quote/SalesDoc with the job it became — is a deal and its quotation; each
+  // customer an account, its contacts contacts. The "_" fields are computed by
+  // the adapter (python-agent/app/integrations/hoops.py): a sale is won when
+  // the customer accepts the quote (on acceptedAt), lost when it's voided.
   hoops: {
     id: 'hoops',
     label: 'Hoops CRM',
-    description: 'Hoops — new customers and jobs, sent to HaiVE as they are created.',
-    integrationProviders: [],
-    modules: ['deals', 'contacts'],
-    terminology: { deal: 'Job', quote: 'SalesDoc', contact: 'Customer', account: 'Company' },
-    fieldMappings: {},
-    statusMapping: { won: ['won', 'completed', 'complete', 'invoiced', 'paid'], lost: ['lost', 'cancelled', 'canceled', 'declined'] },
-    syncSupported: false,
-    connection: 'push',
+    description: 'Hoops — customers, contacts, quotes and jobs, synced every night.',
+    integrationProviders: ['hoops'],
+    modules: ['deals', 'quotes', 'contacts', 'accounts'],
+    terminology: { deal: 'Sale', quote: 'Quote', contact: 'Contact', account: 'Customer' },
+    fieldMappings: {
+      deals: {
+        externalId: '_id',
+        name: '_name',
+        amount: 'total',
+        status: '_status',
+        stage: '_stage',
+        closeDate: '_closeDate',
+        owner: 'ownerId',
+        createdAt: 'createdAt',
+      },
+      quotes: {
+        externalId: '_id',
+        name: '_name',
+        amount: 'total',
+        status: '_quoteStatus',
+        approvalStatus: '_approval',
+        currency: '_currency',
+        number: 'number',
+        // A transaction is both the deal and its quotation: same id.
+        dealRef: '_id',
+        owner: 'ownerId',
+        ownerName: '_ownerName',
+        customerCompany: '_customerCompany',
+        customerName: '_contactName',
+        customerEmail: '_email',
+        customerPhone: '_phone',
+        expirationDate: 'deadline',
+        createdAt: 'createdAt',
+      },
+      contacts: { externalId: '_id', name: '_name', email: 'email', phone: 'phone', company: '_company', createdAt: '_createdAt' },
+      accounts: { externalId: '_id', name: 'name', domain: '_domain' },
+    },
+    statusMapping: { won: ['accepted', 'completed'], lost: ['voided'] },
+    syncSupported: true,
+    syncDefaults: { intervalMinutes: 1440, window: { utcOffsetMinutes: 600, start: '19:00', end: '05:00', label: 'AEST' } },
+    defaultCurrency: 'AUD',
   },
-  // Any app in the organization's Zapier account (Hoops, …): a Zap's trigger
+  // Any app in the organization's Zapier account: a Zap's trigger
   // ("New Customer", "New Job") posts each new record to this source's own
   // webhook (see webhook-sources.service.ts). Push-only — nothing to sync, and
   // an organization can have several (one per app), each its own source.
   zapier: {
     id: 'zapier',
     label: 'Zapier',
-    description: 'Records sent from an app in your Zapier account (e.g. Hoops) as they are created.',
+    description: 'Records sent from an app in your Zapier account as they are created.',
     integrationProviders: [],
     modules: ['deals', 'contacts', 'accounts'],
     terminology: DEFAULT_TERMS,

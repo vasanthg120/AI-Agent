@@ -8,12 +8,14 @@ import { axiosClient } from '@/api/axiosClient';
 export interface SetupField {
   key: string;
   label: string;
-  type: 'text' | 'password' | 'url';
+  type: 'text' | 'password' | 'url' | 'select';
   hint?: string;
   placeholder?: string;
   required: boolean;
   defaultValue?: string;
   advanced?: boolean;
+  // type 'select': the choices.
+  options?: { value: string; label: string }[];
 }
 
 export interface WebhookInfo {
@@ -38,7 +40,10 @@ export interface CrmIntegration {
   description: string;
   // pull: HaiVE reads the CRM on a schedule. push: the CRM sends each new record to HaiVE.
   connection: 'pull' | 'push';
-  setup: { fields: SetupField[]; provides: string[]; limitations: string[]; steps?: string[] };
+  // Read once a night only (Hoops), from this time on — known before it is connected.
+  nightly?: { windowLabel: string };
+  // autoSetup: connected with its credentials alone — no mapping review, the first sync starts by itself (Hoops).
+  setup: { fields: SetupField[]; provides: string[]; limitations: string[]; steps?: string[]; autoSetup?: boolean };
   status: 'not_connected' | 'connected' | 'waiting' | 'needs_attention';
   source?: {
     id: string;
@@ -53,7 +58,19 @@ export interface CrmIntegration {
     modules: string[];
     error?: IntegrationError;
     webhook?: WebhookInfo;
+    // A CRM read once a night (Hoops): when the next sync runs, and whether "Sync now" can run now.
+    schedule?: { windowLabel: string; nextRunAt: string; canSyncNow: boolean; reason?: string };
+    // A CRM whose history comes in a little each night (Hoops): how far back it reaches so far (from null: everything).
+    history?: { from: string | null; importedBackTo: string | null; complete: boolean };
   };
+}
+
+// "deferred": the CRM may not be read right now (Hoops: once a night) — message says why, nextRunAt when it will be.
+export interface SyncResult {
+  status: 'ok' | 'error' | 'deferred' | string;
+  error?: string;
+  message?: string;
+  nextRunAt?: string | null;
 }
 
 export type Discovery = Record<string, { records: number; fields: number }>;
@@ -139,7 +156,7 @@ export const crmIntegrationsService = {
     return data;
   },
 
-  async syncNow(provider: string): Promise<{ result: { status: string; error?: string }; integration: CrmIntegration }> {
+  async syncNow(provider: string): Promise<{ result: SyncResult; integration: CrmIntegration }> {
     const { data } = await axiosClient.post(`/crm-integrations/${provider}/sync`, undefined, { timeout: 240_000 });
     return data;
   },

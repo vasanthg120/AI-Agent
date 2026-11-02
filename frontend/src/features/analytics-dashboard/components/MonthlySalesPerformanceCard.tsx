@@ -1,8 +1,9 @@
 import dayjs from 'dayjs';
 import clsx from 'clsx';
-import { FiArrowDown, FiArrowUp } from 'react-icons/fi';
-import { AnimatedNumber, Card, Badge } from '@/components/ui';
+import { FiArrowDown, FiArrowUp, FiChevronRight } from 'react-icons/fi';
+import { AnimatedNumber, Card, Badge, InfoPopover } from '@/components/ui';
 import { formatINR as money } from '@/utils/currency';
+import type { PreviousMonthClosures } from '@/services/analyticsDashboardService';
 import styles from './MonthlySalesPerformanceCard.module.css';
 
 export interface MonthlySalesPerformanceCardProps {
@@ -23,6 +24,99 @@ export interface MonthlySalesPerformanceCardProps {
   dateFrom: string;
   dateTo: string;
   onClick?: () => void;
+  // Won deals that started the month before and were closed in this one — a
+  // band of its own at the bottom; nothing else on the card reads it.
+  previousMonthClosures?: PreviousMonthClosures;
+  onOpenPreviousMonthClosures?: () => void;
+}
+
+const monthName = (period: string) => dayjs(`${period}-01`).format('MMMM');
+
+// How the listed deals relate to the revenue figure above: inside it (closing
+// date this month), outside it (closing date in another month), or a mix.
+function closuresNote(data: PreviousMonthClosures, achieved: number): string {
+  const month = monthName(data.period);
+  if (data.count === 0) return `No deal that started in ${monthName(data.previousPeriod)} was won in ${month}.`;
+
+  const inRevenue = `${month}'s ${money(achieved)}`;
+  const otherMonths = new Set(
+    data.deals.filter((d) => d.revenuePeriod && d.revenuePeriod !== data.period).map((d) => monthName(d.revenuePeriod!)),
+  );
+  const elsewhere = otherMonths.size === 1 ? `${[...otherMonths][0]}'s revenue` : "other months' revenue";
+
+  if (data.outsideThisMonthRevenue.count === 0) return `Already part of ${inRevenue} above — shown here, not added again.`;
+  if (data.inThisMonthRevenue.count === 0) return `Not part of ${inRevenue} — by closing date it counts in ${elsewhere}.`;
+  return (
+    `${money(data.inThisMonthRevenue.value)} is part of ${inRevenue} above; ` +
+    `${money(data.outsideThisMonthRevenue.value)} counts in ${elsewhere} by closing date.`
+  );
+}
+
+function PreviousMonthClosuresBand({
+  data,
+  achieved,
+  onOpen,
+}: {
+  data: PreviousMonthClosures;
+  achieved: number;
+  onOpen?: () => void;
+}) {
+  const month = monthName(data.period);
+  const previous = monthName(data.previousPeriod);
+  const title = `${previous} deals closed in ${month}`;
+  const clickable = data.count > 0 && !!onOpen;
+  const unknown = data.unknownStart;
+
+  return (
+    <div
+      className={clsx(styles.carryOver, clickable && styles.carryOverClickable)}
+      onClick={(event) => {
+        // Opens its own list, never the card's won-deals one underneath.
+        event.stopPropagation();
+        if (clickable) onOpen?.();
+      }}
+    >
+      <div className={styles.carryOverHead}>
+        <span className={styles.miniLabel}>{title}</span>
+        <InfoPopover title={title} align="right" placement="top">
+          <div>
+            Won deals that started in {previous} and were closed in {month}. Shown on their own — never added to the
+            revenue, target, forecast or daily figures above.
+          </div>
+          <div>
+            <strong>Revenue month</strong> — the figure above counts a won deal in the month of its closing date: the
+            day it was marked won, unless the CRM sent its own date. That hasn&apos;t changed.
+          </div>
+          <div>
+            <strong>Started</strong> — the earliest date the deal or one of its quotes was recorded.{' '}
+            <strong>Closed</strong> — when HaiVE saw it marked won; deals won before HaiVE recorded that use their
+            closing date.
+          </div>
+          <div>A reopened deal drops out; a deal closed twice counts once, in the month it last closed.</div>
+          {unknown.count > 0 && (
+            <div>
+              {unknown.count} won {unknown.count === 1 ? 'deal' : 'deals'} closed in {month} ({money(unknown.value)}){' '}
+              {unknown.count === 1 ? "isn't" : "aren't"} listed: HaiVE first saw {unknown.count === 1 ? 'it' : 'them'}{' '}
+              in the CRM&apos;s first import, and nothing earlier shows when {unknown.count === 1 ? 'it' : 'they'}{' '}
+              started.
+            </div>
+          )}
+        </InfoPopover>
+      </div>
+      <div className={styles.carryOverRow}>
+        <span className={styles.carryOverValue}>{money(data.value)}</span>
+        <span className={styles.trendMeta}>
+          · {data.count} {data.count === 1 ? 'deal' : 'deals'}
+        </span>
+        {clickable && (
+          <button type="button" className={styles.carryOverLink}>
+            View {data.count === 1 ? 'deal' : 'deals'} <FiChevronRight size={13} />
+          </button>
+        )}
+      </div>
+      <div className={styles.carryOverNote}>{closuresNote(data, achieved)}</div>
+    </div>
+  );
 }
 
 // The one hero KPI on the Overview tab. On-track/off-track, the forecast
@@ -39,6 +133,8 @@ export function MonthlySalesPerformanceCard({
   dateFrom,
   dateTo,
   onClick,
+  previousMonthClosures,
+  onOpenPreviousMonthClosures,
 }: MonthlySalesPerformanceCardProps) {
   const current = revenueTrend[revenueTrend.length - 1];
   const previous = revenueTrend[revenueTrend.length - 2];
@@ -146,6 +242,10 @@ export function MonthlySalesPerformanceCard({
           <div className={styles.miniValue}>{neededPerDay !== null ? money(neededPerDay) : '—'}</div>
         </div>
       </div>
+
+      {previousMonthClosures && (
+        <PreviousMonthClosuresBand data={previousMonthClosures} achieved={achieved} onOpen={onOpenPreviousMonthClosures} />
+      )}
     </Card>
   );
 }

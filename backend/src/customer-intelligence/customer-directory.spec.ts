@@ -365,23 +365,27 @@ describe('Customers (real Mongo)', () => {
     expect(result.sources).toEqual([
       expect.objectContaining({ label: 'Gorilla Dash', connected: true, canSync: true, lastError: 'The API key was rejected.' }),
       expect.objectContaining({ label: 'Pantheras CRM', connected: true, canSync: true, lastError: undefined }),
-      // Connected, but it has nothing to pull: no Sync for it.
-      expect.objectContaining({ label: 'Hoops CRM', connected: true, canSync: false }),
+      // Read through its API (once a night): it can be synced too.
+      expect.objectContaining({ label: 'Hoops CRM', connected: true, canSync: true }),
     ]);
   });
 
   it('Sync now pulls from every CRM that can be synced, and one failing does not stop the others', async () => {
     await seedPriya();
+    const hoopsId = (await service.list(org, {})).sources.find((x) => x.label === 'Hoops CRM')!.id;
     dataSources.syncNow.mockImplementation(async (_org: string, id: string) => {
       if (id === pantheras) throw new Error('timeout');
+      // Outside its nightly window Hoops isn't read: it says when it will be.
+      if (id === hoopsId) return { status: 'deferred', message: 'Hoops CRM allows HaiVE to read once a night, after 7:00pm AEST.' };
       return { status: 'ok' };
     });
     const { results } = await service.sync(org);
-    expect(dataSources.syncNow.mock.calls.map((call) => call[1]).sort()).toEqual([gorilla, pantheras].sort());
+    expect(dataSources.syncNow.mock.calls.map((call) => call[1]).sort()).toEqual([gorilla, pantheras, hoopsId].sort());
     expect(results).toEqual(
       expect.arrayContaining([
         { source: 'Gorilla Dash', ok: true, error: undefined },
         { source: 'Pantheras CRM', ok: false, error: expect.stringMatching(/couldn’t be completed/) },
+        { source: 'Hoops CRM', ok: true, error: undefined, note: expect.stringContaining('once a night') },
       ]),
     );
 
@@ -390,9 +394,8 @@ describe('Customers (real Mongo)', () => {
     dataSources.syncNow.mockResolvedValue({ status: 'error', error: 'The API key was rejected.' });
     expect(await service.sync(org, gorilla)).toEqual({ results: [{ source: 'Gorilla Dash', ok: false, error: 'The API key was rejected.' }] });
     expect(dataSources.syncNow).toHaveBeenCalledTimes(1);
-    // A source with nothing to pull, or somebody else's source, can't be synced.
-    const hoops = (await service.list(org, {})).sources.find((x) => x.label === 'Hoops CRM')!;
-    await expect(service.sync(org, hoops.id)).rejects.toBeInstanceOf(BadRequestException);
+    // Somebody else's source can't be synced.
+    await expect(service.sync(org, `${PREFIX}-not-a-source`)).rejects.toBeInstanceOf(BadRequestException);
     await expect(service.sync(`${PREFIX}-nobody`)).rejects.toBeInstanceOf(BadRequestException);
   });
 

@@ -2,6 +2,9 @@ import { useEffect, useRef, useState } from 'react';
 import type { RefObject } from 'react';
 import { Outlet, useLocation } from 'react-router-dom';
 import { AnimatePresence, MotionConfig, motion } from 'framer-motion';
+import { useQuery } from '@tanstack/react-query';
+import { dataSourcesService } from '@/services/dataSourcesService';
+import { useCurrencyStore } from '@/stores/currencyStore';
 import { useMediaQuery } from '@/hooks/useMediaQuery';
 import { useNotificationsStore } from '@/stores/notificationsStore';
 import { useUiStore } from '@/stores/uiStore';
@@ -23,6 +26,9 @@ const ENTRANCE_MS = 700;
 function PageTransition({ scrollRef }: { scrollRef: RefObject<HTMLElement | null> }) {
   const location = useLocation();
   const section = location.pathname.split('/')[1] ?? '';
+  // Amounts on the page are in the shown CRM's currency: when it changes (another
+  // CRM chosen for dashboards), the page opens again so none is left in the old one.
+  const currency = useCurrencyStore((s) => s.currency);
 
   // The staggered block entrance (AppLayout.module.css) runs only while the
   // page is opening; blocks that appear later just appear.
@@ -37,7 +43,7 @@ function PageTransition({ scrollRef }: { scrollRef: RefObject<HTMLElement | null
 
   return (
     <motion.div
-      key={section}
+      key={`${section}|${currency}`}
       className={styles.page}
       data-entering={entering || undefined}
       // Opacity only — the upward movement comes from the per-block stagger
@@ -94,6 +100,18 @@ export function AppLayout() {
   useEffect(() => {
     useNotificationsStore.getState().init();
   }, []);
+
+  // Which currency amounts are shown in: the CRM chosen for dashboards (Pantheras
+  // CRM: INR, Hoops CRM: AUD), as the backend reports it — see utils/currency.
+  const { data: dataSources } = useQuery({
+    queryKey: ['data-sources', 'overview'],
+    queryFn: dataSourcesService.getOverview,
+    staleTime: 5 * 60_000,
+  });
+  const setCurrency = useCurrencyStore((s) => s.setCurrency);
+  useEffect(() => {
+    if (dataSources?.currency) setCurrency(dataSources.currency);
+  }, [dataSources?.currency, setCurrency]);
 
   if (!isMobile) {
     return (

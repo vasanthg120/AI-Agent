@@ -19,8 +19,9 @@ export class SalesTargetController {
   @Get()
   @UseGuards(RolesGuard)
   @Roles('admin')
-  list(@CurrentUser() user: JwtPayload, @Query('period') period?: string) {
-    return this.salesAnalyticsService.listTargets(user.organizationId, period);
+  // currency: only the targets in that currency (Settings asks for the shown CRM's).
+  list(@CurrentUser() user: JwtPayload, @Query('period') period?: string, @Query('currency') currency?: string) {
+    return this.salesAnalyticsService.listTargets(user.organizationId, period, currency);
   }
 
   @Post()

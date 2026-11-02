@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { motion } from 'framer-motion';
 import clsx from 'clsx';
+import dayjs from 'dayjs';
 import { FiAward, FiGrid, FiLayers, FiMail, FiPieChart, FiTarget, FiTruck, FiUsers } from 'react-icons/fi';
 import { Avatar, EmptyState, SectionCard, Skeleton, Tabs } from '@/components/ui';
 import type { DateRange } from '@/components/ui';
@@ -11,10 +12,10 @@ import { ROUTES } from '@/constants/routes';
 import { hasRole } from '@/utils/roles';
 import { formatINR as money } from '@/utils/currency';
 import { organizationsService } from '@/services/organizationsService';
-import { analyticsDashboardService } from '@/services/analyticsDashboardService';
+import { analyticsDashboardService, type AnalyticsDashboardOverview } from '@/services/analyticsDashboardService';
 import { dealsService } from '@/services/dealsService';
 import { quotesService } from '@/services/quotesService';
-import { DealSplitDonut } from './components/DealSplitDonut';
+import { DealSplitDonut } from './components/DealSplitDonut'; 
 import { DashboardHeroHeader } from './components/DashboardHeroHeader';
 import { AiBriefingCard } from './components/AiBriefingCard';
 import { CustomersAndEmailSection } from './components/CustomersAndEmailSection';
@@ -105,7 +106,31 @@ type DrillDownTarget =
       // every month ('all'), or one month of its own. Omitted = the chosen month.
       range?: 'all' | { dateFrom: string; dateTo: string };
     }
-  | { kind: 'quotes'; title: string; clientApprovalStatus?: 'approved' | 'not-approved' };
+  | { kind: 'quotes'; title: string; clientApprovalStatus?: 'approved' | 'not-approved' }
+  // Rows already in the overview response (last month's deals closed this month) — shown as they are, nothing fetched.
+  | { kind: 'rows'; title: string; rows: DrillDownRow[] };
+
+type PreviousMonthClosures = AnalyticsDashboardOverview['previousMonthClosures'];
+
+const monthName = (period: string) => dayjs(`${period}-01`).format('MMMM');
+
+// One row per deal: which month's revenue it sits in (the chip), and the two dates behind it.
+function previousMonthClosureRows(closures: PreviousMonthClosures): DrillDownRow[] {
+  return closures.deals.map((d) => {
+    const started = `Started ${dayjs(d.startedOn).format('D MMM')} (${d.startedFrom === 'quote' ? 'first quote' : 'deal created'})`;
+    const closed = `Closed ${dayjs(d.closedOn).format('D MMM')}${d.closedFrom === 'closing-date' ? ' (closing date)' : ''}`;
+    return {
+      id: d.id,
+      title: d.name,
+      subtitle: d.revenuePeriod ? `In ${monthName(d.revenuePeriod)} revenue` : "Not in any month's revenue",
+      meta: `${started} · ${closed}`,
+      value: d.value,
+    };
+  });
+}
+
+const previousMonthClosuresTitle = (closures: PreviousMonthClosures) =>
+  `${monthName(closures.previousPeriod)} deals closed in ${monthName(closures.period)}`;
 
 // Phase 19 — replaces the Owner/Manager/Consultant Home Dashboard views as
 // the single /dashboard experience for every business-hierarchy role. One
@@ -169,7 +194,7 @@ export function AnalyticsDashboardPage() {
   const { data: drillItems, isLoading: drillLoading } = useQuery({
     queryKey: ['analytics-dashboard-drilldown', drillDown, dateFrom, dateTo, storeId],
     queryFn: async (): Promise<DrillDownRow[]> => {
-      if (!drillDown) return [];
+      if (!drillDown || drillDown.kind === 'rows') return [];
 
       if (drillDown.kind === 'deals') {
         const result = await dealsService.listFiltered(
@@ -205,7 +230,7 @@ export function AnalyticsDashboardPage() {
         value: q.quoteAmount,
       }));
     },
-    enabled: !!drillDown,
+    enabled: !!drillDown && drillDown.kind !== 'rows',
   });
 
   return (
@@ -283,6 +308,14 @@ export function AnalyticsDashboardPage() {
                           // figure that was clicked, instead of showing a
                           // createdAt-scoped set that can span unrelated months.
                           dateField: 'expectedClosingDate',
+                        })
+                      }
+                      previousMonthClosures={data.previousMonthClosures}
+                      onOpenPreviousMonthClosures={() =>
+                        setDrillDown({
+                          kind: 'rows',
+                          title: previousMonthClosuresTitle(data.previousMonthClosures),
+                          rows: previousMonthClosureRows(data.previousMonthClosures),
                         })
                       }
                     />
@@ -480,8 +513,8 @@ export function AnalyticsDashboardPage() {
         open={!!drillDown}
         onClose={() => setDrillDown(null)}
         title={drillDown?.title ?? ''}
-        isLoading={drillLoading}
-        rows={drillItems ?? []}
+        isLoading={drillDown?.kind === 'rows' ? false : drillLoading}
+        rows={drillDown?.kind === 'rows' ? drillDown.rows : (drillItems ?? [])}
       />
     </div>
   );

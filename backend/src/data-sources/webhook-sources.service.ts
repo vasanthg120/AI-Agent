@@ -95,7 +95,7 @@ export class WebhookSourcesService {
       label?: string;
       modules?: MirroredModule[];
       terminology?: Partial<Terminology>;
-      // 'zapier' (any app, named by the admin) or a first-class push provider such as 'hoops'.
+      // 'zapier' (any app, named by the admin) or another push provider in the catalog.
       provider?: CrmProviderId;
     },
   ) {
@@ -281,10 +281,12 @@ export class WebhookSourcesService {
       }
       const filter = { organizationId, dataSourceId: sourceId, externalId };
       let fields: Record<string, unknown>;
+      let unset: Record<string, ''> | undefined;
       if (mod === 'deals') {
+        const dealStatus = mapStatus(c.status, source.statusMapping);
         fields = {
           name: String(c.name ?? '').trim() || 'Untitled deal',
-          dealStatus: mapStatus(c.status, source.statusMapping),
+          dealStatus,
           monetaryValue: toNumber(c.amount),
           expectedClosingDate: toDay(c.closeDate),
           stageId: c.stage !== undefined && c.stage !== null ? String(c.stage) : null,
@@ -298,6 +300,14 @@ export class WebhookSourcesService {
               }
             : {}),
         };
+        // When the deal was closed (deal.schema.ts's closedAt): stamped when a push
+        // changes a deal stored earlier to won/lost, cleared when it reopens. A deal
+        // that first arrives already closed has no known closing time.
+        const before = await collection.findOne<{ dealStatus?: string }>(filter, { projection: { dealStatus: 1 } });
+        if (before && before.dealStatus !== dealStatus) {
+          if (dealStatus === 'open') unset = { closedAt: '' };
+          else fields.closedAt = now;
+        }
       } else {
         fields = Object.fromEntries(
           Object.entries(c).filter(([k, v]) => k !== 'externalId' && k !== 'createdAt' && v !== undefined && v !== null && v !== '' && typeof v !== 'object'),
@@ -309,6 +319,7 @@ export class WebhookSourcesService {
         {
           $set: { ...filter, sourceProvider: source.provider, ...fields },
           $setOnInsert: { createdAt: parseDate(c.createdAt) ?? now },
+          ...(unset ? { $unset: unset } : {}),
         },
         { upsert: true },
       );

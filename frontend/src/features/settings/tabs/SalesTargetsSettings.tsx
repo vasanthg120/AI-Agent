@@ -9,6 +9,8 @@ import { usersService, type AdminUser } from '@/services/usersService';
 import { isSalesperson, SALES_ROLE_LABEL } from '@/utils/access';
 import { salesTargetsService, type SalesTarget, type TargetScope } from '@/services/salesTargetsService';
 import { SettingsField, SettingsSection } from '../components/SettingsSection';
+import { useCurrencyStore } from '@/stores/currencyStore';
+import { currencySymbol } from '@/utils/currency';
 import styles from './SalesTargetsSettings.module.css';
 
 type RowKey = string;
@@ -34,7 +36,8 @@ export function SalesTargetsSettings() {
       const [storeList, userList, targetList] = await Promise.all([
         organizationsService.listStores(),
         usersService.list(),
-        salesTargetsService.list(forPeriod),
+        // The targets for the CRM shown on dashboards: they are in its currency.
+        salesTargetsService.list(forPeriod, useCurrencyStore.getState().currency),
       ]);
       setStores(storeList);
       setUsers(userList);
@@ -86,7 +89,7 @@ export function SalesTargetsSettings() {
         scope,
         period,
         targetAmount: amount,
-        currency: 'INR',
+        currency: useCurrencyStore.getState().currency,
         storeId: scope === 'store' ? id : storeId,
         userId: scope === 'user' ? id : undefined,
       });
@@ -145,7 +148,7 @@ export function SalesTargetsSettings() {
                       <Input
                         type="number"
                         min={0}
-                        leftIcon="₹"
+                        leftIcon={currencySymbol()}
                         value={currentValue('store', s._id)}
                         onChange={(e) => setDrafts((prev) => ({ ...prev, [rowKey('store', s._id)]: e.target.value }))}
                         placeholder="Target amount"
@@ -184,7 +187,7 @@ export function SalesTargetsSettings() {
                       <Input
                         type="number"
                         min={0}
-                        leftIcon="₹"
+                        leftIcon={currencySymbol()}
                         value={currentValue('user', u.id)}
                         onChange={(e) => setDrafts((prev) => ({ ...prev, [rowKey('user', u.id)]: e.target.value }))}
                         placeholder="Target amount"

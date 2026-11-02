@@ -23,10 +23,14 @@ the customised CRM):
 - A deal's expected closing date is a forecast in most CRMs; when a deal turns
   won/lost and the CRM didn't also send a new date, it is stamped with today so
   won revenue lands in the month it was won.
+- closedAt records the moment a deal stored earlier turned won/lost (cleared if
+  it reopens) — when it closed, kept apart from the month its revenue counts in.
 - lastActivityAt only moves when a meaningful field changes (these writes
   bypass Mongoose's updatedAt, and stamping every poll would make every record
   look "actioned today").
 - createdAt is set once, from the CRM's own creation date when it has one.
+- A source with a nightly window (Hoops) is read at most once a night, inside
+  it, whatever asks for the sync (see "nightly sync window" below).
 - A quote turning "approved" auto-drafts a royalty invoice (Phase 20a).
 """
 
@@ -46,7 +50,7 @@ logger = logging.getLogger(__name__)
 _DEAL_ACTIVITY_FIELDS = ("dealStatus", "monetaryValue", "expectedClosingDate", "stageId", "externalOwnerRef")
 _QUOTE_ACTIVITY_FIELDS = ("quoteStatus", "clientApprovalStatus", "quoteAmount", "quoteNumber")
 _MAX_FIELD_SAMPLES = 20
-_SYNCABLE = ("prospectconnect", "hubspot", "salesforce", "zoho", "gorilladash")
+_SYNCABLE = ("prospectconnect", "hubspot", "salesforce", "zoho", "gorilladash", "hoops")
 
 
 def _now() -> datetime:
@@ -138,6 +142,16 @@ def _deal_update(source, store_id, raw, existing_by_external_id, owner_mapping_b
     ):
         fields["expectedClosingDate"] = _now().strftime("%Y-%m-%d")
 
+    # When the deal was closed (closedAt, see the backend's deal.schema.ts): stamped
+    # when a deal stored earlier changes to won/lost, cleared when it reopens. A deal
+    # that first arrives already closed has no known closing time, so none is set.
+    unset = {}
+    if existing is not None and existing.get("dealStatus") != new_status:
+        if new_status in ("won", "lost"):
+            fields["closedAt"] = _now()
+        else:
+            unset["closedAt"] = ""
+
     owner = c.get("owner")
     if owner:
         fields["externalOwnerRef"] = str(owner)
@@ -152,11 +166,10 @@ def _deal_update(source, store_id, raw, existing_by_external_id, owner_mapping_b
     if existing is None or any(existing.get(f) != fields.get(f) for f in _DEAL_ACTIVITY_FIELDS):
         fields["lastActivityAt"] = _now()
 
-    return UpdateOne(
-        {**_source_filter(source), "externalId": external_id},
-        {"$set": fields, "$setOnInsert": {"createdAt": _parse_date(c.get("createdAt")) or _now()}},
-        upsert=True,
-    )
+    update = {"$set": fields, "$setOnInsert": {"createdAt": _parse_date(c.get("createdAt")) or _now()}}
+    if unset:
+        update["$unset"] = unset
+    return UpdateOne({**_source_filter(source), "externalId": external_id}, update, upsert=True)
 
 
 def _sync_deals(source: dict, adapter, seen_fields: set) -> int:
@@ -501,12 +514,121 @@ def _record_run(source: dict, started: datetime, trigger: str, status_: str, cou
         logger.exception("Could not record the sync run for %s", source.get("label"))
 
 
+# ---- nightly sync window (Hoops) -------------------------------------------------
+#
+# A source with sync.window — Hoops: {"utcOffsetMinutes": 600, "start": "19:00",
+# "end": "05:00", "label": "AEST"}, set by the backend's provider catalog — is
+# read at most once a night, inside that window, whoever asks: the scheduler,
+# "Sync now", or a just-connected CRM. A night whose sync failed is retried an
+# hour later, at most three tries a night. The backend shows the same schedule
+# (backend/src/data-sources/sync-window.ts) — a change here needs the same there.
+
+_WINDOW_RETRY_AFTER = timedelta(minutes=60)
+_WINDOW_MAX_TRIES = 3
+
+
+def _window(source: dict) -> dict | None:
+    window = (source.get("sync") or {}).get("window")
+    return window if isinstance(window, dict) and window.get("start") and window.get("end") else None
+
+
+def _minutes(hhmm: str) -> int:
+    hours, minutes = str(hhmm).split(":")
+    return int(hours) * 60 + int(minutes)
+
+
+def _window_tz(window: dict) -> timezone:
+    return timezone(timedelta(minutes=int(window.get("utcOffsetMinutes") or 0)))
+
+
+def window_night(window: dict, at: datetime):
+    """The night `at` falls in (the local date the window opened on), or None outside the window."""
+    local = at.astimezone(_window_tz(window))
+    now_m, start, end = local.hour * 60 + local.minute, _minutes(window["start"]), _minutes(window["end"])
+    if start <= end:
+        return local.date() if start <= now_m < end else None
+    if now_m >= start:
+        return local.date()
+    if now_m < end:
+        return local.date() - timedelta(days=1)
+    return None
+
+
+def _night_opens(window: dict, night) -> datetime:
+    start = _minutes(window["start"])
+    return datetime(night.year, night.month, night.day, start // 60, start % 60, tzinfo=_window_tz(window)).astimezone(timezone.utc)
+
+
+def next_window_opening(window: dict, at: datetime) -> datetime:
+    """When the next night's window opens after `at` (tonight's, if it hasn't opened yet)."""
+    night = window_night(window, at)
+    if night is not None:
+        return _night_opens(window, night + timedelta(days=1))
+    local_date = at.astimezone(_window_tz(window)).date()
+    opens = _night_opens(window, local_date)
+    return opens if opens > at else _night_opens(window, local_date + timedelta(days=1))
+
+
+def window_opens_label(window: dict) -> str:
+    """"7:00pm AEST" — when the window opens, as people read it."""
+    hours, minutes = (int(p) for p in str(window['start']).split(':'))
+    return f"{hours % 12 or 12}:{minutes:02d}{'am' if hours < 12 else 'pm'} {window.get('label') or ''}".strip()
+
+
+def _window_block(source: dict, now: datetime) -> str | None:
+    """Why this source mustn't be read right now, or None if it may be."""
+    window = _window(source)
+    if not window:
+        return None
+    name = source.get("label") or "This CRM"
+    opens = window_opens_label(window)
+    night = window_night(window, now)
+    if night is None:
+        return f"{name} allows HaiVE to read once a night, after {opens}. The next sync runs then by itself."
+    last_ok = _parse_date((source.get("sync") or {}).get("lastSuccessAt"))
+    if last_ok and window_night(window, last_ok) == night:
+        return f"Already synced tonight — {name} allows one sync a night. The next one runs after {opens} tomorrow."
+    return None
+
+
+def _window_due(source: dict, now: datetime) -> bool:
+    if _window_block(source, now):
+        return False
+    window = _window(source)
+    night = window_night(window, now)
+    last = _parse_date((source.get("sync") or {}).get("lastSyncAt"))
+    if last is None or window_night(window, last) != night:
+        return True
+    # Tried tonight and it failed: again an hour later, a few times at most.
+    tries = get_db().crm_sync_runs.count_documents(
+        {**_source_filter(source), "startedAt": {"$gte": _night_opens(window, night)}, "trigger": {"$ne": "push"}}
+    )
+    return tries < _WINDOW_MAX_TRIES and now - last >= _WINDOW_RETRY_AFTER
+
+
 def sync_source(source: dict, modules: tuple[str, ...] | None = None, trigger: str = "scheduled") -> dict:
     """Syncs one data source and records the outcome on it (last sync time,
     status, counts, error) and in its history (crm_sync_runs)."""
     db = get_db()
     wanted = [m for m in (modules or ("deals", "quotes", "contacts", "accounts")) if m in (source.get("modules") or [])]
-    db.crm_data_sources.update_one({"_id": source["_id"]}, {"$set": {"sync.lastStatus": "running"}})
+    window = _window(source)
+    if window:
+        blocked = _window_block(source, _now())
+        if blocked:
+            return {"status": "deferred", "message": blocked, "nextRunAt": next_window_opening(window, _now()).isoformat()}
+        # One sync at a time (Hoops refuses a second request while one runs); a
+        # "running" left behind by a crash stops counting after 45 minutes.
+        claimed = db.crm_data_sources.find_one_and_update(
+            {
+                "_id": source["_id"],
+                "$or": [{"sync.lastStatus": {"$ne": "running"}}, {"sync.runningSince": {"$lt": _now() - timedelta(minutes=45)}}],
+            },
+            {"$set": {"sync.lastStatus": "running", "sync.runningSince": _now()}},
+        )
+        if not claimed:
+            return {"status": "deferred", "message": f"{source.get('label') or 'This CRM'} is already being synced.", "nextRunAt": None}
+    else:
+        db.crm_data_sources.update_one({"_id": source["_id"]}, {"$set": {"sync.lastStatus": "running"}})
     counts: dict[str, int] = {}
     seen: dict[str, set] = {}
     # Incremental CRMs: fetch only what changed since the *start* of the last
@@ -518,8 +640,16 @@ def sync_source(source: dict, modules: tuple[str, ...] | None = None, trigger: s
         if adapter.incremental:
             adapter.since = _parse_date((source.get("sync") or {}).get("cursor"))
             # Records synced before their detail was kept: read everything once more.
-            if adapter.stores_details and db.crm_deals.find_one({**_source_filter(source), "sourceData": {"$exists": False}}, {"_id": 1}):
+            if (
+                adapter.stores_details
+                and adapter.rereads_for_details
+                and db.crm_deals.find_one({**_source_filter(source), "sourceData": {"$exists": False}}, {"_id": 1})
+            ):
                 adapter.since = None
+        if adapter.keeps_state:
+            # Saved together with the cursor: without one (never synced, or the mapping changed) the adapter starts afresh.
+            saved = (source.get("sync") or {}).get("adapterState")
+            adapter.state = dict(saved) if adapter.since is not None and isinstance(saved, dict) else {}
         adapter = _Recording(adapter)
         for module in wanted:
             if module not in adapter.modules or not ((source.get("fieldMappings") or {}).get(module) or {}).get("externalId"):
@@ -556,6 +686,8 @@ def sync_source(source: dict, modules: tuple[str, ...] | None = None, trigger: s
     update = {"sync.lastStatus": "ok", "sync.lastSyncAt": _now(), "sync.lastSuccessAt": _now(), "sync.lastCounts": counts}
     if adapter.incremental and modules is None:
         update["sync.cursor"] = started
+        if adapter.keeps_state:
+            update["sync.adapterState"] = adapter.state
     for module, paths in seen.items():
         if paths:
             update[f"availableFields.{module}"] = sorted(paths)[:500]
@@ -575,6 +707,7 @@ def discover_source(source: dict) -> dict:
         adapter = adapter_for(source)
     except Exception as exc:  # noqa: BLE001
         return {"status": "error", **describe_failure(exc)}
+    adapter.sample_only = True
     found: dict[str, dict] = {}
     samples: dict[str, list[dict]] = {}
     update: dict = {}
@@ -606,6 +739,8 @@ def _syncable_sources(organization_id: str | None = None) -> list[dict]:
 
 
 def _due(source: dict) -> bool:
+    if _window(source):
+        return _window_due(source, _now())
     sync = source.get("sync") or {}
     last = _parse_date(sync.get("lastSyncAt"))
     interval = max(int(sync.get("intervalMinutes") or 10), 5)

@@ -16,6 +16,7 @@ from __future__ import annotations
 import html
 import logging
 import re
+from datetime import datetime, timedelta, timezone
 from typing import Iterator
 from urllib.parse import urlparse
 
@@ -147,11 +148,18 @@ class Adapter:
     incremental = False
     # Set by sync_source for incremental adapters: fetch only records changed after this.
     since = None
+    # Set by discover_source: read only a first, small page of each kind of record.
+    sample_only = False
+    # Adapters that keep their own reading position between syncs (Hoops' history
+    # walk) set this; sync_source hands back what was saved (`state`) and saves it
+    # again after a successful run.
+    keeps_state = False
 
     def __init__(self, source: dict):
         self.source = source
         self.organization_id = source["organizationId"]
         self.mappings = source.get("fieldMappings") or {}
+        self.state: dict = {}
 
     def pages(self, module: str) -> Iterator[list[dict]]:  # pragma: no cover - interface
         raise NotImplementedError
@@ -162,6 +170,11 @@ class Adapter:
 
     def details(self, module: str, raw: dict) -> dict | None:
         return None
+
+    # With stores_details: when a stored deal has no detail yet, sync_source reads
+    # everything once more to fill it. Off for a CRM that may only be read a little
+    # at a time (Hoops) — its details fill in as the nightly reading reaches them.
+    rereads_for_details = True
 
     # The product lines a deal carries, and the tax and fee lines of a
     # quotation, in HaiVE's own shape — for the CRMs that hold them. None means
@@ -463,12 +476,84 @@ class GorillaDashAdapter(Adapter):
             raise AdapterError(str(exc)) from exc
 
 
+class HoopsAdapter(Adapter):
+    """Hoops: each transaction (a quote/SalesDoc with its job and invoice) is a
+    deal and that deal's quotation; each customer is an account, its contacts
+    are contacts. One night's reading follows Hoops' integration rules — see
+    app/integrations/hoops.py. The two lists are read once per sync and shared:
+    deals and quotes come from the same transactions, contacts and accounts from
+    the same customers."""
+
+    provider = "hoops"
+    modules = ("deals", "quotes", "contacts", "accounts")
+    incremental = True
+    keeps_state = True
+    # Each deal keeps its transaction's Hoops status, flags, job and summary (sourceData).
+    stores_details = True
+    rereads_for_details = False
+
+    def __init__(self, source: dict):
+        super().__init__(source)
+        from app.integrations import hoops
+
+        self._hoops = hoops
+        try:
+            self.client = hoops.HoopsClient(self.organization_id)
+        except hoops.HoopsError as exc:
+            raise AdapterError(str(exc)) from exc
+        # Hoops is Australian and sends amounts without a currency: AUD unless the source says otherwise.
+        self.currency = str((source.get("metadata") or {}).get("currency") or "AUD")
+        sync = source.get("sync") or {}
+        # None: the whole history. A source set up before the choice existed reads one year back.
+        if "historyFrom" in sync:
+            self.history_from = hoops.parse_date(sync.get("historyFrom"))
+        else:
+            self.history_from = datetime.now(timezone.utc) - timedelta(days=365)
+        self._read_cache: dict[str, list[dict]] = {}
+
+    def _read(self, endpoint: str) -> list[dict]:
+        if endpoint not in self._read_cache:
+            try:
+                if self.sample_only:
+                    rows, _ = self.client.page(endpoint, 0, limit=self._hoops.SAMPLE_PAGE_SIZE)
+                else:
+                    rows, self.state[endpoint] = self._hoops.collect(
+                        self.client, endpoint, self.since, self.state.get(endpoint), self.history_from, datetime.now(timezone.utc)
+                    )
+            except self._hoops.HoopsError as exc:
+                raise AdapterError(str(exc)) from exc
+            self._read_cache[endpoint] = rows
+        return self._read_cache[endpoint]
+
+    def pages(self, module: str) -> Iterator[list[dict]]:
+        if module in ("deals", "quotes"):
+            rows = [self._hoops.transaction_fields(r, self.currency) for r in self._read("transactions")]
+        elif module == "contacts":
+            rows = [c for customer in self._read("customers") for c in self._hoops.contacts_of(customer)]
+        elif module == "accounts":
+            rows = [a for a in (self._hoops.account_of(c) for c in self._read("customers")) if a]
+        else:
+            return
+        for start in range(0, len(rows), PAGE_SIZE):
+            yield rows[start : start + PAGE_SIZE]
+
+    def details(self, module: str, raw: dict) -> dict | None:
+        return self._hoops.transaction_detail(raw) if module == "deals" else None
+
+    def products(self, raw: dict) -> list[dict] | None:
+        return self._hoops.product_lines(raw)
+
+    def charges(self, raw: dict) -> dict[str, list[dict]] | None:
+        return self._hoops.charges(raw)
+
+
 ADAPTERS: dict[str, type[Adapter]] = {
     "prospectconnect": ProspectConnectAdapter,
     "hubspot": HubSpotAdapter,
     "salesforce": SalesforceAdapter,
     "zoho": ZohoAdapter,
     "gorilladash": GorillaDashAdapter,
+    "hoops": HoopsAdapter,
 }
 
 

@@ -38,6 +38,10 @@ export interface AnalyticsDashboardOverview {
     forecastConfidence: number;
     businessHealthScore: number | null;
   };
+  // Won deals that started in the month before the selected one and were closed
+  // in the selected one — shown beside `revenue`, never added to it (see the
+  // backend's previous-month-closures.service.ts for the three dates).
+  previousMonthClosures: PreviousMonthClosures;
   // Outstanding customer receivables (quoteAmount - paidAmount, summed) —
   // "dues" in Agent Activity's team-wide view. Not date-range scoped, unlike
   // the rest of this response — a current balance, not a per-period figure.
@@ -58,6 +62,32 @@ export interface AnalyticsDashboardOverview {
   customers: { newCount: number; existingCount: number; lostCount: number; totalConsidered: number };
   aiInsight: string;
   insights: AiInsightItem[];
+}
+
+export interface PreviousMonthClosedDeal {
+  id: string;
+  name: string;
+  value: number;
+  // "YYYY-MM-DD": the earliest date the deal or one of its quotes was recorded.
+  startedOn: string;
+  startedFrom: 'deal' | 'quote';
+  // "YYYY-MM-DD": recorded when it turned won, or its closing date for deals closed before that was recorded.
+  closedOn: string;
+  closedFrom: 'recorded' | 'closing-date';
+  // "YYYY-MM" of its closing date — the month its revenue counts in (null: none).
+  revenuePeriod: string | null;
+}
+
+export interface PreviousMonthClosures {
+  period: string;
+  previousPeriod: string;
+  count: number;
+  value: number;
+  inThisMonthRevenue: { count: number; value: number };
+  outsideThisMonthRevenue: { count: number; value: number };
+  // Won deals closed in the month whose start is unknown — not in the count above.
+  unknownStart: { count: number; value: number };
+  deals: PreviousMonthClosedDeal[];
 }
 
 // The open pipeline of every month at once (not scoped to the dashboard's chosen month).

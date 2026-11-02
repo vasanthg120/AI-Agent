@@ -407,7 +407,8 @@ export interface CustomerSource {
 }
 
 export interface CustomerSyncResult {
-  results: { source: string; ok: boolean; error?: string }[];
+  // note: a CRM read once a night (Hoops) says when it will be read instead.
+  results: { source: string; ok: boolean; error?: string; note?: string }[];
 }
 
 export interface CustomerStats {

@@ -42,6 +42,8 @@ export interface RoyaltyReportGroupRow {
 export interface RoyaltyReportSummary {
   dateFrom: string;
   dateTo: string;
+  // What the amounts are in: the shown CRM's currency (Pantheras INR, Hoops AUD).
+  currency: string;
   scope: { level: 'org' | 'store'; storeId?: string };
   royaltyRule: {
     royaltyPercentage: number;
@@ -122,9 +124,10 @@ export class RoyaltyReportService {
     storeConstraint?: string,
     groupBy?: 'salesperson' | 'customer',
   ): Promise<RoyaltyReportSummary> {
-    const [rule, sales] = await Promise.all([
+    const [rule, sales, currency] = await Promise.all([
       this.royaltyRulesService.getEffectiveRule(organizationId, new Date(`${dateTo}T23:59:59.999Z`)),
       this.quotationSales.sent(organizationId, dateFrom, dateTo, storeConstraint),
+      this.quotationSales.currency(organizationId),
     ]);
     const totals = totalsOf(sales);
     const royaltyBase: 'exTax' | 'incTax' = rule && rule.excludeTax === false ? 'incTax' : 'exTax';
@@ -166,6 +169,7 @@ export class RoyaltyReportService {
     return {
       dateFrom,
       dateTo,
+      currency,
       scope: storeConstraint ? { level: 'store', storeId: storeConstraint } : { level: 'org' },
       royaltyRule: rule
         ? {

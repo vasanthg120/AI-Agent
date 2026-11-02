@@ -44,7 +44,7 @@ import { usersService, type AdminUser } from '@/services/usersService';
 import { useAuthStore } from '@/stores/authStore';
 import { CloudStorageSection } from './CloudStorageSection';
 import { CrmManageModal } from './CrmManageModal';
-import { CrmSetupWizard } from './CrmSetupWizard';
+import { CrmSetupWizard, nextRunText } from './CrmSetupWizard';
 import { IntegrationCard, LetterLogo, type CardTone } from './IntegrationCard';
 import { ResourceEndpointBuilder } from './ResourceEndpointBuilder';
 import styles from './IntegrationsPage.module.css';
@@ -361,6 +361,7 @@ export function IntegrationsPage() {
     try {
       const { result } = await crmIntegrationsService.syncNow(integration.id);
       if (result.status === 'error') toast.error(result.error ?? 'The sync didn’t finish.', { duration: 8_000 });
+      else if (result.status === 'deferred') toast(result.message ?? 'Not now — the next sync runs by itself.', { duration: 8_000 });
       else toast.success(`${integration.label} is up to date`);
     } catch (error) {
       toast.error(extractErrorMessage(error), { duration: 8_000 });
@@ -576,6 +577,8 @@ export function IntegrationsPage() {
             ? 'No records received yet'
             : 'Not synced yet',
       },
+      // A CRM read once a night (Hoops): when it next runs, in the viewer's own time.
+      ...(source.schedule ? [{ icon: FiRefreshCw, text: `Next sync ${nextRunText(source.schedule.nextRunAt)}` }] : []),
       // A CRM that hasn't sent anything yet already says so in the line above.
       ...(records.length > 0 || source.lastSyncAt ? [{ icon: FiDatabase, text: records.length > 0 ? records.join(' · ') : 'No records yet' }] : []),
       ...(source.isDefault ? [{ icon: FiStar, text: 'Shown on dashboards' }] : []),
@@ -589,10 +592,10 @@ export function IntegrationsPage() {
         key={integration.id}
         logo={crmLogo(integration)}
         name={integration.label}
-        tagline={integration.connection === 'push' ? 'Sends new records live' : 'Synced automatically'}
+        tagline={integration.connection === 'push' ? 'Sends new records live' : integration.nightly ? 'Synced every night' : 'Synced automatically'}
         tone={crmTone(integration)}
         status={crmStatus(integration)}
-        // The card already carries the name: "Hoops — new customers…" reads as "New customers…".
+        // The card already carries the name: "Hoops — customers, contacts…" reads as "Customers, contacts…".
         description={connected ? undefined : integration.description.replace(/^[^—]+—\s*/, '').replace(/^./, (c) => c.toUpperCase())}
         highlights={connected ? undefined : integration.setup.provides.slice(0, 3)}
         facts={crmFacts(integration)}
@@ -615,7 +618,7 @@ export function IntegrationsPage() {
                 <Button size="sm" onClick={() => setSetupFor(integration)}>
                   Reconnect
                 </Button>
-              ) : integration.connection === 'pull' ? (
+              ) : integration.connection === 'pull' && (integration.source?.schedule?.canSyncNow ?? true) ? (
                 <Button
                   size="sm"
                   variant="ghost"

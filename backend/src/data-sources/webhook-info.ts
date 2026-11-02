@@ -1,7 +1,7 @@
 import { PUSH_PROVIDERS, type MirroredModule } from './provider-catalog';
 import type { DataSource } from './schemas/data-source.schema';
 
-// The generic one ("an app in your Zapier account"); Hoops is the other push provider.
+// The generic one ("an app in your Zapier account") — the only push provider since Hoops is read through its API.
 export const WEBHOOK_PROVIDER = 'zapier';
 
 export function isPushProvider(provider: string | undefined): boolean {

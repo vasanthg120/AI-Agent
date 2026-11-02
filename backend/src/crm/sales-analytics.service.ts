@@ -1,6 +1,7 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
-import { InjectModel } from '@nestjs/mongoose';
-import { Model } from 'mongoose';
+import { BadRequestException, Injectable, Logger, OnModuleInit, Optional } from '@nestjs/common';
+import { InjectConnection, InjectModel } from '@nestjs/mongoose';
+import { Connection, Model } from 'mongoose';
+import { scopeCurrency } from '../data-sources/scope-currency';
 import { Deal, DealDocument } from './schemas/deal.schema';
 import { SalesTarget, SalesTargetDocument } from './schemas/sales-target.schema';
 import { UpsertSalesTargetDto } from './dto/upsert-sales-target.dto';
@@ -34,11 +35,36 @@ function daysElapsed(period: string): number {
 }
 
 @Injectable()
-export class SalesAnalyticsService {
+export class SalesAnalyticsService implements OnModuleInit {
+  private readonly logger = new Logger(SalesAnalyticsService.name);
+
   constructor(
     @InjectModel(Deal.name) private dealModel: Model<DealDocument>,
     @InjectModel(SalesTarget.name) private targetModel: Model<SalesTargetDocument>,
+    // Targets are in a currency: only those in the shown CRM's apply (see resolveTarget).
+    @Optional() @InjectConnection() private connection?: Connection,
   ) {}
+
+  /** Targets used to be one per store/person and month; now one per currency too
+   * (schema index). The old unique index would refuse a second currency's target. */
+  async onModuleInit(): Promise<void> {
+    if (!this.connection) return;
+    try {
+      const indexes = await this.connection.collection('sales_targets').indexes();
+      if (indexes.some((i) => i.name === 'organizationId_1_scope_1_storeId_1_userId_1_period_1')) {
+        await this.connection.collection('sales_targets').dropIndex('organizationId_1_scope_1_storeId_1_userId_1_period_1');
+        this.logger.log('Sales targets are now one per currency as well (old unique index replaced).');
+      }
+    } catch (err) {
+      // Collection not created yet — nothing to replace.
+      if (!/ns not found|NamespaceNotFound/i.test((err as Error).message)) this.logger.warn(`Sales target index: ${(err as Error).message}`);
+    }
+  }
+
+  /** The shown CRM's currency (Pantheras INR, Hoops AUD); undefined where there's no connection to ask (tests). */
+  private shownCurrency(organizationId: string): Promise<string | undefined> {
+    return this.connection ? scopeCurrency(this.connection, organizationId) : Promise.resolve(undefined);
+  }
 
   async upsertTarget(organizationId: string, dto: UpsertSalesTargetDto) {
     if (dto.scope === 'store' && !dto.storeId) throw new BadRequestException('storeId is required for scope "store"');
@@ -50,18 +76,14 @@ export class SalesAnalyticsService {
       storeId: dto.scope === 'store' ? dto.storeId : undefined,
       userId: dto.scope === 'user' ? dto.userId : undefined,
       period: dto.period,
+      // One target per store/person, month and currency: a rupee target for Pantheras CRM and an AUD one for Hoops CRM live side by side.
+      currency: (dto.currency ?? 'INR').toUpperCase(),
     };
-    return this.targetModel
-      .findOneAndUpdate(
-        filter,
-        { ...filter, targetAmount: dto.targetAmount, currency: dto.currency ?? 'INR' },
-        { upsert: true, new: true },
-      )
-      .exec();
+    return this.targetModel.findOneAndUpdate(filter, { ...filter, targetAmount: dto.targetAmount }, { upsert: true, new: true }).exec();
   }
 
-  listTargets(organizationId: string, period?: string) {
-    return this.targetModel.find({ organizationId, ...(period ? { period } : {}) }).exec();
+  listTargets(organizationId: string, period?: string, currency?: string) {
+    return this.targetModel.find({ organizationId, ...(period ? { period } : {}), ...(currency ? { currency: currency.toUpperCase() } : {}) }).exec();
   }
 
   /** Achievement %, remaining target, average daily sales still needed, and a
@@ -127,9 +149,12 @@ export class SalesAnalyticsService {
     scopeId: string | undefined,
     period: string,
   ): Promise<{ targetAmount: number | null; currency: string }> {
+    // Only targets in the shown CRM's currency: a rupee target is never measured against AUD sales.
+    const currency = await this.shownCurrency(organizationId);
+    const inCurrency = currency ? { currency } : {};
     if (scope === 'org') {
-      const storeTargets = await this.targetModel.find({ organizationId, scope: 'store', period }).exec();
-      if (storeTargets.length === 0) return { targetAmount: null, currency: 'INR' };
+      const storeTargets = await this.targetModel.find({ organizationId, scope: 'store', period, ...inCurrency }).exec();
+      if (storeTargets.length === 0) return { targetAmount: null, currency: currency ?? 'INR' };
       return {
         targetAmount: storeTargets.reduce((sum, t) => sum + t.targetAmount, 0),
         currency: storeTargets[0].currency ?? 'INR',
@@ -142,8 +167,9 @@ export class SalesAnalyticsService {
         storeId: scope === 'store' ? scopeId : undefined,
         userId: scope === 'user' ? scopeId : undefined,
         period,
+        ...inCurrency,
       })
       .exec();
-    return { targetAmount: target?.targetAmount ?? null, currency: target?.currency ?? 'INR' };
+    return { targetAmount: target?.targetAmount ?? null, currency: target?.currency ?? currency ?? 'INR' };
   }
 }
