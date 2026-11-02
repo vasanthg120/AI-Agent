@@ -68,7 +68,7 @@ describe('PlivoService (real Mongo)', () => {
       lines,
       calls,
       integrations as never,
-      { findById: async (id: string) => users.get(id) ?? null, findAll: async () => [...users.values()] } as never,
+      { findById: async (id: string) => users.get(id) ?? null, findAllWithLinkedMembers: async () => [...users.values()] } as never,
       { get: httpGet, post: httpPost } as never,
       { get: (key: string) => config[key] } as never,
     );
