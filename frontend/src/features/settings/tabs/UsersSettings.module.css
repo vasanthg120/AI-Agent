@@ -167,3 +167,26 @@
 .moreOptions > * + * {
   margin-top: var(--space-3);
 }
+
+.inviteRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.inviteLabel {
+  display: block;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--color-text-secondary);
+}
+
+.inviteHint {
+  display: block;
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+}

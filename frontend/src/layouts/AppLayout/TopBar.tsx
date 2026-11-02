@@ -9,6 +9,7 @@ import { useAuthStore } from '@/stores/authStore';
 import { useNotificationsStore } from '@/stores/notificationsStore';
 import { NAV_GROUPS } from '@/constants/navigation';
 import { ROUTES } from '@/constants/routes';
+import { AccountSwitcher } from './AccountSwitcher';
 import styles from './TopBar.module.css';
 
 const IS_MAC = typeof navigator !== 'undefined' && /Mac|iPod|iPhone|iPad/.test(navigator.platform);
@@ -50,6 +51,7 @@ export function TopBar({ onMenuClick }: TopBarProps) {
     <header className={styles.topbar}>
       <div className={styles.left}>
         {onMenuClick && <IconButton icon={<FiMenu />} label="Open menu" onClick={onMenuClick} />}
+        <AccountSwitcher />
         <span className={styles.breadcrumb}>
           {breadcrumb.group && (
             <>

@@ -41,6 +41,11 @@ axiosClient.interceptors.response.use(
       queryClient.clear();
       toast.error('Your session has expired — please sign in again.');
     }
+    // A sub-account's subscription has just lapsed: the header and lock screen read
+    // this, so they catch up on the next render rather than at the next page load.
+    if (axios.isAxiosError(error) && error.response?.status === 402 && (error.response.data as { code?: string } | undefined)?.code === 'SUBSCRIPTION_REQUIRED') {
+      void queryClient.invalidateQueries({ queryKey: ['accounts'] });
+    }
     return Promise.reject(error);
   },
 );

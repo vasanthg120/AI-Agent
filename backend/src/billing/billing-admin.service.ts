@@ -336,7 +336,7 @@ export class BillingAdminService {
               { $group: { _id: null, credits: { $sum: { $abs: '$amountCredits' } } } },
             ])
             .exec(),
-          this.userModel.countDocuments({ organizationId }).exec(),
+          this.userModel.countDocuments({ organizationId, linkedLoginUserId: { $exists: false } }).exec(),
           this.walletModel.findOne({ organizationId }).exec(),
           this.currentSubscriptionFor(organizationId),
         ]);
@@ -384,7 +384,7 @@ export class BillingAdminService {
     if (!org) throw new NotFoundException('Organization not found.');
 
     const [userCount, walletSummary, subscription, purchaseRows, usageRows] = await Promise.all([
-      this.userModel.countDocuments({ organizationId }).exec(),
+      this.userModel.countDocuments({ organizationId, linkedLoginUserId: { $exists: false } }).exec(),
       this.wallet.getSummary(organizationId, this.config.get<number>('billing.lowBalanceThresholdCredits') ?? 200),
       this.currentSubscriptionFor(organizationId),
       this.transactionModel

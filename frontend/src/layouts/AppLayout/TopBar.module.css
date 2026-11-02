@@ -202,3 +202,11 @@
     font-size: var(--text-md);
   }
 }
+
+/* A phone header has room for one label: the account, when there is one, so nobody
+   has to guess whose data they're looking at. */
+@media (max-width: 640px) {
+  .left:has([data-account-switcher]) .breadcrumb {
+    display: none;
+  }
+}

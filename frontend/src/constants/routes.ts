@@ -3,6 +3,8 @@ export const ROUTES = {
   register: '/register',
   forgotPassword: '/forgot-password',
   oauthCallback: '/oauth/callback',
+  // Where an invitation email's link lands (sub-account owners, invited employees).
+  activate: '/activate',
 
   dashboard: '/dashboard',
   agentActivity: '/agent-activity',
@@ -55,6 +57,7 @@ export const ROUTES = {
   settingsRoyaltyRules: '/settings/royalty-rules',
   settingsEmailSla: '/settings/email-sla',
   settingsIntegrations: '/settings/integrations',
+  settingsSubAccounts: '/settings/sub-accounts',
 
   profile: '/profile',
 

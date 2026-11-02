@@ -3,6 +3,7 @@ import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { AnimatePresence, LayoutGroup, MotionConfig, motion } from 'framer-motion';
 import { FiChevronRight, FiLock, FiSearch, FiX } from 'react-icons/fi';
 import clsx from 'clsx';
+import { useAccounts } from '@/features/sub-accounts/useAccounts';
 import { useAuthStore } from '@/stores/authStore';
 import { hasRole } from '@/utils/roles';
 import { SETTINGS_NAV, type SettingsNavItem } from './settingsNav';
@@ -25,6 +26,7 @@ export function SettingsLayout() {
   const location = useLocation();
   const navigate = useNavigate();
   const user = useAuthStore((state) => state.user);
+  const canManageSubAccounts = useAccounts().data?.canManageSubAccounts ?? false;
   const [query, setQuery] = useState('');
   const searchRef = useRef<HTMLInputElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
@@ -34,9 +36,11 @@ export function SettingsLayout() {
     () =>
       SETTINGS_NAV.map((group) => ({
         ...group,
-        items: group.items.filter((t) => !t.requireRoles || t.requireRoles.some((r) => hasRole(user, r))),
+        items: group.items
+          .filter((t) => !t.requireRoles || t.requireRoles.some((r) => hasRole(user, r)))
+          .filter((t) => !t.requireMainOwner || canManageSubAccounts),
       })).filter((group) => group.items.length > 0),
-    [user],
+    [user, canManageSubAccounts],
   );
 
   const allItems = useMemo(() => visibleGroups.flatMap((g) => g.items), [visibleGroups]);

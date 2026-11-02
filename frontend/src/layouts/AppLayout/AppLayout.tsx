@@ -4,6 +4,9 @@ import { Outlet, useLocation } from 'react-router-dom';
 import { AnimatePresence, MotionConfig, motion } from 'framer-motion';
 import { useQuery } from '@tanstack/react-query';
 import { dataSourcesService } from '@/services/dataSourcesService';
+import { SubscriptionLockScreen, isOpenWhenLocked } from '@/features/sub-accounts/SubscriptionLockScreen';
+import { useAccounts } from '@/features/sub-accounts/useAccounts';
+import { useAuthStore } from '@/stores/authStore';
 import { useCurrencyStore } from '@/stores/currencyStore';
 import { useMediaQuery } from '@/hooks/useMediaQuery';
 import { useNotificationsStore } from '@/stores/notificationsStore';
@@ -11,6 +14,7 @@ import { useUiStore } from '@/stores/uiStore';
 import { CommandPalette } from '@/components/common/CommandPalette';
 import { FloatingAssistant } from '@/components/assistant/FloatingAssistant';
 import { ROUTES } from '@/constants/routes';
+import { AccountContextStrip } from './AccountContextStrip';
 import { Sidebar } from './Sidebar';
 import { TopBar } from './TopBar';
 import styles from './AppLayout.module.css';
@@ -29,6 +33,12 @@ function PageTransition({ scrollRef }: { scrollRef: RefObject<HTMLElement | null
   // Amounts on the page are in the shown CRM's currency: when it changes (another
   // CRM chosen for dashboards), the page opens again so none is left in the old one.
   const currency = useCurrencyStore((s) => s.currency);
+  // A locked sub-account sees this in place of any page it can't use. Checked again
+  // on each navigation, so subscribing in Billing opens everything straight away.
+  const { locked, refetch: refetchAccounts } = useAccounts();
+  useEffect(() => {
+    if (locked) void refetchAccounts();
+  }, [location.pathname, locked, refetchAccounts]);
 
   // The staggered block entrance (AppLayout.module.css) runs only while the
   // page is opening; blocks that appear later just appear.
@@ -52,7 +62,7 @@ function PageTransition({ scrollRef }: { scrollRef: RefObject<HTMLElement | null
       animate={{ opacity: 1 }}
       transition={{ duration: 0.25, ease: [0.16, 1, 0.3, 1] }}
     >
-      <Outlet />
+      {locked && !isOpenWhenLocked(location.pathname) ? <SubscriptionLockScreen /> : <Outlet />}
     </motion.div>
   );
 }
@@ -101,6 +111,22 @@ export function AppLayout() {
     useNotificationsStore.getState().init();
   }, []);
 
+  // Another tab switched account: this one would otherwise keep showing the old
+  // business under a token that's been replaced for the whole browser.
+  useEffect(() => {
+    const onStorage = (event: StorageEvent) => {
+      if (event.key !== 'enterprise-ai:auth' || !event.newValue) return;
+      try {
+        const next = (JSON.parse(event.newValue) as { state?: { accessToken?: string | null } }).state?.accessToken;
+        if (next && next !== useAuthStore.getState().accessToken) window.location.reload();
+      } catch {
+        // Not something this tab can read; leave it as it is.
+      }
+    };
+    window.addEventListener('storage', onStorage);
+    return () => window.removeEventListener('storage', onStorage);
+  }, []);
+
   // Which currency amounts are shown in: the CRM chosen for dashboards (Pantheras
   // CRM: INR, Hoops CRM: AUD), as the backend reports it — see utils/currency.
   const { data: dataSources } = useQuery({
@@ -121,6 +147,7 @@ export function AppLayout() {
           <Sidebar />
           <div className={styles.mainColumn}>
             <TopBar />
+            <AccountContextStrip />
             <main className={styles.content} ref={contentRef}>
               <PageTransition scrollRef={contentRef} />
             </main>
@@ -161,6 +188,7 @@ export function AppLayout() {
         </AnimatePresence>
         <div className={styles.mainColumn}>
           <TopBar onMenuClick={() => setMobileSidebarOpen(true)} />
+          <AccountContextStrip />
           <main className={styles.content} ref={contentRef}>
             <PageTransition scrollRef={contentRef} />
           </main>
