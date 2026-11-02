@@ -735,7 +735,9 @@ def _syncable_sources(organization_id: str | None = None) -> list[dict]:
     query: dict = {"status": "active", "provider": {"$in": list(_SYNCABLE)}, "sync.enabled": {"$ne": False}}
     if organization_id:
         query["organizationId"] = organization_id
-    return list(get_db().crm_data_sources.find(query))
+    # Nobody is working in an archived business, so its CRM isn't polled.
+    archived = {str(org["_id"]) for org in get_db().organizations.find({"status": "archived"}, {"_id": 1})}
+    return [source for source in get_db().crm_data_sources.find(query) if source.get("organizationId") not in archived]
 
 
 def _due(source: dict) -> bool:

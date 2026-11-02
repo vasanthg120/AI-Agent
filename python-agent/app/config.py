@@ -68,6 +68,9 @@ class Settings:
 
     crm_base_url: str = os.environ.get("CRM_BASE_URL", "")
     crm_api_key: str = os.environ.get("CRM_API_KEY", "")
+    # The one business the CRM above belongs to. AI search won't index that CRM
+    # without it, because its records would have no business to belong to.
+    crm_rag_organization_id: str = os.environ.get("CRM_RAG_ORGANIZATION_ID", "")
 
     ms_graph_client_id: str = os.environ.get("MS_GRAPH_CLIENT_ID", "")
     ms_graph_client_secret: str = os.environ.get("MS_GRAPH_CLIENT_SECRET", "")

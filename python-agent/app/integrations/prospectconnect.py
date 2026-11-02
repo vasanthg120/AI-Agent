@@ -1,5 +1,7 @@
+import hashlib
 from urllib.parse import urlparse
 
+import jwt
 import requests
 
 from app.cache import cache
@@ -148,17 +150,34 @@ def resolve_external_credentials(organization_id: str | None) -> tuple[str, str]
     return None
 
 
+def _cache_namespace(api_root: str, api_key: str) -> str:
+    """Whose CRM a cached answer belongs to. The address alone isn't enough: every
+    customer of a hosted CRM shares one host, and the built-in CRM is one address
+    for every business. The built-in CRM's key is a new short-lived token each
+    time, so it is identified by the business inside it (read only to label the
+    cache; the backend is what verifies it). Never the raw key: cache keys are
+    visible to anyone who can read Redis."""
+    identity = api_key
+    if api_key.startswith("Bearer "):
+        try:
+            claims = jwt.decode(api_key[len("Bearer "):], options={"verify_signature": False})
+            identity = f"org:{claims.get('organizationId') or claims.get('sub')}"
+        except jwt.PyJWTError:
+            pass
+    return f"crm:{api_root}:{hashlib.sha256(identity.encode()).hexdigest()[:16]}"
+
+
 def post_json(api_root: str, api_key: str, path: str, payload: dict):
     """Like post(), but returns the parsed JSON body and raises on failure
     instead of returning a human-readable error string — for callers (e.g.
     the RAG sync job) that need structured data rather than LLM-ready text.
 
     Read-only endpoints (see _CACHEABLE_PATHS) are cached briefly — CRM data
-    is shared/business-wide (not per-user), so this speeds up both repeated
-    lookups within one agentic turn and lookups across different users.
+    is shared within a business (not per-user), so this speeds up both repeated
+    lookups within one agentic turn and lookups across that business's users.
     """
     cacheable = path in _CACHEABLE_PATHS
-    key = cache.cache_key(f"crm:{api_root}", path, payload) if cacheable else None
+    key = cache.cache_key(_cache_namespace(api_root, api_key), path, payload) if cacheable else None
     if key is not None:
         hit = cache.get_json(key)
         if hit is not None:
@@ -182,7 +201,7 @@ def get_json(api_root: str, api_key: str, path: str, params: dict | None = None)
     this org's own imported connector manifest, e.g. /deal/getPipelineList),
     unlike the rest of this API which is POST-with-body throughout."""
     cacheable = path in _CACHEABLE_PATHS
-    key = cache.cache_key(f"crm:{api_root}", path, params or {}) if cacheable else None
+    key = cache.cache_key(_cache_namespace(api_root, api_key), path, params or {}) if cacheable else None
     if key is not None:
         hit = cache.get_json(key)
         if hit is not None:

@@ -53,10 +53,40 @@ _VALID_SOURCES = set(_SOURCE_TYPES) | {"memory"}
 # Points for these source types carry a real organization_id payload field
 # and must be scoped by it (a catalog/profile is an organizational asset,
 # not private to its uploader — see app.rag.retriever._business_knowledge_filter).
-# Every other source type here (crm/outlook/document/memory) has no
-# organization_id field at all, so an org-scoped clause on them would zero
-# out results that are correctly scoped by user_id alone today.
 _ORG_SCOPED_TYPES = set(_SOURCE_TYPES["business_knowledge"])
+
+
+def _search_filter(source_types: list[str], user_id: str, organization_id: str | None) -> qmodels.Filter | None:
+    """What one request may read, built in one place so it can be tested. Three
+    separate branches, none of which can reach another business's data:
+
+    - a person's own points (uploads, connected mailbox), matched by their user
+      id, which is itself unique to one business (see User.linkedLoginUserId in
+      the backend);
+    - points shared within a business (user_id "*": CRM records, activated AI role
+      documents), which also need that business's organization_id. A shared point
+      with no organization_id matches nobody: it fails closed rather than being
+      visible to every business;
+    - points that are always organization-wide (see _ORG_SCOPED_TYPES).
+
+    The scheduled report path acts as user_id "*" and so only gets the last two.
+    """
+    scoped = [t for t in source_types if t in _ORG_SCOPED_TYPES]
+    unscoped = [t for t in source_types if t not in _ORG_SCOPED_TYPES]
+    source = lambda types: qmodels.FieldCondition(key="source_type", match=qmodels.MatchAny(any=types))  # noqa: E731
+    in_organization = qmodels.FieldCondition(key="organization_id", match=qmodels.MatchValue(value=organization_id))
+
+    branches = []
+    if unscoped and user_id and user_id != "*":
+        branches.append(qmodels.Filter(must=[source(unscoped), qmodels.FieldCondition(key="user_id", match=qmodels.MatchValue(value=user_id))]))
+    if unscoped and organization_id:
+        branches.append(qmodels.Filter(must=[source(unscoped), qmodels.FieldCondition(key="user_id", match=qmodels.MatchValue(value="*")), in_organization]))
+    if scoped and organization_id:
+        branches.append(qmodels.Filter(must=[source(scoped), in_organization]))
+
+    if not branches:
+        return None
+    return branches[0] if len(branches) == 1 else qmodels.Filter(should=branches)
 
 
 def run(tool_input: dict, context: dict) -> str:
@@ -86,40 +116,8 @@ def run(tool_input: dict, context: dict) -> str:
 
     lines: list[str] = []
     if source != "memory":
-        requested = _SOURCE_TYPES[source]
-        scoped = [t for t in requested if t in _ORG_SCOPED_TYPES]
-        unscoped = [t for t in requested if t not in _ORG_SCOPED_TYPES]
-
-        # CRM records carry user_id="*" (shared, no real owner); Outlook records
-        # carry the connected user's real id — this branch always covers both,
-        # never omitted, matching the pattern used to fix the document-search
-        # tenant-isolation bug in app/rag/retriever.py. business_knowledge_*
-        # points instead get a separate, organization_id-scoped branch (never a
-        # flat combined filter — these points have no user_id-based ownership
-        # concept, and adding an org clause to the branch above would silently
-        # zero out every other source, none of which carry organization_id).
-        branches = []
-        if unscoped:
-            branches.append(
-                qmodels.Filter(
-                    must=[
-                        qmodels.FieldCondition(key="source_type", match=qmodels.MatchAny(any=unscoped)),
-                        qmodels.FieldCondition(key="user_id", match=qmodels.MatchAny(any=[user_id, "*"])),
-                    ]
-                )
-            )
-        if scoped and organization_id:
-            branches.append(
-                qmodels.Filter(
-                    must=[
-                        qmodels.FieldCondition(key="source_type", match=qmodels.MatchAny(any=scoped)),
-                        qmodels.FieldCondition(key="organization_id", match=qmodels.MatchValue(value=organization_id)),
-                    ]
-                )
-            )
-
-        if branches:
-            query_filter = branches[0] if len(branches) == 1 else qmodels.Filter(should=branches)
+        query_filter = _search_filter(_SOURCE_TYPES[source], user_id, organization_id)
+        if query_filter is not None:
             hits = hybrid_search.search(query, query_filter, top_k=8)
             # [n] markers are a citation convention (see app.agent.llm_client's
             # SYSTEM_PROMPT) — the model is instructed to keep them next to the

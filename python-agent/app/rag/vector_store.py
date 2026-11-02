@@ -90,18 +90,45 @@ def upsert_chunks(
     upsert_points(points)
 
 
-def reassign_owner(document_id: str, new_user_id: str) -> None:
+def reassign_owner(document_id: str, new_user_id: str, organization_id: str | None = None) -> None:
     """Rewrites user_id for every point of document_id, no re-embedding —
     used to promote a draft role's privately-owned source doc to org-wide
-    ("*") on activation."""
+    ("*") on activation. organization_id is what limits "*" to that one
+    business: without it a shared point is searchable by nobody."""
     ensure_collection()
     get_client().set_payload(
         collection_name=settings.qdrant_collection,
-        payload={"user_id": new_user_id},
+        payload={"user_id": new_user_id, **({"organization_id": organization_id} if organization_id else {})},
         points=qmodels.Filter(
             must=[qmodels.FieldCondition(key="document_id", match=qmodels.MatchValue(value=document_id))]
         ),
     )
+
+
+def stamp_role_documents() -> int:
+    """Gives AI role documents activated before shared points carried a business
+    id the id of the business they belong to. Runs at every startup and is safe to
+    repeat; until it runs, those documents simply aren't found by anyone."""
+    from app.memory.mongo_client import get_db  # local: mongo_client isn't needed by the rest of this module
+
+    ensure_collection()
+    stamped = 0
+    roles = get_db().agent_roles.find({"sourceDocumentId": {"$exists": True, "$nin": [None, ""]}}, {"sourceDocumentId": 1, "organizationId": 1})
+    for role in roles:
+        if not role.get("organizationId"):
+            continue
+        get_client().set_payload(
+            collection_name=settings.qdrant_collection,
+            payload={"organization_id": role["organizationId"]},
+            points=qmodels.Filter(
+                must=[
+                    qmodels.FieldCondition(key="document_id", match=qmodels.MatchValue(value=str(role["sourceDocumentId"]))),
+                    qmodels.FieldCondition(key="user_id", match=qmodels.MatchValue(value="*")),
+                ]
+            ),
+        )
+        stamped += 1
+    return stamped
 
 
 def delete_by_document_id(document_id: str) -> None:
