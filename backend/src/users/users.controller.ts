@@ -9,8 +9,10 @@ import { UpdateUserDto } from './dto/update-user.dto';
 import { UpdateProfileDto } from './dto/update-profile.dto';
 import { InvitationsService } from './invitations.service';
 import { UsersService } from './users.service';
+import { Permission, PermissionExempt } from '../common/permissions/permission.decorator';
 
 @UseGuards(JwtAuthGuard)
+@Permission('users')
 @Controller('users')
 export class UsersController {
   constructor(
@@ -19,6 +21,7 @@ export class UsersController {
   ) {}
 
   @Get('me')
+  @PermissionExempt('personal')
   async me(@CurrentUser() user: JwtPayload) {
     return this.usersService.profile(user.sub);
   }
@@ -27,23 +30,42 @@ export class UsersController {
   // only the fields UpdateProfileDto allows. Declared before PATCH :id so
   // "me" is never captured as an id by the admin-only route below.
   @Patch('me')
+  @PermissionExempt('personal')
   updateMe(@CurrentUser() user: JwtPayload, @Body() dto: UpdateProfileDto) {
     return this.usersService.updateOwnProfile(user.sub, dto);
+  }
+
+  // The modules, actions and groups a person's access is made of — the Users page
+  // and the AI role editor draw their permission grids from this, so there is no
+  // second copy of the list. Nothing in it is private to the business.
+  @Get('permission-catalog')
+  @PermissionExempt('personal')
+  permissionCatalog() {
+    return this.usersService.permissionCatalog();
+  }
+
+  // The active AI roles a person can be given, with the account type and starting
+  // permissions each one brings. Part of User Management (not AI Roles), so whoever
+  // may add people can see what to choose from.
+  @Get('ai-roles')
+  @UseGuards(RolesGuard)
+  @Roles('admin')
+  aiRoles(@CurrentUser() caller: JwtPayload) {
+    return this.usersService.assignableAiRoles(caller.organizationId);
   }
 
   @Get()
   @UseGuards(RolesGuard)
   @Roles('admin')
-  async list(@CurrentUser() caller: JwtPayload) {
-    const users = await this.usersService.findAllWithLinkedMembers(caller.organizationId);
-    return users.map((u) => this.usersService.toPublic(u));
+  list(@CurrentUser() caller: JwtPayload) {
+    return this.usersService.listDescribed(caller.organizationId);
   }
 
   @Post()
   @UseGuards(RolesGuard)
   @Roles('admin')
   async create(@CurrentUser() caller: JwtPayload, @Body() dto: CreateUserDto) {
-    const created = await this.usersService.createByAdmin(dto, caller.organizationId);
+    const created = await this.usersService.createByAdmin(dto, caller.organizationId, caller);
     if (!dto.sendInvite) return created;
     const { activationLink } = await this.invitations.inviteById(created.user.id, caller.organizationId);
     return { ...created, activationLink };
@@ -53,6 +75,7 @@ export class UsersController {
   @UseGuards(RolesGuard)
   @Roles('admin')
   async resendInvitation(@CurrentUser() caller: JwtPayload, @Param('id') id: string) {
+    await this.usersService.assertMayManage(caller, id, caller.organizationId);
     const { activationLink } = await this.invitations.inviteById(id, caller.organizationId);
     return { activationLink };
   }
@@ -64,7 +87,7 @@ export class UsersController {
     if (id === caller.sub && (dto.active === false || (dto.role && dto.role !== 'admin'))) {
       throw new BadRequestException("Can't demote or disable your own account");
     }
-    return this.usersService.updateByAdmin(id, dto, caller.organizationId, caller.sub);
+    return this.usersService.updateByAdmin(id, dto, caller.organizationId, caller.sub, caller);
   }
 
   @Delete(':id')
@@ -74,6 +97,6 @@ export class UsersController {
     if (id === caller.sub) {
       throw new BadRequestException("Can't delete your own account");
     }
-    return this.usersService.deleteByAdmin(id, caller.organizationId);
+    return this.usersService.deleteByAdmin(id, caller.organizationId, caller);
   }
 }

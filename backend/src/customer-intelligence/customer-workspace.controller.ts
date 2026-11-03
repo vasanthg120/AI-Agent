@@ -11,6 +11,7 @@ import { RolesGuard } from '../common/guards/roles.guard';
 import { UPLOAD_FILE_INTERCEPTOR_OPTIONS } from '../common/upload-limits';
 import { CustomerWorkspaceService } from './customer-workspace.service';
 import { CreateCustomerNoteDto, CreateCustomerTaskDto, SetCustomerStatusDto, UpdateCustomerTaskDto } from './dto/customer-workspace.dto';
+import { Permission } from '../common/permissions/permission.decorator';
 
 // What the team attaches to a customer — comments, tasks, files — from the
 // Customers panel. Same audience as the page itself; every call is scoped to
@@ -19,6 +20,7 @@ import { CreateCustomerNoteDto, CreateCustomerTaskDto, SetCustomerStatusDto, Upd
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Roles('owner', 'admin', 'manager')
 @Feature('inquiries')
+@Permission('customers')
 @Controller('customers')
 export class CustomerWorkspaceController {
   constructor(private workspace: CustomerWorkspaceService) {}

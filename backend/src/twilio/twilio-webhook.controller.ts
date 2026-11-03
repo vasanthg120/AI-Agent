@@ -2,11 +2,13 @@ import { Body, Controller, HttpCode, Post, Query, Req, Res } from '@nestjs/commo
 import { SkipThrottle } from '@nestjs/throttler';
 import { Request, Response } from 'express';
 import { TwilioWebhookResult, TwilioWebhooksService } from './twilio-webhooks.service';
+import { PermissionExempt } from '../common/permissions/permission.decorator';
 
 // Called by Twilio, not by a signed-in user: no JwtAuthGuard — every request is
 // authenticated by its X-Twilio-Signature instead (TwilioWebhooksService). Not
 // throttled: a refused webhook is a lost call or recording.
 @SkipThrottle()
+@PermissionExempt('public')
 @Controller('twilio/webhooks')
 export class TwilioWebhookController {
   constructor(private webhooks: TwilioWebhooksService) {}

@@ -143,6 +143,14 @@ export class User {
   @Prop()
   assignedAgentId?: string;
 
+  // This person's own page & action permissions ("customers:edit" — see
+  // common/permissions/app-modules.ts), set when they're created or edited
+  // with an AI role. Unset (not empty) for owners, admins and every account
+  // made before this existed: those keep the rules they had. An empty list is
+  // a real answer — nothing beyond the basics.
+  @Prop({ type: [String], default: undefined })
+  permissions?: string[];
+
   // Free-text label, same convention as AgentRole.department (Phase 6) —
   // matched against a custom AgentRole's assignedDepartments to decide chat
   // @mention visibility. Optional; unset means "no department filter can

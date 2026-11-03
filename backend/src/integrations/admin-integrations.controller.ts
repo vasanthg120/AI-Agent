@@ -3,6 +3,7 @@ import { AdminJwtAuthGuard } from '../common/guards/admin-jwt-auth.guard';
 import { ConnectIntegrationDto } from './dto/connect-integration.dto';
 import { SaveOAuthAppCredentialsDto } from './dto/save-oauth-app-credentials.dto';
 import { IntegrationsService, PLATFORM_PROVIDERS, PlatformProvider } from './integrations.service';
+import { PermissionExempt } from '../common/permissions/permission.decorator';
 
 // Anthropic, Sarvam, ElevenLabs, and Groq are all platform-wide AI provider
 // credentials — python-agent's anthropic_client.py._resolve_api_key(),
@@ -38,6 +39,7 @@ function isPlatformProvider(provider: string): provider is PlatformProvider {
 }
 
 @UseGuards(AdminJwtAuthGuard)
+@PermissionExempt('platform')
 @Controller('integrations/admin')
 export class AdminIntegrationsController {
   constructor(private integrationsService: IntegrationsService) {}

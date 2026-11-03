@@ -13,8 +13,10 @@ import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { JwtPayload } from '../auth/jwt-payload.interface';
 import { UPLOAD_FILE_INTERCEPTOR_OPTIONS } from '../common/upload-limits';
 import { DocumentsService } from './documents.service';
+import { Permission } from '../common/permissions/permission.decorator';
 
 @UseGuards(JwtAuthGuard)
+@Permission('ai_agent', 'create')
 @Controller('documents')
 export class DocumentsController {
   constructor(private documentsService: DocumentsService) {}

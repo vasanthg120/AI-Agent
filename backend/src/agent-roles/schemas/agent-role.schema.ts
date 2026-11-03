@@ -85,6 +85,13 @@ export class AgentRole {
   @Prop({ type: [String], default: undefined })
   features?: string[];
 
+  // Where a new person on this AI role starts in Create User: their page & action
+  // permissions ("customers:edit", see common/permissions/app-modules.ts). Only a
+  // starting point — changing it never changes anyone already on the role. Unset on
+  // older roles: their features stand in for it (defaultPermissionsOfRole).
+  @Prop({ type: [String], default: undefined })
+  defaultPermissions?: string[];
+
   @Prop({ default: '#6b7280' }) avatarColor: string;
 
   // Audit trail only — no RBAC gating exists in this app yet (see plan notes).

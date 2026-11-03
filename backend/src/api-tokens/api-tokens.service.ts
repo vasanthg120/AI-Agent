@@ -119,6 +119,10 @@ export class ApiTokensService {
       organizationId: user.organizationId,
       storeId: user.storeId,
       assignedAgentId: user.assignedAgentId,
+      // The same access as the person's own login: their permission list, or for an
+      // older AI-role account the features of their role.
+      permissions: user.permissions,
+      features: user.permissions ? undefined : await this.usersService.resolveFeatures(user),
       department: user.department,
       voiceAccessEnabled: user.voiceAccessEnabled,
       aiAccessEnabled: user.aiAccessEnabled,

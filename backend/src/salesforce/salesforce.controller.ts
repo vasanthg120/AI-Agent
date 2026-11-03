@@ -6,6 +6,7 @@ import { Roles } from '../common/decorators/roles.decorator';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { SalesforceService } from './salesforce.service';
+import { Permission, PermissionExempt } from '../common/permissions/permission.decorator';
 
 // Salesforce's real OAuth flow — mirrors outlook.controller.ts's shape
 // (connect-url -> signed JWT state -> provider consent -> callback -> token
@@ -14,6 +15,7 @@ import { SalesforceService } from './salesforce.service';
 // requires the same owner/admin role CrmIntegrationsController already
 // requires for every other CRM connect action, and the state carries
 // organizationId only.
+@Permission('crm_integrations')
 @Controller('salesforce')
 export class SalesforceController {
   private readonly logger = new Logger(SalesforceController.name);
@@ -26,6 +28,7 @@ export class SalesforceController {
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('owner', 'admin')
   @Get('connect-url')
+  @Permission('crm_integrations', 'manage')
   getConnectUrl(@CurrentUser() user: JwtPayload) {
     return { url: this.salesforce.buildAuthorizeUrl(user.organizationId) };
   }
@@ -35,6 +38,7 @@ export class SalesforceController {
   // authenticates this request, same as Outlook/Gmail's callbacks.
   @Get('callback')
   @Redirect()
+  @PermissionExempt('public')
   async callback(@Query('code') code?: string, @Query('state') state?: string, @Query('error') error?: string) {
     const frontendUrl = this.config.get<string>('corsOrigin');
     if (error || !code || !state) {

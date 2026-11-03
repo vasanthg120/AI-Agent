@@ -2,6 +2,7 @@ import { CanActivate, ExecutionContext, ForbiddenException, Injectable } from '@
 import { Reflector } from '@nestjs/core';
 import { JwtPayload } from '../../auth/jwt-payload.interface';
 import { AppFeature, FEATURE_KEY, isAiRoleAccount } from '../app-features';
+import { holdsPermission, isPermissionManaged, permissionDeniedMessage, routePermission } from '../permissions/permission.decorator';
 
 // For features every ordinary account may use (the AI Email Inbox, Call
 // Copilot): an account tied to an AI role gets in only when that AI role
@@ -14,6 +15,12 @@ export class FeatureGuard implements CanActivate {
     const feature = this.reflector.getAllAndOverride<AppFeature | undefined>(FEATURE_KEY, [context.getHandler(), context.getClass()]);
     if (!feature) return true;
     const user = context.switchToHttp().getRequest().user as JwtPayload | undefined;
+    // Someone with their own permission list is held to it, not to their AI role's features.
+    if (isPermissionManaged(user)) {
+      const need = routePermission(this.reflector, context);
+      if (!need || holdsPermission(user, need.module, need.action)) return true;
+      throw new ForbiddenException(permissionDeniedMessage(need));
+    }
     if (!isAiRoleAccount(user?.roles)) return true;
     if (user?.features?.includes(feature)) return true;
     throw new ForbiddenException('Your AI role doesn’t include this feature. Ask an admin to enable it for the role.');

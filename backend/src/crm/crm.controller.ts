@@ -3,6 +3,7 @@ import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { JwtPayload } from '../auth/jwt-payload.interface';
 import { CrmService } from './crm.service';
+import { Permission } from '../common/permissions/permission.decorator';
 
 /**
  * Native CRM bridge — the exact route paths and request/response shapes
@@ -15,11 +16,13 @@ import { CrmService } from './crm.service';
  * would have to imperfectly re-describe someone else's API shape.
  */
 @UseGuards(JwtAuthGuard)
+@Permission('customers', 'view')
 @Controller('crm')
 export class CrmController {
   constructor(private crmService: CrmService) {}
 
   @Post('contact/upsert')
+  @Permission('customers', 'create')
   upsertContact(@CurrentUser() user: JwtPayload, @Body() body: { data: Record<string, unknown> }) {
     return this.crmService.upsertContact(user.organizationId, body.data ?? {});
   }

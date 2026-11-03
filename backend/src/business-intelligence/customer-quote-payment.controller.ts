@@ -8,11 +8,13 @@ import { resolveBiDateRange, scopeBiFilters } from './bi-filter.util';
 import { BiFilterQueryDto } from './dto/bi-filter-query.dto';
 import { ListBiQuotesQueryDto } from './dto/list-bi-quotes-query.dto';
 import { CustomerQuotePaymentService } from './customer-quote-payment.service';
+import { Permission } from '../common/permissions/permission.decorator';
 
 // Route order matters: 'summary'/'quotes' are static segments and must be
 // registered before 'customer/:businessKey', same rule deals.controller.ts's
 // own comment documents.
 @UseGuards(JwtAuthGuard, RolesGuard)
+@Permission('analytics')
 @Controller('business-intelligence/customer-quote-payment')
 export class CustomerQuotePaymentController {
   constructor(private customerQuotePaymentService: CustomerQuotePaymentService) {}

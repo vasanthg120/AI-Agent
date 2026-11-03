@@ -6,8 +6,10 @@ import { RolesGuard } from '../common/guards/roles.guard';
 import { JwtPayload } from '../auth/jwt-payload.interface';
 import { BusinessDashboardService } from './business-dashboard.service';
 import { BusinessDashboardQueryDto } from './dto/business-dashboard-query.dto';
+import { Permission } from '../common/permissions/permission.decorator';
 
 @UseGuards(JwtAuthGuard)
+@Permission('dashboard')
 @Controller('crm/dashboard')
 export class BusinessDashboardController {
   constructor(private businessDashboardService: BusinessDashboardService) {}

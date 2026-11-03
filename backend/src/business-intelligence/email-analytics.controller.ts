@@ -14,6 +14,7 @@ import { BiEmailsByEmployeeQueryDto } from './dto/bi-emails-by-employee-query.dt
 import { ListBiEmailsQueryDto } from './dto/list-bi-emails-query.dto';
 import { ExportBiEmailsQueryDto } from './dto/export-bi-emails-query.dto';
 import { EmailAnalyticsExportService } from './email-analytics-export.service';
+import { Permission } from '../common/permissions/permission.decorator';
 
 const EXPORT_ROW_CAP = 5000;
 
@@ -21,6 +22,7 @@ const EXPORT_ROW_CAP = 5000;
 // segments and must be registered before 'emails/:id', same rule
 // deals.controller.ts's own comment documents.
 @UseGuards(JwtAuthGuard, RolesGuard)
+@Permission('analytics')
 @Controller('business-intelligence/email-analytics')
 export class EmailAnalyticsController {
   constructor(
@@ -69,6 +71,7 @@ export class EmailAnalyticsController {
 
   @Get('export')
   @Roles('owner', 'admin', 'manager')
+  @Permission('analytics', 'export')
   async export(@CurrentUser() user: JwtPayload, @Query() query: ExportBiEmailsQueryDto, @Res() res: Response) {
     const scoped = scopeBiFilters(user, query);
     const { start, end } = resolveBiDateRange(scoped);

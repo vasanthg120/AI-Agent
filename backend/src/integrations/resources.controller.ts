@@ -12,6 +12,7 @@ import { ImportConnectorManifestDto } from './dto/import-connector-manifest.dto'
 import { DynamicExecutorService } from './dynamic-executor.service';
 import { IntegrationResourcesService } from './integration-resources.service';
 import { IntegrationsService } from './integrations.service';
+import { Permission } from '../common/permissions/permission.decorator';
 
 // Metadata CRUD for the "unlimited resources/endpoints per integration"
 // engine (see integration-resource.schema.ts / integration-endpoint.schema.ts),
@@ -20,6 +21,7 @@ import { IntegrationsService } from './integrations.service';
 // Executor — run any configured endpoint). Registered alongside
 // IntegrationsController under the same 'integrations' base path.
 @UseGuards(JwtAuthGuard)
+@Permission('integrations')
 @Controller('integrations')
 export class ResourcesController {
   constructor(

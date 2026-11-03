@@ -8,6 +8,7 @@ import { CreateProductDto } from './dto/create-product.dto';
 import { UpdateProductDto } from './dto/update-product.dto';
 import { ListProductsQueryDto } from './dto/list-products-query.dto';
 import { ProductsService } from './products.service';
+import { Permission } from '../common/permissions/permission.decorator';
 
 // Native product/service catalog for Quote line items. Same
 // JwtAuthGuard+RolesGuard shape as QuotesController: read is open to every
@@ -18,6 +19,7 @@ import { ProductsService } from './products.service';
 // Route order matters: 'query' is a static segment and must be registered
 // before ':id' — same rule quotes.controller.ts/deals.controller.ts document.
 @UseGuards(JwtAuthGuard, RolesGuard)
+@Permission('customers')
 @Controller('crm/products')
 export class ProductsController {
   constructor(private productsService: ProductsService) {}
@@ -48,12 +50,14 @@ export class ProductsController {
 
   @Post(':id/activate')
   @Roles('owner', 'admin', 'manager')
+  @Permission('customers', 'edit')
   activate(@CurrentUser() user: JwtPayload, @Param('id') id: string) {
     return this.productsService.setActive(user.organizationId, id, true);
   }
 
   @Post(':id/deactivate')
   @Roles('owner', 'admin', 'manager')
+  @Permission('customers', 'edit')
   deactivate(@CurrentUser() user: JwtPayload, @Param('id') id: string) {
     return this.productsService.setActive(user.organizationId, id, false);
   }

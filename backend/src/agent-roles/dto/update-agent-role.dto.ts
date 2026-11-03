@@ -1,4 +1,4 @@
-import { IsArray, IsIn, IsOptional, IsString } from 'class-validator';
+import { ArrayMaxSize, IsArray, IsIn, IsOptional, IsString } from 'class-validator';
 import { APP_FEATURES, AppFeature } from '../../common/app-features';
 import { ROLE_CATEGORIES, RoleCategory } from '../schemas/agent-role.schema';
 
@@ -15,6 +15,8 @@ export class UpdateAgentRoleDto {
   @IsOptional() @IsArray() @IsString({ each: true }) allowedTools?: string[];
   // Which app features people assigned to this role can use (see common/app-features.ts).
   @IsOptional() @IsArray() @IsIn(APP_FEATURES, { each: true }) features?: AppFeature[];
+  // Where a new person on this role starts (see AgentRole.defaultPermissions); unknown entries are dropped.
+  @IsOptional() @IsArray() @ArrayMaxSize(200) @IsString({ each: true }) defaultPermissions?: string[];
 
   // null explicitly clears back to "unset" (see agent-roles.service.ts's
   // update() — a `null` value still passes its `!== undefined` copy check,

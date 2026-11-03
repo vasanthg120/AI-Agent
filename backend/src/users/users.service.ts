@@ -1,7 +1,19 @@
 import { randomBytes } from 'crypto';
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
-import { APP_FEATURES, DEFAULT_ROLE_FEATURES, isAiRoleAccount } from '../common/app-features';
+import { APP_FEATURES, AppFeature, DEFAULT_ROLE_FEATURES, isAiRoleAccount } from '../common/app-features';
+import { accessModeOf, accountTypeOf, AiRoleSummary } from '../common/permissions/account-type';
+import {
+  APP_MODULES,
+  AppModuleId,
+  defaultPermissionsOfRole,
+  MODULE_GROUPS,
+  moduleById,
+  normalizePermissions,
+  PermissionAction,
+  permissionsFromFeatures,
+} from '../common/permissions/app-modules';
+import { holdsPermission, isPermissionManaged, permissionDeniedMessage } from '../common/permissions/permission.decorator';
 import { hasTeamRole, isOwner } from '../common/team-roster';
 import * as bcrypt from 'bcrypt';
 import { Model, Types, isValidObjectId } from 'mongoose';
@@ -31,6 +43,22 @@ const MAX_PUSH_SUBSCRIPTIONS = 20;
 const STORE_SCOPED_ROLES = new Set(['manager', 'consultant']);
 
 const LINKED_MEMBER_MESSAGE = 'This person has access through the Main Account, so it can only be changed from there.';
+
+export const AI_ROLE_UNAVAILABLE_MESSAGE =
+  'Your AI role isn’t available any more, so there’s no agent to chat with. Ask an admin to give you a new AI role.';
+
+// An AI role as the Users page needs it, whatever its status.
+interface AiRoleRecord extends AiRoleSummary {
+  features?: string[];
+  defaultPermissions?: string[];
+  allowedTools: string[];
+  builtin: boolean;
+}
+
+function sameList(a: readonly string[] | undefined, b: readonly string[] | undefined): boolean {
+  if (!a || !b) return a === b;
+  return a.length === b.length && a.every((x) => b.includes(x));
+}
 
 @Injectable()
 export class UsersService {
@@ -225,9 +253,10 @@ export class UsersService {
    * The app features an account gets from its AI role — undefined for accounts
    * that aren't tied to one (their fixed role decides instead). An AI role that
    * has been deleted or switched back to draft gives nothing beyond the basics.
+   * Someone with their own permission list doesn't use features at all.
    */
-  async resolveFeatures(user: { roles: string[]; organizationId: string; assignedAgentId?: string }): Promise<string[] | undefined> {
-    if (!isAiRoleAccount(user.roles)) return undefined;
+  async resolveFeatures(user: { roles: string[]; organizationId: string; assignedAgentId?: string; permissions?: string[] }): Promise<string[] | undefined> {
+    if (!isAiRoleAccount(user.roles) || Array.isArray(user.permissions)) return undefined;
     if (!user.assignedAgentId) return [];
     const role = await this.userModel.db
       .collection('agent_roles')
@@ -237,19 +266,186 @@ export class UsersService {
     return features.filter((f) => (APP_FEATURES as readonly string[]).includes(f));
   }
 
-  /** The signed-in user's own profile, with what their AI role lets them use. */
+  /** The signed-in user's own profile, with what their AI role and permissions let them use. */
   async profile(userId: string) {
     const user = await this.findById(userId);
     if (!user) return null;
     const features = await this.resolveFeatures(user);
-    let aiRoleName: string | undefined;
-    if (features !== undefined && user.assignedAgentId) {
-      const role = await this.userModel.db
-        .collection('agent_roles')
-        .findOne({ organizationId: user.organizationId, slug: user.assignedAgentId }, { projection: { name: 1 } });
-      aiRoleName = typeof role?.name === 'string' ? role.name : undefined;
+    const described = this.describeUser(user, await this.aiRolesOf(user.organizationId));
+    return {
+      ...described,
+      features,
+      aiRoleName: isAiRoleAccount(user.roles) && described.aiRole?.status !== 'missing' ? described.aiRole?.name : undefined,
+      avatarUrl: await this.avatarOf(user),
+    };
+  }
+
+  // ---- AI roles, account types and permissions ---------------------------------
+
+  /** Every AI role of the business by slug (any status), plus the built-in agents. */
+  private async aiRolesOf(organizationId: string): Promise<Map<string, AiRoleRecord>> {
+    const rows = await this.agentRoleModel
+      .find({ organizationId })
+      .select({ slug: 1, name: 1, department: 1, status: 1, avatarColor: 1, description: 1, features: 1, defaultPermissions: 1, allowedTools: 1 })
+      .lean()
+      .exec();
+    const map = new Map<string, AiRoleRecord>();
+    for (const agent of CHAT_AGENTS) {
+      map.set(agent.id, { slug: agent.id, name: agent.name, category: 'custom', status: 'active', allowedTools: [], builtin: true });
     }
-    return { ...this.toPublic(user), features, aiRoleName, avatarUrl: await this.avatarOf(user) };
+    for (const row of rows) {
+      map.set(row.slug, {
+        slug: row.slug,
+        name: row.name,
+        category: row.department || 'custom',
+        status: row.status === 'active' ? 'active' : 'draft',
+        avatarColor: row.avatarColor,
+        description: row.description,
+        features: row.features,
+        defaultPermissions: row.defaultPermissions,
+        allowedTools: row.allowedTools ?? [],
+        builtin: false,
+      });
+    }
+    return map;
+  }
+
+  /** A person as the Users page shows them: their AI role, account type and access. */
+  describeUser(user: UserDocument, aiRoles: Map<string, AiRoleRecord>) {
+    const record = isAiRoleAccount(user.roles) && user.assignedAgentId ? aiRoles.get(user.assignedAgentId) : undefined;
+    const aiRole: AiRoleSummary | null =
+      isAiRoleAccount(user.roles) && user.assignedAgentId
+        ? record
+          ? { slug: record.slug, name: record.name, category: record.category, status: record.status, avatarColor: record.avatarColor, description: record.description }
+          : { slug: user.assignedAgentId, name: '', category: '', status: 'missing' }
+        : null;
+    const accessMode = accessModeOf(user.roles, user.permissions);
+    // What an older team member can use today, in permission terms: their AI role's
+    // features when it's active, only the basics otherwise.
+    const olderPermissions =
+      accessMode === 'older' && isAiRoleAccount(user.roles)
+        ? permissionsFromFeatures(record?.status === 'active' ? (record.features ?? DEFAULT_ROLE_FEATURES) : [])
+        : null;
+    return {
+      ...this.toPublic(user),
+      accountType: accountTypeOf(user.roles, aiRole),
+      accessMode,
+      aiRole,
+      permissions: accessMode === 'permissions' ? [...(user.permissions ?? [])] : null,
+      olderPermissions,
+      needsAiRole: isAiRoleAccount(user.roles) && aiRole?.status !== 'active',
+    };
+  }
+
+  /** The Users page's list: everyone in the business, described. */
+  async listDescribed(organizationId: string) {
+    const [users, aiRoles] = await Promise.all([this.findAllWithLinkedMembers(organizationId), this.aiRolesOf(organizationId)]);
+    return users.map((u) => this.describeUser(u, aiRoles));
+  }
+
+  /** The AI roles a person can be given in Create User, with what each one starts them on. */
+  async assignableAiRoles(organizationId: string) {
+    const [aiRoles, counts] = await Promise.all([
+      this.aiRolesOf(organizationId),
+      this.userModel.aggregate<{ _id: string; n: number }>([
+        { $match: { organizationId, roles: 'agent_user', assignedAgentId: { $exists: true } } },
+        { $group: { _id: '$assignedAgentId', n: { $sum: 1 } } },
+      ]),
+    ]);
+    const people = new Map(counts.map((c) => [c._id, c.n]));
+    return [...aiRoles.values()]
+      .filter((role) => !role.builtin && role.status === 'active')
+      .map((role) => ({
+        slug: role.slug,
+        name: role.name,
+        description: role.description ?? '',
+        category: role.category,
+        avatarColor: role.avatarColor,
+        allowedTools: role.allowedTools,
+        accountType: accountTypeOf(['agent_user'], role),
+        defaultPermissions: defaultPermissionsOfRole(role),
+        people: people.get(role.slug) ?? 0,
+      }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }
+
+  /** The permission catalog, for the Users page and the AI role editor. */
+  permissionCatalog() {
+    return {
+      groups: MODULE_GROUPS,
+      modules: APP_MODULES,
+      alwaysIncluded: ['Profile & security', 'Notifications', 'To-Do & EOD', 'Timeline'],
+      notGrantable: ['Billing & subscription', 'Sub-accounts', 'Audit log', 'Creating administrators'],
+    };
+  }
+
+  /**
+   * What someone who isn't an owner or admin may do on the Users page: only people
+   * created with their own permission list, never themselves, never anyone with
+   * access they don't have — and they can only hand out access they hold. Owners
+   * and admins pass untouched.
+   */
+  private assertDelegation(caller: JwtPayload | undefined, change: { role?: string; permissions?: string[]; target?: UserDocument }): void {
+    if (!caller || caller.roles.includes('owner') || caller.roles.includes('admin')) return;
+    if (!isPermissionManaged(caller)) throw new ForbiddenException('Insufficient role');
+    const mine = new Set(caller.permissions ?? []);
+    if (change.role !== undefined && change.role !== 'agent_user') {
+      throw new ForbiddenException('Only owners and admins can create administrators or change someone’s account type.');
+    }
+    const target = change.target;
+    if (target) {
+      if (target._id.toString() === caller.sub) throw new ForbiddenException('You can’t change your own access. Ask an admin.');
+      if (accessModeOf(target.roles, target.permissions) !== 'permissions') {
+        throw new ForbiddenException('Only owners and admins can change this person’s account.');
+      }
+      if (!(target.permissions ?? []).every((p) => mine.has(p))) {
+        throw new ForbiddenException('This person has access you don’t have yourself, so only an owner or admin can change them.');
+      }
+    }
+    if (change.permissions) {
+      const beyond = change.permissions.filter((p) => !mine.has(p));
+      if (beyond.length) {
+        const pages = [...new Set(beyond.map((p) => moduleById(p.split(':')[0])?.label ?? p))];
+        throw new ForbiddenException(`You can only give access you have yourself. Not yours to give: ${pages.join(', ')}.`);
+      }
+    }
+  }
+
+  /** For routes that act on one person (resend invitation): the same rule as editing them. */
+  async assertMayManage(caller: JwtPayload, id: string, organizationId: string): Promise<void> {
+    const target = isValidObjectId(id) ? await this.userModel.findOne({ _id: id, organizationId }).exec() : null;
+    if (!target) throw new NotFoundException('User not found');
+    this.assertDelegation(caller, { target });
+  }
+
+  /** Whether a team member's AI role is gone or back in draft, so chat has no agent for them. */
+  async aiRoleUnavailable(user: { roles?: string[]; organizationId: string; assignedAgentId?: string }): Promise<boolean> {
+    if (!isAiRoleAccount(user.roles) || !user.assignedAgentId) return false;
+    return !(await this.resolveValidAgentIds(user.organizationId)).has(user.assignedAgentId);
+  }
+
+  /**
+   * For a socket event (sockets skip the HTTP checks): the person as they are now,
+   * and why they may not do this — null when they may. Someone with a permission
+   * list needs the permission; an older AI-role account needs the feature.
+   */
+  async socketAccess(
+    payload: Pick<JwtPayload, 'sub' | 'jti' | 'loginUserId'>,
+    module: AppModuleId,
+    action: PermissionAction,
+    olderFeature?: AppFeature,
+  ): Promise<{ user: UserDocument | null; refusal: string | null }> {
+    const session = await this.resolveSession(payload);
+    if (!session) return { user: null, refusal: 'Unauthorized' };
+    const { user } = session;
+    if (isPermissionManaged(user)) {
+      const label = moduleById(module)?.label ?? module;
+      return { user, refusal: holdsPermission(user, module, action) ? null : permissionDeniedMessage({ module, action, label }) };
+    }
+    if (olderFeature && isAiRoleAccount(user.roles) && !(await this.resolveFeatures(user))?.includes(olderFeature)) {
+      return { user, refusal: 'Your AI role doesn’t include this feature. Ask an admin to enable it for the role.' };
+    }
+    return { user, refusal: null };
   }
 
   /** A person's profile photo, whichever business they're working in. */
@@ -258,10 +454,25 @@ export class UsersService {
     return row?.avatar;
   }
 
-  async createByAdmin(dto: CreateUserDto, organizationId: string) {
+  /** Checks a permission list sent for an account and returns it as it will be saved. */
+  private permissionsFor(role: string, permissions: string[] | undefined): string[] | undefined {
+    if (permissions === undefined) return undefined;
+    if (role !== 'agent_user') {
+      throw new BadRequestException('Only people with an AI role get their own permissions. Administrators have full access.');
+    }
+    return normalizePermissions(permissions);
+  }
+
+  async createByAdmin(dto: CreateUserDto, organizationId: string, caller?: JwtPayload) {
     const email = dto.email.trim().toLowerCase();
     const name = dto.name.trim();
     if (!name) throw new BadRequestException('Enter the person’s name.');
+    const permissions = this.permissionsFor(dto.role, dto.permissions);
+    this.assertDelegation(caller, { role: dto.role, permissions });
+    // Someone who isn't an admin always says exactly what the new person gets.
+    if (caller && isPermissionManaged(caller) && permissions === undefined) {
+      throw new BadRequestException('Choose which pages and actions this person can use.');
+    }
     await this.assertRoleRequirements(organizationId, dto.role, dto.assignedAgentId, dto.storeId);
     // Email addresses are unique across HaiVE (one account per address, whichever organization it's in).
     if (await this.userModel.exists({ email })) {
@@ -281,8 +492,9 @@ export class UsersService {
         storeId: STORE_SCOPED_ROLES.has(dto.role) ? dto.storeId : undefined,
         roles: [dto.role],
         assignedAgentId: dto.role === 'agent_user' ? dto.assignedAgentId : undefined,
+        permissions,
         department: dto.department?.trim() || undefined,
-        active: true,
+        active: dto.active ?? true,
         voiceAccessEnabled: dto.voiceAccessEnabled ?? true,
         aiAccessEnabled: dto.aiAccessEnabled ?? true,
       });
@@ -294,13 +506,24 @@ export class UsersService {
     }
   }
 
-  async updateByAdmin(id: string, dto: UpdateUserDto, organizationId: string, callerId?: string) {
+  async updateByAdmin(id: string, dto: UpdateUserDto, organizationId: string, callerId?: string, caller?: JwtPayload) {
     // Scoped by organizationId, not just _id — an admin from org A must
     // never be able to modify a user in org B, even by guessing/enumerating
     // a valid Mongo _id.
     const target = isValidObjectId(id) ? await this.userModel.findOne({ _id: id, organizationId }).exec() : null;
     if (!target) throw new NotFoundException('User not found');
     if (target.linkedLoginUserId) throw new ForbiddenException(LINKED_MEMBER_MESSAGE);
+
+    // Nobody changes their own access — role, AI role, permissions or on/off.
+    // Sending what's already there (the edit form does) isn't a change.
+    if (callerId === id && !target.roles.includes('owner')) {
+      const changesAccess =
+        (dto.role !== undefined && dto.role !== target.roles[0]) ||
+        (dto.assignedAgentId !== undefined && dto.assignedAgentId !== target.assignedAgentId) ||
+        (dto.permissions !== undefined && !sameList(normalizePermissions(dto.permissions), target.permissions)) ||
+        (dto.active !== undefined && dto.active !== target.active);
+      if (changesAccess) throw new BadRequestException('You can’t change your own access. Ask another admin.');
+    }
 
     // The org owner is a single, special account with no transfer flow in
     // this codebase — no other admin may change it, and nobody (the owner
@@ -319,6 +542,8 @@ export class UsersService {
     const role = dto.role ?? target.roles[0];
     const assignedAgentId = dto.assignedAgentId ?? target.assignedAgentId;
     const storeId = dto.storeId ?? target.storeId;
+    const permissions = this.permissionsFor(role, dto.permissions);
+    this.assertDelegation(caller, { role: dto.role, permissions, target });
     if (dto.role !== undefined || dto.assignedAgentId !== undefined || dto.storeId !== undefined) {
       await this.assertRoleRequirements(organizationId, role, assignedAgentId, storeId);
     }
@@ -337,6 +562,10 @@ export class UsersService {
     else if (target.assignedAgentId) unset.assignedAgentId = '';
     if (STORE_SCOPED_ROLES.has(role)) set.storeId = storeId;
     else if (dto.role !== undefined && target.storeId && !target.roles.includes('owner')) unset.storeId = '';
+    // A permission list only exists with an AI role: set when sent, kept when not,
+    // dropped when the account becomes anything else (an admin has everything).
+    if (permissions !== undefined) set.permissions = permissions;
+    else if (role !== 'agent_user' && target.permissions !== undefined) unset.permissions = '';
     if (dto.active !== undefined) set.active = dto.active;
     if (dto.department !== undefined) set.department = dto.department.trim();
     if (dto.voiceAccessEnabled !== undefined) set.voiceAccessEnabled = dto.voiceAccessEnabled;
@@ -348,11 +577,12 @@ export class UsersService {
       .findOneAndUpdate({ _id: id, organizationId }, { ...(Object.keys(set).length ? { $set: set } : {}), ...(Object.keys(unset).length ? { $unset: unset } : {}) }, { new: true })
       .exec();
     if (!updated) throw new NotFoundException('User not found');
-    return this.toPublic(updated);
+    return this.describeUser(updated, await this.aiRolesOf(organizationId));
   }
 
-  async deleteByAdmin(id: string, organizationId: string) {
+  async deleteByAdmin(id: string, organizationId: string, caller?: JwtPayload) {
     await this.assertNotOwner(id, organizationId);
+    if (caller && !caller.roles.includes('owner') && !caller.roles.includes('admin')) await this.assertMayManage(caller, id, organizationId);
     const deleted = await this.userModel.findOneAndDelete({ _id: id, organizationId }).exec();
     if (!deleted) throw new NotFoundException('User not found');
     // Their access to any other business goes with them.

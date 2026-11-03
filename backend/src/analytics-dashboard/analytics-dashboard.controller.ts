@@ -8,6 +8,7 @@ import { AnalyticsDashboardService } from './analytics-dashboard.service';
 import { ScopeInfo } from './analytics-dashboard.types';
 import { GetAnalyticsOverviewQueryDto } from './dto/get-analytics-overview-query.dto';
 import { GetPipelineByMonthQueryDto } from './dto/get-pipeline-by-month-query.dto';
+import { Permission } from '../common/permissions/permission.decorator';
 
 // One endpoint, internal role branching — the composite response shape is
 // identical across owner/manager/consultant (only the values narrow), a
@@ -16,6 +17,7 @@ import { GetPipelineByMonthQueryDto } from './dto/get-pipeline-by-month-query.dt
 // per role). Goes one step further than customer-activity.controller.ts's
 // owner/admin/manager-collapsed-but-consultant-separate precedent.
 @UseGuards(JwtAuthGuard, RolesGuard)
+@Permission('analytics')
 @Controller('analytics-dashboard')
 export class AnalyticsDashboardController {
   constructor(private analyticsDashboardService: AnalyticsDashboardService) {}

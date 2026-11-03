@@ -22,6 +22,7 @@ import {
   UpdateShipmentDto,
 } from './dto/customer-jobs.dto';
 import { CreateCustomerNoteDto, CreateCustomerTaskDto, UpdateCustomerTaskDto } from './dto/customer-workspace.dto';
+import { Permission } from '../common/permissions/permission.decorator';
 
 // The Job board of the Customers page: quotations the team decided to produce.
 // Same audience as the page itself; every call is scoped to the caller's
@@ -31,6 +32,7 @@ import { CreateCustomerNoteDto, CreateCustomerTaskDto, UpdateCustomerTaskDto } f
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Roles('owner', 'admin', 'manager')
 @Feature('inquiries')
+@Permission('job_board')
 @Controller()
 export class CustomerJobsController {
   constructor(private jobs: CustomerJobsService) {}

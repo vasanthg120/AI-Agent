@@ -9,8 +9,10 @@ import { ListTasksQueryDto } from './dto/list-tasks-query.dto';
 import { UpdateTaskStatusDto } from './dto/update-task-status.dto';
 import { TasksExportService } from './tasks-export.service';
 import { TasksService } from './tasks.service';
+import { PermissionExempt } from '../common/permissions/permission.decorator';
 
 @UseGuards(JwtAuthGuard)
+@PermissionExempt('personal')
 @Controller('tasks')
 export class TasksController {
   constructor(

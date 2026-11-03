@@ -5,9 +5,11 @@ import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { JwtPayload } from '../auth/jwt-payload.interface';
 import { HomeDashboardService } from './home-dashboard.service';
+import { Permission } from '../common/permissions/permission.decorator';
 
 // Same guard/role shape as the sibling BusinessDashboardController.
 @UseGuards(JwtAuthGuard)
+@Permission('dashboard')
 @Controller('home-dashboard')
 export class HomeDashboardController {
   constructor(private homeDashboardService: HomeDashboardService) {}

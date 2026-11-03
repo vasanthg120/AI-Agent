@@ -7,12 +7,14 @@ import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { SelectTenantDto } from './dto/select-tenant.dto';
 import { XeroService } from './xero.service';
+import { Permission, PermissionExempt } from '../common/permissions/permission.decorator';
 
 // Same route shape as zoho.controller.ts (connect-url -> signed JWT state ->
 // provider consent -> callback -> token exchange), plus status/disconnect
 // routes directly here (not delegated to crm-integrations — Xero is an
 // Accounting connection, not a CRM) and a select-tenant step for the
 // multi-organisation case (see xero.service.ts).
+@Permission('integrations')
 @Controller('xero')
 export class XeroController {
   private readonly logger = new Logger(XeroController.name);
@@ -33,6 +35,7 @@ export class XeroController {
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('owner', 'admin')
   @Get('connect-url')
+  @Permission('integrations', 'manage')
   async getConnectUrl(@CurrentUser() user: JwtPayload) {
     return { url: await this.xero.buildAuthorizeUrl(user.organizationId) };
   }
@@ -42,6 +45,7 @@ export class XeroController {
   // this request, same as Zoho/Outlook/Gmail's callbacks.
   @Get('callback')
   @Redirect()
+  @PermissionExempt('public')
   async callback(@Query('code') code?: string, @Query('state') state?: string, @Query('error') error?: string) {
     const frontendUrl = this.config.get<string>('corsOrigin');
     if (error || !code || !state) {

@@ -10,6 +10,7 @@ import { GetRoyaltyReportQueryDto } from './dto/get-royalty-report-query.dto';
 import { ExportRoyaltyReportQueryDto } from './dto/export-royalty-report-query.dto';
 import { RoyaltyReportService } from './royalty-report.service';
 import { RoyaltyReportExportService } from './royalty-report-export.service';
+import { Permission } from '../common/permissions/permission.decorator';
 
 // Same CRUD-tier RBAC as InvoicesController (owner/admin/manager,
 // manager store-scoped) — a generated report is a read operation over the
@@ -21,6 +22,7 @@ import { RoyaltyReportExportService } from './royalty-report-export.service';
 // no-path generate() handler — same rule deals.controller.ts documents for
 // its own 'query'/'export' segments ahead of ':id'.
 @UseGuards(JwtAuthGuard, RolesGuard)
+@Permission('reports')
 @Controller('royalty/report')
 export class RoyaltyReportController {
   constructor(
@@ -44,6 +46,7 @@ export class RoyaltyReportController {
 
   @Get('export')
   @Roles('owner', 'admin', 'manager')
+  @Permission('reports', 'export')
   async export(@CurrentUser() user: JwtPayload, @Query() query: ExportRoyaltyReportQueryDto, @Res() res: Response) {
     const canOverride = user.roles.includes('admin') || user.roles.includes('owner');
     const storeConstraint = canOverride ? undefined : user.storeId;

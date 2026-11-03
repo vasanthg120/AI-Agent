@@ -6,11 +6,13 @@ import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { ConnectTwilioDto, UpsertTwilioLineDto } from './dto/twilio.dto';
 import { TwilioService } from './twilio.service';
+import { Permission } from '../common/permissions/permission.decorator';
 
 // Setting Twilio up — owners and admins only. Placing calls and the call log go
 // through /calling, which covers Plivo and Twilio together.
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Roles('owner', 'admin')
+@Permission('integrations')
 @Controller('twilio')
 export class TwilioController {
   constructor(private twilio: TwilioService) {}

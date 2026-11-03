@@ -8,6 +8,7 @@ import { DuplicateBillingPlanDto } from './dto/duplicate-billing-plan.dto';
 import { ReorderBillingPlansDto } from './dto/reorder-billing-plans.dto';
 import { UpdateBillingFeatureDto } from './dto/update-billing-feature.dto';
 import { UpdateBillingPlanDto } from './dto/update-billing-plan.dto';
+import { PermissionExempt } from '../common/permissions/permission.decorator';
 
 // Phase 0 catalog admin surface — platform_admin only, matching
 // billing-admin.controller.ts's existing gate (global plan/price/feature
@@ -15,6 +16,7 @@ import { UpdateBillingPlanDto } from './dto/update-billing-plan.dto';
 // customer-scoped route yet; that arrives once a future
 // GET /billing/plans is added.
 @UseGuards(AdminJwtAuthGuard)
+@PermissionExempt('platform')
 @Controller('billing/admin')
 export class BillingAdminPlansController {
   constructor(private plansService: BillingAdminPlansService) {}

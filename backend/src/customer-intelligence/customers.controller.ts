@@ -10,6 +10,7 @@ import { RolesGuard } from '../common/guards/roles.guard';
 import { CustomerDirectoryService } from './customer-directory.service';
 import { CustomerWorkspaceService } from './customer-workspace.service';
 import { AddCustomerContactDto, CreateCustomerDto, UpdateCustomerDto } from './dto/customer-profile.dto';
+import { Permission } from '../common/permissions/permission.decorator';
 
 // Customers: one row per customer, built from every connected CRM and the
 // mailbox together. Same audience as New Inquiries (owner/admin/manager, or an
@@ -17,6 +18,7 @@ import { AddCustomerContactDto, CreateCustomerDto, UpdateCustomerDto } from './d
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Roles('owner', 'admin', 'manager')
 @Feature('inquiries')
+@Permission('customers')
 @Controller('customers')
 export class CustomersController {
   constructor(
@@ -80,6 +82,7 @@ export class CustomersController {
   // The board as a spreadsheet: the same filters as the list, every page. Declared before ':id'.
   @Get('export')
   @Throttle({ default: { limit: 10, ttl: 60_000 } })
+  @Permission('customers', 'export')
   async export(
     @CurrentUser() user: JwtPayload,
     @Res() res: Response,
@@ -123,6 +126,7 @@ export class CustomersController {
   // Pull the latest from the connected CRMs now (otherwise they sync on their own schedule).
   @Post('sync')
   @Throttle({ default: { limit: 6, ttl: 60_000 } })
+  @Permission('customers', 'edit')
   sync(@CurrentUser() user: JwtPayload, @Query('source') source?: string) {
     return this.directory.sync(user.organizationId, source);
   }
@@ -143,11 +147,13 @@ export class CustomersController {
   // Same activate/deactivate shape as products.controller.ts — archived
   // customers drop out of the default list but stay fully reachable by id.
   @Post(':id/archive')
+  @Permission('customers', 'edit')
   archive(@CurrentUser() user: JwtPayload, @Param('id') id: string) {
     return this.directory.setArchived(user.organizationId, id, true);
   }
 
   @Post(':id/restore')
+  @Permission('customers', 'edit')
   restore(@CurrentUser() user: JwtPayload, @Param('id') id: string) {
     return this.directory.setArchived(user.organizationId, id, false);
   }
@@ -167,6 +173,7 @@ export class CustomersController {
   // A real, billed AI call — same per-employee switch as the chat.
   @Post(':id/analysis')
   @Throttle({ default: { limit: 20, ttl: 60_000 } })
+  @Permission('customers', 'view')
   analyze(@CurrentUser() user: JwtPayload, @Param('id') id: string, @Query('refresh') refresh?: string) {
     if (user.aiAccessEnabled === false) {
       throw new ForbiddenException('AI access has been disabled for your account by an administrator.');

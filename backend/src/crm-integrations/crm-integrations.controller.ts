@@ -9,6 +9,7 @@ import { RolesGuard } from '../common/guards/roles.guard';
 import { MappingIntelligenceService } from '../data-sources/mapping-intelligence.service';
 import type { FieldMappings, StatusMapping } from '../data-sources/provider-catalog';
 import { CrmIntegrationsService } from './crm-integrations.service';
+import { Permission } from '../common/permissions/permission.decorator';
 
 export class ConnectCrmDto {
   // Whatever the chosen CRM's setup asks for (see CrmIntegrationsService SETUP) — validated there, per provider.
@@ -24,6 +25,7 @@ export class MappingDto {
 // organization always comes from the signed-in user, never from the request.
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Roles('owner', 'admin')
+@Permission('crm_integrations')
 @Controller('crm-integrations')
 export class CrmIntegrationsController {
   constructor(

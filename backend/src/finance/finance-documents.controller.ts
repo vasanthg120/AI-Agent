@@ -28,6 +28,7 @@ import { LinkCustomerQuoteDto } from './dto/link-customer-quote.dto';
 import { UpdateFinanceDocumentDto } from './dto/update-finance-document.dto';
 import { FinanceDocumentsService } from './finance-documents.service';
 import { FinanceExportService } from './finance-export.service';
+import { Permission } from '../common/permissions/permission.decorator';
 
 const EXPORT_ROW_CAP = 5000;
 
@@ -41,6 +42,7 @@ const EXPORT_ROW_CAP = 5000;
 // registered before ':id', same rule documented in crm/deals.controller.ts.
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Roles('owner', 'admin')
+@Permission('finance')
 @Controller('finance/documents')
 export class FinanceDocumentsController {
   constructor(
@@ -60,6 +62,7 @@ export class FinanceDocumentsController {
   }
 
   @Get('export')
+  @Permission('finance', 'export')
   async export(@CurrentUser() user: JwtPayload, @Query() query: FinanceExportQueryDto, @Res() res: Response) {
     const { items, truncated } = await this.financeDocumentsService.listForExport(user.organizationId, query, EXPORT_ROW_CAP);
     const rows = this.financeExportService.buildRows(items);
@@ -124,11 +127,13 @@ export class FinanceDocumentsController {
   }
 
   @Post(':id/retry-extraction')
+  @Permission('finance', 'edit')
   retryExtraction(@CurrentUser() user: JwtPayload, @Param('id') id: string) {
     return this.financeDocumentsService.retryExtraction(id, user.organizationId, user.sub);
   }
 
   @Post(':id/link-quote')
+  @Permission('finance', 'edit')
   linkCustomerQuote(@CurrentUser() user: JwtPayload, @Param('id') id: string, @Body() dto: LinkCustomerQuoteDto) {
     return this.financeDocumentsService.linkCustomerQuote(id, user.organizationId, dto.quoteId);
   }

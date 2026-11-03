@@ -11,6 +11,7 @@ import { RecordQuotePaymentDto } from './dto/record-quote-payment.dto';
 import { VoidQuotePaymentDto } from './dto/void-quote-payment.dto';
 import { QuotesService } from './quotes.service';
 import { QuotePaymentsService } from './quote-payments.service';
+import { Permission } from '../common/permissions/permission.decorator';
 
 // Phase 19 — the Unified Analytics Dashboard's quote drill-down. Same
 // role/scope shape as DealsController's own /query route: owner/admin see
@@ -21,6 +22,7 @@ import { QuotePaymentsService } from './quote-payments.service';
 // Route order matters: 'query' is a static segment and must be registered
 // before ':id', same rule deals.controller.ts's own comment documents.
 @UseGuards(JwtAuthGuard, RolesGuard)
+@Permission('customers')
 @Controller('crm/quotes')
 export class QuotesController {
   constructor(
@@ -73,6 +75,7 @@ export class QuotesController {
 
   @Post(':id/payments')
   @Roles('owner', 'admin', 'manager')
+  @Permission('customers', 'edit')
   recordPayment(@CurrentUser() user: JwtPayload, @Param('id') id: string, @Body() dto: RecordQuotePaymentDto) {
     const canOverride = user.roles.includes('admin') || user.roles.includes('owner');
     const storeConstraint = canOverride ? undefined : user.storeId;
@@ -92,6 +95,7 @@ export class QuotesController {
   // ethos as quote-payment.schema.ts's own comment.
   @Post(':id/payments/:paymentId/void')
   @Roles('owner', 'admin', 'manager')
+  @Permission('customers', 'edit')
   voidPayment(
     @CurrentUser() user: JwtPayload,
     @Param('id') id: string,

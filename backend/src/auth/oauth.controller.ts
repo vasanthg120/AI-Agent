@@ -4,6 +4,7 @@ import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { AuthService } from './auth.service';
 import { OAuthProviderName, OAuthService } from './oauth.service';
+import { PermissionExempt } from '../common/permissions/permission.decorator';
 
 const PROVIDERS: OAuthProviderName[] = ['google', 'microsoft', 'github'];
 
@@ -16,6 +17,7 @@ function assertProvider(provider: string): asserts provider is OAuthProviderName
 // Deliberately unguarded (no JwtAuthGuard) — unlike gmail/outlook's
 // connect-url, there is no logged-in user yet; `state` here only needs to
 // prove the callback round-tripped through us (CSRF), not carry a user id.
+@PermissionExempt('public')
 @Controller('auth/oauth')
 export class OAuthController {
   private readonly logger = new Logger(OAuthController.name);

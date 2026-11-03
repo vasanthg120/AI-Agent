@@ -10,6 +10,7 @@ import { RolesGuard } from '../common/guards/roles.guard';
 import { PUSH_PROVIDERS, type CrmProviderId, type MirroredModule } from './provider-catalog';
 import { WEBHOOK_MODULES } from './webhook-info';
 import { WebhookSourcesService } from './webhook-sources.service';
+import { Permission, PermissionExempt } from '../common/permissions/permission.decorator';
 
 class WebhookTerminologyDto {
   @IsOptional() @IsString() @MaxLength(40) deal?: string;
@@ -38,6 +39,7 @@ export class CreateWebhookSourceDto {
 // Owners and admins add apps that push records into HaiVE (via Zapier).
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Roles('owner', 'admin')
+@Permission('crm_integrations')
 @Controller('data-sources/webhook-sources')
 export class WebhookSourcesController {
   constructor(private webhooks: WebhookSourcesService) {}
@@ -62,6 +64,7 @@ export class WebhookSourcesController {
 // Called by Zapier ("Webhooks by Zapier" -> POST), not by a signed-in user: no
 // JwtAuthGuard — the source's own webhook key (X-HaiVE-Key header, or ?key=)
 // authenticates it and decides the one organization and source it writes to.
+@PermissionExempt('public')
 @Controller('data-source-webhooks')
 export class WebhookIngestController {
   constructor(private webhooks: WebhookSourcesService) {}

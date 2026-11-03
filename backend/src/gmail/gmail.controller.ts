@@ -5,9 +5,11 @@ import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { JwtPayload } from '../auth/jwt-payload.interface';
 import { GmailService } from './gmail.service';
+import { Permission, PermissionExempt } from '../common/permissions/permission.decorator';
 
 // Same route shape as outlook.controller.ts — connect-url/callback/status/
 // accounts/activate/disconnect.
+@Permission('email')
 @Controller('gmail')
 export class GmailController {
   private readonly logger = new Logger(GmailController.name);
@@ -30,6 +32,7 @@ export class GmailController {
 
   @UseGuards(JwtAuthGuard)
   @Get('connect-url')
+  @Permission('email', 'manage')
   async getConnectUrl(@CurrentUser() user: JwtPayload) {
     // Short-lived JWT as OAuth `state` — carries the user id through the
     // Google redirect round-trip without needing a server session.
@@ -39,6 +42,7 @@ export class GmailController {
 
   @Get('callback')
   @Redirect()
+  @PermissionExempt('public')
   async callback(
     @Query('code') code?: string,
     @Query('state') state?: string,

@@ -7,6 +7,7 @@ import { JwtPayload } from '../auth/jwt-payload.interface';
 import { BusinessProfileService } from './business-profile.service';
 import { UpsertBusinessProfileDto } from './dto/upsert-business-profile.dto';
 import { Feature } from '../common/app-features';
+import { Permission } from '../common/permissions/permission.decorator';
 
 // Reads are CRM-dashboard-tier (owner/admin/manager) — ordinary operational
 // context, not Finance-tier sensitive. Mutation is tighter (owner/admin
@@ -15,6 +16,7 @@ import { Feature } from '../common/app-features';
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Roles('owner', 'admin', 'manager')
 @Feature('business_knowledge')
+@Permission('business_knowledge')
 @Controller('business-knowledge/profile')
 export class BusinessProfileController {
   constructor(private profileService: BusinessProfileService) {}

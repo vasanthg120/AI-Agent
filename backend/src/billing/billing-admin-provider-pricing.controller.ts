@@ -2,8 +2,10 @@ import { Body, Controller, Get, Post, UseGuards } from '@nestjs/common';
 import { AdminJwtAuthGuard } from '../common/guards/admin-jwt-auth.guard';
 import { BillingAdminProviderPricingService } from './billing-admin-provider-pricing.service';
 import { CreateProviderPricingDto } from './dto/create-provider-pricing.dto';
+import { PermissionExempt } from '../common/permissions/permission.decorator';
 
 @UseGuards(AdminJwtAuthGuard)
+@PermissionExempt('platform')
 @Controller('billing/admin/provider-pricing')
 export class BillingAdminProviderPricingController {
   constructor(private pricingService: BillingAdminProviderPricingService) {}

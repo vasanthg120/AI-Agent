@@ -1,6 +1,7 @@
 import { Controller, Post, Query, UseGuards } from '@nestjs/common';
 import { AdminJwtAuthGuard } from '../common/guards/admin-jwt-auth.guard';
 import { BillingMigrationService } from './billing-migration.service';
+import { PermissionExempt } from '../common/permissions/permission.decorator';
 
 // Phase 0 of the org-scoped billing extension — see
 // billing-migration.service.ts and billing.controller.ts's tenantKey() for
@@ -8,6 +9,7 @@ import { BillingMigrationService } from './billing-migration.service';
 // existing gate: this endpoint can rewrite real wallet balances across every
 // organization in one call.
 @UseGuards(AdminJwtAuthGuard)
+@PermissionExempt('platform')
 @Controller('billing/admin')
 export class BillingAdminMigrationController {
   constructor(private migrationService: BillingMigrationService) {}

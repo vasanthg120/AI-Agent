@@ -9,6 +9,7 @@ import { UpdateNotificationPreferencesDto } from './dto/update-notification-pref
 import { PushSubscribeDto, PushUnsubscribeDto } from './dto/push-subscribe.dto';
 import { NotificationsService } from './notifications.service';
 import { WebPushService } from './web-push.service';
+import { PermissionExempt } from '../common/permissions/permission.decorator';
 
 // Creation (POST /) is authenticated the same way every other route here
 // is — no separate "service token" mechanism. python-agent mints a
@@ -19,6 +20,7 @@ import { WebPushService } from './web-push.service';
 // exactly the user named in the token's `sub`, never an arbitrary userId
 // from the request body.
 @UseGuards(JwtAuthGuard)
+@PermissionExempt('personal')
 @Controller('notifications')
 export class NotificationsController {
   constructor(

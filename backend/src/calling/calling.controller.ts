@@ -6,6 +6,7 @@ import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { CallingProvider } from './calling-routing';
 import { CallingService } from './calling.service';
+import { Permission } from '../common/permissions/permission.decorator';
 
 const PROVIDERS: CallingProvider[] = ['plivo', 'twilio'];
 const canManage = (user: JwtPayload) => user.roles.some((role) => role === 'owner' || role === 'admin');
@@ -28,6 +29,7 @@ export class StartCallDto {
 }
 
 @UseGuards(JwtAuthGuard)
+@Permission('call_copilot')
 @Controller('calling')
 export class CallingController {
   constructor(private calling: CallingService) {}

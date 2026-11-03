@@ -9,6 +9,7 @@ import { TwoFactorVerifyDto } from './dto/two-factor-verify.dto';
 import { TwoFactorReauthDto } from './dto/two-factor-reauth.dto';
 import { TwoFactorLoginVerifyDto } from './dto/two-factor-login-verify.dto';
 import { TwoFactorService } from './two-factor.service';
+import { PermissionExempt } from '../common/permissions/permission.decorator';
 
 // Same ceiling as AuthController's own AUTH_THROTTLE — every route here is
 // either a guessable-code target (enable/login-verify) or a security-
@@ -16,6 +17,7 @@ import { TwoFactorService } from './two-factor.service';
 // than the app-wide default.
 const TWO_FACTOR_THROTTLE = { default: { limit: 5, ttl: 60_000 } };
 
+@PermissionExempt('personal')
 @Controller('auth/2fa')
 export class TwoFactorController {
   constructor(private twoFactorService: TwoFactorService) {}

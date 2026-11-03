@@ -7,6 +7,7 @@ import { JwtPayload } from '../auth/jwt-payload.interface';
 import { CreateRoyaltyRuleDto } from './dto/create-royalty-rule.dto';
 import { UpdateRoyaltyRuleDto } from './dto/update-royalty-rule.dto';
 import { RoyaltyRulesService } from './royalty-rules.service';
+import { Permission } from '../common/permissions/permission.decorator';
 
 // Tighter tier than InvoicesController (owner/admin only, no manager) —
 // matches Finance's/Command Center's precedent: sensitive, org-wide
@@ -14,6 +15,7 @@ import { RoyaltyRulesService } from './royalty-rules.service';
 // gets the tighter gate, unlike routine store-operational Invoice CRUD.
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Roles('owner', 'admin')
+@Permission('settings')
 @Controller('royalty/rules')
 export class RoyaltyRulesController {
   constructor(private royaltyRulesService: RoyaltyRulesService) {}

@@ -3,6 +3,7 @@ import {
   Body,
   Controller,
   Delete,
+  ForbiddenException,
   Get,
   Param,
   Patch,
@@ -23,16 +24,19 @@ import { AgentRolesService } from './agent-roles.service';
 import { CreateAgentRoleDto } from './dto/create-agent-role.dto';
 import { GenerateFromDescriptionDto } from './dto/generate-from-description.dto';
 import { UpdateAgentRoleDto } from './dto/update-agent-role.dto';
+import { holdsPermission, isPermissionManaged, Permission } from '../common/permissions/permission.decorator';
 
 @UseGuards(JwtAuthGuard)
+@Permission('ai_roles')
 @Controller('agent-roles')
 export class AgentRolesController {
   constructor(private agentRolesService: AgentRolesService) {}
 
-  // Read-only, needed by every user's chat @mention widget — stays
-  // unrestricted. generate/update/remove below create or change the AI
-  // personas every user interacts with, so those are admin-only, same as
-  // the equally sensitive integrations/store-settings mutations.
+  // Read by the AI Roles settings and the Agent Builder (chat lists its agents
+  // through /chat/agents). generate/update/remove below create or change the AI
+  // personas every user interacts with, so those are admin-only, same as the
+  // equally sensitive integrations/store-settings mutations — or, for someone
+  // given AI Roles access, the actions they were given.
   @Get()
   list(@CurrentUser() user: JwtPayload) {
     return this.agentRolesService.listAll(user.organizationId);
@@ -74,6 +78,10 @@ export class AgentRolesController {
   @UseGuards(RolesGuard)
   @Roles('admin')
   update(@CurrentUser() user: JwtPayload, @Param('id') id: string, @Body() dto: UpdateAgentRoleDto, @Req() req: Request) {
+    // Activating a role, or setting it back to draft, is its own permission.
+    if (dto.status !== undefined && isPermissionManaged(user) && !holdsPermission(user, 'ai_roles', 'manage')) {
+      throw new ForbiddenException('You don’t have permission to activate AI roles or set them back to draft. Ask an admin for access.');
+    }
     const bearerToken = (req.headers.authorization ?? '').replace(/^Bearer\s+/i, '');
     return this.agentRolesService.update(id, dto, bearerToken, user.organizationId);
   }

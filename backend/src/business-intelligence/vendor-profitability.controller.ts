@@ -10,6 +10,7 @@ import { JwtPayload } from '../auth/jwt-payload.interface';
 import { resolveBiDateRange } from './bi-filter.util';
 import { BiFilterQueryDto, splitCsv } from './dto/bi-filter-query.dto';
 import { VendorProfitabilityService } from './vendor-profitability.service';
+import { Permission } from '../common/permissions/permission.decorator';
 
 class VendorProfitabilityQueryDto extends BiFilterQueryDto {
   @IsOptional()
@@ -24,6 +25,7 @@ class VendorProfitabilityQueryDto extends BiFilterQueryDto {
 // than pipeline data). No manager/consultant store or self scoping needed:
 // this role tier always sees the whole org.
 @UseGuards(JwtAuthGuard, RolesGuard)
+@Permission('vendors')
 @Controller('business-intelligence/vendor-profitability')
 export class VendorProfitabilityController {
   constructor(private vendorProfitabilityService: VendorProfitabilityService) {}
@@ -64,6 +66,7 @@ export class VendorProfitabilityController {
   @Post('ai-compare')
   @Roles('owner', 'admin')
   @Throttle({ default: { limit: 5, ttl: 60_000 } })
+  @Permission('vendors', 'view')
   async aiCompare(@CurrentUser() user: JwtPayload, @Query() query: VendorProfitabilityQueryDto) {
     const { start, end } = resolveBiDateRange(query);
     const overview = await this.vendorProfitabilityService.getOverview(user.organizationId, start, end, { vendorId: query.vendorId });

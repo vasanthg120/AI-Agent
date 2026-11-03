@@ -13,6 +13,7 @@ import { EmailSlaEscalationService } from './email-sla-escalation.service';
 import { EmailSlaPolicyService } from './email-sla-policy.service';
 import { EmailSlaStatus } from './schemas/email-sla-record.schema';
 import { EmailSlaService } from './email-sla.service';
+import { Permission } from '../common/permissions/permission.decorator';
 
 // Same org-scoped-from-JWT, JwtAuthGuard-only pattern as the rest of the
 // email-intelligence-adjacent surface — every route resolves organizationId
@@ -23,6 +24,7 @@ import { EmailSlaService } from './email-sla.service';
 // authenticated user in the org, matching this module's "isolated, additive"
 // posture — it doesn't invent a new permission tier.
 @UseGuards(JwtAuthGuard)
+@Permission('analytics')
 @Controller('email-sla')
 export class EmailSlaController {
   constructor(
@@ -42,11 +44,13 @@ export class EmailSlaController {
   }
 
   @Post('records/:id/resolve')
+  @Permission('email', 'edit')
   resolveRecord(@CurrentUser() user: JwtPayload, @Param('id') id: string) {
     return this.slaService.resolveRecord(user.organizationId, id);
   }
 
   @Post('records/:id/exclude')
+  @Permission('email', 'edit')
   excludeRecord(@CurrentUser() user: JwtPayload, @Param('id') id: string, @Body() dto: ExcludeSlaRecordDto) {
     return this.slaService.excludeRecord(user.organizationId, id, dto.reason);
   }
@@ -64,6 +68,7 @@ export class EmailSlaController {
   @Get('policies')
   @UseGuards(RolesGuard)
   @Roles('owner', 'admin', 'manager')
+  @Permission('settings', 'view')
   listPolicies(@CurrentUser() user: JwtPayload) {
     return this.policyService.listPolicies(user.organizationId);
   }
@@ -71,6 +76,7 @@ export class EmailSlaController {
   @Post('policies')
   @UseGuards(RolesGuard)
   @Roles('owner', 'admin')
+  @Permission('settings', 'manage')
   upsertPolicy(@CurrentUser() user: JwtPayload, @Body() dto: UpsertSlaPolicyDto) {
     return this.policyService.upsertPolicy(user.organizationId, dto.priority, dto);
   }
@@ -78,6 +84,7 @@ export class EmailSlaController {
   @Patch('policies/:id')
   @UseGuards(RolesGuard)
   @Roles('owner', 'admin')
+  @Permission('settings', 'manage')
   updatePolicy(@CurrentUser() user: JwtPayload, @Param('id') id: string, @Body() dto: UpdateSlaPolicyDto) {
     return this.policyService.updatePolicy(user.organizationId, id, dto);
   }
@@ -85,6 +92,7 @@ export class EmailSlaController {
   @Get('business-hours')
   @UseGuards(RolesGuard)
   @Roles('owner', 'admin', 'manager')
+  @Permission('settings', 'view')
   getBusinessHours(@CurrentUser() user: JwtPayload) {
     return this.policyService.getBusinessHoursConfig(user.organizationId);
   }
@@ -92,6 +100,7 @@ export class EmailSlaController {
   @Post('business-hours')
   @UseGuards(RolesGuard)
   @Roles('owner', 'admin')
+  @Permission('settings', 'manage')
   upsertBusinessHours(@CurrentUser() user: JwtPayload, @Body() dto: UpdateBusinessHoursDto) {
     return this.policyService.upsertBusinessHoursConfig(user.organizationId, dto);
   }
@@ -102,6 +111,7 @@ export class EmailSlaController {
   @Get('escalations')
   @UseGuards(RolesGuard)
   @Roles('owner', 'admin', 'manager')
+  @Permission('settings', 'view')
   listEscalationRules(@CurrentUser() user: JwtPayload) {
     return this.escalationService.listRules(user.organizationId);
   }
@@ -109,6 +119,7 @@ export class EmailSlaController {
   @Post('escalations')
   @UseGuards(RolesGuard)
   @Roles('owner', 'admin')
+  @Permission('settings', 'manage')
   upsertEscalationRule(@CurrentUser() user: JwtPayload, @Body() dto: UpsertEscalationRuleDto) {
     return this.escalationService.upsertRule(user.organizationId, dto);
   }

@@ -2,6 +2,7 @@ import { Body, Controller, Get, Param, Post, Query, UseGuards } from '@nestjs/co
 import { AdminJwtAuthGuard } from '../common/guards/admin-jwt-auth.guard';
 import { BillingAdminService } from './billing-admin.service';
 import { SetOrganizationStatusDto } from './dto/set-organization-status.dto';
+import { PermissionExempt } from '../common/permissions/permission.decorator';
 
 // Haive-internal only — gated by a fully separate admin credential (see
 // AdminJwtAuthGuard/AdminAccount), never reachable by a customer login no
@@ -9,6 +10,7 @@ import { SetOrganizationStatusDto } from './dto/set-organization-status.dto';
 // revenue/margin data is ever returned by an API — never reachable from a
 // customer-scoped route.
 @UseGuards(AdminJwtAuthGuard)
+@PermissionExempt('platform')
 @Controller('billing/admin')
 export class BillingAdminController {
   constructor(private adminService: BillingAdminService) {}

@@ -6,12 +6,14 @@ import { BillingAdminInvoicesService } from './billing-admin-invoices.service';
 import { BillingInvoicePdfService } from './billing-invoice-pdf.service';
 import { BillingInvoiceService } from './billing-invoice.service';
 import { VoidInvoiceDto } from './dto/void-invoice.dto';
+import { PermissionExempt } from '../common/permissions/permission.decorator';
 
 // Phase 4 admin surface — platform_admin only, matching every other
 // billing-admin-*.controller.ts's gate. Unlike the customer-facing
 // GET /billing/invoices (org-scoped), this sees every organization's
 // invoices — never reachable from a customer-scoped route.
 @UseGuards(AdminJwtAuthGuard)
+@PermissionExempt('platform')
 @Controller('billing/admin/invoices')
 export class BillingAdminInvoicesController {
   constructor(

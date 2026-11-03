@@ -1,6 +1,7 @@
 import { ChatController } from './chat.controller';
 import { ChatService } from './chat.service';
 import { JwtPayload } from '../auth/jwt-payload.interface';
+import { AI_ROLE_UNAVAILABLE_MESSAGE, UsersService } from '../users/users.service';
 
 // An 'agent_user' account exists to BE one specific persona (user.assignedAgentId) —
 // chat.service.ts's listAgents() already only ever shows it that one option in the
@@ -24,8 +25,10 @@ describe('ChatController — agentId cannot be overridden by a locked agent_user
     const chatService = {
       sendMessage: jest.fn().mockResolvedValue({ ok: true }),
     } as unknown as jest.Mocked<ChatService>;
-    const controller = new ChatController(chatService);
-    return { controller, chatService };
+    // The AI role check (is their AI role still there?) is covered on its own below.
+    const usersService = { aiRoleUnavailable: jest.fn().mockResolvedValue(false) } as unknown as jest.Mocked<UsersService>;
+    const controller = new ChatController(chatService, usersService);
+    return { controller, chatService, usersService };
   }
 
   function fakeRequest() {
@@ -37,50 +40,59 @@ describe('ChatController — agentId cannot be overridden by a locked agent_user
     return (chatService.sendMessage as jest.Mock).mock.calls[0][5];
   }
 
-  it('ignores a client-supplied agentId for a locked agent_user account, using its own assignedAgentId instead', () => {
+  it('ignores a client-supplied agentId for a locked agent_user account, using its own assignedAgentId instead', async () => {
     const { controller, chatService } = makeController();
     const user: JwtPayload = { ...basePayload, roles: ['agent_user'], assignedAgentId: 'restricted-bot' };
 
-    controller.sendMessage(user, fakeRequest(), { message: 'hi', agentId: 'some-other-persona' } as any);
+    await controller.sendMessage(user, fakeRequest(), { message: 'hi', agentId: 'some-other-persona' } as any);
 
     expect(calledAgentId(chatService)).toBe('restricted-bot');
   });
 
-  it('still defaults to assignedAgentId for a locked agent_user account when no agentId is supplied', () => {
+  it('still defaults to assignedAgentId for a locked agent_user account when no agentId is supplied', async () => {
     const { controller, chatService } = makeController();
     const user: JwtPayload = { ...basePayload, roles: ['agent_user'], assignedAgentId: 'restricted-bot' };
 
-    controller.sendMessage(user, fakeRequest(), { message: 'hi' } as any);
+    await controller.sendMessage(user, fakeRequest(), { message: 'hi' } as any);
 
     expect(calledAgentId(chatService)).toBe('restricted-bot');
   });
 
-  it('honors a client-supplied agentId when the account also has admin (admin wins over the agent_user lock)', () => {
+  it('refuses a locked agent_user whose AI role was deleted or set back to draft, with a clear message', async () => {
+    const { controller, chatService, usersService } = makeController();
+    (usersService.aiRoleUnavailable as jest.Mock).mockResolvedValue(true);
+    const user: JwtPayload = { ...basePayload, roles: ['agent_user'], assignedAgentId: 'gone-bot' };
+
+    await expect(controller.sendMessage(user, fakeRequest(), { message: 'hi' } as any)).rejects.toThrow(AI_ROLE_UNAVAILABLE_MESSAGE);
+    expect(chatService.sendMessage).not.toHaveBeenCalled();
+  });
+
+  it('honors a client-supplied agentId when the account also has admin (admin wins over the agent_user lock)', async () => {
     const { controller, chatService } = makeController();
     const user: JwtPayload = { ...basePayload, roles: ['agent_user', 'admin'], assignedAgentId: 'restricted-bot' };
 
-    controller.sendMessage(user, fakeRequest(), { message: 'hi', agentId: 'any-persona' } as any);
+    await controller.sendMessage(user, fakeRequest(), { message: 'hi', agentId: 'any-persona' } as any);
 
     expect(calledAgentId(chatService)).toBe('any-persona');
   });
 
   it.each([['user'], ['manager'], ['consultant'], ['owner'], ['admin']])(
     'honors a client-supplied agentId unchanged for role %s',
-    (role) => {
+    async (role) => {
       const { controller, chatService } = makeController();
       const user: JwtPayload = { ...basePayload, roles: [role] };
 
-      controller.sendMessage(user, fakeRequest(), { message: 'hi', agentId: 'any-persona' } as any);
+      await controller.sendMessage(user, fakeRequest(), { message: 'hi', agentId: 'any-persona' } as any);
 
       expect(calledAgentId(chatService)).toBe('any-persona');
     },
   );
 
-  it('leaves agentId undefined for a non-agent_user role with no agentId supplied (unchanged default behavior)', () => {
+  it('leaves agentId undefined for a non-agent_user role with no agentId supplied (unchanged default behavior)', async () => {
     const { controller, chatService } = makeController();
     const user: JwtPayload = { ...basePayload, roles: ['user'] };
 
-    controller.sendMessage(user, fakeRequest(), { message: 'hi' } as any);
+    await controller.sendMessage(user, fakeRequest(), { message: 'hi' } as any);
 
     expect(calledAgentId(chatService)).toBeUndefined();
   });

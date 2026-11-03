@@ -7,8 +7,10 @@ import { JwtPayload } from '../auth/jwt-payload.interface';
 import { GetAchievementQueryDto } from './dto/get-achievement-query.dto';
 import { UpsertSalesTargetDto } from './dto/upsert-sales-target.dto';
 import { SalesAnalyticsService } from './sales-analytics.service';
+import { Permission } from '../common/permissions/permission.decorator';
 
 @UseGuards(JwtAuthGuard)
+@Permission('settings')
 @Controller('sales-targets')
 export class SalesTargetController {
   constructor(private salesAnalyticsService: SalesAnalyticsService) {}
@@ -40,6 +42,7 @@ export class SalesTargetController {
   @Get('achievement')
   @UseGuards(RolesGuard)
   @Roles('admin')
+  @Permission('analytics', 'view')
   achievement(@CurrentUser() user: JwtPayload, @Query() query: GetAchievementQueryDto) {
     return this.salesAnalyticsService.getAchievement(user.organizationId, query.scope, query.scopeId, query.period);
   }

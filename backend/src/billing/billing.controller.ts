@@ -22,6 +22,7 @@ import { RequestIdDto } from './dto/request-id.dto';
 import { ReserveCreditsDto } from './dto/reserve-credits.dto';
 import { SavePaymentMethodDto } from './dto/save-payment-method.dto';
 import { SubscriptionCheckoutDto } from './dto/subscription-checkout.dto';
+import { PermissionExempt } from '../common/permissions/permission.decorator';
 
 // Every route here is JwtAuthGuard-only (no @Roles) — reserve/settle/release
 // are called by python-agent's service-role bridge token (see
@@ -51,6 +52,7 @@ import { SubscriptionCheckoutDto } from './dto/subscription-checkout.dto';
 // the real organizationId) and can set BILLING_ORG_SCOPED_WALLETS=false to
 // stay on the old per-user behavior until that's done.
 @UseGuards(JwtAuthGuard)
+@PermissionExempt('not_grantable')
 @Controller('billing')
 export class BillingController {
   constructor(

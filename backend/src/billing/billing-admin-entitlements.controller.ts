@@ -3,12 +3,14 @@ import { AdminJwtAuthGuard } from '../common/guards/admin-jwt-auth.guard';
 import { BillingAdminEntitlementsService } from './billing-admin-entitlements.service';
 import { CreateEntitlementDto } from './dto/create-entitlement.dto';
 import { UpdateEntitlementDto } from './dto/update-entitlement.dto';
+import { PermissionExempt } from '../common/permissions/permission.decorator';
 
 // Admin-haive's "Entitlements" catalog page — platform_admin only, matching
 // every other billing-admin-*.controller.ts's gate. Phase 0 of the
 // ChatGPT-style billing migration (see entitlements.service.ts); reachable
 // from no customer-scoped route.
 @UseGuards(AdminJwtAuthGuard)
+@PermissionExempt('platform')
 @Controller('billing/admin/entitlements')
 export class BillingAdminEntitlementsController {
   constructor(private entitlementsService: BillingAdminEntitlementsService) {}

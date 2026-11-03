@@ -4,11 +4,13 @@ import { AdminJwtAuthGuard } from '../common/guards/admin-jwt-auth.guard';
 import { AdminAuthService } from './admin-auth.service';
 import { AdminJwtPayload } from './admin-jwt-payload.interface';
 import { CreateAdminAccountDto } from './dto/create-admin-account.dto';
+import { PermissionExempt } from '../common/permissions/permission.decorator';
 
 // Replaces the old cross-org "promote an existing customer" flow
 // (users/admin-users.controller.ts) — admin accounts are now their own
 // credential, so the only way in is being created here by an existing admin.
 @UseGuards(AdminJwtAuthGuard)
+@PermissionExempt('platform')
 @Controller('auth/admin/accounts')
 export class AdminAccountsController {
   constructor(private adminAuthService: AdminAuthService) {}

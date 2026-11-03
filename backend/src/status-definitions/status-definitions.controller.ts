@@ -6,6 +6,7 @@ import { Roles } from '../common/decorators/roles.decorator';
 import { JwtPayload } from '../auth/jwt-payload.interface';
 import { StatusDefinitionsService } from './status-definitions.service';
 import { UpdateStatusDefinitionDto } from './dto/update-status-definition.dto';
+import { Permission, PermissionExempt } from '../common/permissions/permission.decorator';
 
 // Phase 2a of the Hoops-parity plan. Listing is open to any authenticated
 // org member (@Roles omitted — JwtAuthGuard alone) since any role viewing a
@@ -15,6 +16,7 @@ import { UpdateStatusDefinitionDto } from './dto/update-status-definition.dto';
 // Hoops reference), gated the same way every other admin-config route in
 // this codebase is (Deal Assignment, Integrations app-credentials, ...).
 @UseGuards(JwtAuthGuard)
+@PermissionExempt('personal')
 @Controller('status-definitions')
 export class StatusDefinitionsController {
   constructor(private statusDefinitionsService: StatusDefinitionsService) {}
@@ -27,6 +29,7 @@ export class StatusDefinitionsController {
   @Patch(':field/:key')
   @UseGuards(RolesGuard)
   @Roles('owner', 'admin')
+  @Permission('settings', 'manage')
   relabel(
     @CurrentUser() user: JwtPayload,
     @Param('field') field: string,

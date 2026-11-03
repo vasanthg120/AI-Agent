@@ -1,6 +1,6 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
-import { APP_GUARD } from '@nestjs/core';
+import { APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
 import { MongooseModule } from '@nestjs/mongoose';
 import { ScheduleModule } from '@nestjs/schedule';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
@@ -59,6 +59,7 @@ import { ApiTokensModule } from './api-tokens/api-tokens.module';
 import { BillingModule } from './billing/billing.module';
 import { AiUsageModule } from './ai-usage/ai-usage.module';
 import { HealthController } from './health/health.controller';
+import { ModulePermissionInterceptor } from './common/permissions/module-permission.interceptor';
 
 @Module({
   imports: [
@@ -132,6 +133,10 @@ import { HealthController } from './health/health.controller';
     ApiTokensModule,
   ],
   controllers: [HealthController],
-  providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
+  providers: [
+    { provide: APP_GUARD, useClass: ThrottlerGuard },
+    // Holds people with their own page & action permissions to them on every route (common/permissions).
+    { provide: APP_INTERCEPTOR, useClass: ModulePermissionInterceptor },
+  ],
 })
 export class AppModule {}

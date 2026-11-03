@@ -13,6 +13,7 @@ import { StripePaymentProvider } from './providers/stripe-payment.provider';
 import { WalletService } from './wallet.service';
 import { PaymentRecord, PaymentRecordDocument } from './schemas/payment-record.schema';
 import { WebhookEvent, WebhookEventDocument } from './schemas/webhook-event.schema';
+import { PermissionExempt } from '../common/permissions/permission.decorator';
 
 // No JwtAuthGuard — the gateway itself is the caller, authenticated by its
 // own signature scheme instead of a bearer token, same reason
@@ -24,6 +25,7 @@ import { WebhookEvent, WebhookEventDocument } from './schemas/webhook-event.sche
 // which one is currently PAYMENT_PROVIDER-active, so a gateway's webhook
 // still gets processed correctly even mid-migration to a different active
 // provider.
+@PermissionExempt('public')
 @Controller('billing/webhooks')
 export class BillingWebhookController {
   private readonly logger = new Logger(BillingWebhookController.name);

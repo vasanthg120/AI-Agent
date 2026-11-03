@@ -14,6 +14,7 @@ import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RequireSessionAuthGuard } from '../common/guards/require-session-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { JwtPayload, loginIdOf } from './jwt-payload.interface';
+import { PermissionExempt } from '../common/permissions/permission.decorator';
 
 // Tighter than the app-wide default (see ThrottlerModule.forRoot in
 // app.module.ts) — these are the two routes a credential-stuffing/brute-force
@@ -24,6 +25,7 @@ function sessionMeta(req: Request): SessionMeta {
   return { userAgent: req.headers['user-agent'], ip: req.ip };
 }
 
+@PermissionExempt('personal')
 @Controller('auth')
 export class AuthController {
   constructor(private authService: AuthService) {}

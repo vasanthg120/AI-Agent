@@ -5,11 +5,13 @@ import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
 import { JwtPayload } from '../auth/jwt-payload.interface';
 import { CustomerActivityService } from './customer-activity.service';
+import { Permission } from '../common/permissions/permission.decorator';
 
 // RBAC matches the rest of the Deal Performance page (owner/admin/manager),
 // same canOverride/storeConstraint pattern deals.controller.ts already uses
 // — a manager is always forced to their own store, never a client-supplied one.
 @UseGuards(JwtAuthGuard)
+@Permission('customers')
 @Controller('crm/customer-activity')
 export class CustomerActivityController {
   constructor(private customerActivityService: CustomerActivityService) {}
@@ -53,6 +55,7 @@ export class CustomerActivityController {
   @Post('generate-summary')
   @UseGuards(RolesGuard)
   @Roles('owner', 'admin', 'manager')
+  @Permission('customers', 'view')
   generateSummary(@CurrentUser() user: JwtPayload, @Body() body: { regenerate?: boolean }) {
     const canOverride = user.roles.includes('admin') || user.roles.includes('owner');
     const storeConstraint = canOverride ? undefined : user.storeId;
@@ -72,6 +75,7 @@ export class CustomerActivityController {
   @Post('generate-personal-summary')
   @UseGuards(RolesGuard)
   @Roles('consultant')
+  @Permission('customers', 'view')
   generatePersonalSummary(@CurrentUser() user: JwtPayload, @Body() body: { regenerate?: boolean }) {
     return this.customerActivityService.generatePersonalSummary(user, body?.regenerate ?? false);
   }

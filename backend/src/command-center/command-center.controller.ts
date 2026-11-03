@@ -6,8 +6,10 @@ import { RolesGuard } from '../common/guards/roles.guard';
 import { JwtPayload } from '../auth/jwt-payload.interface';
 import { CommandCenterService } from './command-center.service';
 import { ListExecutionsQueryDto } from './dto/list-executions-query.dto';
+import { Permission } from '../common/permissions/permission.decorator';
 
 @UseGuards(JwtAuthGuard)
+@Permission('analytics')
 @Controller('command-center')
 export class CommandCenterController {
   constructor(private commandCenterService: CommandCenterService) {}
@@ -34,6 +36,7 @@ export class CommandCenterController {
   // caller's own userId so one user can never pull another's conversation
   // stats by guessing a conversationId.
   @Get('conversations/:conversationId/stats')
+  @Permission('ai_agent', 'view')
   conversationStats(@CurrentUser() user: JwtPayload, @Param('conversationId') conversationId: string) {
     return this.commandCenterService.getConversationStats(user.organizationId, user.sub, conversationId);
   }

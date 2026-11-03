@@ -10,6 +10,7 @@ import { UpdateVendorDto } from './dto/update-vendor.dto';
 import { CreateVendorQuoteDto } from './dto/create-vendor-quote.dto';
 import { UpdateVendorQuoteDto } from './dto/update-vendor-quote.dto';
 import { ListVendorQuotesQueryDto } from './dto/list-vendor-quotes-query.dto';
+import { Permission } from '../common/permissions/permission.decorator';
 
 // Owner/admin only, matching Vendor Profitability's own sensitivity tier
 // (see business-intelligence's vendor-profitability.controller.ts) — vendor
@@ -17,6 +18,7 @@ import { ListVendorQuotesQueryDto } from './dto/list-vendor-quotes-query.dto';
 // Finance already established for this class of data.
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Roles('owner', 'admin')
+@Permission('vendors')
 @Controller()
 export class VendorsController {
   constructor(private vendorsService: VendorsService) {}
