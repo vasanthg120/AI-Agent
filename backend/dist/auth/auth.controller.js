@@ -23,9 +23,11 @@ const resend_otp_dto_1 = require("./dto/resend-otp.dto");
 const forgot_password_dto_1 = require("./dto/forgot-password.dto");
 const reset_password_dto_1 = require("./dto/reset-password.dto");
 const change_password_dto_1 = require("./dto/change-password.dto");
+const invitation_dto_1 = require("./dto/invitation.dto");
 const jwt_auth_guard_1 = require("../common/guards/jwt-auth.guard");
 const require_session_auth_guard_1 = require("../common/guards/require-session-auth.guard");
 const current_user_decorator_1 = require("../common/decorators/current-user.decorator");
+const jwt_payload_interface_1 = require("./jwt-payload.interface");
 const AUTH_THROTTLE = { default: { limit: 5, ttl: 60_000 } };
 function sessionMeta(req) {
     return { userAgent: req.headers['user-agent'], ip: req.ip };
@@ -55,12 +57,18 @@ let AuthController = class AuthController {
         await this.authService.resetPassword(dto.email, dto.otp, dto.password);
         return { success: true };
     }
+    verifyInvitation(dto) {
+        return this.authService.describeInvitation(dto.token);
+    }
+    acceptInvitation(dto, req) {
+        return this.authService.acceptInvitation(dto.token, dto.password, sessionMeta(req));
+    }
     async changePassword(user, dto, req) {
-        await this.authService.changePassword(user.sub, dto.currentPassword, dto.newPassword, user.jti, req.ip);
+        await this.authService.changePassword((0, jwt_payload_interface_1.loginIdOf)(user), dto.currentPassword, dto.newPassword, user.jti, req.ip);
         return { success: true };
     }
     async logout(user) {
-        await this.authService.logout(user.sub, user.jti);
+        await this.authService.logout((0, jwt_payload_interface_1.loginIdOf)(user), user.jti);
         return { success: true };
     }
 };
@@ -115,6 +123,23 @@ __decorate([
     __metadata("design:paramtypes", [reset_password_dto_1.ResetPasswordDto]),
     __metadata("design:returntype", Promise)
 ], AuthController.prototype, "resetPassword", null);
+__decorate([
+    (0, throttler_1.Throttle)(AUTH_THROTTLE),
+    (0, common_1.Post)('invitation/verify'),
+    __param(0, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [invitation_dto_1.VerifyInvitationDto]),
+    __metadata("design:returntype", void 0)
+], AuthController.prototype, "verifyInvitation", null);
+__decorate([
+    (0, throttler_1.Throttle)(AUTH_THROTTLE),
+    (0, common_1.Post)('invitation/accept'),
+    __param(0, (0, common_1.Body)()),
+    __param(1, (0, common_1.Req)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [invitation_dto_1.AcceptInvitationDto, Object]),
+    __metadata("design:returntype", void 0)
+], AuthController.prototype, "acceptInvitation", null);
 __decorate([
     (0, common_1.UseGuards)(jwt_auth_guard_1.JwtAuthGuard, require_session_auth_guard_1.RequireSessionAuthGuard),
     (0, throttler_1.Throttle)(AUTH_THROTTLE),

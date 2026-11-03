@@ -249,7 +249,13 @@ export class UsersService {
         .findOne({ organizationId: user.organizationId, slug: user.assignedAgentId }, { projection: { name: 1 } });
       aiRoleName = typeof role?.name === 'string' ? role.name : undefined;
     }
-    return { ...this.toPublic(user), features, aiRoleName };
+    return { ...this.toPublic(user), features, aiRoleName, avatarUrl: await this.avatarOf(user) };
+  }
+
+  /** A person's profile photo, whichever business they're working in. */
+  private async avatarOf(user: UserDocument): Promise<string | undefined> {
+    const row = await this.userModel.findById(user.linkedLoginUserId ?? user._id).select('avatar').lean().exec();
+    return row?.avatar;
   }
 
   async createByAdmin(dto: CreateUserDto, organizationId: string) {
@@ -374,7 +380,10 @@ export class UsersService {
 
     const updated = await this.userModel.findByIdAndUpdate(userId, { $set: update }, { new: true }).exec();
     if (!updated) throw new NotFoundException('User not found');
-    return this.toPublic(updated);
+    if (dto.avatar !== undefined) {
+      await this.userModel.updateOne({ _id: updated.linkedLoginUserId ?? updated._id }, dto.avatar ? { $set: { avatar: dto.avatar } } : { $unset: { avatar: '' } }).exec();
+    }
+    return { ...this.toPublic(updated), avatarUrl: await this.avatarOf(updated) };
   }
 
   private async assertNotOwner(id: string, organizationId: string): Promise<void> {

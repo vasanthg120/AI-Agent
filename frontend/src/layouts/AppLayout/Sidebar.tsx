@@ -53,12 +53,12 @@ export function Sidebar({ onNavigate }: SidebarProps) {
             collapsed ? (
               <Tooltip content={user ? `${user.firstName} ${user.lastName}` : 'Account'} placement="right">
                 <button type="button" className={styles.userRow} aria-label="Account menu">
-                  <Avatar name={user ? `${user.firstName} ${user.lastName}` : 'User'} size="sm" />
+                  <Avatar name={user ? `${user.firstName} ${user.lastName}` : 'User'} src={user?.avatarUrl} size="sm" />
                 </button>
               </Tooltip>
             ) : (
               <button type="button" className={styles.userRow} aria-label="Account menu">
-                <Avatar name={user ? `${user.firstName} ${user.lastName}` : 'User'} size="sm" />
+                <Avatar name={user ? `${user.firstName} ${user.lastName}` : 'User'} src={user?.avatarUrl} size="sm" />
                 <span className={styles.userText}>
                   <div className={styles.userName}>{user ? `${user.firstName} ${user.lastName}` : 'User'}</div>
                   <div className={styles.userEmail}>{user?.email}</div>

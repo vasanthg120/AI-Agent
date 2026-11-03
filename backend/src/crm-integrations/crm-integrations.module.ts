@@ -16,5 +16,11 @@ import { CrmIntegrationsService } from './crm-integrations.service';
   imports: [HttpModule.register({ timeout: 120_000 }), AuthModule, BillingModule, IntegrationsModule, GorillaDashModule],
   controllers: [CrmIntegrationsController],
   providers: [CrmIntegrationsService, MappingIntelligenceService],
+  // ZohoModule/SalesforceModule inject this to run the same post-connect
+  // "read a first page, confirm it works, roll back if not" discovery step
+  // every other CRM's connect() already does — their OAuth callback plays
+  // the same role connect() plays for gorilladash/prospectconnect, just
+  // reached via a provider redirect instead of a form submit.
+  exports: [CrmIntegrationsService],
 })
 export class CrmIntegrationsModule {}

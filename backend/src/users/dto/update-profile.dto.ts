@@ -30,4 +30,12 @@ export class UpdateProfileDto {
   @IsOptional()
   @IsIn(PROFILE_LANGUAGES)
   language?: string;
+
+  // PNG, JPEG or WebP as a data URL, already shrunk by the browser. SVG is refused
+  // on purpose: it can carry script. '' removes the photo.
+  @IsOptional()
+  @IsString()
+  @Matches(/^$|^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/, { message: 'The photo must be a PNG, JPEG or WebP image.' })
+  @MaxLength(96_000, { message: 'The photo is too large.' })
+  avatar?: string;
 }

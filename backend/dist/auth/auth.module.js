@@ -51,7 +51,7 @@ exports.AuthModule = AuthModule = __decorate([
         ],
         controllers: [auth_controller_1.AuthController, oauth_controller_1.OAuthController, two_factor_controller_1.TwoFactorController, admin_auth_controller_1.AdminAuthController, admin_accounts_controller_1.AdminAccountsController],
         providers: [auth_service_1.AuthService, jwt_strategy_1.JwtStrategy, oauth_service_1.OAuthService, two_factor_service_1.TwoFactorService, admin_jwt_strategy_1.AdminJwtStrategy, admin_auth_service_1.AdminAuthService],
-        exports: [jwt_1.JwtModule, passport_1.PassportModule],
+        exports: [jwt_1.JwtModule, passport_1.PassportModule, auth_service_1.AuthService],
     })
 ], AuthModule);
 //# sourceMappingURL=auth.module.js.map

@@ -100,7 +100,7 @@ class PublishSourceOwnershipTests(unittest.TestCase):
                 payload=SourceRef(documentId=document_id),
                 user={"sub": "owner-admin", "organizationId": owner_org, "roles": ["admin"]},
             )
-            reassign_owner.assert_called_once_with(document_id, "*")
+            reassign_owner.assert_called_once_with(document_id, "*", owner_org)
         self.assertEqual(result, {"status": "published"})
 
     def test_cross_organization_access_is_rejected_even_with_a_valid_admin_token(self):

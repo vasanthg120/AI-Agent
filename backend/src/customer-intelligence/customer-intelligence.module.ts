@@ -5,6 +5,7 @@ import { AuthModule } from '../auth/auth.module';
 import { BillingModule } from '../billing/billing.module';
 import { CloudFilesModule } from '../cloud-files/cloud-files.module';
 import { GridFsService } from '../common/gridfs/gridfs.service';
+import { UsersModule } from '../users/users.module';
 import { CustomerCloudSyncController } from './customer-cloud-sync.controller';
 import { CustomerCloudSyncService } from './customer-cloud-sync.service';
 import { CustomerCloudController } from './customer-cloud.controller';
@@ -24,7 +25,7 @@ import { CustomersController } from './customers.controller';
 // (customer-jobs.service.ts) — and their Google Drive / OneDrive documents
 // (customer-cloud.service.ts). DataSourcesModule is global.
 @Module({
-  imports: [HttpModule.register({ timeout: 90_000 }), AuthModule, BillingModule, AuditModule, CloudFilesModule],
+  imports: [HttpModule.register({ timeout: 90_000 }), AuthModule, BillingModule, UsersModule, AuditModule, CloudFilesModule],
   controllers: [CustomersController, CustomerWorkspaceController, CustomerJobsController, CustomerCloudController, CustomerCloudSyncController],
   providers: [CustomerMailService, CustomerDirectoryService, CustomerWorkspaceService, CustomerJobsService, CustomerCloudService, CustomerCloudSyncService, GridFsService],
 })

@@ -15,6 +15,7 @@ const config_1 = require("@nestjs/config");
 const passport_1 = require("@nestjs/passport");
 const passport_jwt_1 = require("passport-jwt");
 const organizations_service_1 = require("../../organizations/organizations.service");
+const organization_schema_1 = require("../../organizations/schemas/organization.schema");
 const users_service_1 = require("../../users/users.service");
 let JwtStrategy = class JwtStrategy extends (0, passport_1.PassportStrategy)(passport_jwt_1.Strategy) {
     constructor(config, usersService, organizationsService) {
@@ -40,18 +41,16 @@ let JwtStrategy = class JwtStrategy extends (0, passport_1.PassportStrategy)(pas
         if (payload.roles?.includes('service')) {
             return { ...payload, authMethod: 'service' };
         }
-        const user = await this.usersService.findById(payload.sub);
-        if (!user || user.active === false) {
+        const session = await this.usersService.resolveSession(payload);
+        if (!session) {
             throw new common_1.UnauthorizedException();
         }
-        if (!payload.jti || !user.sessions.some((s) => s.jti === payload.jti)) {
+        const { user, login } = session;
+        const org = await this.organizationsService.findOrgStatus(user.organizationId);
+        if ((0, organization_schema_1.isOrganizationBlocked)(org?.status)) {
             throw new common_1.UnauthorizedException();
         }
-        const org = await this.organizationsService.findOrgById(user.organizationId);
-        if (org?.status === 'suspended') {
-            throw new common_1.UnauthorizedException();
-        }
-        void this.usersService.touchSessionIfStale(user._id.toString(), payload.jti);
+        void this.usersService.touchSessionIfStale(login._id.toString(), payload.jti);
         return {
             sub: user._id.toString(),
             email: user.email,
@@ -64,6 +63,9 @@ let JwtStrategy = class JwtStrategy extends (0, passport_1.PassportStrategy)(pas
             voiceAccessEnabled: user.voiceAccessEnabled,
             aiAccessEnabled: user.aiAccessEnabled,
             jti: payload.jti,
+            exp: payload.exp,
+            isSubAccount: !!org?.parentOrganizationId,
+            ...(payload.loginUserId ? { loginUserId: payload.loginUserId } : {}),
             authMethod: 'session',
         };
     }

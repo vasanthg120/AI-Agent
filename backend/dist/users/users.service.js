@@ -60,25 +60,86 @@ const SALT_ROUNDS = 12;
 const MAX_SESSIONS = 10;
 const MAX_PUSH_SUBSCRIPTIONS = 20;
 const STORE_SCOPED_ROLES = new Set(['manager', 'consultant']);
+const LINKED_MEMBER_MESSAGE = 'This person has access through the Main Account, so it can only be changed from there.';
 let UsersService = class UsersService {
     constructor(userModel, agentRoleModel) {
         this.userModel = userModel;
         this.agentRoleModel = agentRoleModel;
     }
     findByEmail(email) {
-        return this.userModel.findOne({ email: email.toLowerCase() }).exec();
+        return this.userModel.findOne({ email: email.toLowerCase(), isLogin: { $ne: false } }).exec();
     }
     findById(id) {
         return this.userModel.findById(id).exec();
     }
+    async emailInUse(email) {
+        return !!(await this.userModel.exists({ email: email.toLowerCase() }));
+    }
+    async resolveSession(payload) {
+        if (!payload.jti || !(0, mongoose_2.isValidObjectId)(payload.sub))
+            return null;
+        const user = await this.findById(payload.sub);
+        if (!user || user.active === false)
+            return null;
+        let login = user;
+        if (payload.loginUserId || user.linkedLoginUserId) {
+            if (!payload.loginUserId || user.linkedLoginUserId !== payload.loginUserId)
+                return null;
+            const linked = await this.findById(payload.loginUserId);
+            if (!linked || linked.active === false)
+                return null;
+            login = linked;
+        }
+        if (!(login.sessions ?? []).some((s) => s.jti === payload.jti))
+            return null;
+        return { user, login };
+    }
+    findLinkedMember(loginUserId, organizationId) {
+        return this.userModel.findOne({ linkedLoginUserId: loginUserId, organizationId }).exec();
+    }
+    findLinkedMembersOfLogin(loginUserId) {
+        return this.userModel.find({ linkedLoginUserId: loginUserId }).exec();
+    }
+    createLinkedMember(login, organizationId, role, storeId) {
+        return this.userModel
+            .findOneAndUpdate({ linkedLoginUserId: login._id.toString(), organizationId }, {
+            $set: { roles: [role], active: true, ...(storeId ? { storeId } : {}) },
+            $setOnInsert: { email: login.email, name: login.name, isLogin: false, emailVerified: true },
+        }, { upsert: true, new: true })
+            .exec();
+    }
+    async removeLinkedMember(loginUserId, organizationId) {
+        const result = await this.userModel.deleteOne({ linkedLoginUserId: loginUserId, organizationId }).exec();
+        return result.deletedCount > 0;
+    }
+    setInvitation(userId, inviteTokenHash, inviteExpiresAt) {
+        return this.userModel.updateOne({ _id: userId }, { $set: { inviteTokenHash, inviteExpiresAt } }).exec();
+    }
+    findByInvitation(inviteTokenHash) {
+        return this.userModel.findOne({ inviteTokenHash, inviteExpiresAt: { $gt: new Date() }, isLogin: { $ne: false }, active: { $ne: false } }).exec();
+    }
+    consumeInvitation(inviteTokenHash, passwordHash) {
+        return this.userModel
+            .findOneAndUpdate({ inviteTokenHash, inviteExpiresAt: { $gt: new Date() }, isLogin: { $ne: false }, active: { $ne: false } }, { $set: { passwordHash, emailVerified: true }, $unset: { inviteTokenHash: '', inviteExpiresAt: '' } }, { new: true })
+            .exec();
+    }
+    async organizationName(organizationId) {
+        if (!(0, mongoose_2.isValidObjectId)(organizationId))
+            return '';
+        const org = await this.userModel.db.collection('organizations').findOne({ _id: new mongoose_2.Types.ObjectId(organizationId) }, { projection: { name: 1 } });
+        return typeof org?.name === 'string' ? org.name : '';
+    }
     async findIdsByOrgAndStore(organizationId, storeId) {
         const users = await this.userModel
-            .find({ organizationId, $or: [{ storeId: { $exists: false } }, { storeId }] })
+            .find({ organizationId, linkedLoginUserId: { $exists: false }, $or: [{ storeId: { $exists: false } }, { storeId }] })
             .select({ _id: 1 })
             .exec();
         return users.map((u) => u._id.toString());
     }
     async findAll(organizationId) {
+        return this.userModel.find({ organizationId, linkedLoginUserId: { $exists: false } }).exec();
+    }
+    async findAllWithLinkedMembers(organizationId) {
         return this.userModel.find({ organizationId }).exec();
     }
     async findTeamRoster(organizationId) {
@@ -148,7 +209,11 @@ let UsersService = class UsersService {
                 .findOne({ organizationId: user.organizationId, slug: user.assignedAgentId }, { projection: { name: 1 } });
             aiRoleName = typeof role?.name === 'string' ? role.name : undefined;
         }
-        return { ...this.toPublic(user), features, aiRoleName };
+        return { ...this.toPublic(user), features, aiRoleName, avatarUrl: await this.avatarOf(user) };
+    }
+    async avatarOf(user) {
+        const row = await this.userModel.findById(user.linkedLoginUserId ?? user._id).select('avatar').lean().exec();
+        return row?.avatar;
     }
     async createByAdmin(dto, organizationId) {
         const email = dto.email.trim().toLowerCase();
@@ -159,8 +224,8 @@ let UsersService = class UsersService {
         if (await this.userModel.exists({ email })) {
             throw new common_1.ConflictException('An account with this email address already exists.');
         }
-        const tempPassword = (0, crypto_1.randomBytes)(9).toString('base64url');
-        const passwordHash = await bcrypt.hash(tempPassword, SALT_ROUNDS);
+        const tempPassword = dto.sendInvite ? undefined : (0, crypto_1.randomBytes)(9).toString('base64url');
+        const passwordHash = tempPassword ? await bcrypt.hash(tempPassword, SALT_ROUNDS) : undefined;
         try {
             const user = await this.userModel.create({
                 email,
@@ -187,6 +252,8 @@ let UsersService = class UsersService {
         const target = (0, mongoose_2.isValidObjectId)(id) ? await this.userModel.findOne({ _id: id, organizationId }).exec() : null;
         if (!target)
             throw new common_1.NotFoundException('User not found');
+        if (target.linkedLoginUserId)
+            throw new common_1.ForbiddenException(LINKED_MEMBER_MESSAGE);
         if (target.roles.includes('owner')) {
             if (callerId !== id)
                 throw new common_1.ForbiddenException("The organization owner's account can't be modified or deleted by another admin");
@@ -240,6 +307,7 @@ let UsersService = class UsersService {
         const deleted = await this.userModel.findOneAndDelete({ _id: id, organizationId }).exec();
         if (!deleted)
             throw new common_1.NotFoundException('User not found');
+        await this.userModel.deleteMany({ linkedLoginUserId: id }).exec();
     }
     async updateOwnProfile(userId, dto) {
         const update = {};
@@ -265,10 +333,15 @@ let UsersService = class UsersService {
         const updated = await this.userModel.findByIdAndUpdate(userId, { $set: update }, { new: true }).exec();
         if (!updated)
             throw new common_1.NotFoundException('User not found');
-        return this.toPublic(updated);
+        if (dto.avatar !== undefined) {
+            await this.userModel.updateOne({ _id: updated.linkedLoginUserId ?? updated._id }, dto.avatar ? { $set: { avatar: dto.avatar } } : { $unset: { avatar: '' } }).exec();
+        }
+        return { ...this.toPublic(updated), avatarUrl: await this.avatarOf(updated) };
     }
     async assertNotOwner(id, organizationId) {
-        const target = await this.userModel.findOne({ _id: id, organizationId }).select({ roles: 1 }).exec();
+        const target = await this.userModel.findOne({ _id: id, organizationId }).select({ roles: 1, linkedLoginUserId: 1 }).exec();
+        if (target?.linkedLoginUserId)
+            throw new common_1.ForbiddenException(LINKED_MEMBER_MESSAGE);
         if (target?.roles.includes('owner')) {
             throw new common_1.ForbiddenException("The organization owner's account can't be modified or deleted by another admin");
         }
@@ -286,6 +359,8 @@ let UsersService = class UsersService {
             active: user.active,
             voiceAccessEnabled: user.voiceAccessEnabled,
             aiAccessEnabled: user.aiAccessEnabled,
+            linkedFromMain: !!user.linkedLoginUserId,
+            pendingInvitation: !user.passwordHash && !!user.inviteTokenHash,
             phone: typeof user.preferences?.phone === 'string' ? user.preferences.phone : undefined,
             timezone: typeof user.preferences?.timezone === 'string' ? user.preferences.timezone : undefined,
             language: typeof user.preferences?.language === 'string' ? user.preferences.language : undefined,

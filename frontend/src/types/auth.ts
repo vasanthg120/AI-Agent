@@ -23,6 +23,8 @@ export interface UpdateProfilePayload {
   phone?: string;
   timezone?: string;
   language?: string;
+  // A small image as a data URL; '' removes the photo.
+  avatar?: string;
 }
 
 export interface AuthSession {

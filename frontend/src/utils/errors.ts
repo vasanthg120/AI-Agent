@@ -35,6 +35,7 @@ export async function readBlobErrorBody(error: unknown): Promise<unknown> {
 export function extractLoginErrorMessage(error: unknown, fallback = 'Invalid email or password.'): string {
   if (axios.isAxiosError(error)) {
     if (!error.response) return 'Could not reach the backend — is it running?';
+    if (error.response.status === 429) return 'Too many attempts. Please wait a minute and try again.';
     const backendMessage = (error.response.data as { message?: string | string[] } | undefined)?.message;
     if (Array.isArray(backendMessage)) return backendMessage.join(', ');
     if (backendMessage) return backendMessage;

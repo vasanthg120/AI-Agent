@@ -4,19 +4,23 @@ import toast from 'react-hot-toast';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   FiAlertCircle,
+  FiArchive,
   FiChevronDown,
   FiCopy,
   FiCpu,
+  FiEdit2,
   FiMail,
   FiMessageSquare,
   FiPaperclip,
   FiPhone,
+  FiRotateCcw,
 } from 'react-icons/fi';
 import { Button, Drawer, Dropdown, EmptyState, Input, Modal, Skeleton, Tabs } from '@/components/ui';
 import type { DropdownItem } from '@/components/ui';
 import { customersService, type CustomerDetail, type Stage, type StageKey } from '@/services/customersService';
 import { extractErrorMessage } from '@/utils/errors';
 import { ActivityTab } from './panel/ActivityTab';
+import { EditCustomerModal } from './EditCustomerModal';
 import { DetailsTab } from './panel/DetailsTab';
 import { DocumentsTab } from './panel/DocumentsTab';
 import { MailTab } from './panel/MailTab';
@@ -75,6 +79,7 @@ export function CustomerPanel({
   const [pickingDate, setPickingDate] = useState(false);
   // The status being saved: its menu waits until the board has caught up.
   const [savingStage, setSavingStage] = useState<StageKey | null>(null);
+  const [editing, setEditing] = useState(false);
   const detailKey = ['customers', 'detail', customerId];
   const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: detailKey,
@@ -126,6 +131,21 @@ export function CustomerPanel({
   const goTo = (next: string) => {
     setTab(next as PanelTab);
     setDocumentId(null);
+  };
+  const toggleArchive = async () => {
+    if (!customerId || !data) return;
+    try {
+      if (data.archived) {
+        await customersService.restore(customerId);
+        toast.success(`${data.name} restored`);
+      } else {
+        await customersService.archive(customerId);
+        toast.success(`${data.name} archived`);
+      }
+      await queryClient.invalidateQueries({ queryKey: ['customers'], exact: false, refetchType: 'active' });
+    } catch (err) {
+      toast.error(extractErrorMessage(err), { duration: 8_000 });
+    }
   };
 
   const counts = workspace.data;
@@ -238,10 +258,15 @@ export function CustomerPanel({
           onSelect: () => goTo('comments'),
         },
         { id: 'file', label: 'Upload file', icon: <FiPaperclip />, onSelect: () => goTo('files') },
+        { id: 'edit', label: 'Edit customer', icon: <FiEdit2 />, separatorBefore: true, onSelect: () => setEditing(true) },
+        data.archived
+          ? { id: 'restore', label: 'Restore', icon: <FiRotateCcw />, onSelect: () => void toggleArchive() }
+          : { id: 'archive', label: 'Archive', icon: <FiArchive />, danger: true, onSelect: () => void toggleArchive() },
       ]
     : [];
 
   return (
+    <>
     <Drawer
       open={!!customerId}
       onClose={onClose}
@@ -254,7 +279,12 @@ export function CustomerPanel({
           <>
             {data.company && <span className={styles.headCompany}>{data.company}</span>}
             <span>
-              {[data.owner ? `Owner: ${data.owner}` : '', data.sources.join(' + ')].filter(Boolean).join(' · ')}
+              {[
+                data.repName ?? data.owner ? `Customer Rep: ${data.repName ?? data.owner}` : '',
+                data.sources.join(' + '),
+              ]
+                .filter(Boolean)
+                .join(' · ')}
             </span>
           </>
         ) : isError ? undefined : (
@@ -409,6 +439,17 @@ export function CustomerPanel({
       )}
       <FollowUpDateDialog open={pickingDate} onClose={() => setPickingDate(false)} onPick={scheduleFollowUpOn} />
     </Drawer>
+    {editing && data && (
+      <EditCustomerModal
+        customer={data}
+        onClose={() => setEditing(false)}
+        onUpdated={() => {
+          setEditing(false);
+          void queryClient.invalidateQueries({ queryKey: ['customers'], exact: false, refetchType: 'active' });
+        }}
+      />
+    )}
+    </>
   );
 }
 

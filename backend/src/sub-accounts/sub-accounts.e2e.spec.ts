@@ -527,6 +527,59 @@ describe('Sub-accounts (real HTTP, real Mongo)', () => {
     });
   });
 
+  describe('profile photo', () => {
+    const PHOTO = `data:image/jpeg;base64,${'A'.repeat(4000)}`;
+
+    it('saves, returns and removes it, and it stays out of what loads on every request', async () => {
+      const person = await register('photo');
+      expect((await call('GET', '/users/me', person.token)).body.avatarUrl).toBeUndefined();
+
+      const saved = await call('PATCH', '/users/me', person.token, { avatar: PHOTO });
+      expect(saved.status).toBe(200);
+      expect(saved.body.avatarUrl).toBe(PHOTO);
+      expect((await call('GET', '/users/me', person.token)).body.avatarUrl).toBe(PHOTO);
+
+      expect((await users.findById(person.userId))!.avatar).toBeUndefined();
+      expect((await call('GET', '/users', person.token)).raw).not.toContain(PHOTO);
+
+      // Saving something else leaves it alone.
+      expect((await call('PATCH', '/users/me', person.token, { phone: '9876543210' })).body.avatarUrl).toBe(PHOTO);
+
+      const removed = await call('PATCH', '/users/me', person.token, { avatar: '' });
+      expect(removed.status).toBe(200);
+      expect(removed.body.avatarUrl).toBeUndefined();
+      expect((await call('GET', '/users/me', person.token)).body.avatarUrl).toBeUndefined();
+    });
+
+    it('refuses anything that isn’t a small PNG, JPEG or WebP', async () => {
+      const person = await register('photobad');
+      for (const avatar of ['data:image/svg+xml;base64,PHN2Zz4=', 'https://evil.example/x.png', 'data:text/html;base64,PHNjcmlwdD4=', `data:image/png;base64,${'A'.repeat(100_000)}`]) {
+        expect((await call('PATCH', '/users/me', person.token, { avatar })).status).toBe(400);
+      }
+      expect((await call('GET', '/users/me', person.token)).body.avatarUrl).toBeUndefined();
+    });
+
+    it('follows the person into a sub-account, and can be changed from there', async () => {
+      const main = await register('photomain');
+      const { body } = await call('POST', '/sub-accounts', main.token, subForm('photosub'));
+      await seedSubscription(body.id, 'active');
+      await call('PATCH', '/users/me', main.token, { avatar: PHOTO });
+      const inside = (await call('POST', '/organizations/switch', main.token, { organizationId: body.id })).body.accessToken;
+      expect((await call('GET', '/users/me', inside)).body.avatarUrl).toBe(PHOTO);
+
+      const next = `data:image/png;base64,${'B'.repeat(2000)}`;
+      expect((await call('PATCH', '/users/me', inside, { avatar: next })).body.avatarUrl).toBe(next);
+      expect((await call('GET', '/users/me', main.token)).body.avatarUrl).toBe(next);
+    });
+
+    it('is one person’s only: someone else in the same business doesn’t get it', async () => {
+      const main = await register('photoa');
+      const { accessToken } = await auth.issueSessionToken(await users.create({ email: email('photob'), name: 'B', organizationId: main.organizationId, roles: ['admin'] }), {});
+      await call('PATCH', '/users/me', main.token, { avatar: PHOTO });
+      expect((await call('GET', '/users/me', accessToken)).body.avatarUrl).toBeUndefined();
+    });
+  });
+
   describe('dashboard and read-only views', () => {
     it('reports status and billing, never credentials or secrets', async () => {
       const main = await register('dashmain');

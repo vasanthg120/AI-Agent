@@ -3,6 +3,7 @@ import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { AuthModule } from '../auth/auth.module';
 import { CloudFilesModule } from '../cloud-files/cloud-files.module';
+import { IntegrationsModule } from '../integrations/integrations.module';
 import { UsersModule } from '../users/users.module';
 import { OutlookController } from './outlook.controller';
 import { OutlookConnection, OutlookConnectionSchema } from './schemas/outlook-connection.schema';
@@ -23,6 +24,10 @@ import { OutlookService } from './outlook.service';
     // Needed for listOrgAccounts()'s owner name/email lookup (org-wide
     // account visibility) — unrelated to OAuth app credentials, kept.
     UsersModule,
+    // resolveOAuthAppCredentials/saveOAuthAppCredentials — the platform
+    // Azure App Registration's Client ID/Secret, same mechanism
+    // GmailModule already uses for its own OAuth app.
+    IntegrationsModule,
     // OneDrive connections come back through this module's callback (the return address already registered with Microsoft).
     CloudFilesModule,
   ],

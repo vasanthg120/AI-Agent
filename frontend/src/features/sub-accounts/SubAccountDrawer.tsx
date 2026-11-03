@@ -6,6 +6,7 @@ import { Button, CopyableText, Drawer, Input, Switch } from '@/components/ui';
 import { PhoneNumberField } from '@/features/calling/PhoneNumberField';
 import { subAccountsService, type CreatedSubAccount, type SubAccountDetails } from '@/services/subAccountsService';
 import { extractErrorMessage } from '@/utils/errors';
+import { IMAGE_UPLOAD_TYPES, shrinkImage } from '@/utils/shrinkImage';
 import { DEVICE_TIMEZONE, TIMEZONE_GROUPS, isKnownTimezone } from '@/utils/timezones';
 import { ACCOUNTS_QUERY_KEY } from './useAccounts';
 import { AccountLogo } from './subAccountParts';
@@ -13,7 +14,6 @@ import styles from './SubAccountDrawer.module.css';
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const LOGO_SIZE = 128;
-const LOGO_TYPES = ['image/png', 'image/jpeg', 'image/webp'];
 
 // The usual choices first; any other ISO code is still accepted by the server.
 const CURRENCIES = ['INR', 'USD', 'AUD', 'EUR', 'GBP', 'AED', 'SGD', 'CAD', 'NZD', 'ZAR', 'MYR', 'SAR', 'JPY'];
@@ -72,34 +72,6 @@ function formFrom(account: SubAccountDetails): FormState {
   };
 }
 
-/** Shrinks a picked image in the browser, so a logo is always small enough to keep
- * with the business and is re-encoded rather than stored as uploaded. */
-function shrinkLogo(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const url = URL.createObjectURL(file);
-    const image = new Image();
-    image.onload = () => {
-      URL.revokeObjectURL(url);
-      const scale = Math.min(LOGO_SIZE / image.width, LOGO_SIZE / image.height, 1);
-      const canvas = document.createElement('canvas');
-      canvas.width = Math.max(1, Math.round(image.width * scale));
-      canvas.height = Math.max(1, Math.round(image.height * scale));
-      const context = canvas.getContext('2d');
-      if (!context) {
-        reject(new Error('This browser couldn’t read that image.'));
-        return;
-      }
-      context.drawImage(image, 0, 0, canvas.width, canvas.height);
-      resolve(canvas.toDataURL('image/png'));
-    };
-    image.onerror = () => {
-      URL.revokeObjectURL(url);
-      reject(new Error('That file couldn’t be read as an image.'));
-    };
-    image.src = url;
-  });
-}
-
 export interface SubAccountDrawerProps {
   open: boolean;
   onClose: () => void;
@@ -142,12 +114,12 @@ export function SubAccountDrawer({ open, onClose, account, onSaved }: SubAccount
 
   const pickLogo = async (file?: File) => {
     if (!file) return;
-    if (!LOGO_TYPES.includes(file.type)) {
+    if (!IMAGE_UPLOAD_TYPES.includes(file.type)) {
       toast.error('Choose a PNG, JPEG or WebP image.');
       return;
     }
     try {
-      set('logo', await shrinkLogo(file));
+      set('logo', await shrinkImage(file, { size: LOGO_SIZE }));
     } catch (err) {
       toast.error(extractErrorMessage(err));
     }
@@ -257,7 +229,7 @@ export function SubAccountDrawer({ open, onClose, account, onSaved }: SubAccount
             <input
               ref={fileRef}
               type="file"
-              accept={LOGO_TYPES.join(',')}
+              accept={IMAGE_UPLOAD_TYPES.join(',')}
               hidden
               onChange={(e) => {
                 void pickLogo(e.target.files?.[0]);

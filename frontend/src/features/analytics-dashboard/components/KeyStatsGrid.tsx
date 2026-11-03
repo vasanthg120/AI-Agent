@@ -40,7 +40,7 @@ export interface KeyStatsGridProps {
 // that comes from the CRM and none carries a due date, so it showed
 // everything quoted as though it were owed. It is now the pipeline of the
 // chosen period — open deals expected to close in it — which is the same
-// figure the "Overall Pipeline — All Months" section shows for that month.
+// figure the "Overall Pipeline" section shows for that month.
 export function KeyStatsGrid({ deals, businessHealthScore, revenueTrend, dateFrom, dateTo, storeId, onDealsClick }: KeyStatsGridProps) {
   const [openDrilldown, setOpenDrilldown] = useState<OpenDrilldown>(null);
 

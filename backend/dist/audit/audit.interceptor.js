@@ -36,6 +36,7 @@ let AuditInterceptor = class AuditInterceptor {
                 statusCode,
                 durationMs: Date.now() - start,
                 ip: request.ip,
+                ...(request.user?.loginUserId ? { metadata: { loginUserId: request.user.loginUserId } } : {}),
             });
         };
         return next.handle().pipe((0, rxjs_1.tap)(() => record(context.switchToHttp().getResponse().statusCode)), (0, rxjs_1.catchError)((err) => {

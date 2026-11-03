@@ -177,6 +177,13 @@ export class User {
   @Prop({ type: Object, default: {} })
   preferences: Record<string, unknown>;
 
+  // Profile photo: a small image as a data URL (see UpdateProfileDto.avatar). Not
+  // loaded unless asked for, because this document is read on every request and
+  // the photo is many times larger than everything else on it. It belongs to the
+  // person, so a member record has none of its own: see UsersService.avatarOf.
+  @Prop({ select: false })
+  avatar?: string;
+
   // Informational only today — nothing currently gates login or feature
   // access on this being true. Set once the user completes the OTP flow
   // sent at registration (see AuthService.register/verifyEmail).

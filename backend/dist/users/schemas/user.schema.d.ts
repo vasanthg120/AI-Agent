@@ -25,6 +25,10 @@ export declare class TwoFactorBackupCode {
 }
 export declare class User {
     email: string;
+    linkedLoginUserId?: string;
+    isLogin: boolean;
+    inviteTokenHash?: string;
+    inviteExpiresAt?: Date;
     passwordHash?: string;
     name: string;
     organizationId: string;
@@ -36,6 +40,7 @@ export declare class User {
     voiceAccessEnabled: boolean;
     aiAccessEnabled: boolean;
     preferences: Record<string, unknown>;
+    avatar?: string;
     emailVerified: boolean;
     verifyOtpHash?: string;
     verifyOtpExpiresAt?: Date;

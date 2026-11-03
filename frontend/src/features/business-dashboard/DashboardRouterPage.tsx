@@ -1,3 +1,5 @@
+import { Skeleton } from '@/components/ui';
+import { useAccounts } from '@/features/sub-accounts/useAccounts';
 import { useAuthStore } from '@/stores/authStore';
 import { hasRole } from '@/utils/roles';
 import { DashboardPage as AgentWorkforceDashboardPage } from '@/features/dashboard/DashboardPage';
@@ -20,8 +22,17 @@ import { AnalyticsDashboardPage } from '@/features/analytics-dashboard/Analytics
 // account) keep falling back to the original AI-workforce dashboard.
 export function DashboardRouterPage() {
   const user = useAuthStore((s) => s.user);
+  const { data: accounts, isLoading } = useAccounts();
 
   if (hasRole(user, 'owner') || hasRole(user, 'manager') || hasRole(user, 'consultant')) {
+    return <AnalyticsDashboardPage />;
+  }
+  // Waits for the answer below rather than opening the wrong dashboard for a moment.
+  if (isLoading) return <Skeleton height={320} />;
+  // Someone who has entered from their Main Account is there to see how that business
+  // is doing, so they get the dashboard its own owner gets. Their role there is 'admin'
+  // only because 'owner' belongs to the business's own owner.
+  if (accounts && accounts.currentOrganizationId !== accounts.homeOrganizationId) {
     return <AnalyticsDashboardPage />;
   }
   return <AgentWorkforceDashboardPage />;

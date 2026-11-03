@@ -93,6 +93,15 @@ def _message_for(status: int, body: dict | None) -> str:
 
 class GorillaDashClient:
     def __init__(self, organization_id: str | None, *, session=requests):
+        if not organization_id:
+            # credentials_for()/integration_store.get_credentials() do an
+            # org-unscoped Mongo lookup when organization_id is falsy (that
+            # fallback exists for genuinely global, pre-multi-tenant
+            # singleton credentials) — refuse here rather than let a caller
+            # with no real org context (e.g. a misconfigured tool context)
+            # silently receive whichever organization's Gorilla Dash
+            # credentials happen to sort first in integration_credentials.
+            raise GorillaDashError("Gorilla Dash isn't connected. An administrator can connect it in Settings → Data Sources.")
         creds = credentials_for(organization_id)
         if not creds:
             raise GorillaDashError("Gorilla Dash isn't connected. An administrator can connect it in Settings → Data Sources.")

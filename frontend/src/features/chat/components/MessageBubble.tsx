@@ -53,6 +53,7 @@ export function MessageBubble({ message, isLast }: MessageBubbleProps) {
       <Avatar
         className={styles.avatar}
         name={isUser ? `${user?.firstName ?? 'You'} ${user?.lastName ?? ''}` : 'HaiVE AI'}
+        src={isUser ? user?.avatarUrl : undefined}
         color={isUser ? undefined : 'var(--brand-accent-secondary)'}
         size="sm"
       />

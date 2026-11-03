@@ -62,6 +62,15 @@ export interface CustomerTask {
   jobNumber?: string;
 }
 
+// Hoops-parity Tasks tab — the one cross-customer view this collection
+// never needed before (every other caller already has one customer in
+// hand). Reuses TASKS_COLLECTION and CustomerDirectoryService.namesByIds
+// exactly as-is; no new task system.
+export interface CrossCustomerTask extends CustomerTask {
+  customerId: string;
+  customerName: string;
+}
+
 export interface CustomerFile {
   id: string;
   name: string;
@@ -405,6 +414,26 @@ export class CustomerWorkspaceService {
       throw new ForbiddenException('Only the person who added a task, or an administrator, can delete it.');
     await this.connection.collection(TASKS_COLLECTION).deleteOne(filter);
     this.directory.invalidate(caller.organizationId);
+  }
+
+  /** The Tasks tab: every task across every customer/job the caller can see — the same
+   * TASKS_COLLECTION every other task call here already reads, just without one customer's
+   * identity keys narrowing it first. `mine` narrows to tasks the caller created or was
+   * assigned; omitted shows the org's shared board, same convention as /tasks's own `mine` flag. */
+  async listAllTasks(caller: JwtPayload, options: { status?: 'open' | 'done'; mine?: boolean } = {}): Promise<CrossCustomerTask[]> {
+    const organizationId = caller.organizationId;
+    const filter: Doc = { organizationId };
+    if (options.status) filter.status = options.status;
+    if (options.mine) filter.$or = [{ createdBy: caller.sub }, { assigneeId: caller.sub }];
+    const docs = await this.connection.collection(TASKS_COLLECTION).find(filter).sort({ createdAt: -1 }).limit(LIST_LIMIT).toArray();
+    const team = await this.team(organizationId);
+    const customerIds = [...new Set(docs.map((d) => text(d.customerId)).filter(Boolean))];
+    const names = await this.directory.namesByIds(organizationId, customerIds);
+    return docs.map((doc) => ({
+      ...this.task(doc, team, caller.sub),
+      customerId: text(doc.customerId),
+      customerName: names.get(text(doc.customerId)) ?? 'Unknown customer',
+    }));
   }
 
   // ---- files -------------------------------------------------------------------------

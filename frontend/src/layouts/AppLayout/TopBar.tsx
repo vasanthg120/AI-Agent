@@ -116,7 +116,7 @@ export function TopBar({ onMenuClick }: TopBarProps) {
           onClick={() => navigate(ROUTES.profile)}
           aria-label="Profile"
         >
-          <Avatar name={user ? `${user.firstName} ${user.lastName}` : 'User'} size="sm" />
+          <Avatar name={user ? `${user.firstName} ${user.lastName}` : 'User'} src={user?.avatarUrl} size="sm" />
         </button>
       </div>
     </header>

@@ -65,9 +65,10 @@ export class ReservationService {
    * user's own id. Exposed here so callers that reserve() directly with a
    * real organizationId (business knowledge, email intelligence, finance,
    * customer activity) draw from the exact same wallet as chat and the
-   * Billing page — which, with BILLING_ORG_SCOPED_WALLETS left at its
-   * documented `false` default, is the per-user wallet — instead of a
-   * separate org-keyed wallet the Billing UI never shows or lets top up. */
+   * Billing page — with BILLING_ORG_SCOPED_WALLETS left at its default
+   * `true`, that's the shared organization wallet every authorized user
+   * draws from; only a deployment that's explicitly opted back to per-user
+   * wallets (pending migration) gets a separate wallet per caller here. */
   /** A sub-account pays for itself: with no live subscription its AI stops, even
    * with credits left, including chat and background work that never pass through
    * SubscriptionLockInterceptor. Main Accounts aren't affected. */

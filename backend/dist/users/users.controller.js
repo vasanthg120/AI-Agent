@@ -21,10 +21,12 @@ const current_user_decorator_1 = require("../common/decorators/current-user.deco
 const create_user_dto_1 = require("./dto/create-user.dto");
 const update_user_dto_1 = require("./dto/update-user.dto");
 const update_profile_dto_1 = require("./dto/update-profile.dto");
+const invitations_service_1 = require("./invitations.service");
 const users_service_1 = require("./users.service");
 let UsersController = class UsersController {
-    constructor(usersService) {
+    constructor(usersService, invitations) {
         this.usersService = usersService;
+        this.invitations = invitations;
     }
     async me(user) {
         return this.usersService.profile(user.sub);
@@ -33,11 +35,19 @@ let UsersController = class UsersController {
         return this.usersService.updateOwnProfile(user.sub, dto);
     }
     async list(caller) {
-        const users = await this.usersService.findAll(caller.organizationId);
+        const users = await this.usersService.findAllWithLinkedMembers(caller.organizationId);
         return users.map((u) => this.usersService.toPublic(u));
     }
-    create(caller, dto) {
-        return this.usersService.createByAdmin(dto, caller.organizationId);
+    async create(caller, dto) {
+        const created = await this.usersService.createByAdmin(dto, caller.organizationId);
+        if (!dto.sendInvite)
+            return created;
+        const { activationLink } = await this.invitations.inviteById(created.user.id, caller.organizationId);
+        return { ...created, activationLink };
+    }
+    async resendInvitation(caller, id) {
+        const { activationLink } = await this.invitations.inviteById(id, caller.organizationId);
+        return { activationLink };
     }
     update(caller, id, dto) {
         if (id === caller.sub && (dto.active === false || (dto.role && dto.role !== 'admin'))) {
@@ -85,8 +95,18 @@ __decorate([
     __param(1, (0, common_1.Body)()),
     __metadata("design:type", Function),
     __metadata("design:paramtypes", [Object, create_user_dto_1.CreateUserDto]),
-    __metadata("design:returntype", void 0)
+    __metadata("design:returntype", Promise)
 ], UsersController.prototype, "create", null);
+__decorate([
+    (0, common_1.Post)(':id/resend-invitation'),
+    (0, common_1.UseGuards)(roles_guard_1.RolesGuard),
+    (0, roles_decorator_1.Roles)('admin'),
+    __param(0, (0, current_user_decorator_1.CurrentUser)()),
+    __param(1, (0, common_1.Param)('id')),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, String]),
+    __metadata("design:returntype", Promise)
+], UsersController.prototype, "resendInvitation", null);
 __decorate([
     (0, common_1.Patch)(':id'),
     (0, common_1.UseGuards)(roles_guard_1.RolesGuard),
@@ -111,6 +131,7 @@ __decorate([
 exports.UsersController = UsersController = __decorate([
     (0, common_1.UseGuards)(jwt_auth_guard_1.JwtAuthGuard),
     (0, common_1.Controller)('users'),
-    __metadata("design:paramtypes", [users_service_1.UsersService])
+    __metadata("design:paramtypes", [users_service_1.UsersService,
+        invitations_service_1.InvitationsService])
 ], UsersController);
 //# sourceMappingURL=users.controller.js.map

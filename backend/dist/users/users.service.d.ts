@@ -1,5 +1,6 @@
 import { Model, Types } from 'mongoose';
 import { AgentRoleDocument } from '../agent-roles/schemas/agent-role.schema';
+import type { JwtPayload } from '../auth/jwt-payload.interface';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { UpdateProfileDto } from './dto/update-profile.dto';
@@ -18,8 +19,42 @@ export declare class UsersService {
     }> & {
         __v: number;
     }) | null>;
+    emailInUse(email: string): Promise<boolean>;
+    resolveSession(payload: Pick<JwtPayload, 'sub' | 'jti' | 'loginUserId'>): Promise<{
+        user: UserDocument;
+        login: UserDocument;
+    } | null>;
+    findLinkedMember(loginUserId: string, organizationId: string): Promise<(import("mongoose").Document<unknown, {}, UserDocument, {}, {}> & User & import("mongoose").Document<Types.ObjectId, any, any, Record<string, any>, {}> & Required<{
+        _id: Types.ObjectId;
+    }> & {
+        __v: number;
+    }) | null>;
+    findLinkedMembersOfLogin(loginUserId: string): Promise<(import("mongoose").Document<unknown, {}, UserDocument, {}, {}> & User & import("mongoose").Document<Types.ObjectId, any, any, Record<string, any>, {}> & Required<{
+        _id: Types.ObjectId;
+    }> & {
+        __v: number;
+    })[]>;
+    createLinkedMember(login: UserDocument, organizationId: string, role: string, storeId?: string): Promise<import("mongoose").Document<unknown, {}, UserDocument, {}, {}> & User & import("mongoose").Document<Types.ObjectId, any, any, Record<string, any>, {}> & Required<{
+        _id: Types.ObjectId;
+    }> & {
+        __v: number;
+    }>;
+    removeLinkedMember(loginUserId: string, organizationId: string): Promise<boolean>;
+    setInvitation(userId: string, inviteTokenHash: string, inviteExpiresAt: Date): Promise<import("mongoose").UpdateWriteOpResult>;
+    findByInvitation(inviteTokenHash: string): Promise<(import("mongoose").Document<unknown, {}, UserDocument, {}, {}> & User & import("mongoose").Document<Types.ObjectId, any, any, Record<string, any>, {}> & Required<{
+        _id: Types.ObjectId;
+    }> & {
+        __v: number;
+    }) | null>;
+    consumeInvitation(inviteTokenHash: string, passwordHash: string): Promise<(import("mongoose").Document<unknown, {}, UserDocument, {}, {}> & User & import("mongoose").Document<Types.ObjectId, any, any, Record<string, any>, {}> & Required<{
+        _id: Types.ObjectId;
+    }> & {
+        __v: number;
+    }) | null>;
+    organizationName(organizationId: string): Promise<string>;
     findIdsByOrgAndStore(organizationId: string, storeId: string): Promise<string[]>;
     findAll(organizationId: string): Promise<UserDocument[]>;
+    findAllWithLinkedMembers(organizationId: string): Promise<UserDocument[]>;
     findTeamRoster(organizationId: string): Promise<UserDocument[]>;
     create(data: {
         email: string;
@@ -52,6 +87,7 @@ export declare class UsersService {
     profile(userId: string): Promise<{
         features: string[] | undefined;
         aiRoleName: string | undefined;
+        avatarUrl: string | undefined;
         id: string;
         email: string;
         name: string;
@@ -63,11 +99,14 @@ export declare class UsersService {
         active: boolean;
         voiceAccessEnabled: boolean;
         aiAccessEnabled: boolean;
+        linkedFromMain: boolean;
+        pendingInvitation: boolean;
         phone: string | undefined;
         timezone: string | undefined;
         language: string | undefined;
         createdAt: Date | undefined;
     } | null>;
+    private avatarOf;
     createByAdmin(dto: CreateUserDto, organizationId: string): Promise<{
         user: {
             id: string;
@@ -81,12 +120,14 @@ export declare class UsersService {
             active: boolean;
             voiceAccessEnabled: boolean;
             aiAccessEnabled: boolean;
+            linkedFromMain: boolean;
+            pendingInvitation: boolean;
             phone: string | undefined;
             timezone: string | undefined;
             language: string | undefined;
             createdAt: Date | undefined;
         };
-        tempPassword: string;
+        tempPassword: string | undefined;
     }>;
     updateByAdmin(id: string, dto: UpdateUserDto, organizationId: string, callerId?: string): Promise<{
         id: string;
@@ -100,6 +141,8 @@ export declare class UsersService {
         active: boolean;
         voiceAccessEnabled: boolean;
         aiAccessEnabled: boolean;
+        linkedFromMain: boolean;
+        pendingInvitation: boolean;
         phone: string | undefined;
         timezone: string | undefined;
         language: string | undefined;
@@ -107,6 +150,7 @@ export declare class UsersService {
     }>;
     deleteByAdmin(id: string, organizationId: string): Promise<void>;
     updateOwnProfile(userId: string, dto: UpdateProfileDto): Promise<{
+        avatarUrl: string | undefined;
         id: string;
         email: string;
         name: string;
@@ -118,6 +162,8 @@ export declare class UsersService {
         active: boolean;
         voiceAccessEnabled: boolean;
         aiAccessEnabled: boolean;
+        linkedFromMain: boolean;
+        pendingInvitation: boolean;
         phone: string | undefined;
         timezone: string | undefined;
         language: string | undefined;
@@ -136,6 +182,8 @@ export declare class UsersService {
         active: boolean;
         voiceAccessEnabled: boolean;
         aiAccessEnabled: boolean;
+        linkedFromMain: boolean;
+        pendingInvitation: boolean;
         phone: string | undefined;
         timezone: string | undefined;
         language: string | undefined;

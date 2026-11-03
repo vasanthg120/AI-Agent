@@ -2,13 +2,16 @@ import { JwtPayload } from '../auth/jwt-payload.interface';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { UpdateProfileDto } from './dto/update-profile.dto';
+import { InvitationsService } from './invitations.service';
 import { UsersService } from './users.service';
 export declare class UsersController {
     private usersService;
-    constructor(usersService: UsersService);
+    private invitations;
+    constructor(usersService: UsersService, invitations: InvitationsService);
     me(user: JwtPayload): Promise<{
         features: string[] | undefined;
         aiRoleName: string | undefined;
+        avatarUrl: string | undefined;
         id: string;
         email: string;
         name: string;
@@ -20,12 +23,15 @@ export declare class UsersController {
         active: boolean;
         voiceAccessEnabled: boolean;
         aiAccessEnabled: boolean;
+        linkedFromMain: boolean;
+        pendingInvitation: boolean;
         phone: string | undefined;
         timezone: string | undefined;
         language: string | undefined;
         createdAt: Date | undefined;
     } | null>;
     updateMe(user: JwtPayload, dto: UpdateProfileDto): Promise<{
+        avatarUrl: string | undefined;
         id: string;
         email: string;
         name: string;
@@ -37,6 +43,8 @@ export declare class UsersController {
         active: boolean;
         voiceAccessEnabled: boolean;
         aiAccessEnabled: boolean;
+        linkedFromMain: boolean;
+        pendingInvitation: boolean;
         phone: string | undefined;
         timezone: string | undefined;
         language: string | undefined;
@@ -54,6 +62,8 @@ export declare class UsersController {
         active: boolean;
         voiceAccessEnabled: boolean;
         aiAccessEnabled: boolean;
+        linkedFromMain: boolean;
+        pendingInvitation: boolean;
         phone: string | undefined;
         timezone: string | undefined;
         language: string | undefined;
@@ -72,12 +82,39 @@ export declare class UsersController {
             active: boolean;
             voiceAccessEnabled: boolean;
             aiAccessEnabled: boolean;
+            linkedFromMain: boolean;
+            pendingInvitation: boolean;
             phone: string | undefined;
             timezone: string | undefined;
             language: string | undefined;
             createdAt: Date | undefined;
         };
-        tempPassword: string;
+        tempPassword: string | undefined;
+    } | {
+        activationLink: string | undefined;
+        user: {
+            id: string;
+            email: string;
+            name: string;
+            organizationId: string;
+            storeId: string | undefined;
+            roles: string[];
+            assignedAgentId: string | undefined;
+            department: string | undefined;
+            active: boolean;
+            voiceAccessEnabled: boolean;
+            aiAccessEnabled: boolean;
+            linkedFromMain: boolean;
+            pendingInvitation: boolean;
+            phone: string | undefined;
+            timezone: string | undefined;
+            language: string | undefined;
+            createdAt: Date | undefined;
+        };
+        tempPassword: string | undefined;
+    }>;
+    resendInvitation(caller: JwtPayload, id: string): Promise<{
+        activationLink: string | undefined;
     }>;
     update(caller: JwtPayload, id: string, dto: UpdateUserDto): Promise<{
         id: string;
@@ -91,6 +128,8 @@ export declare class UsersController {
         active: boolean;
         voiceAccessEnabled: boolean;
         aiAccessEnabled: boolean;
+        linkedFromMain: boolean;
+        pendingInvitation: boolean;
         phone: string | undefined;
         timezone: string | undefined;
         language: string | undefined;

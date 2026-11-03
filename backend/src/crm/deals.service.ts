@@ -41,7 +41,7 @@ export class DealsService {
   async assignOwnerBulk(ids: string[], organizationId: string, ownerId: string | null, storeId?: string): Promise<{ requested: number; assigned: number }> {
     const unique = [...new Set(ids)];
     const filter = { _id: { $in: unique }, organizationId, ...(storeId ? { storeId } : {}) };
-    const update = ownerId ? { $set: { ownerId } } : { $unset: { ownerId: '' } };
+    const update = ownerId ? { $set: { ownerId, ownerAssignedManually: true } } : { $unset: { ownerId: '', ownerAssignedManually: '' } };
     const result = await this.dealModel.updateMany(filter, update).exec();
     return { requested: unique.length, assigned: result.matchedCount };
   }

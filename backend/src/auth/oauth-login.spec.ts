@@ -53,7 +53,8 @@ describe('Google/Microsoft/GitHub Sign-In (OAuthService + AuthService.loginWithO
     const mail = { sendWelcomeEmail: jest.fn().mockResolvedValue(undefined) };
     const audit = { log: jest.fn() };
 
-    authService = new AuthService(usersService, organizationsService, jwt, mail as never, audit as never);
+    // Invitations are only used by the invite describe/accept endpoints, never by OAuth sign-in.
+    authService = new AuthService(usersService, organizationsService, jwt, mail as never, audit as never, {} as never);
     const http = { post: jest.fn(), get: jest.fn() };
     const config = {
       // OAuthService.providerConfig() reads the whole `oauth.<provider>`

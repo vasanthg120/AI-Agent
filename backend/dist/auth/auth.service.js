@@ -50,19 +50,23 @@ const bcrypt = __importStar(require("bcrypt"));
 const audit_service_1 = require("../audit/audit.service");
 const mail_service_1 = require("../mail/mail.service");
 const organizations_service_1 = require("../organizations/organizations.service");
+const organization_schema_1 = require("../organizations/schemas/organization.schema");
+const invitations_service_1 = require("../users/invitations.service");
 const users_service_1 = require("../users/users.service");
+const jwt_payload_interface_1 = require("./jwt-payload.interface");
 const session_meta_util_1 = require("./session-meta.util");
 const SALT_ROUNDS = 12;
 const VERIFY_OTP_TTL_MS = 10 * 60 * 1000;
 const RESET_OTP_TTL_MS = 15 * 60 * 1000;
 const GENERIC_OTP_ERROR = 'Invalid or expired code';
 let AuthService = class AuthService {
-    constructor(usersService, organizationsService, jwtService, mailService, auditService) {
+    constructor(usersService, organizationsService, jwtService, mailService, auditService, invitations) {
         this.usersService = usersService;
         this.organizationsService = organizationsService;
         this.jwtService = jwtService;
         this.mailService = mailService;
         this.auditService = auditService;
+        this.invitations = invitations;
     }
     async register(email, password, name, organizationName, meta = {}) {
         const existing = await this.usersService.findByEmail(email);
@@ -216,6 +220,63 @@ let AuthService = class AuthService {
         };
         return { accessToken: this.jwtService.sign(payload) };
     }
+    async switchAccount(caller, organizationId, ip) {
+        if (caller.authMethod !== 'session' || !caller.jti) {
+            throw new common_1.ForbiddenException('Switching accounts requires a full login session.');
+        }
+        const loginId = (0, jwt_payload_interface_1.loginIdOf)(caller);
+        const login = await this.usersService.findById(loginId);
+        if (!login || login.active === false)
+            throw new common_1.UnauthorizedException();
+        const target = login.organizationId === organizationId ? login : await this.usersService.findLinkedMember(loginId, organizationId);
+        if (!target || target.active === false)
+            throw new common_1.ForbiddenException('You don’t have access to this account.');
+        const org = await this.organizationsService.findOrgStatus(organizationId);
+        if (!org || (0, organization_schema_1.isOrganizationBlocked)(org.status))
+            throw new common_1.ForbiddenException('This account is suspended or archived.');
+        const payload = {
+            sub: target._id.toString(),
+            email: target.email,
+            roles: target.roles,
+            organizationId: target.organizationId,
+            storeId: target.storeId,
+            assignedAgentId: target.assignedAgentId,
+            department: target.department,
+            jti: caller.jti,
+            ...(target.linkedLoginUserId ? { loginUserId: loginId } : {}),
+        };
+        const secondsLeft = caller.exp ? caller.exp - Math.floor(Date.now() / 1000) : 0;
+        const accessToken = secondsLeft > 0 ? this.jwtService.sign(payload, { expiresIn: secondsLeft }) : this.jwtService.sign(payload);
+        void this.auditService.log({
+            userId: loginId,
+            organizationId,
+            method: 'POST',
+            route: '/organizations/switch',
+            statusCode: 200,
+            durationMs: 0,
+            ip,
+            action: 'account.switch',
+            metadata: { fromOrganizationId: caller.organizationId, toOrganizationId: organizationId },
+        });
+        return { accessToken };
+    }
+    describeInvitation(token) {
+        return this.invitations.describe(token);
+    }
+    async acceptInvitation(token, password, meta = {}) {
+        const user = await this.invitations.accept(token, password);
+        void this.auditService.log({
+            userId: user._id.toString(),
+            organizationId: user.organizationId,
+            method: 'POST',
+            route: '/auth/invitation/accept',
+            statusCode: 200,
+            durationMs: 0,
+            ip: meta.ip,
+            action: 'invitation.accept',
+        });
+        return this.issueSessionToken(user, meta);
+    }
     buildChallengeToken(user) {
         return this.jwtService.sign({ sub: user._id.toString(), purpose: 'login-2fa-challenge' }, { expiresIn: '5m' });
     }
@@ -237,7 +298,8 @@ exports.AuthService = AuthService = __decorate([
         organizations_service_1.OrganizationsService,
         jwt_1.JwtService,
         mail_service_1.MailService,
-        audit_service_1.AuditService])
+        audit_service_1.AuditService,
+        invitations_service_1.InvitationsService])
 ], AuthService);
 function generateOtp() {
     return String((0, crypto_1.randomInt)(100_000, 1_000_000));

@@ -43,6 +43,7 @@ interface BackendUserProfile {
   timezone?: string;
   language?: string;
   createdAt?: string;
+  avatarUrl?: string;
 }
 
 function toUser(profile: BackendUserProfile): User {
@@ -57,6 +58,7 @@ function toUser(profile: BackendUserProfile): User {
     aiRoleName: profile.aiRoleName,
     features: profile.features,
     department: profile.department,
+    avatarUrl: profile.avatarUrl,
     phone: profile.phone,
     timezone: profile.timezone ?? Intl.DateTimeFormat().resolvedOptions().timeZone,
     language: profile.language ?? 'en-US',

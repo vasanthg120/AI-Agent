@@ -50,7 +50,8 @@ let ChatController = class ChatController {
     sendMessage(user, req, dto) {
         this.assertAiAccessAllowed(user);
         const bearerToken = (req.headers.authorization ?? '').replace(/^Bearer\s+/i, '');
-        const agentId = dto.agentId ?? (user.roles.includes('agent_user') ? user.assignedAgentId : undefined);
+        const isLockedAgentUser = user.roles.includes('agent_user') && !user.roles.includes('admin');
+        const agentId = isLockedAgentUser ? user.assignedAgentId : dto.agentId;
         return this.chatService.sendMessage(user.sub, user.organizationId, bearerToken, dto.message, dto.conversationId, agentId, dto.attachmentIds);
     }
     assertAiAccessAllowed(user) {

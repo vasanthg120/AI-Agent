@@ -32,6 +32,12 @@ import { DataSourcesModule } from './data-sources/data-sources.module';
 import { GorillaDashModule } from './gorilladash/gorilladash.module';
 import { ZapierModule } from './zapier/zapier.module';
 import { CrmIntegrationsModule } from './crm-integrations/crm-integrations.module';
+import { ZohoModule } from './zoho/zoho.module';
+import { ZohoBooksModule } from './zohobooks/zohobooks.module';
+import { XeroModule } from './xero/xero.module';
+import { ZohoPayrollModule } from './zohopayroll/zohopayroll.module';
+import { MyobModule } from './myob/myob.module';
+import { SalesforceModule } from './salesforce/salesforce.module';
 import { CustomerIntelligenceModule } from './customer-intelligence/customer-intelligence.module';
 import { CloudFilesModule } from './cloud-files/cloud-files.module';
 import { CallCopilotModule } from './call-copilot/call-copilot.module';
@@ -97,6 +103,12 @@ import { HealthController } from './health/health.controller';
     GorillaDashModule,
     ZapierModule,
     CrmIntegrationsModule,
+    ZohoModule,
+    ZohoBooksModule,
+    ZohoPayrollModule,
+    XeroModule,
+    MyobModule,
+    SalesforceModule,
     CustomerIntelligenceModule,
     CloudFilesModule,
     CallCopilotModule,

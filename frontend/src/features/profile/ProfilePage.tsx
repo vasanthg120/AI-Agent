@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import { AnimatePresence, motion } from 'framer-motion';
 import clsx from 'clsx';
@@ -8,6 +8,7 @@ import {
   FiBell,
   FiBriefcase,
   FiCalendar,
+  FiCamera,
   FiCheck,
   FiChevronRight,
   FiClock,
@@ -23,13 +24,14 @@ import {
   FiUser,
   FiVolume2,
 } from 'react-icons/fi';
-import { Avatar, Button, Input, PageHeader } from '@/components/ui';
+import { Avatar, Button, Input, PageHeader, Spinner } from '@/components/ui';
 import { useAuthStore } from '@/stores/authStore';
 import { authService } from '@/services/authService';
 import { organizationsService } from '@/services/organizationsService';
 import { ROUTES } from '@/constants/routes';
 import { dayjs } from '@/utils/date';
 import { extractErrorMessage } from '@/utils/errors';
+import { IMAGE_UPLOAD_TYPES, shrinkImage } from '@/utils/shrinkImage';
 import { DEVICE_TIMEZONE, TIMEZONE_GROUPS, timeIn } from '@/utils/timezones';
 import type { User } from '@/types';
 import { SettingsSection, SettingsField } from '@/features/settings/components/SettingsSection';
@@ -49,6 +51,9 @@ const LANGUAGES: { value: string; label: string }[] = [
 ];
 
 const PHONE_PATTERN = /^\+?[0-9 ()-]{5,}$/;
+// Twice its size on screen, so it stays sharp on high-resolution displays.
+const PHOTO_SIZE = 256;
+const MAX_PHOTO_FILE_BYTES = 15 * 1024 * 1024;
 function roleLabel(role: string): string {
   return role.replace(/_/g, ' ').replace(/^\w/, (c) => c.toUpperCase());
 }
@@ -86,6 +91,45 @@ export function ProfilePage() {
   const [baseline, setBaseline] = useState<User | null>(storeUser);
   const [draft, setDraft] = useState<Draft | null>(storeUser ? draftFrom(storeUser) : null);
   const [saving, setSaving] = useState(false);
+  const queryClient = useQueryClient();
+  const [photoBusy, setPhotoBusy] = useState(false);
+  const photoInput = useRef<HTMLInputElement>(null);
+
+  // Saved straight away, separately from the form below: choosing a photo is a
+  // finished action, and it mustn't touch any edits still being typed there.
+  const savePhoto = async (avatar: string, done: string) => {
+    setPhotoBusy(true);
+    try {
+      const saved = await authService.updateMe({ avatar });
+      useAuthStore.setState((s) => ({ user: s.user ? { ...s.user, avatarUrl: saved.avatarUrl } : saved }));
+      setBaseline((current) => (current ? { ...current, avatarUrl: saved.avatarUrl } : saved));
+      queryClient.setQueryData(['me'], saved);
+      toast.success(done);
+    } catch (error) {
+      toast.error(extractErrorMessage(error));
+    } finally {
+      setPhotoBusy(false);
+    }
+  };
+
+  const pickPhoto = async (file?: File) => {
+    if (!file) return;
+    if (!IMAGE_UPLOAD_TYPES.includes(file.type)) {
+      toast.error('Choose a PNG, JPEG or WebP image.');
+      return;
+    }
+    if (file.size > MAX_PHOTO_FILE_BYTES) {
+      toast.error('That image is too large. Choose one under 15 MB.');
+      return;
+    }
+    setPhotoBusy(true);
+    try {
+      await savePhoto(await shrinkImage(file, { size: PHOTO_SIZE, square: true, format: 'image/jpeg' }), 'Profile photo updated');
+    } catch (error) {
+      toast.error(extractErrorMessage(error));
+      setPhotoBusy(false);
+    }
+  };
 
   useEffect(() => {
     if (!freshUser) return;
@@ -196,8 +240,35 @@ export function ProfilePage() {
       >
         <div className={styles.heroBanner} aria-hidden />
         <div className={styles.heroBody}>
-          <div className={styles.avatarRing}>
-            <Avatar name={displayName} size="xl" />
+          <div className={styles.photo}>
+            <button
+              type="button"
+              className={styles.avatarRing}
+              disabled={photoBusy}
+              title={baseline.avatarUrl ? 'Change photo' : 'Add a photo'}
+              aria-label={baseline.avatarUrl ? 'Change profile photo' : 'Add a profile photo'}
+              onClick={() => photoInput.current?.click()}
+            >
+              <Avatar name={displayName} src={baseline.avatarUrl} size="xl" className={styles.heroAvatar} />
+              <span className={styles.photoBadge} aria-hidden>
+                {photoBusy ? <Spinner size={14} /> : <FiCamera />}
+              </span>
+            </button>
+            {baseline.avatarUrl && (
+              <button type="button" className={styles.photoRemove} disabled={photoBusy} onClick={() => void savePhoto('', 'Profile photo removed')}>
+                Remove
+              </button>
+            )}
+            <input
+              ref={photoInput}
+              type="file"
+              accept={IMAGE_UPLOAD_TYPES.join(',')}
+              hidden
+              onChange={(e) => {
+                void pickPhoto(e.target.files?.[0]);
+                e.target.value = '';
+              }}
+            />
           </div>
           <div className={styles.heroText}>
             <h2 className={styles.name}>{displayName}</h2>

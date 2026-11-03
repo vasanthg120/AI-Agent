@@ -8,7 +8,7 @@ import { FaGoogle, FaMicrosoft } from 'react-icons/fa';
 import { Input, Button } from '@/components/ui';
 import { useAuthStore } from '@/stores/authStore';
 import { authService } from '@/services/authService';
-import { extractErrorMessage } from '@/utils/errors';
+import { extractErrorMessage, extractLoginErrorMessage } from '@/utils/errors';
 import { ROUTES } from '@/constants/routes';
 import type { OAuthProvider } from '@/types';
 import { PasswordField } from './components/PasswordField';
@@ -62,7 +62,7 @@ export function LoginPage() {
       }
       goToChat();
     } catch (error) {
-      toast.error((error as Error).message);
+      toast.error(extractLoginErrorMessage(error));
     }
   };
 
@@ -72,7 +72,7 @@ export function LoginPage() {
       await verifyTwoFactor(challengeToken, code);
       goToChat();
     } catch (error) {
-      toast.error(extractErrorMessage(error));
+      toast.error(extractLoginErrorMessage(error));
       throw error;
     }
   };

@@ -89,9 +89,25 @@ let User = class User {
 };
 exports.User = User;
 __decorate([
-    (0, mongoose_1.Prop)({ required: true, unique: true, lowercase: true, trim: true }),
+    (0, mongoose_1.Prop)({ required: true, lowercase: true, trim: true }),
     __metadata("design:type", String)
 ], User.prototype, "email", void 0);
+__decorate([
+    (0, mongoose_1.Prop)({ index: true, sparse: true }),
+    __metadata("design:type", String)
+], User.prototype, "linkedLoginUserId", void 0);
+__decorate([
+    (0, mongoose_1.Prop)({ default: true }),
+    __metadata("design:type", Boolean)
+], User.prototype, "isLogin", void 0);
+__decorate([
+    (0, mongoose_1.Prop)({ index: true, sparse: true }),
+    __metadata("design:type", String)
+], User.prototype, "inviteTokenHash", void 0);
+__decorate([
+    (0, mongoose_1.Prop)(),
+    __metadata("design:type", Date)
+], User.prototype, "inviteExpiresAt", void 0);
 __decorate([
     (0, mongoose_1.Prop)(),
     __metadata("design:type", String)
@@ -136,6 +152,10 @@ __decorate([
     (0, mongoose_1.Prop)({ type: Object, default: {} }),
     __metadata("design:type", Object)
 ], User.prototype, "preferences", void 0);
+__decorate([
+    (0, mongoose_1.Prop)({ select: false }),
+    __metadata("design:type", String)
+], User.prototype, "avatar", void 0);
 __decorate([
     (0, mongoose_1.Prop)({ default: false }),
     __metadata("design:type", Boolean)

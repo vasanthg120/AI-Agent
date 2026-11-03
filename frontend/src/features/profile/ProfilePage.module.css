@@ -37,18 +37,78 @@
   padding: 0 var(--space-6) var(--space-5);
 }
 
-.avatarRing {
+.photo {
+  display: flex;
+  flex-direction: column;
   flex-shrink: 0;
+  align-items: center;
+  gap: var(--space-1);
   margin-top: -44px;
+}
+
+/* The photo is a button: a click opens the file picker. */
+.avatarRing {
+  position: relative;
+  display: block;
   padding: 4px;
+  border: 0;
   border-radius: var(--radius-full);
   background: var(--color-bg-surface);
   box-shadow: var(--shadow-md);
+  cursor: pointer;
   transition: transform var(--duration-slow) var(--ease-out);
 }
 
-.avatarRing:hover {
-  transform: scale(1.04) rotate(-2deg);
+.avatarRing:hover:not(:disabled) {
+  transform: scale(1.04);
+}
+
+.avatarRing:disabled {
+  cursor: progress;
+}
+
+.avatarRing:focus-visible,
+.photoRemove:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+.avatarRing .heroAvatar {
+  display: flex;
+  width: 88px;
+  height: 88px;
+  font-size: 28px;
+}
+
+.photoBadge {
+  position: absolute;
+  right: 2px;
+  bottom: 2px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: 2px solid var(--color-bg-surface);
+  border-radius: var(--radius-full);
+  background: var(--color-accent);
+  color: var(--color-accent-contrast);
+  font-size: 13px;
+}
+
+.photoRemove {
+  padding: 2px var(--space-2);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--color-text-muted);
+  font: inherit;
+  font-size: var(--text-xs);
+  cursor: pointer;
+}
+
+.photoRemove:hover:not(:disabled) {
+  color: var(--color-danger);
 }
 
 .heroText {
