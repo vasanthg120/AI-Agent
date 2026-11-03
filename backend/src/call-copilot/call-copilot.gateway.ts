@@ -46,11 +46,7 @@ export class CallCopilotGateway implements OnGatewayConnection, OnGatewayDisconn
     try {
       const payload = this.jwtService.verify<JwtPayload>(token);
       if (payload.purpose) throw new Error('special-purpose token');
-      const user = await this.usersService.findById(payload.sub);
-      if (!user || user.active === false) throw new Error('inactive or missing user');
-      if (!payload.jti || !user.sessions.some((s) => s.jti === payload.jti)) {
-        throw new Error('revoked or missing session');
-      }
+      if (!(await this.usersService.resolveSession(payload))) throw new Error('inactive user or revoked session');
       client.data.user = payload;
       // Per-user room (mirrors chat.gateway.ts) — lets CallCopilotUploadService
       // push progress for a background upload-processing job via emitToUser,

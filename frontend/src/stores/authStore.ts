@@ -1,6 +1,8 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { queryClient } from '@/config/queryClient';
+import { ROUTES } from '@/constants/routes';
+import { accountsService } from '@/services/accountsService';
 import { authService } from '@/services/authService';
 import { twoFactorService } from '@/services/twoFactorService';
 import { extractErrorMessage } from '@/utils/errors';
@@ -30,6 +32,8 @@ interface AuthState {
   // header by axiosClient's interceptor or treated as a real session.
   verifyTwoFactor: (challengeToken: string, code: string) => Promise<void>;
   logout: () => Promise<void>;
+  // Moves into another business this login may enter, without signing in again.
+  switchAccount: (organizationId: string, destination?: string) => Promise<void>;
   clearError: () => void;
 }
 
@@ -120,6 +124,22 @@ export const useAuthStore = create<AuthState>()(
         await authService.logout();
         queryClient.clear();
         set({ user: null, accessToken: null, isAuthenticated: false });
+      },
+
+      // Ends in a full page load on purpose: chat sockets, in-memory stores and any
+      // request still in flight all belong to the business being left, and starting
+      // the app again is the one way to be sure none of it stays on screen.
+      async switchAccount(organizationId, destination = ROUTES.dashboard) {
+        const { accessToken } = await accountsService.switchTo(organizationId);
+        const user = await authService.fetchCurrentUser(accessToken);
+        queryClient.clear();
+        try {
+          localStorage.removeItem('enterprise-ai:display-currency');
+        } catch {
+          // Storage unavailable: the currency is refreshed on load anyway.
+        }
+        set({ user, accessToken, isAuthenticated: true, error: null });
+        window.location.assign(destination);
       },
 
       clearError() {

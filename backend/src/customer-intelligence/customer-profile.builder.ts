@@ -288,7 +288,8 @@ export interface CustomerSummary {
   lastActivity: { at: Date; label: string } | null;
   daysSinceLastActivity: number | null;
   owner?: string;
-  inquiries: { count: number; latestAt?: Date; latestSummary?: string; open: boolean; channel?: string; location?: string };
+  /** `actioned`: since the latest inquiry someone emailed them or sent a quotation (or marked it handled). */
+  inquiries: { count: number; latestAt?: Date; latestSummary?: string; open: boolean; actioned: boolean; channel?: string; location?: string };
   quotes: { count: number; openCount: number; openValue: number; latest: QuoteLine | null };
   invoices: { count: number; total: number; latest: InvoiceLine | null };
   payment: { status: PaymentState; label: string; billed: number; paid: number | null; outstanding: number | null; overdueAmount: number };
@@ -969,6 +970,8 @@ export function buildCustomerProfile(input: ProfileInput): CustomerProfile {
       latestAt: latestEnquiry?.date,
       latestSummary: latestEnquiry?.summary,
       open: inquiryOpen,
+      // Anything done about the latest inquiry: an email or a quotation since, or a status the team set by hand.
+      actioned: !latestEnquiry || contactedSinceEnquiry || quotedSinceEnquiry || (!!set.inquiry && set.inquiry.status !== 'new'),
       channel: latestEnquiry?.channel,
       location: latestEnquiry?.location,
     },

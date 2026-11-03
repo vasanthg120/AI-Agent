@@ -1,5 +1,18 @@
 export interface JwtPayload {
+  // The account acting. Normally the login itself; while someone is working in
+  // another business it is their member record there (see loginUserId).
   sub: string;
+  // Present only on a token for a member record: the login behind it, whose
+  // sessions it lives under. See UsersService.resolveSession, which checks the
+  // two are really linked on every request rather than trusting this claim.
+  loginUserId?: string;
+  // Set by JwtStrategy from the live organization, never read from the token:
+  // only sub-accounts can be locked for having no subscription, so a Main Account
+  // pays no extra lookup on any request (see SubscriptionLockInterceptor).
+  isSubAccount?: boolean;
+  // The token's own expiry, carried through by JwtStrategy so switching accounts
+  // can keep it — moving between businesses never extends a session.
+  exp?: number;
   email: string;
   roles: string[];
   organizationId: string;
@@ -41,4 +54,10 @@ export interface JwtPayload {
   // this is set, so a leaked challenge token can never be used as a real
   // Bearer credential even though it carries a valid `sub`.
   purpose?: string;
+}
+
+/** The login behind a request, whichever business it is working in. Anything about
+ * the person rather than the business (password, 2FA, sessions) belongs to this. */
+export function loginIdOf(user: Pick<JwtPayload, 'sub' | 'loginUserId'>): string {
+  return user.loginUserId ?? user.sub;
 }

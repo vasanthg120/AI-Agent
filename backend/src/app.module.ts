@@ -8,6 +8,7 @@ import configuration from './config/configuration';
 import { AuditModule } from './audit/audit.module';
 import { AuthModule } from './auth/auth.module';
 import { OrganizationsModule } from './organizations/organizations.module';
+import { SubAccountsModule } from './sub-accounts/sub-accounts.module';
 import { UsersModule } from './users/users.module';
 import { ChatModule } from './chat/chat.module';
 import { DocumentsModule } from './documents/documents.module';
@@ -31,13 +32,8 @@ import { DataSourcesModule } from './data-sources/data-sources.module';
 import { GorillaDashModule } from './gorilladash/gorilladash.module';
 import { ZapierModule } from './zapier/zapier.module';
 import { CrmIntegrationsModule } from './crm-integrations/crm-integrations.module';
-import { ZohoModule } from './zoho/zoho.module';
-import { ZohoBooksModule } from './zohobooks/zohobooks.module';
-import { XeroModule } from './xero/xero.module';
-import { ZohoPayrollModule } from './zohopayroll/zohopayroll.module';
-import { MyobModule } from './myob/myob.module';
-import { SalesforceModule } from './salesforce/salesforce.module';
 import { CustomerIntelligenceModule } from './customer-intelligence/customer-intelligence.module';
+import { CloudFilesModule } from './cloud-files/cloud-files.module';
 import { CallCopilotModule } from './call-copilot/call-copilot.module';
 import { BusinessKnowledgeModule } from './business-knowledge/business-knowledge.module';
 import { EmailIntelligenceModule } from './email-intelligence/email-intelligence.module';
@@ -77,6 +73,7 @@ import { HealthController } from './health/health.controller';
     MailModule,
     AuthModule,
     OrganizationsModule,
+    SubAccountsModule,
     UsersModule,
     ChatModule,
     DocumentsModule,
@@ -100,13 +97,8 @@ import { HealthController } from './health/health.controller';
     GorillaDashModule,
     ZapierModule,
     CrmIntegrationsModule,
-    ZohoModule,
-    ZohoBooksModule,
-    ZohoPayrollModule,
-    XeroModule,
-    MyobModule,
-    SalesforceModule,
     CustomerIntelligenceModule,
+    CloudFilesModule,
     CallCopilotModule,
     BusinessKnowledgeModule,
     EmailIntelligenceModule,

@@ -7,12 +7,12 @@ import { extractErrorMessage } from '@/utils/errors';
 import { formatFullDate } from '@/utils/date';
 import shared from '../adminShared.module.css';
 
-const TRANSACTION_TYPES = [
+const TRANSACTION_TYPES = [ 
   'FREE_TRIAL',
   'PURCHASE',
   'AI_USAGE',
   'AUTO_RECHARGE',
-  'BONUS',
+  'BONUS', 
   'PROMOTION',
   'REFUND',
   'MANUAL_ADJUSTMENT',

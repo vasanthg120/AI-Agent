@@ -7,6 +7,7 @@ const app_module_1 = require("./app.module");
 async function bootstrap() {
     const app = await core_1.NestFactory.create(app_module_1.AppModule, { cors: false, rawBody: true });
     const config = app.get(config_1.ConfigService);
+    app.set('trust proxy', 'loopback, uniquelocal');
     app.enableCors({
         origin: config.get('corsOrigin'),
         credentials: true,

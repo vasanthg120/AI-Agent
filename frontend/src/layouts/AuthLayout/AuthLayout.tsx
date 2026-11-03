@@ -1,7 +1,6 @@
 import type { ReactNode } from 'react';
 import { motion } from 'framer-motion';
 import clsx from 'clsx';
-import type { IconType } from 'react-icons';
 import { FiBarChart2, FiMail, FiPhoneCall, FiShield } from 'react-icons/fi';
 import { Logo } from '@/components/common/Logo';
 import styles from './AuthLayout.module.css';
@@ -18,29 +17,9 @@ export interface AuthLayoutProps {
   children: ReactNode;
   // Wider form column (the multi-step sign-up).
   wide?: boolean;
-  // Left brand panel content — all optional, defaulting to HaiVE's
-  // customer-facing pitch below (used as-is by /login, /register,
-  // /forgot-password). A caller like AdminSignInPage overrides these to
-  // show relevant copy on the SAME visual shell, without touching any of
-  // those customer pages' content.
-  brandTitle?: ReactNode;
-  brandLead?: ReactNode;
-  highlights?: AuthLayoutHighlight[];
-  trust?: ReactNode;
 }
 
-const DEFAULT_BRAND_TITLE = (
-  <>
-    Your enterprise
-    <br />
-    <span className={styles.brandAccent}>AI workforce.</span>
-  </>
-);
-
-const DEFAULT_BRAND_LEAD =
-  'Deals, emails, calls and documents in one place — with an AI that works them alongside your team.';
-
-const DEFAULT_HIGHLIGHTS: AuthLayoutHighlight[] = [
+const HIGHLIGHTS = [
   {
     icon: FiBarChart2,
     title: 'Your business at a glance',
@@ -58,16 +37,10 @@ const DEFAULT_HIGHLIGHTS: AuthLayoutHighlight[] = [
   },
 ];
 
-const DEFAULT_TRUST = (
-  <>
-    <FiShield /> Encrypted at rest · two-factor sign-in · your data stays yours
-  </>
-);
-
 // Every signed-out page: a brand panel that says what HaiVE is (desktop and
 // tablet), and the form. On phones the panel steps aside and the form takes
 // the whole screen, with the logo on top.
-export function AuthLayout({ title, subtitle, children, wide, brandTitle, brandLead, highlights, trust }: AuthLayoutProps) {
+export function AuthLayout({ title, subtitle, children, wide }: AuthLayoutProps) {
   return (
     <div className={styles.page}>
       <aside className={styles.brand} aria-hidden>
@@ -76,11 +49,17 @@ export function AuthLayout({ title, subtitle, children, wide, brandTitle, brandL
         <div className={styles.brandInner}>
           <Logo className={styles.brandLogo} />
           <div className={styles.brandCopy}>
-            <h2 className={styles.brandTitle}>{brandTitle ?? DEFAULT_BRAND_TITLE}</h2>
-            <p className={styles.brandLead}>{brandLead ?? DEFAULT_BRAND_LEAD}</p>
+            <h2 className={styles.brandTitle}>
+              Your enterprise
+              <br />
+              <span className={styles.brandAccent}>AI workforce.</span>
+            </h2>
+            <p className={styles.brandLead}>
+              Deals, emails, calls and documents in one place — with an AI that works them alongside your team.
+            </p>
           </div>
           <ul className={styles.highlights}>
-            {(highlights ?? DEFAULT_HIGHLIGHTS).map(({ icon: Icon, title: t, text }, i) => (
+            {HIGHLIGHTS.map(({ icon: Icon, title: t, text }, i) => (
               <motion.li
                 key={t}
                 className={styles.highlight}
@@ -98,7 +77,9 @@ export function AuthLayout({ title, subtitle, children, wide, brandTitle, brandL
               </motion.li>
             ))}
           </ul>
-          <p className={styles.trust}>{trust ?? DEFAULT_TRUST}</p>
+          <p className={styles.trust}>
+            <FiShield /> Encrypted at rest · two-factor sign-in · your data stays yours
+          </p>
         </div>
       </aside>
 

@@ -2,7 +2,8 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ChangeEvent, ClipboardEvent, DragEvent, KeyboardEvent } from 'react';
 import clsx from 'clsx';
 import toast from 'react-hot-toast';
-import { FiAlertCircle, FiFileText, FiPaperclip, FiImage, FiMic, FiSend, FiSquare, FiX } from 'react-icons/fi';
+import { FiAlertCircle, FiCloud, FiFileText, FiPaperclip, FiImage, FiMic, FiSend, FiSquare, FiX } from 'react-icons/fi';
+import { CloudFilePickerModal } from '@/components/cloud-files';
 import { IconButton, Tooltip } from '@/components/ui';
 import { useAutosizeTextarea } from '@/hooks/useAutosizeTextarea';
 import { useChatStore } from '@/stores/chatStore';
@@ -48,6 +49,7 @@ export function ChatInput({ prefillText, onPrefillConsumed }: ChatInputProps) {
   const [agents, setAgents] = useState<ChatAgent[]>([]);
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
   const [attachments, setAttachments] = useState<PendingAttachment[]>([]);
+  const [cloudOpen, setCloudOpen] = useState(false);
   const [limits, setLimits] = useState(DEFAULT_ATTACHMENT_LIMITS);
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -368,6 +370,9 @@ export function ChatInput({ prefillText, onPrefillConsumed }: ChatInputProps) {
           <Tooltip content="Attach files">
             <IconButton icon={<FiPaperclip />} label="Attach files" size="sm" onClick={() => fileInputRef.current?.click()} />
           </Tooltip>
+          <Tooltip content="Attach from Google Drive or OneDrive">
+            <IconButton icon={<FiCloud />} label="Attach from Google Drive or OneDrive" size="sm" onClick={() => setCloudOpen(true)} />
+          </Tooltip>
           <Tooltip content="Attach images">
             <IconButton icon={<FiImage />} label="Attach images" size="sm" onClick={() => imageInputRef.current?.click()} />
           </Tooltip>
@@ -413,6 +418,17 @@ export function ChatInput({ prefillText, onPrefillConsumed }: ChatInputProps) {
         </div>
       </div>
       <VoiceInputModal open={voiceModalOpen} onClose={() => setVoiceModalOpen(false)} />
+      {/* A copy of each picked file is attached, exactly like one chosen on this computer. */}
+      <CloudFilePickerModal
+        open={cloudOpen}
+        onClose={() => setCloudOpen(false)}
+        mode="pick"
+        accept={limits.extensions.join(',')}
+        maxBytes={limits.maxFileBytes}
+        title="Attach from Google Drive or OneDrive"
+        description="A copy of each file is attached to this message. The original stays where it is."
+        onPick={(files) => addFiles(files)}
+      />
     </div>
   );
 }

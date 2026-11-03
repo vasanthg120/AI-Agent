@@ -1,0 +1,668 @@
+/* Google Drive / OneDrive file manager and picker — shared by the Files page, the
+   customer's documents, the Integrations page and every "choose a file" dialog.
+   It sits in panels and dialogs of any width, so it reads its own width
+   (container queries), not the window's. */
+
+.browser {
+  container: cloud-browser / inline-size;
+  display: grid;
+  grid-template-columns: minmax(180px, 220px) minmax(0, 1fr);
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+.browserNoTree {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.main {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+/* ---- folder tree ---------------------------------------------------------------- */
+
+.tree {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  max-height: 520px;
+  overflow: auto;
+  padding: var(--space-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-surface);
+  font-size: var(--text-sm);
+}
+
+.treeNode {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+}
+
+.treeToggle {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 26px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--color-text-muted);
+  cursor: pointer;
+}
+
+.treeToggle svg {
+  transition: transform var(--duration-normal) var(--ease-out);
+}
+
+.treeToggleOpen svg {
+  transform: rotate(90deg);
+}
+
+.treeToggle:disabled {
+  visibility: hidden;
+}
+
+.treeLabel {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 4px 6px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--color-text-secondary);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.treeLabel span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.treeLabel:hover {
+  background: var(--color-bg-hover);
+}
+
+.treeActive {
+  background: var(--color-bg-active);
+  color: var(--color-text-primary);
+  font-weight: 600;
+}
+
+.treeChildren {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding-left: 14px;
+}
+
+.treeEmpty {
+  padding: 2px 0 4px 34px;
+  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+}
+
+/* ---- toolbar ---------------------------------------------------------------------- */
+
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.search {
+  position: relative;
+  display: flex;
+  flex: 1 1 220px;
+  align-items: center;
+  min-width: 0;
+}
+
+.search svg {
+  position: absolute;
+  left: 10px;
+  color: var(--color-text-muted);
+  pointer-events: none;
+}
+
+.search input {
+  width: 100%;
+  height: 34px;
+  padding: 0 32px 0 32px;
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-input);
+  color: var(--color-text-primary);
+  font: inherit;
+  font-size: var(--text-sm);
+}
+
+.search input:focus-visible,
+.select:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 1px;
+}
+
+.searchClear {
+  position: absolute;
+  right: 4px;
+}
+
+.select {
+  height: 34px;
+  max-width: 100%;
+  padding: 0 28px 0 10px;
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-md);
+  background-color: var(--color-bg-input);
+  color: var(--color-text-primary);
+  font: inherit;
+  font-size: var(--text-sm);
+}
+
+.toolbarEnd {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  margin-left: auto;
+}
+
+/* ---- where you are --------------------------------------------------------------- */
+
+.crumbs {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+  font-size: var(--text-sm);
+}
+
+.crumb {
+  max-width: 220px;
+  padding: 2px 6px;
+  overflow: hidden;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--color-text-secondary);
+  font: inherit;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.crumb:hover {
+  background: var(--color-bg-hover);
+  color: var(--color-text-primary);
+}
+
+.crumbCurrent {
+  color: var(--color-text-primary);
+  font-weight: 600;
+  cursor: default;
+}
+
+.crumbCurrent:hover {
+  background: none;
+}
+
+.crumbSep {
+  flex: none;
+  color: var(--color-text-muted);
+}
+
+.where {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.note {
+  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+}
+
+/* ---- the list --------------------------------------------------------------------- */
+
+.list {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-surface);
+  overflow: hidden;
+}
+
+.row,
+.head {
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr) 132px 84px 40px;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 44px;
+  padding: 0 var(--space-2);
+}
+
+.listNoCheck .row,
+.listNoCheck .head {
+  grid-template-columns: 0 minmax(0, 1fr) 132px 84px 40px;
+}
+
+.head {
+  min-height: 34px;
+  border-bottom: 1px solid var(--color-border);
+  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.row + .row {
+  border-top: 1px solid var(--color-border);
+}
+
+.row {
+  cursor: pointer;
+  transition: background var(--duration-normal) var(--ease-out);
+}
+
+.row:hover {
+  background: var(--color-bg-hover);
+}
+
+.row:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: -2px;
+}
+
+.rowSelected,
+.rowSelected:hover {
+  background: var(--color-bg-active);
+}
+
+.rowDisabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.check {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.check input {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--color-accent);
+  cursor: pointer;
+}
+
+.name {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.nameIcon {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-hover);
+  color: var(--color-text-secondary);
+}
+
+.nameIconFolder {
+  background: var(--color-warning-soft);
+  color: var(--color-warning-ink);
+}
+
+.nameText {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.nameText strong {
+  overflow: hidden;
+  color: var(--color-text-primary);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Modified and size under the name, for the narrow layout. */
+.nameMeta {
+  display: none;
+  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+}
+
+.cell {
+  overflow: hidden;
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+/* ---- the grid ---------------------------------------------------------------------- */
+
+.tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(148px, 1fr));
+  gap: var(--space-3);
+}
+
+.tile {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+  padding: var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-surface);
+  cursor: pointer;
+  transition:
+    border-color var(--duration-normal) var(--ease-out),
+    background var(--duration-normal) var(--ease-out);
+}
+
+.tile:hover {
+  border-color: var(--color-border-strong);
+  background: var(--color-bg-hover);
+}
+
+.tile:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 1px;
+}
+
+.tileIcon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 64px;
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-hover);
+  color: var(--color-text-secondary);
+  font-size: 28px;
+}
+
+.tileFolder .tileIcon {
+  background: var(--color-warning-soft);
+  color: var(--color-warning-ink);
+}
+
+.tile strong {
+  overflow: hidden;
+  color: var(--color-text-primary);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tileMeta {
+  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+}
+
+.tileCheck {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+}
+
+.tileMenu {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+}
+
+.loadMore {
+  display: flex;
+  justify-content: center;
+  padding: var(--space-2);
+}
+
+.skeletonRows {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3);
+}
+
+/* ---- uploads in progress ----------------------------------------------------------- */
+
+.queue {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-surface);
+}
+
+.queueHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  font-size: var(--text-sm);
+  font-weight: 600;
+}
+
+.queueItem {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 4px var(--space-2);
+  font-size: var(--text-sm);
+}
+
+.queueName {
+  overflow: hidden;
+  color: var(--color-text-primary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.queueState {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+}
+
+.queueError {
+  grid-column: 1 / -1;
+  color: var(--color-danger-ink);
+  font-size: var(--text-xs);
+}
+
+.progress {
+  grid-column: 1 / -1;
+  height: 4px;
+  overflow: hidden;
+  border-radius: var(--radius-full);
+  background: var(--color-bg-hover);
+}
+
+.progress span {
+  display: block;
+  height: 100%;
+  background: var(--color-accent);
+  transition: width var(--duration-normal) var(--ease-out);
+}
+
+.progressDone span {
+  background: var(--color-success);
+}
+
+.progressFailed span {
+  background: var(--color-danger);
+}
+
+/* ---- preview ------------------------------------------------------------------------ */
+
+.preview {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 240px;
+  max-height: 70vh;
+  overflow: auto;
+  border-radius: var(--radius-md);
+  background: var(--color-bg-hover);
+}
+
+.preview img {
+  max-width: 100%;
+  max-height: 68vh;
+  object-fit: contain;
+}
+
+.preview iframe {
+  width: 100%;
+  height: 68vh;
+  border: none;
+  background: #fff;
+}
+
+.preview pre {
+  align-self: stretch;
+  width: 100%;
+  margin: 0;
+  padding: var(--space-4);
+  overflow: auto;
+  color: var(--color-text-primary);
+  font-size: var(--text-xs);
+  white-space: pre-wrap;
+}
+
+.previewFacts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-4);
+  margin: var(--space-3) 0;
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+}
+
+.dialogActions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  margin-top: var(--space-4);
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: var(--text-sm);
+}
+
+/* ---- where a file lives -------------------------------------------------------------- */
+
+.provider {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  max-width: 100%;
+  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+}
+
+.provider img {
+  flex: none;
+  width: 14px;
+  height: 14px;
+}
+
+.provider span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.providerCopy {
+  color: var(--color-info-ink);
+}
+
+/* ---- narrow: no tree, two columns, the facts under the name --------------------------- */
+
+@container cloud-browser (max-width: 720px) {
+  .browser {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .tree {
+    display: none;
+  }
+}
+
+@container cloud-browser (max-width: 560px) {
+  .row,
+  .head {
+    grid-template-columns: 28px minmax(0, 1fr) 40px;
+  }
+
+  .listNoCheck .row,
+  .listNoCheck .head {
+    grid-template-columns: 0 minmax(0, 1fr) 40px;
+  }
+
+  .colModified,
+  .colSize {
+    display: none;
+  }
+
+  .nameMeta {
+    display: block;
+  }
+
+  .toolbarEnd {
+    margin-left: 0;
+  }
+
+  .tiles {
+    grid-template-columns: repeat(auto-fill, minmax(124px, 1fr));
+  }
+}

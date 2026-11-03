@@ -1,0 +1,7 @@
+# Scripts and configs run on the Linux server: always LF, whatever the editor or OS that committed them.
+*.sh        text eol=lf
+*.yml       text eol=lf
+*.yaml      text eol=lf
+*.conf      text eol=lf
+Dockerfile  text eol=lf
+*.example   text eol=lf

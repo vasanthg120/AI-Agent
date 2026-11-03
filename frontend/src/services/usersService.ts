@@ -25,6 +25,11 @@ export interface AdminUser {
   // Whether this person may use AI features on the organization's credits —
   // enforced by the server on every AI request. Defaults true.
   aiAccessEnabled?: boolean;
+  // Has access through the Main Account rather than being one of this business's
+  // own people; it can only be changed from the Main Account.
+  linkedFromMain?: boolean;
+  // Invited and hasn't set a password yet.
+  pendingInvitation?: boolean;
 }
 
 export interface CreateUserPayload {
@@ -36,11 +41,15 @@ export interface CreateUserPayload {
   department?: string;
   voiceAccessEnabled?: boolean;
   aiAccessEnabled?: boolean;
+  // Email them a link to set their own password instead of a temporary one.
+  sendInvite?: boolean;
 }
 
 export interface CreateUserResult {
   user: AdminUser;
-  tempPassword: string;
+  // Exactly one of these, depending on sendInvite.
+  tempPassword?: string;
+  activationLink?: string;
 }
 
 export interface UpdateUserPayload {
@@ -55,6 +64,11 @@ export interface UpdateUserPayload {
 }
 
 export const usersService = {
+  async resendInvitation(id: string): Promise<{ activationLink?: string }> {
+    const { data } = await axiosClient.post<{ activationLink?: string }>(`/users/${id}/resend-invitation`);
+    return data;
+  },
+
   async list(): Promise<AdminUser[]> {
     const { data } = await axiosClient.get<AdminUser[]>('/users');
     return data;

@@ -1,12 +1,12 @@
 import { useState } from 'react';
 import toast from 'react-hot-toast';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { FiAlertTriangle, FiCheckCircle, FiKey, FiRefreshCw, FiStar, FiTrash2 } from 'react-icons/fi';
+import { FiAlertTriangle, FiCheckCircle, FiClock, FiKey, FiRefreshCw, FiStar, FiTrash2 } from 'react-icons/fi';
 import { Badge, Button, CopyableText, EmptyState, Modal, Skeleton, Tabs } from '@/components/ui';
 import { crmIntegrationsService, type CrmIntegration } from '@/services/crmIntegrationsService';
 import { formatRelativeTime } from '@/utils/date';
 import { extractErrorMessage } from '@/utils/errors';
-import { ErrorNotice, isLocalAddress, webhookAddress } from './CrmSetupWizard';
+import { ErrorNotice, isLocalAddress, nextRunText, webhookAddress } from './CrmSetupWizard';
 import { MappingEditor } from './MappingEditor';
 import styles from './integrations.module.css';
 
@@ -16,6 +16,7 @@ const TRIGGER: Record<string, string> = { scheduled: 'Automatic', manual: 'Sync 
 
 const when = (iso?: string) =>
   iso ? new Date(iso).toLocaleString(undefined, { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' }) : '—';
+const dateOnly = (iso: string) => new Date(iso).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
 
 export const HEALTH: Record<string, { label: string; variant: 'success' | 'danger' | 'neutral' | 'accent' }> = {
   healthy: { label: 'Healthy', variant: 'success' },
@@ -74,6 +75,7 @@ export function CrmManageModal({ integration, onClose, onReconnect }: Props) {
     run('sync', async () => {
       const { result } = await crmIntegrationsService.syncNow(provider);
       if (result.status === 'error') toast.error(result.error ?? 'The sync didn’t finish.', { duration: 8_000 });
+      else if (result.status === 'deferred') toast(result.message ?? 'Not now — the next sync runs by itself.', { duration: 8_000 });
       else toast.success(`${label} is up to date`);
       await queryClient.invalidateQueries({ queryKey: ['crm-integrations', 'history', provider] });
     });
@@ -98,6 +100,9 @@ export function CrmManageModal({ integration, onClose, onReconnect }: Props) {
   };
 
   const health = HEALTH[source.health] ?? HEALTH.not_synced;
+  // A CRM read once a night (Hoops): "Sync now" only inside its window, once.
+  const schedule = source.schedule;
+  const canSyncNow = !schedule || schedule.canSyncNow;
   const tabs = [
     { id: 'overview', label: 'Overview' },
     { id: 'mapping', label: 'Field mapping' },
@@ -135,7 +140,7 @@ export function CrmManageModal({ integration, onClose, onReconnect }: Props) {
                     Review mapping
                   </Button>
                 )}
-                {!push && source.error.kind !== 'auth' && (
+                {!push && source.error.kind !== 'auth' && canSyncNow && (
                   <Button type="button" size="sm" variant="secondary" loading={busy === 'sync'} onClick={() => void syncNow()}>
                     Retry
                   </Button>
@@ -162,9 +167,33 @@ export function CrmManageModal({ integration, onClose, onReconnect }: Props) {
               ))}
               <div>
                 <dt>How it stays up to date</dt>
-                <dd>{push ? `${label} sends each new record` : 'Automatically, every few minutes'}</dd>
+                <dd>
+                  {push
+                    ? `${label} sends each new record`
+                    : schedule
+                      ? `Once a night, after ${schedule.windowLabel} — next ${nextRunText(schedule.nextRunAt)}`
+                      : 'Automatically, every few minutes'}
+                </dd>
               </div>
+              {source.history && (
+                <div>
+                  <dt>History</dt>
+                  <dd>
+                    {source.history.complete
+                      ? `All in — ${source.history.from ? `back to ${dateOnly(source.history.from)}` : 'everything'}`
+                      : source.history.importedBackTo
+                        ? `Back to ${dateOnly(source.history.importedBackTo)} so far — more each night until ${source.history.from ? dateOnly(source.history.from) : 'the beginning'}`
+                        : `From ${source.history.from ? dateOnly(source.history.from) : 'the beginning'} — starts with the first sync`}
+                  </dd>
+                </div>
+              )}
             </dl>
+
+            {schedule && !schedule.canSyncNow && schedule.reason && (
+              <p className={styles.note}>
+                <FiClock aria-hidden /> {schedule.reason}
+              </p>
+            )}
 
             {integration.setup.limitations.length > 0 && (
               <ul className={styles.noteList}>
@@ -188,6 +217,8 @@ export function CrmManageModal({ integration, onClose, onReconnect }: Props) {
                   onClick={() =>
                     void run('default', async () => {
                       await crmIntegrationsService.makeDefault(provider);
+                      // Its currency becomes the one amounts are shown in (AppLayout reads this).
+                      await queryClient.invalidateQueries({ queryKey: ['data-sources'] });
                       toast.success(`Dashboards now show ${label}`);
                     })
                   }
@@ -200,7 +231,7 @@ export function CrmManageModal({ integration, onClose, onReconnect }: Props) {
                   <Button type="button" variant="secondary" onClick={() => onReconnect(integration)}>
                     Reconnect
                   </Button>
-                  <Button type="button" leftIcon={<FiRefreshCw />} loading={busy === 'sync'} onClick={() => void syncNow()}>
+                  <Button type="button" leftIcon={<FiRefreshCw />} loading={busy === 'sync'} disabled={!canSyncNow} onClick={() => void syncNow()}>
                     Sync now
                   </Button>
                 </>

@@ -113,6 +113,18 @@ exports.default = () => ({
             authBaseUrl: process.env.SALESFORCE_AUTH_BASE_URL ?? 'https://login.salesforce.com',
         },
     },
+    cloudFiles: {
+        google: {
+            clientId: process.env.GOOGLE_DRIVE_CLIENT_ID ?? '',
+            clientSecret: process.env.GOOGLE_DRIVE_CLIENT_SECRET ?? '',
+            redirectUri: process.env.GOOGLE_DRIVE_REDIRECT_URI ?? 'http://localhost:3000/cloud-files/google/callback',
+        },
+        microsoft: {
+            clientId: process.env.MS_GRAPH_CLIENT_ID ?? '',
+            clientSecret: process.env.MS_GRAPH_CLIENT_SECRET ?? '',
+            redirectUri: process.env.MS_GRAPH_REDIRECT_URI ?? 'http://localhost:3000/outlook/callback',
+        },
+    },
     oauth: {
         google: {
             clientId: process.env.GOOGLE_OAUTH_CLIENT_ID ?? '',

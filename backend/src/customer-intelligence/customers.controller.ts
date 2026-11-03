@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, ForbiddenException, Get, Param, Patch, Post, Query, Res, UseGuards } from '@nestjs/common';
+import { Controller, ForbiddenException, Get, Param, Post, Query, Res, UseGuards } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import { Response } from 'express';
 import { JwtPayload } from '../auth/jwt-payload.interface';
@@ -8,8 +8,6 @@ import { Roles } from '../common/decorators/roles.decorator';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { CustomerDirectoryService } from './customer-directory.service';
-import { CustomerWorkspaceService } from './customer-workspace.service';
-import { AddCustomerContactDto, CreateCustomerDto, UpdateCustomerDto } from './dto/customer-profile.dto';
 
 // Customers: one row per customer, built from every connected CRM and the
 // mailbox together. Same audience as New Inquiries (owner/admin/manager, or an
@@ -19,10 +17,7 @@ import { AddCustomerContactDto, CreateCustomerDto, UpdateCustomerDto } from './d
 @Feature('inquiries')
 @Controller('customers')
 export class CustomersController {
-  constructor(
-    private directory: CustomerDirectoryService,
-    private workspace: CustomerWorkspaceService,
-  ) {}
+  constructor(private directory: CustomerDirectoryService) {}
 
   @Get()
   list(
@@ -42,39 +37,11 @@ export class CustomersController {
     @Query('payment') payment?: string,
     @Query('mail') mail?: string,
     @Query('channel') channel?: string,
-    @Query('includeArchived') includeArchived?: string,
   ) {
     return this.directory.list(user.organizationId, {
       ...{ source, from, to, view, search, sort, direction, page: Number(page), pageSize: Number(pageSize) },
-      ...{ owner, type, quote, payment, mail, channel, includeArchived },
+      ...{ owner, type, quote, payment, mail, channel },
     });
-  }
-
-  // Phase 3 — "Add Customer". Creates a real crm_contacts record (see
-  // CustomerDirectoryService.createCustomer's own comment); when the
-  // email/phone/company looks like an existing customer, returns that
-  // match instead of creating one — resend with confirmDuplicate:true to
-  // create anyway. Declared before ':id' so 'export'/'sync' (both static
-  // segments, same rule as every other GET below) are never shadowed; POST
-  // here can't collide with GET :id regardless of order (different verbs).
-  @Post()
-  @Throttle({ default: { limit: 30, ttl: 60_000 } })
-  create(@CurrentUser() user: JwtPayload, @Body() dto: CreateCustomerDto) {
-    return this.directory.createCustomer(user, dto);
-  }
-
-  // Just enough to populate the "Customer Rep" picker (id + name only) — declared before ':id'.
-  @Get('reps')
-  listReps(@CurrentUser() user: JwtPayload) {
-    return this.directory.listReps(user.organizationId);
-  }
-
-  // Hoops-parity Tasks tab — every task across every customer/job, not
-  // narrowed to one (see CustomerWorkspaceService.listAllTasks's own
-  // comment). Declared before ':id' so it's never shadowed by it.
-  @Get('tasks')
-  listAllTasks(@CurrentUser() user: JwtPayload, @Query('status') status?: 'open' | 'done', @Query('mine') mine?: string) {
-    return this.workspace.listAllTasks(user, { status, mine: mine === 'true' });
   }
 
   // The board as a spreadsheet: the same filters as the list, every page. Declared before ':id'.
@@ -130,38 +97,6 @@ export class CustomersController {
   @Get(':id')
   detail(@CurrentUser() user: JwtPayload, @Param('id') id: string) {
     return this.directory.detail(user.organizationId, id);
-  }
-
-  // "Edit customer" — name/email/phone corrections and the assigned rep.
-  // Never touches which records belong to this customer (see
-  // updateCustomer's own comment) — only how they display.
-  @Patch(':id')
-  update(@CurrentUser() user: JwtPayload, @Param('id') id: string, @Body() dto: UpdateCustomerDto) {
-    return this.directory.updateCustomer(user.organizationId, id, dto);
-  }
-
-  // Same activate/deactivate shape as products.controller.ts — archived
-  // customers drop out of the default list but stay fully reachable by id.
-  @Post(':id/archive')
-  archive(@CurrentUser() user: JwtPayload, @Param('id') id: string) {
-    return this.directory.setArchived(user.organizationId, id, true);
-  }
-
-  @Post(':id/restore')
-  restore(@CurrentUser() user: JwtPayload, @Param('id') id: string) {
-    return this.directory.setArchived(user.organizationId, id, false);
-  }
-
-  // Additional contacts on a customer beyond what the connected systems
-  // already name (see customer-directory.service.ts's addContact comment).
-  @Post(':id/contacts')
-  addContact(@CurrentUser() user: JwtPayload, @Param('id') id: string, @Body() dto: AddCustomerContactDto) {
-    return this.directory.addContact(user.organizationId, id, dto);
-  }
-
-  @Delete(':id/contacts/:contactId')
-  removeContact(@CurrentUser() user: JwtPayload, @Param('id') id: string, @Param('contactId') contactId: string) {
-    return this.directory.removeContact(user.organizationId, id, contactId);
   }
 
   // A real, billed AI call — same per-employee switch as the chat.

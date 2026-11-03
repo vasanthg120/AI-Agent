@@ -1,4 +1,5 @@
 import { HttpService } from '@nestjs/axios';
+import { archivedOrganizationIds } from '../common/archived-organizations';
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
@@ -412,7 +413,7 @@ export class EmailIntelligenceSyncService {
   @Cron('*/2 * * * *')
   async runScheduledReplyRefresh(): Promise<void> {
     const connections = await this.connectionModel
-      .find({ isActive: true, status: { $ne: 'needs_reauth' } })
+      .find({ isActive: true, status: { $ne: 'needs_reauth' }, organizationId: { $nin: await archivedOrganizationIds(this.connectionModel.db) } })
       .select('userId')
       .lean()
       .exec();
@@ -696,7 +697,9 @@ export class EmailIntelligenceSyncService {
   // Outlook do not wait for this: see runScheduledReplyRefresh.
   @Cron(CronExpression.EVERY_30_MINUTES)
   async runScheduledSync(): Promise<void> {
-    const connections = await this.connectionModel.find({ isActive: true, status: { $ne: 'needs_reauth' } }).exec();
+    const connections = await this.connectionModel
+      .find({ isActive: true, status: { $ne: 'needs_reauth' }, organizationId: { $nin: await archivedOrganizationIds(this.connectionModel.db) } })
+      .exec();
     for (const connection of connections) {
       try {
         await this.syncMyMailbox(connection.userId, 'scheduled');

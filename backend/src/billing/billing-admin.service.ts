@@ -4,7 +4,7 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { AgentExecution, AgentExecutionDocument } from '../command-center/schemas/agent-execution.schema';
 import { CommandCenterService } from '../command-center/command-center.service';
-import { Organization, OrganizationDocument } from '../organizations/schemas/organization.schema';
+import { Organization, OrganizationDocument, OrganizationStatus } from '../organizations/schemas/organization.schema';
 import { User, UserDocument } from '../users/schemas/user.schema';
 import { PricingService } from './pricing.service';
 import { WalletService } from './wallet.service';
@@ -21,7 +21,7 @@ export interface OrganizationDirectoryEntry {
   organizationId: string;
   name: string;
   slug: string;
-  status: 'active' | 'suspended';
+  status: OrganizationStatus;
   userCount: number;
   planName: string | null;
   subscriptionStatus: string | null;
@@ -336,7 +336,7 @@ export class BillingAdminService {
               { $group: { _id: null, credits: { $sum: { $abs: '$amountCredits' } } } },
             ])
             .exec(),
-          this.userModel.countDocuments({ organizationId }).exec(),
+          this.userModel.countDocuments({ organizationId, linkedLoginUserId: { $exists: false } }).exec(),
           this.walletModel.findOne({ organizationId }).exec(),
           this.currentSubscriptionFor(organizationId),
         ]);
@@ -384,7 +384,7 @@ export class BillingAdminService {
     if (!org) throw new NotFoundException('Organization not found.');
 
     const [userCount, walletSummary, subscription, purchaseRows, usageRows] = await Promise.all([
-      this.userModel.countDocuments({ organizationId }).exec(),
+      this.userModel.countDocuments({ organizationId, linkedLoginUserId: { $exists: false } }).exec(),
       this.wallet.getSummary(organizationId, this.config.get<number>('billing.lowBalanceThresholdCredits') ?? 200),
       this.currentSubscriptionFor(organizationId),
       this.transactionModel
@@ -424,7 +424,10 @@ export class BillingAdminService {
    * this whole controller is AdminJwtAuthGuard-gated, a completely separate
    * credential from any organization's own owner/admin. */
   async setOrganizationStatus(organizationId: string, status: 'active' | 'suspended') {
-    const org = await this.orgModel.findByIdAndUpdate(organizationId, { status }, { new: true }).exec();
+    // The platform's own decision, so it is never one a Main Account can lift
+    // (see Organization.suspendedByParent); reactivating also undoes an archive.
+    const update = status === 'active' ? { status, suspendedByParent: false, $unset: { archivedAt: '' } } : { status, suspendedByParent: false };
+    const org = await this.orgModel.findByIdAndUpdate(organizationId, update, { new: true }).exec();
     if (!org) throw new NotFoundException('Organization not found.');
     return { organizationId, status: org.status };
   }

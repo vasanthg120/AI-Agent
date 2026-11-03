@@ -98,6 +98,18 @@ declare const _default: () => {
             authBaseUrl: string;
         };
     };
+    cloudFiles: {
+        google: {
+            clientId: string;
+            clientSecret: string;
+            redirectUri: string;
+        };
+        microsoft: {
+            clientId: string;
+            clientSecret: string;
+            redirectUri: string;
+        };
+    };
     oauth: {
         google: {
             clientId: string;

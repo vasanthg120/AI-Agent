@@ -32,6 +32,9 @@ export class AuditInterceptor implements NestInterceptor {
         statusCode,
         durationMs: Date.now() - start,
         ip: request.ip,
+        // Someone working in another business acts as their member record there;
+        // this keeps the login behind it on the trail.
+        ...(request.user?.loginUserId ? { metadata: { loginUserId: request.user.loginUserId } } : {}),
       });
     };
 

@@ -13,14 +13,16 @@ import { CrmIntegrationsService } from './crm-integrations.service';
 const PREFIX = `jest-crmint-${Date.now()}`;
 
 describe('provider catalog', () => {
-  it('names Pantheras CRM and treats Hoops as its own push provider', () => {
+  it('names Pantheras CRM and reads Hoops through its own API, once a night', () => {
     expect(CRM_PROVIDERS.prospectconnect.label).toBe('Pantheras CRM');
-    expect(CRM_PROVIDERS.hoops).toMatchObject({ label: 'Hoops CRM', syncSupported: false, fieldMappings: {} });
-    expect(connectionOf(CRM_PROVIDERS.hoops)).toBe('push');
+    expect(CRM_PROVIDERS.hoops).toMatchObject({ label: 'Hoops CRM', syncSupported: true, integrationProviders: ['hoops'] });
+    expect(connectionOf(CRM_PROVIDERS.hoops)).toBe('pull');
+    expect(CRM_PROVIDERS.hoops.syncDefaults?.window).toEqual({ utcOffsetMinutes: 600, start: '19:00', end: '05:00', label: 'AEST' });
     expect(connectionOf(CRM_PROVIDERS.prospectconnect)).toBe('pull');
-    expect(PUSH_PROVIDERS).toEqual(expect.arrayContaining(['hoops', 'zapier']));
-    // Hoops carries none of Pantheras' field names.
+    expect(PUSH_PROVIDERS).toEqual(['zapier']);
+    // Hoops carries none of Pantheras' field names; a sale is won when its quote is accepted.
     expect(JSON.stringify(CRM_PROVIDERS.hoops)).not.toContain('monetary_value');
+    expect(CRM_PROVIDERS.hoops.statusMapping).toEqual({ won: ['accepted', 'completed'], lost: ['voided'] });
   });
 
   it('scores field names: exact known names high, look-alikes as "probably", unrelated 0', () => {
@@ -80,46 +82,43 @@ describe('CRM integrations (real Mongo)', () => {
     await connection.close();
   });
 
-  it('sets Hoops up as a push CRM: an address and a key, then records arrive under the Hoops source only', async () => {
+  it('a pushed source (Zapier): an address and a key, then records arrive under that source only, mapped by suggestion + review', async () => {
     const before = await crm.list(org);
     expect(before.map((i) => [i.id, i.status])).toEqual([
       ['prospectconnect', 'not_connected'],
       ['hoops', 'not_connected'],
       ['gorilladash', 'not_connected'],
-      ['zoho', 'not_connected'],
-      ['salesforce', 'not_connected'],
     ]);
     // Each CRM asks only for what it needs.
     expect(before[0].setup.fields.map((f) => f.key)).toEqual(['apiToken', 'baseUrl']);
-    expect(before[1].setup.fields).toEqual([]);
-    expect(before[1].setup.limitations.join(' ')).toContain('SalesDocs');
+    expect(before[1].setup.fields.map((f) => f.key)).toEqual(['apiKey', 'history', 'currency', 'baseUrl']);
+    expect(before[1].setup.limitations.join(' ')).toContain('7:00pm AEST');
     expect(before[2].setup.fields.map((f) => f.key)).toEqual(['apiKey', 'apiSecret']);
 
-    const { integration, webhookKey } = await crm.connect(org, 'hoops', {});
+    const created = await webhooks.create(org, { label: 'Job app', terminology: { deal: 'Job', contact: 'Customer' } });
+    const integration = { source: { id: created.id } };
+    const webhookKey = created.key;
     expect(webhookKey).toMatch(/^hvk_/);
-    expect(integration).toMatchObject({ id: 'hoops', connection: 'push', status: 'waiting' });
-    expect(integration.source?.webhook?.paths).toEqual({
-      deals: `/data-source-webhooks/${integration.source!.id}/deals`,
-      contacts: `/data-source-webhooks/${integration.source!.id}/contacts`,
+    expect(created.webhook.paths).toEqual({
+      deals: `/data-source-webhooks/${created.id}/deals`,
+      contacts: `/data-source-webhooks/${created.id}/contacts`,
+      accounts: `/data-source-webhooks/${created.id}/accounts`,
     });
-    await expect(crm.connect(org, 'hoops', {})).rejects.toThrow('already set up');
-    await expect(crm.syncNow(org, 'hoops')).rejects.toThrow('nothing to pull');
 
     // Hoops' own field names — nothing like Pantheras'.
     await webhooks.ingest(integration.source!.id, 'contacts', webhookKey, { CustomerID: 'C-1', 'Client Name': 'Acme Print', Email: 'ap@acme.com' });
     await webhooks.ingest(integration.source!.id, 'deals', webhookKey, [
-      { JobNumber: 'J-7', JobTitle: '200 caps', SalesDocTotal: '1,450.00', JobState: 'Invoiced' },
+      { JobNumber: 'J-7', JobTitle: '200 caps', SalesDocTotal: '1,450.00', JobState: 'Completed' },
       { JobNumber: 'J-8', JobTitle: 'Banner', SalesDocTotal: '300', JobState: 'In production' },
     ]);
-    const after = (await crm.list(org))[1];
+    const after = await sources.findById(created.id).lean();
     // Jobs arrived but none could be stored yet (no ID field mapped): that needs the customer's attention, as a mapping problem.
-    expect(after.status).toBe('needs_attention');
-    expect(after.source).toMatchObject({ health: 'failing', totalRecords: 1 });
-    expect(after.source?.error).toMatchObject({ kind: 'mapping' });
-    expect(await crm.history(org, 'hoops')).toHaveLength(2);
+    expect(after?.sync).toMatchObject({ lastStatus: 'error', lastErrorKind: 'mapping' });
+    expect(await connection.collection('crm_sync_runs').countDocuments({ organizationId: org, dataSourceId: created.id })).toBe(2);
 
     // Jobs had no field literally called "id": nothing was guessed, so nothing was stored — it waits for review.
-    expect(after.source!.records).toEqual({ deals: 0, contacts: 0 + 1 });
+    expect(await connection.collection('crm_deals').countDocuments({ organizationId: org, dataSourceId: created.id })).toBe(0);
+    expect(await connection.collection('crm_contacts').countDocuments({ organizationId: org, dataSourceId: created.id })).toBe(1);
 
     const suggestion = await mapping.suggest(caller(), integration.source!.id, false);
     const deals = suggestion.modules.find((m) => m.module === 'deals')!;
@@ -159,7 +158,7 @@ describe('CRM integrations (real Mongo)', () => {
       'Record ID': 'J-7',
       Name: '200 caps',
       Value: 1450,
-      Status: 'won (from “Invoiced”)',
+      Status: 'won (from “Completed”)',
     });
     expect(preview.problems).toEqual([]);
     expect(mapping.validate({ deals: { name: 'JobTitle' } }, ['deals'])[0]).toContain('Record ID');
@@ -170,11 +169,11 @@ describe('CRM integrations (real Mongo)', () => {
       JobNumber: 'J-7',
       JobTitle: '200 caps',
       SalesDocTotal: '1,450.00',
-      JobState: 'Invoiced',
+      JobState: 'Completed',
     });
     const stored = await connection.collection('crm_deals').findOne({ organizationId: org, externalId: 'J-7' });
-    expect(stored).toMatchObject({ name: '200 caps', monetaryValue: 1450, dealStatus: 'won', sourceProvider: 'hoops', dataSourceId: integration.source!.id });
-    expect((await crm.list(org))[1]).toMatchObject({ status: 'connected', source: { health: 'healthy', totalRecords: 2 } });
+    expect(stored).toMatchObject({ name: '200 caps', monetaryValue: 1450, dealStatus: 'won', sourceProvider: 'zapier', dataSourceId: created.id });
+    expect((await sources.findById(created.id).lean())?.sync.lastError).toBeUndefined();
 
     // One CRM field can't feed two HaiVE fields.
     await expect(mapping.save(caller(), integration.source!.id, { deals: { ...chosen.deals, name: 'JobNumber' } })).rejects.toThrow('mapped to two');
@@ -186,15 +185,13 @@ describe('CRM integrations (real Mongo)', () => {
     await mapping.restore(caller(), integration.source!.id, 2);
     expect((await sources.findById(integration.source!.id).lean())?.fieldMappings.deals).toMatchObject({ name: 'JobTitle', status: 'JobState' });
 
-    // Another organization: no Hoops, no mapping, no records, no versions.
+    // Another organization: no mapping, no records, no versions.
     const other = `${org}-other`;
-    expect((await crm.list(other))[1].status).toBe('not_connected');
     await expect(mapping.suggest({ sub: 'x', organizationId: other } as never, integration.source!.id, false)).rejects.toThrow('Data source not found.');
     await expect(mapping.versions(other, integration.source!.id)).rejects.toThrow('Data source not found.');
-    expect(await crm.history(other, 'hoops')).toEqual([]);
 
     // Disconnecting stops records; the key no longer works.
-    expect((await crm.disconnect(org, 'hoops')).status).toBe('not_connected');
+    await webhooks.disconnect(org, created.id);
     await expect(webhooks.ingest(integration.source!.id, 'deals', webhookKey, { JobNumber: 'J-9' })).rejects.toThrow('Unknown webhook address or key.');
   });
 
@@ -249,5 +246,109 @@ describe('CRM integrations (real Mongo)', () => {
 
     await crm.disconnect(org, 'prospectconnect');
     expect((await crm.list(org))[0].status).toBe('not_connected');
+  });
+
+  it('connects Hoops with its API key: checked by reading a first page, then read once a night, its history a little each night', async () => {
+    integrations.resolveAuth.mockResolvedValue(null);
+    integrations.connectWithAuth.mockImplementation(async (organizationId: string, provider: string) => {
+      await connection.collection('integration_credentials').updateOne({ organizationId, provider }, { $set: { organizationId, provider } }, { upsert: true });
+      await dataSources.reconcile(organizationId);
+    });
+    integrations.disconnect.mockImplementation(async (organizationId: string, provider: string) => {
+      await connection.collection('integration_credentials').deleteMany({ organizationId, provider });
+    });
+    // Set up earlier, when Hoops could only send records through Zapier: its key since removed, its sync off, its old words.
+    await sources.create({
+      organizationId: org,
+      key: 'hoops',
+      provider: 'hoops',
+      label: 'Hoops CRM',
+      status: 'active',
+      isDefault: false,
+      modules: ['deals', 'contacts'],
+      terminology: { deal: 'Job', quote: 'SalesDoc', contact: 'Customer', account: 'Company' },
+      fieldMappings: {},
+      statusMapping: { won: ['won'], lost: ['lost'] },
+      sync: { enabled: false, intervalMinutes: 10, lastStatus: 'never' },
+      metadata: { webhookReceived: 0 },
+    });
+    await dataSources.reconcile(org);
+    // Nothing sends to it any more and it has no API key yet: not connected.
+    expect((await crm.list(org))[1].status).toBe('not_connected');
+
+    await expect(crm.connect(org, 'hoops', { apiKey: '' })).rejects.toThrow('Enter the api key.');
+    await expect(crm.connect(org, 'hoops', { apiKey: 'k', currency: 'rupees' })).rejects.toThrow('3-letter code');
+    await expect(crm.connect(org, 'hoops', { apiKey: 'k', history: 'forever' })).rejects.toThrow('how much history');
+    await expect(crm.connect(org, 'hoops', { apiKey: 'k', baseUrl: 'http://api.hoopscrm.com/rest/api' })).rejects.toThrow('https://');
+
+    // Hoops refuses the key: nothing is kept.
+    http.post.mockReturnValue(of({ data: { status: 'error', kind: 'auth', message: 'x', detail: 'AdapterError: Hoops rejected the API key (HTTP 403).' } }));
+    await expect(crm.connect(org, 'hoops', { apiKey: 'wrong' })).rejects.toThrow('Hoops CRM didn’t accept these details');
+    expect(await connection.collection('integration_credentials').countDocuments({ organizationId: org })).toBe(0);
+
+    const modules = {
+      deals: { records: 5, fields: 60 },
+      quotes: { records: 5, fields: 60 },
+      contacts: { records: 7, fields: 9 },
+      accounts: { records: 4, fields: 20 },
+    };
+    http.post.mockReturnValue(of({ data: { status: 'ok', modules } }));
+    const { integration, discovery } = await crm.connect(org, 'hoops', { apiKey: ' key-1 ', history: '90' });
+    // Connected with the key alone: the first sync is asked for straight away (python decides whether it may run now).
+    expect(http.post).toHaveBeenCalledWith(expect.stringContaining('/sync/crm/run-for-source'), expect.anything(), expect.anything());
+    // The key goes in Hoops' own header; the API's path is kept.
+    expect(integrations.connectWithAuth).toHaveBeenLastCalledWith(
+      org,
+      'hoops',
+      { authType: 'apiKeyBaseUrl', credentials: { apiKey: 'key-1', headerName: 'x-api-key' }, baseUrl: 'https://api.hoopscrm.com/rest/api' },
+      { skipSync: true },
+    );
+    expect(discovery).toEqual(modules);
+    expect(integration).toMatchObject({ id: 'hoops', connection: 'pull', status: 'connected' });
+
+    // The Zapier-era source became the API source: Hoops' own mapping and schedule, and no webhook key.
+    const stored = await sources.findOne({ organizationId: org, key: 'hoops' }).lean();
+    expect(stored).toMatchObject({
+      modules: ['deals', 'quotes', 'contacts', 'accounts'],
+      statusMapping: { won: ['accepted', 'completed'], lost: ['voided'] },
+      metadata: { currency: 'AUD' },
+    });
+    expect(stored?.metadata.webhookReceived).toBeUndefined();
+    expect(stored?.fieldMappings.deals).toMatchObject({ externalId: '_id', status: '_status', closeDate: '_closeDate', amount: 'total' });
+    expect(stored?.sync).toMatchObject({ enabled: true, intervalMinutes: 1440, historyChoice: '90', window: { start: '19:00', end: '05:00', label: 'AEST' } });
+    const ninetyDaysAgo = Date.now() - 90 * 86_400_000;
+    expect(Math.abs(new Date(stored!.sync.historyFrom!).getTime() - ninetyDaysAgo)).toBeLessThan(60_000);
+    // What the page shows: when it runs, and how far back the history reaches so far.
+    expect(integration.source?.schedule).toMatchObject({ windowLabel: '7:00pm AEST' });
+    expect(integration.source?.history).toEqual({ from: new Date(stored!.sync.historyFrom!), importedBackTo: null, complete: false });
+
+    // A few nights in.
+    await sources.updateOne(
+      { _id: stored!._id },
+      {
+        $set: {
+          'sync.cursor': new Date(),
+          'sync.adapterState': { transactions: { skip: 120, at: '2026-10-20T09:00:00.000Z', oldest: '2026-09-02T00:00:00.000Z', done: false } },
+        },
+      },
+    );
+    expect((await crm.list(org))[1].source?.history).toMatchObject({ importedBackTo: new Date('2026-09-02T00:00:00.000Z'), complete: false });
+
+    // A new key with the same history choice: the reading carries on where it was.
+    await crm.connect(org, 'hoops', { apiKey: 'key-2', history: '90' });
+    const same = await sources.findById(stored!._id).lean();
+    expect(same?.sync.historyFrom).toEqual(stored?.sync.historyFrom);
+    expect(same?.sync.adapterState?.transactions?.skip).toBe(120);
+
+    // A different choice starts the reading over.
+    await crm.connect(org, 'hoops', { apiKey: 'key-2', history: 'all', currency: 'nzd' });
+    const restarted = await sources.findById(stored!._id).lean();
+    expect(restarted?.sync).toMatchObject({ historyChoice: 'all', historyFrom: null });
+    expect(restarted?.sync.adapterState).toBeUndefined();
+    expect((restarted?.sync as Record<string, unknown>).cursor).toBeUndefined();
+    expect(restarted?.metadata.currency).toBe('NZD');
+
+    await crm.disconnect(org, 'hoops');
+    expect((await crm.list(org))[1].status).toBe('not_connected');
   });
 });

@@ -19,10 +19,11 @@ logger = logging.getLogger(__name__)
 # duplicating it.
 _POINT_NAMESPACE = uuid.NAMESPACE_URL
 
-# CRM data has no real owner (credentials are shared per deployment, not
-# per-user) — every point still gets a user_id so every query filter is a
-# plain match with no null-field special casing; "*" means "visible to
-# every app user".
+# CRM data has no single owner within a business — every point still gets a
+# user_id so every query filter is a plain match with no null-field special
+# casing; "*" means "shared within this point's business", which is why these
+# points also carry organization_id (see settings.crm_rag_organization_id and
+# business_search_tool._search_filter).
 _SHARED_USER = "*"
 
 
@@ -84,6 +85,7 @@ def _embed_and_build_points(
             payload={
                 "source_type": source_type,
                 "user_id": user_id,
+                **({"organization_id": settings.crm_rag_organization_id} if user_id == _SHARED_USER else {}),
                 "record_id": record_id,
                 "text": text,
                 "synced_at": synced_at,
@@ -153,7 +155,14 @@ def _sync_notes_for_contacts(contact_ids: list[str]) -> int:
 
 def sync_crm() -> dict:
     """Each CRM module is wrapped independently — one endpoint failing (e.g.
-    quotes down) must not abort the others."""
+    quotes down) must not abort the others. Skipped unless it's known which
+    business this CRM belongs to: indexing it for nobody in particular is how one
+    business's records would become searchable by another."""
+    if not settings.crm_rag_organization_id:
+        if settings.crm_base_url:
+            logger.warning("CRM_BASE_URL is set but CRM_RAG_ORGANIZATION_ID is not, so that CRM isn't indexed for AI search.")
+        return {"skipped": "no organization for the configured CRM"}
+
     summary: dict = {}
     contact_ids: list[str] = []
 
@@ -251,7 +260,9 @@ def sync_outlook_for_user(user_id: str) -> int:
 def sync_all() -> dict:
     crm_summary = sync_crm()
 
-    user_ids = get_db().outlook_connections.distinct("userId", {"isActive": True})
+    # Nobody is working in an archived business, so its mail isn't re-indexed.
+    archived = [str(org["_id"]) for org in get_db().organizations.find({"status": "archived"}, {"_id": 1})]
+    user_ids = get_db().outlook_connections.distinct("userId", {"isActive": True, "organizationId": {"$nin": archived}})
     with ThreadPoolExecutor(max_workers=min(len(user_ids), 8) or 1) as executor:
         list(executor.map(sync_outlook_for_user, user_ids))
 

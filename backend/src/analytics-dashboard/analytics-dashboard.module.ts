@@ -9,6 +9,7 @@ import { EmailIntelligenceModule } from '../email-intelligence/email-intelligenc
 import { OrganizationsModule } from '../organizations/organizations.module';
 import { AnalyticsDashboardController } from './analytics-dashboard.controller';
 import { AnalyticsDashboardService } from './analytics-dashboard.service';
+import { PreviousMonthClosuresService } from './previous-month-closures.service';
 
 // Phase 19 — sits above CrmModule/DashboardModule/EmailIntelligenceModule
 // (none of which import it back — no cycle), same shape as
@@ -28,6 +29,6 @@ import { AnalyticsDashboardService } from './analytics-dashboard.service';
     EmailIntelligenceModule,
   ],
   controllers: [AnalyticsDashboardController],
-  providers: [AnalyticsDashboardService],
+  providers: [AnalyticsDashboardService, PreviousMonthClosuresService],
 })
 export class AnalyticsDashboardModule {}

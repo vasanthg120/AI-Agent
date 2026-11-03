@@ -12,6 +12,7 @@ import {
 } from '@/services/royaltyRulesService';
 import { SettingsField, SettingsSection } from '../components/SettingsSection';
 import { GrossMarginSetting } from './GrossMarginSetting';
+import { currencySymbol } from '@/utils/currency';
 import styles from './RoyaltyRulesSettings.module.css';
 
 const CAP_TYPE_LABEL: Record<RoyaltyCapType, string> = {
@@ -212,7 +213,7 @@ export function RoyaltyRulesSettings() {
               <Input
                 type="number"
                 min={0}
-                leftIcon="₹"
+                leftIcon={currencySymbol()}
                 value={draft.capValue}
                 onChange={(e) => setDraft((prev) => ({ ...prev, capValue: e.target.value }))}
               />
@@ -237,7 +238,7 @@ export function RoyaltyRulesSettings() {
                     <Input
                       type="number"
                       min={0}
-                      leftIcon="₹"
+                      leftIcon={currencySymbol()}
                       placeholder="From"
                       value={tier.fromValue}
                       onChange={(e) => setTier(i, 'fromValue', e.target.value)}
@@ -247,7 +248,7 @@ export function RoyaltyRulesSettings() {
                     <Input
                       type="number"
                       min={0}
-                      leftIcon="₹"
+                      leftIcon={currencySymbol()}
                       placeholder="To (blank = no limit)"
                       value={tier.toValue}
                       onChange={(e) => setTier(i, 'toValue', e.target.value)}
@@ -280,7 +281,7 @@ export function RoyaltyRulesSettings() {
             <Input
               type="number"
               min={0}
-              leftIcon="₹"
+              leftIcon={currencySymbol()}
               value={draft.marketingFeeAmount}
               onChange={(e) => setDraft((prev) => ({ ...prev, marketingFeeAmount: e.target.value }))}
             />
@@ -289,7 +290,7 @@ export function RoyaltyRulesSettings() {
             <Input
               type="number"
               min={0}
-              leftIcon="₹"
+              leftIcon={currencySymbol()}
               value={draft.otherFeeAmount}
               onChange={(e) => setDraft((prev) => ({ ...prev, otherFeeAmount: e.target.value }))}
             />

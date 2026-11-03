@@ -15,6 +15,15 @@ const RegisterPage = lazy(() => import('@/features/auth/RegisterPage').then((m) 
 const ForgotPasswordPage = lazy(() =>
   import('@/features/auth/ForgotPasswordPage').then((m) => ({ default: m.ForgotPasswordPage })),
 );
+const ActivateAccountPage = lazy(() =>
+  import('@/features/auth/ActivateAccountPage').then((m) => ({ default: m.ActivateAccountPage })),
+);
+const SubAccountsPage = lazy(() =>
+  import('@/features/sub-accounts/SubAccountsPage').then((m) => ({ default: m.SubAccountsPage })),
+);
+const SubAccountDetailPage = lazy(() =>
+  import('@/features/sub-accounts/SubAccountDetailPage').then((m) => ({ default: m.SubAccountDetailPage })),
+);
 const OAuthCallbackPage = lazy(() =>
   import('@/features/auth/OAuthCallbackPage').then((m) => ({ default: m.OAuthCallbackPage })),
 );
@@ -32,6 +41,7 @@ const CallCopilotPage = lazy(() =>
 const MyCustomerActivityPage = lazy(() =>
   import('@/features/deal-performance/MyCustomerActivityPage').then((m) => ({ default: m.MyCustomerActivityPage })),
 );
+const FilesPage = lazy(() => import('@/features/files/FilesPage').then((m) => ({ default: m.FilesPage })));
 const CustomersPage = lazy(() =>
   import('@/features/customers/CustomersPage').then((m) => ({ default: m.CustomersPage })),
 );
@@ -178,6 +188,8 @@ export function AppRoutes() {
               {/* New Inquiries became part of Customers; old links and bookmarks land there. */}
               <Route path="/inquiries" element={<Navigate to={ROUTES.customers} replace />} />
             </Route>
+            {/* Everyone: their own Google Drive / OneDrive, and company folders shared with their role (checked by the API). */}
+            <Route path={ROUTES.files} element={<FilesPage />} />
             <Route element={<RequireRole role={['owner', 'admin']} />}>
               <Route path={ROUTES.finance} element={<FinancePage />} />
             </Route>
@@ -219,6 +231,8 @@ export function AppRoutes() {
                 <Route path="security" element={<SecuritySettings />} />
                 <Route path="agent-roles" element={<AgentRolesSettings />} />
                 <Route path="integrations" element={<IntegrationsPage />} />
+                <Route path="sub-accounts" element={<SubAccountsPage />} />
+                <Route path="sub-accounts/:id" element={<SubAccountDetailPage />} />
                 <Route element={<RequireRole role="admin" />}>
                   <Route path="users" element={<UsersSettings />} />
                   <Route path="sales-targets" element={<SalesTargetsSettings />} />
@@ -246,6 +260,14 @@ export function AppRoutes() {
         {/* Unguarded: reached mid-flow with no session yet — the page
             itself establishes one from the token in the URL. */}
         <Route path={ROUTES.oauthCallback} element={<OAuthCallbackPage />} />
+        <Route
+          path={ROUTES.activate}
+          element={
+            <AuthLayout title="Activate your account" subtitle="Choose a password to start using HaiVE.">
+              <ActivateAccountPage />
+            </AuthLayout>
+          }
+        />
 
         {/* A completely separate area — its own layout, its own sign-in,
             entirely outside AppLayout/ProtectedRoute above. Must be declared

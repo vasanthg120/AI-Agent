@@ -4,6 +4,7 @@ import { JwtService } from '@nestjs/jwt';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { JwtPayload } from '../auth/jwt-payload.interface';
+import { CloudConnectionsService } from '../cloud-files/cloud-connections.service';
 import { isAdminConsentRequiredError, OutlookService } from './outlook.service';
 
 @Controller('outlook')
@@ -14,6 +15,7 @@ export class OutlookController {
     private outlookService: OutlookService,
     private jwtService: JwtService,
     private config: ConfigService,
+    private cloudConnections: CloudConnectionsService,
   ) {}
 
   @UseGuards(JwtAuthGuard)
@@ -53,6 +55,10 @@ export class OutlookController {
     @Query('error') error?: string,
     @Query('error_description') errorDescription?: string,
   ) {
+    // A OneDrive sign-in (cloud files) shares this return address — its signed state says so.
+    const cloud = this.cloudConnections.readState(state);
+    if (cloud) return { url: await this.cloudConnections.finish(cloud, code, error, errorDescription), statusCode: 302 };
+
     const frontendUrl = this.config.get<string>('corsOrigin');
     if (error || !code || !state) {
       this.logger.warn(`Outlook callback missing params (error=${error}, description=${errorDescription})`);

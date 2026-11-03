@@ -6,6 +6,7 @@ import { hasTeamRole, isOwner } from '../common/team-roster';
 import * as bcrypt from 'bcrypt';
 import { Model, Types, isValidObjectId } from 'mongoose';
 import { AgentRole, AgentRoleDocument } from '../agent-roles/schemas/agent-role.schema';
+import type { JwtPayload } from '../auth/jwt-payload.interface';
 import { CHAT_AGENTS } from '../chat/agents';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
@@ -29,6 +30,8 @@ const MAX_PUSH_SUBSCRIPTIONS = 20;
 // Roles whose dashboards are scoped to one store (see update-user.dto.ts).
 const STORE_SCOPED_ROLES = new Set(['manager', 'consultant']);
 
+const LINKED_MEMBER_MESSAGE = 'This person has access through the Main Account, so it can only be changed from there.';
+
 @Injectable()
 export class UsersService {
   constructor(
@@ -40,12 +43,99 @@ export class UsersService {
     @InjectModel(AgentRole.name) private agentRoleModel: Model<AgentRoleDocument>,
   ) {}
 
+  /** The login account with this address. Member records carry the same address
+   * but can't sign in, so nothing that starts from an email ever finds one. */
   findByEmail(email: string) {
-    return this.userModel.findOne({ email: email.toLowerCase() }).exec();
+    return this.userModel.findOne({ email: email.toLowerCase(), isLogin: { $ne: false } }).exec();
   }
 
   findById(id: string) {
     return this.userModel.findById(id).exec();
+  }
+
+  /** Whether anyone at all holds this address, login or member record. */
+  async emailInUse(email: string): Promise<boolean> {
+    return !!(await this.userModel.exists({ email: email.toLowerCase() }));
+  }
+
+  /**
+   * Who a token really represents, or null if it must be refused — the one check
+   * shared by JwtStrategy and both socket gateways. A token for a member record
+   * is valid only while that record is active, still linked to the login named in
+   * the token, and that login is active with this session still open. So removing
+   * someone's access, deactivating them or revoking the session all take effect on
+   * the very next request, whatever the token itself says.
+   */
+  async resolveSession(payload: Pick<JwtPayload, 'sub' | 'jti' | 'loginUserId'>): Promise<{ user: UserDocument; login: UserDocument } | null> {
+    if (!payload.jti || !isValidObjectId(payload.sub)) return null;
+    const user = await this.findById(payload.sub);
+    if (!user || user.active === false) return null;
+    let login = user;
+    if (payload.loginUserId || user.linkedLoginUserId) {
+      if (!payload.loginUserId || user.linkedLoginUserId !== payload.loginUserId) return null;
+      const linked = await this.findById(payload.loginUserId);
+      if (!linked || linked.active === false) return null;
+      login = linked;
+    }
+    if (!(login.sessions ?? []).some((s) => s.jti === payload.jti)) return null;
+    return { user, login };
+  }
+
+  // ---- member records: one per extra business a person may enter --------------
+
+  findLinkedMember(loginUserId: string, organizationId: string) {
+    return this.userModel.findOne({ linkedLoginUserId: loginUserId, organizationId }).exec();
+  }
+
+  findLinkedMembersOfLogin(loginUserId: string) {
+    return this.userModel.find({ linkedLoginUserId: loginUserId }).exec();
+  }
+
+  /** Gives a login access to another business. Safe to repeat: an existing record
+   * just takes the new role and becomes active again. */
+  createLinkedMember(login: UserDocument, organizationId: string, role: string, storeId?: string) {
+    return this.userModel
+      .findOneAndUpdate(
+        { linkedLoginUserId: login._id.toString(), organizationId },
+        {
+          $set: { roles: [role], active: true, ...(storeId ? { storeId } : {}) },
+          $setOnInsert: { email: login.email, name: login.name, isLogin: false, emailVerified: true },
+        },
+        { upsert: true, new: true },
+      )
+      .exec();
+  }
+
+  async removeLinkedMember(loginUserId: string, organizationId: string): Promise<boolean> {
+    const result = await this.userModel.deleteOne({ linkedLoginUserId: loginUserId, organizationId }).exec();
+    return result.deletedCount > 0;
+  }
+
+  // ---- invitations (see InvitationsService) -------------------------------------
+
+  setInvitation(userId: string, inviteTokenHash: string, inviteExpiresAt: Date) {
+    return this.userModel.updateOne({ _id: userId }, { $set: { inviteTokenHash, inviteExpiresAt } }).exec();
+  }
+
+  findByInvitation(inviteTokenHash: string) {
+    return this.userModel.findOne({ inviteTokenHash, inviteExpiresAt: { $gt: new Date() }, isLogin: { $ne: false }, active: { $ne: false } }).exec();
+  }
+
+  /** One atomic update, so the same link can never set a password twice. */
+  consumeInvitation(inviteTokenHash: string, passwordHash: string) {
+    return this.userModel
+      .findOneAndUpdate(
+        { inviteTokenHash, inviteExpiresAt: { $gt: new Date() }, isLogin: { $ne: false }, active: { $ne: false } },
+        { $set: { passwordHash, emailVerified: true }, $unset: { inviteTokenHash: '', inviteExpiresAt: '' } },
+        { new: true },
+      )
+      .exec();
+  }
+
+  async organizationName(organizationId: string): Promise<string> {
+    if (!isValidObjectId(organizationId)) return '';
+    const org = await this.userModel.db.collection('organizations').findOne({ _id: new Types.ObjectId(organizationId) }, { projection: { name: 1 } });
+    return typeof org?.name === 'string' ? org.name : '';
   }
 
   /** Cron/report fan-out, scoped to one store within one org — replaces the
@@ -54,13 +144,20 @@ export class UsersService {
    * specific store assignment still gets the default store's reports. */
   async findIdsByOrgAndStore(organizationId: string, storeId: string): Promise<string[]> {
     const users = await this.userModel
-      .find({ organizationId, $or: [{ storeId: { $exists: false } }, { storeId }] })
+      .find({ organizationId, linkedLoginUserId: { $exists: false }, $or: [{ storeId: { $exists: false } }, { storeId }] })
       .select({ _id: 1 })
       .exec();
     return users.map((u) => u._id.toString());
   }
 
+  /** The business's own people. Someone who has entered from their Main Account
+   * isn't one of its employees, so they stay out of every team list, picker and
+   * report that starts here; findAllWithLinkedMembers is the Users page's view. */
   async findAll(organizationId: string): Promise<UserDocument[]> {
+    return this.userModel.find({ organizationId, linkedLoginUserId: { $exists: false } }).exec();
+  }
+
+  async findAllWithLinkedMembers(organizationId: string): Promise<UserDocument[]> {
     return this.userModel.find({ organizationId }).exec();
   }
 
@@ -165,8 +262,10 @@ export class UsersService {
       throw new ConflictException('An account with this email address already exists.');
     }
 
-    const tempPassword = randomBytes(9).toString('base64url');
-    const passwordHash = await bcrypt.hash(tempPassword, SALT_ROUNDS);
+    // With an invitation there is no temporary password at all: the account has no
+    // way in until the person sets their own through the emailed link.
+    const tempPassword = dto.sendInvite ? undefined : randomBytes(9).toString('base64url');
+    const passwordHash = tempPassword ? await bcrypt.hash(tempPassword, SALT_ROUNDS) : undefined;
     try {
       const user = await this.userModel.create({
         email,
@@ -195,6 +294,7 @@ export class UsersService {
     // a valid Mongo _id.
     const target = isValidObjectId(id) ? await this.userModel.findOne({ _id: id, organizationId }).exec() : null;
     if (!target) throw new NotFoundException('User not found');
+    if (target.linkedLoginUserId) throw new ForbiddenException(LINKED_MEMBER_MESSAGE);
 
     // The org owner is a single, special account with no transfer flow in
     // this codebase — no other admin may change it, and nobody (the owner
@@ -249,6 +349,8 @@ export class UsersService {
     await this.assertNotOwner(id, organizationId);
     const deleted = await this.userModel.findOneAndDelete({ _id: id, organizationId }).exec();
     if (!deleted) throw new NotFoundException('User not found');
+    // Their access to any other business goes with them.
+    await this.userModel.deleteMany({ linkedLoginUserId: id }).exec();
   }
 
   async updateOwnProfile(userId: string, dto: UpdateProfileDto) {
@@ -276,7 +378,8 @@ export class UsersService {
   }
 
   private async assertNotOwner(id: string, organizationId: string): Promise<void> {
-    const target = await this.userModel.findOne({ _id: id, organizationId }).select({ roles: 1 }).exec();
+    const target = await this.userModel.findOne({ _id: id, organizationId }).select({ roles: 1, linkedLoginUserId: 1 }).exec();
+    if (target?.linkedLoginUserId) throw new ForbiddenException(LINKED_MEMBER_MESSAGE);
     if (target?.roles.includes('owner')) {
       throw new ForbiddenException("The organization owner's account can't be modified or deleted by another admin");
     }
@@ -295,6 +398,11 @@ export class UsersService {
       active: user.active,
       voiceAccessEnabled: user.voiceAccessEnabled,
       aiAccessEnabled: user.aiAccessEnabled,
+      // Has access through the Main Account rather than being one of this
+      // business's own people; the Users page labels and protects these.
+      linkedFromMain: !!user.linkedLoginUserId,
+      // Invited and hasn't set a password yet.
+      pendingInvitation: !user.passwordHash && !!user.inviteTokenHash,
       // Self-editable profile fields (see updateOwnProfile) live in the
       // free-form preferences object rather than as top-level schema fields.
       phone: typeof user.preferences?.phone === 'string' ? user.preferences.phone : undefined,

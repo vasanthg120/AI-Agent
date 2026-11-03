@@ -1,6 +1,8 @@
 import { Injectable } from '@nestjs/common';
 import { InjectConnection } from '@nestjs/mongoose';
 import { Connection, Types } from 'mongoose';
+import { sourceCondition } from '../data-sources/data-source-scope.plugin';
+import { scopeCurrency } from '../data-sources/scope-currency';
 
 type Doc = Record<string, any>;
 
@@ -100,12 +102,17 @@ export function countedNote(totals: QuotationTotals): string {
 }
 
 // The one definition of "sales" the Sales, Gross Margin and Royalty reports
-// share: every quotation that has been sent (anything but a draft) and whose
-// own date falls in the period — whether or not the customer has accepted it
-// yet. The value and the tax come from the quotation itself; no invoice and
-// no cost is involved. Read straight from HaiVE's own copy of the quotations
+// share: every quotation that has been sent (anything but a draft or a voided
+// one — Hoops marks a cancelled quote voided) and whose own date falls in the
+// period — whether or not the customer has accepted it yet. The value and the
+// tax come from the quotation itself; no invoice and no cost is involved. Read
+// straight from HaiVE's own copy of the quotations
 // (filled by the CRM sync and by quotations written in HaiVE), always by
 // organization.
+//
+// Like the dashboards, it reads the CRM the request shows (the one chosen for
+// dashboards, through the data-source scope) — never two CRMs added together,
+// whose amounts may be in different currencies (Pantheras INR, Hoops AUD).
 //
 // Depends on nothing but the database connection, so each module that needs
 // it lists it in its own providers (as GridFsService is).
@@ -116,7 +123,7 @@ export class QuotationSalesService {
   async sent(organizationId: string, dateFrom: string, dateTo: string, storeConstraint?: string): Promise<QuotationSale[]> {
     const match: Doc = {
       organizationId,
-      quoteStatus: { $ne: 'draft' },
+      quoteStatus: { $nin: ['draft', 'voided'] },
       // Whole days, end of the last one included.
       createdAt: { $gte: new Date(dateFrom), $lte: new Date(`${dateTo}T23:59:59.999Z`) },
     };
@@ -128,9 +135,10 @@ export class QuotationSalesService {
         .toArray();
       match.dealId = { $in: deals.map((d) => d._id.toString()) };
     }
+    const scoped = sourceCondition(match);
     const docs = await this.connection
       .collection('crm_quotes')
-      .find(match, {
+      .find(scoped ? { ...match, $and: [scoped] } : match, {
         projection: {
           quoteNumber: 1,
           quoteName: 1,
@@ -149,6 +157,11 @@ export class QuotationSalesService {
       .sort({ createdAt: -1 })
       .toArray();
     return docs.map(quotationSale);
+  }
+
+  /** What the quotations in scope are priced in: the shown CRM's currency (Hoops: AUD), else INR. */
+  currency(organizationId: string): Promise<string> {
+    return scopeCurrency(this.connection, organizationId);
   }
 
   /** Who owns the deal each quotation was raised from. */

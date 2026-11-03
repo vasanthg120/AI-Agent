@@ -8,12 +8,14 @@ import { axiosClient } from '@/api/axiosClient';
 export interface SetupField {
   key: string;
   label: string;
-  type: 'text' | 'password' | 'url';
+  type: 'text' | 'password' | 'url' | 'select';
   hint?: string;
   placeholder?: string;
   required: boolean;
   defaultValue?: string;
   advanced?: boolean;
+  // type 'select': the choices.
+  options?: { value: string; label: string }[];
 }
 
 export interface WebhookInfo {
@@ -30,12 +32,6 @@ export interface IntegrationError {
   kind: 'auth' | 'mapping' | 'unreachable' | 'rate_limit' | 'other' | string;
   // For whoever has to debug it — shown only behind "View technical details".
   detail?: string;
-  // A small, fixed set of machine-readable codes a caller can branch on
-  // instead of string-matching `message` — currently only
-  // ZOHO_APP_CREDENTIALS_REQUIRED (see backend/src/zoho/zoho.service.ts's
-  // resolveAppCredentials), which CrmSetupWizard uses to show the
-  // credential form instead of a plain error toast.
-  code?: string;
 }
 
 export interface CrmIntegration {
@@ -44,16 +40,10 @@ export interface CrmIntegration {
   description: string;
   // pull: HaiVE reads the CRM on a schedule. push: the CRM sends each new record to HaiVE.
   connection: 'pull' | 'push';
-  setup: {
-    fields: SetupField[];
-    provides: string[];
-    limitations: string[];
-    steps?: string[];
-    // Set for Zoho/Salesforce — fields is always [] when this is set; the
-    // "Connect" step redirects to GET /zoho/connect-url or
-    // /salesforce/connect-url instead of rendering a form (see CrmSetupWizard).
-    authMethod?: 'oauth';
-  };
+  // Read once a night only (Hoops), from this time on — known before it is connected.
+  nightly?: { windowLabel: string };
+  // autoSetup: connected with its credentials alone — no mapping review, the first sync starts by itself (Hoops).
+  setup: { fields: SetupField[]; provides: string[]; limitations: string[]; steps?: string[]; autoSetup?: boolean };
   status: 'not_connected' | 'connected' | 'waiting' | 'needs_attention';
   source?: {
     id: string;
@@ -68,7 +58,19 @@ export interface CrmIntegration {
     modules: string[];
     error?: IntegrationError;
     webhook?: WebhookInfo;
+    // A CRM read once a night (Hoops): when the next sync runs, and whether "Sync now" can run now.
+    schedule?: { windowLabel: string; nextRunAt: string; canSyncNow: boolean; reason?: string };
+    // A CRM whose history comes in a little each night (Hoops): how far back it reaches so far (from null: everything).
+    history?: { from: string | null; importedBackTo: string | null; complete: boolean };
   };
+}
+
+// "deferred": the CRM may not be read right now (Hoops: once a night) — message says why, nextRunAt when it will be.
+export interface SyncResult {
+  status: 'ok' | 'error' | 'deferred' | string;
+  error?: string;
+  message?: string;
+  nextRunAt?: string | null;
 }
 
 export type Discovery = Record<string, { records: number; fields: number }>;
@@ -134,41 +136,6 @@ export const crmIntegrationsService = {
     return data;
   },
 
-  // Zoho/Salesforce only (setup.authMethod === 'oauth') — the "Connect"
-  // step's redirect button calls this to get Microsoft/Google-OAuth-style
-  // authorize URL to send the browser to (see backend/src/zoho/
-  // zoho.controller.ts, backend/src/salesforce/salesforce.controller.ts).
-  // Throws (400, code ZOHO_APP_CREDENTIALS_REQUIRED) for Zoho if neither the
-  // organization nor the platform has app credentials configured yet — the
-  // wizard shows the credential modal instead in that case rather than
-  // calling this.
-  async getOAuthConnectUrl(provider: 'zoho' | 'salesforce'): Promise<string> {
-    const { data } = await axiosClient.get<{ url: string }>(`/${provider}/connect-url`);
-    return data.url;
-  },
-
-  // Zoho only — "bring your own Zoho API Console app" (Client ID/Secret/data
-  // center), entered via the credential modal before the first "Connect with
-  // Zoho" redirect. clientSecretMasked is a fixed placeholder, never the
-  // real value (see backend/src/integrations/integrations.service.ts's
-  // getOAuthAppCredentialsStatus). dataCenters is the backend's own region
-  // list (backend/src/zoho/zoho-data-centers.ts) — read from here rather
-  // than duplicated on the frontend, so the two can never drift.
-  async getZohoAppCredentialsStatus(): Promise<{
-    configured: boolean;
-    clientId?: string;
-    clientSecretMasked?: string;
-    meta?: Record<string, string>;
-    dataCenters: Record<string, { label: string; accountsBaseUrl: string }>;
-  }> {
-    const { data } = await axiosClient.get('/zoho/app-credentials');
-    return data;
-  },
-
-  async saveZohoAppCredentials(payload: { clientId: string; clientSecret: string; region: string; accountsServerUrl?: string }): Promise<void> {
-    await axiosClient.post('/zoho/app-credentials', payload);
-  },
-
   // Pull CRMs: saved only if their data can really be read. Nothing is synced yet.
   async connect(provider: string, credentials: Record<string, string> = {}): Promise<ConnectResult> {
     const { data } = await axiosClient.post<ConnectResult>(
@@ -189,7 +156,7 @@ export const crmIntegrationsService = {
     return data;
   },
 
-  async syncNow(provider: string): Promise<{ result: { status: string; error?: string }; integration: CrmIntegration }> {
+  async syncNow(provider: string): Promise<{ result: SyncResult; integration: CrmIntegration }> {
     const { data } = await axiosClient.post(`/crm-integrations/${provider}/sync`, undefined, { timeout: 240_000 });
     return data;
   },
@@ -242,6 +209,5 @@ export function integrationErrorOf(error: unknown): IntegrationError | null {
     message: data.message,
     kind: typeof data.kind === 'string' ? data.kind : 'other',
     detail: typeof data.detail === 'string' ? data.detail : undefined,
-    code: typeof data.code === 'string' ? data.code : undefined,
   };
 }

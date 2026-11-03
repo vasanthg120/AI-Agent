@@ -1,24 +1,182 @@
-name: Deploy AI Agent
+# Push to main → test → build images → deploy to the EC2 server.
+#
+# Nothing reaches the server unless the backend's typecheck and full test suite,
+# the frontend build, the AI service's syntax check and a build of all three Docker
+# images pass. The server then builds that same commit (deploy.sh), tags the images with
+# it, checks they are healthy and rolls back by itself if they are not.
+#
+# Repository settings this needs (docs/deployment/AWS-EC2.md, "GitHub Actions"):
+#   Secrets:   EC2_HOST, EC2_USER, EC2_SSH_KEY  (EC2_PORT optional, default 22)
+#   Variables: VITE_API_URL, VITE_SOCKET_URL    (e.g. https://app.example.com/api and https://app.example.com —
+#              the same values as in the server's /var/www/AI-Agent/.env)
+#   Optional:  AWS_DEPLOY_ROLE_ARN, AWS_REGION, EC2_SECURITY_GROUP_ID — then port 22 can stay closed to
+#              the world: the workflow opens it for this runner's IP only, for the length of the deploy.
+name: Deploy to AWS
 
 on:
   push:
-    branches:
-      - main
+    branches: [main]
+  # "Run workflow" on the Actions tab redeploys the branch head by hand.
+  workflow_dispatch:
+
+# One deploy at a time; a newer push waits for the running one instead of cutting it off midway.
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false
+
+permissions:
+  contents: read
 
 jobs:
+  backend:
+    name: Backend · typecheck and tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    services:
+      mongo:
+        image: mongo:7
+        ports: ["27017:27017"]
+        options: >-
+          --health-cmd "mongosh --quiet --eval 'db.adminCommand({ ping: 1 })'"
+          --health-interval 10s --health-timeout 5s --health-retries 12
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      # The specs run against a real MongoDB (this project's convention); a throwaway one here.
+      MONGO_URI: mongodb://localhost:27017/agent_ci
+      REDIS_URL: redis://localhost:6379/0
+      JWT_SECRET: ci-only-jwt-secret
+      ENCRYPTION_KEY: ci-only-encryption-key
+      NODE_ENV: test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - run: npm ci
+      - name: Typecheck
+        run: npx tsc --noEmit -p tsconfig.json
+      # In band: some billing specs compare organization-wide totals before and after,
+      # which other suites running at the same moment would disturb.
+      - name: Tests
+        run: npx jest --ci --runInBand
+
+  frontend:
+    name: Frontend · typecheck and build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - name: Production addresses are set
+        run: |
+          if [ -z "${{ vars.VITE_API_URL }}" ] || [ -z "${{ vars.VITE_SOCKET_URL }}" ]; then
+            echo "::error::Set the repository variables VITE_API_URL and VITE_SOCKET_URL (Settings → Secrets and variables → Actions → Variables)."
+            exit 1
+          fi
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - name: Typecheck and build
+        run: npm run build
+        env:
+          VITE_API_URL: ${{ vars.VITE_API_URL }}
+          VITE_SOCKET_URL: ${{ vars.VITE_SOCKET_URL }}
+
+  python-agent:
+    name: AI service · syntax check
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m compileall -q python-agent/app
+
+  # The Dockerfiles must build before the server is touched (nothing is pushed anywhere:
+  # the server builds the same commit itself, with its own cache).
+  images:
+    name: Docker build · ${{ matrix.service }}
+    needs: [backend, frontend, python-agent]
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: true
+      matrix:
+        service: [backend, python-agent, frontend]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.service }}
+          push: false
+          tags: haive/${{ matrix.service }}:${{ github.sha }}
+          build-args: |
+            VITE_API_URL=${{ vars.VITE_API_URL }}
+            VITE_SOCKET_URL=${{ vars.VITE_SOCKET_URL }}
+          cache-from: type=gha,scope=${{ matrix.service }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.service }}
+
   deploy:
     name: Deploy to EC2
+    needs: images
     runs-on: ubuntu-latest
-
+    timeout-minutes: 45
+    # Settings → Environments → production can require an approval before this runs.
+    environment: production
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      SSH_GATE: ${{ vars.AWS_DEPLOY_ROLE_ARN != '' && vars.EC2_SECURITY_GROUP_ID != '' }}
     steps:
-      - name: Deploy to EC2
+      - name: AWS credentials (only for opening SSH to this runner)
+        if: env.SSH_GATE == 'true'
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION || 'ap-south-1' }}
+      - name: Open SSH for this runner
+        if: env.SSH_GATE == 'true'
+        id: gate
+        run: |
+          ip="$(curl -fsS https://checkip.amazonaws.com)"
+          echo "ip=$ip" >> "$GITHUB_OUTPUT"
+          aws ec2 authorize-security-group-ingress --group-id "${{ vars.EC2_SECURITY_GROUP_ID }}" \
+            --ip-permissions "IpProtocol=tcp,FromPort=${{ secrets.EC2_PORT || 22 }},ToPort=${{ secrets.EC2_PORT || 22 }},IpRanges=[{CidrIp=$ip/32,Description=github-actions-deploy}]"
+      - name: Deploy ${{ github.sha }}
         uses: appleboy/ssh-action@v1.2.2
+        env:
+          SHA: ${{ github.sha }}
         with:
           host: ${{ secrets.EC2_HOST }}
           username: ${{ secrets.EC2_USER }}
           key: ${{ secrets.EC2_SSH_KEY }}
+          port: ${{ secrets.EC2_PORT || 22 }}
+          # The first build on a new server installs PyTorch and the embedding model: allow for it.
+          command_timeout: 40m
+          envs: SHA
           script: |
-            set -e
+            set -euo pipefail
             cd /var/www/AI-Agent
-            echo "Starting deployment..."
-            ./deploy.sh
+            git fetch --quiet origin main
+            git reset --hard "$SHA"
+            ./deploy.sh "$SHA"
+      - name: Close SSH again
+        if: always() && steps.gate.outputs.ip != ''
+        run: |
+          aws ec2 revoke-security-group-ingress --group-id "${{ vars.EC2_SECURITY_GROUP_ID }}" \
+            --ip-permissions "IpProtocol=tcp,FromPort=${{ secrets.EC2_PORT || 22 }},ToPort=${{ secrets.EC2_PORT || 22 }},IpRanges=[{CidrIp=${{ steps.gate.outputs.ip }}/32}]"

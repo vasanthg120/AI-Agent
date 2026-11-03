@@ -48,7 +48,6 @@ describe('Customers (real Mongo)', () => {
       reservations as never,
       http as never,
       { sign: () => 'jwt' } as never,
-      { findAll: async () => [] } as never,
       { get: () => 'http://agent' } as never,
     );
     gorilla = await source(org, 'gorilladash', 'Gorilla Dash');
@@ -237,6 +236,56 @@ describe('Customers (real Mongo)', () => {
     expect((await service.list(org, { search: 'dee@haive' })).items.map((c) => c.name)).toEqual(['Dee']);
   });
 
+  it('the tiles: open, not actioned, no reply, no follow-up, converted and lost — each one a filter of the same customers', async () => {
+    // Priya ordered before, enquired again 6 days ago, was emailed 4 days ago and hasn't answered.
+    await seedPriya();
+    // Arun enquired yesterday and nobody has done anything about it.
+    await connection
+      .collection('crm_deals')
+      .insertOne(enquiry(org, gorilla, 2, daysAgo(1), { first_name: 'Arun', last_name: 'Kumar', email: 'arun@bluewave.example' }, 'Safety jackets?'));
+    // Meena enquired 30 days ago and her quotation was accepted 20 days ago: the inquiry became an order.
+    await connection
+      .collection('crm_deals')
+      .insertOne(enquiry(org, gorilla, 3, daysAgo(30), { first_name: 'Meena', last_name: 'Iyer', email: 'meena@kovai.example' }, 'Caps for an event'));
+    const quote = (number: string, email: string, approval: string, created: Date) => ({
+      organizationId: org,
+      dataSourceId: pantheras,
+      quoteNumber: number,
+      quoteName: `Order ${number}`,
+      quoteAmount: 40000,
+      currency: 'INR',
+      quoteStatus: 'published',
+      clientApprovalStatus: approval,
+      clientDetails: { email, contactName: number === 'Q-30' ? 'Meena Iyer' : 'Kiran Rao' },
+      createdAt: created,
+    });
+    await connection.collection('crm_quotes').insertMany([
+      quote('Q-30', 'meena@kovai.example', 'approved', daysAgo(20)),
+      // Kiran's only quotation was rejected, and nothing has happened since: lost.
+      quote('Q-40', 'kiran@rao.example', 'rejected', daysAgo(15)),
+    ]);
+
+    const result = await service.list(org, {});
+    expect(result.stats).toMatchObject({ total: 4, open: 2, notActioned: 1, noReply: 1, noFollowUp: 4, converted: 1, lost: 1 });
+    const names = async (view: string) => (await service.list(org, { view, sort: 'name' })).items.map((c) => c.name);
+    expect(await names('open')).toEqual(['Arun Kumar', 'Priya Raman']);
+    expect(await names('not_actioned')).toEqual(['Arun Kumar']);
+    expect(await names('no_reply')).toEqual(['Priya Raman']);
+    expect(await names('no_follow_up')).toEqual(['Arun Kumar', 'Kiran Rao', 'Meena Iyer', 'Priya Raman']);
+    // Meena's Order chip says Converted; Priya ordered before but has something open again ("Past order").
+    expect(await names('converted')).toEqual(['Meena Iyer']);
+    expect(await names('lost')).toEqual(['Kiran Rao']);
+
+    // A follow-up planned for Arun takes him off "No follow-up"; marking his inquiry contacted takes him off "Not actioned".
+    const arun = result.items.find((c) => c.name === 'Arun Kumar')!;
+    await connection.collection('customer_tasks').insertOne({ organizationId: org, customerKeys: [`e:arun@bluewave.example`], title: 'Follow up', status: 'open', dueDate: daysAgo(-2), createdAt: new Date() });
+    await connection.collection('customer_statuses').insertOne({ organizationId: org, customerKeys: ['e:arun@bluewave.example'], stages: { inquiry: { status: 'contacted', at: new Date() } } });
+    service.invalidate(org);
+    expect(await names('no_follow_up')).toEqual(['Kiran Rao', 'Meena Iyer', 'Priya Raman']);
+    expect(await names('not_actioned')).toEqual([]);
+    expect(await names('open')).toContain(arun.name);
+  });
+
   it('the source filter narrows to customers known to that system, and keeps their whole picture', async () => {
     await seedPriya();
     await connection
@@ -316,23 +365,27 @@ describe('Customers (real Mongo)', () => {
     expect(result.sources).toEqual([
       expect.objectContaining({ label: 'Gorilla Dash', connected: true, canSync: true, lastError: 'The API key was rejected.' }),
       expect.objectContaining({ label: 'Pantheras CRM', connected: true, canSync: true, lastError: undefined }),
-      // Connected, but it has nothing to pull: no Sync for it.
-      expect.objectContaining({ label: 'Hoops CRM', connected: true, canSync: false }),
+      // Read through its API (once a night): it can be synced too.
+      expect.objectContaining({ label: 'Hoops CRM', connected: true, canSync: true }),
     ]);
   });
 
   it('Sync now pulls from every CRM that can be synced, and one failing does not stop the others', async () => {
     await seedPriya();
+    const hoopsId = (await service.list(org, {})).sources.find((x) => x.label === 'Hoops CRM')!.id;
     dataSources.syncNow.mockImplementation(async (_org: string, id: string) => {
       if (id === pantheras) throw new Error('timeout');
+      // Outside its nightly window Hoops isn't read: it says when it will be.
+      if (id === hoopsId) return { status: 'deferred', message: 'Hoops CRM allows HaiVE to read once a night, after 7:00pm AEST.' };
       return { status: 'ok' };
     });
     const { results } = await service.sync(org);
-    expect(dataSources.syncNow.mock.calls.map((call) => call[1]).sort()).toEqual([gorilla, pantheras].sort());
+    expect(dataSources.syncNow.mock.calls.map((call) => call[1]).sort()).toEqual([gorilla, pantheras, hoopsId].sort());
     expect(results).toEqual(
       expect.arrayContaining([
         { source: 'Gorilla Dash', ok: true, error: undefined },
         { source: 'Pantheras CRM', ok: false, error: expect.stringMatching(/couldn’t be completed/) },
+        { source: 'Hoops CRM', ok: true, error: undefined, note: expect.stringContaining('once a night') },
       ]),
     );
 
@@ -341,9 +394,8 @@ describe('Customers (real Mongo)', () => {
     dataSources.syncNow.mockResolvedValue({ status: 'error', error: 'The API key was rejected.' });
     expect(await service.sync(org, gorilla)).toEqual({ results: [{ source: 'Gorilla Dash', ok: false, error: 'The API key was rejected.' }] });
     expect(dataSources.syncNow).toHaveBeenCalledTimes(1);
-    // A source with nothing to pull, or somebody else's source, can't be synced.
-    const hoops = (await service.list(org, {})).sources.find((x) => x.label === 'Hoops CRM')!;
-    await expect(service.sync(org, hoops.id)).rejects.toBeInstanceOf(BadRequestException);
+    // Somebody else's source can't be synced.
+    await expect(service.sync(org, `${PREFIX}-not-a-source`)).rejects.toBeInstanceOf(BadRequestException);
     await expect(service.sync(`${PREFIX}-nobody`)).rejects.toBeInstanceOf(BadRequestException);
   });
 
@@ -738,8 +790,8 @@ describe('Customers (real Mongo)', () => {
     expect(kinds).toEqual(
       expect.arrayContaining([
         ['comment', 'Comment by Sanjay'],
-        ['task', 'Task added by Sanjay'],
-        ['task', 'Task done'],
+        ['task', 'Follow-up set by Sanjay'],
+        ['task', 'Follow-up done'],
         ['file', 'File added by Sanjay'],
       ]),
     );

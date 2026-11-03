@@ -15,12 +15,17 @@ import {
   CRM_PROVIDERS,
   CrmModule,
   CrmProviderDefinition,
+  CrmProviderId,
   FieldMappings,
   MirroredModule,
   PUSH_PROVIDERS,
+  connectionOf,
   crmProviderForIntegration,
 } from './provider-catalog';
+import { currencyOf } from './scope-currency';
 import { DataSource, DataSourceDocument } from './schemas/data-source.schema';
+
+export { currencyOf };
 import { isPushProvider, webhookInfo } from './webhook-info';
 
 const NATIVE_KEY = 'haive';
@@ -56,6 +61,8 @@ export interface DataSourceView {
   native: boolean;
   modules: CrmModule[];
   terminology: DataSource['terminology'];
+  // What its amounts are in (ISO code, e.g. INR, AUD).
+  currency: string;
   sync: DataSource['sync'] & { supported: boolean };
   recordCounts: Record<MirroredModule, number>;
   supportedMetrics: string[];
@@ -71,6 +78,16 @@ export interface EmailSourceView {
 function cleanStrings(values: unknown, max = MAX_VALUES): string[] {
   if (!Array.isArray(values)) return [];
   return [...new Set(values.map((v) => String(v ?? '').trim()).filter((v) => v && v.length <= 120))].slice(0, max);
+}
+
+/** A new source's sync settings: its provider's schedule (Hoops: once a night, in a window), otherwise every 10 minutes. */
+function initialSync(provider: CrmProviderDefinition): DataSource['sync'] {
+  return {
+    enabled: provider.syncSupported,
+    intervalMinutes: provider.syncDefaults?.intervalMinutes ?? 10,
+    ...(provider.syncDefaults?.window ? { window: provider.syncDefaults.window } : {}),
+    lastStatus: 'never',
+  };
 }
 
 // The data-source layer: which CRMs an organization takes data from, how each
@@ -106,6 +123,7 @@ export class DataSourcesService implements OnApplicationBootstrap {
     await this.dropLegacyIndexes();
     await this.renameProviders();
     await this.fillEmptyMappings();
+    await this.upgradeLegacyHoops();
     const orgIds = (
       await this.connection
         .collection('organizations')
@@ -123,20 +141,58 @@ export class DataSourcesService implements OnApplicationBootstrap {
   }
 
   /** One-off, idempotent: the CRM formerly shown as "Customized Haive CRM" is
-   * Pantheras CRM (only where an administrator hasn't renamed the source), and
-   * a Zapier source that was set up for Hoops becomes the Hoops CRM provider. */
+   * Pantheras CRM (only where an administrator hasn't renamed the source). (A
+   * Zapier source named "Hoops…" used to become the Hoops provider; since
+   * Hoops is read through its API it stays a Zapier source.) */
   private async renameProviders(): Promise<void> {
     await this.sourceModel.updateMany({ provider: 'prospectconnect', label: { $in: ['Customized Haive CRM', 'CRM'] } }, { $set: { label: CRM_PROVIDERS.prospectconnect.label } }).exec();
-    const hoopsLike = await this.sourceModel.find({ provider: 'zapier', label: /^hoops/i }).exec();
-    for (const source of hoopsLike) {
-      // One Hoops source per organization; a second look-alike stays a generic Zapier source.
-      if (await this.sourceModel.exists({ organizationId: source.organizationId, key: 'hoops' })) continue;
-      await this.sourceModel
-        .updateOne({ _id: source._id }, { $set: { provider: 'hoops', key: 'hoops', label: CRM_PROVIDERS.hoops.label, terminology: CRM_PROVIDERS.hoops.terminology } })
-        .exec();
-      await this.connection.collection('crm_deals').updateMany({ dataSourceId: source._id.toString() }, { $set: { sourceProvider: 'hoops' } });
-      await this.connection.collection('crm_contacts').updateMany({ dataSourceId: source._id.toString() }, { $set: { sourceProvider: 'hoops' } });
+  }
+
+  /** Idempotent: a Hoops source set up before Hoops was read through its API (a
+   * Zapier-era source, connected since or not) takes the API's settings. The
+   * old ones skipped quotes and companies and read every sale as open. */
+  private async upgradeLegacyHoops(): Promise<void> {
+    const legacy = await this.sourceModel.find({ provider: 'hoops', 'sync.window': { $exists: false } }).exec();
+    for (const source of legacy) {
+      await this.applyProviderSetup(source, CRM_PROVIDERS.hoops);
+      this.logger.log(`Hoops source ${source._id.toString()} now uses the Hoops API settings (nightly sync, quotes, AUD).`);
     }
+  }
+
+  /** Gives a source its provider's own modules, words, mapping and schedule —
+   * keeping any extra field an administrator mapped — and starts its reading
+   * over under them (the last sync times stay, so a nightly CRM still waits for
+   * its next night). An old webhook key stops working. */
+  private async applyProviderSetup(source: DataSourceDocument, provider: CrmProviderDefinition): Promise<void> {
+    const saved = (source.fieldMappings ?? {}) as Record<string, Record<string, string>>;
+    const mappings: Record<string, Record<string, string>> = {};
+    for (const [module, defaults] of Object.entries(provider.fieldMappings)) mappings[module] = { ...(saved[module] ?? {}), ...defaults };
+    const sync = source.sync ?? ({} as DataSource['sync']);
+    const currency = typeof source.metadata?.currency === 'string' ? source.metadata.currency : '';
+    // An INR left by the first Hoops connect form was its old default, not a choice.
+    const resetCurrency = !!provider.defaultCurrency && (!currency || (provider.id === 'hoops' && currency === 'INR'));
+    await this.sourceModel
+      .updateOne(
+        { _id: source._id },
+        {
+          $set: {
+            provider: provider.id,
+            modules: provider.modules,
+            terminology: provider.terminology,
+            fieldMappings: mappings,
+            statusMapping: provider.statusMapping,
+            sync: {
+              ...initialSync(provider),
+              ...(sync.lastSyncAt ? { lastSyncAt: sync.lastSyncAt } : {}),
+              ...(sync.lastSuccessAt ? { lastSuccessAt: sync.lastSuccessAt } : {}),
+              ...(sync.historyChoice !== undefined ? { historyChoice: sync.historyChoice, historyFrom: sync.historyFrom ?? null } : {}),
+            },
+            ...(resetCurrency ? { 'metadata.currency': provider.defaultCurrency } : {}),
+          },
+          $unset: { 'metadata.webhookKeyHash': '', 'metadata.webhookKeyHint': '', 'metadata.webhookReceived': '', 'metadata.webhookLastReceivedAt': '' },
+        },
+      )
+      .exec();
   }
 
   /** Idempotent: a module a source maps nothing for gets its provider's default mapping, once the
@@ -237,11 +293,7 @@ export class DataSourcesService implements OnApplicationBootstrap {
             statusMapping: provider.statusMapping,
             stageMappings: [],
             availableFields: {},
-            sync: {
-              enabled: provider.syncSupported,
-              intervalMinutes: 10,
-              lastStatus: 'never',
-            },
+            sync: initialSync(provider),
             metadata: {},
             isDefault: false,
           },
@@ -250,6 +302,16 @@ export class DataSourcesService implements OnApplicationBootstrap {
         { upsert: true },
       )
       .exec();
+
+    // A source set up while this provider could only send records to HaiVE
+    // (Hoops, through Zapier, before its API) becomes an ordinary pulled source
+    // once its API is connected: the provider's own modules, mapping and
+    // schedule — whether or not its old webhook key is still there.
+    if (connectionOf(provider) === 'pull') {
+      const existing = await this.sourceModel.findOne({ organizationId, key }).exec();
+      const pushEra = !!existing?.metadata?.webhookKeyHash || (!!provider.syncDefaults?.window && !existing?.sync?.window);
+      if (existing && pushEra) await this.applyProviderSetup(existing, provider);
+    }
   }
 
   /** Tags records stored before data sources existed. Until now only the
@@ -436,6 +498,7 @@ export class DataSourcesService implements OnApplicationBootstrap {
       native: source.key === NATIVE_KEY,
       modules: capability.modules,
       terminology: { ...provider.terminology, ...(source.terminology ?? {}) },
+      currency: currencyOf(source),
       sync: { ...source.sync, supported: provider.syncSupported },
       recordCounts: {
         deals: own.deals + untagged.deals,
@@ -533,6 +596,8 @@ export class DataSourcesService implements OnApplicationBootstrap {
         mode: scope.mode as SelectionMode,
         sourceIds: scope.sourceIds,
       },
+      // What the dashboards' and reports' amounts are in: the shown source's currency.
+      currency: selected[0] ? currencyOf(selected[0]) : 'INR',
       sources: visible,
       emailSources,
       metrics: METRICS.map((m) => this.metricAvailability(m, selected, emailSources)),

@@ -85,7 +85,6 @@ describe('Jobs (real Mongo)', () => {
       { reserve: jest.fn(), settle: jest.fn(), release: jest.fn(), resolveTenantKey: (o: string) => o } as never,
       { post: jest.fn() } as never,
       { sign: () => 'jwt' } as never,
-      { findAll: async () => [] } as never,
       { get: () => 'http://agent' } as never,
     );
     const w = new CustomerWorkspaceService(connection, d, new GridFsService(connection));

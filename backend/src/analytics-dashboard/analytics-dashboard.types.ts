@@ -32,6 +32,8 @@ export interface AnalyticsDashboardOverview {
   };
   deals: { wonCount: number; lostCount: number; openCount: number; wonValue: number; lostValue: number; openValue: number };
   revenue: Achievement & { businessHealthScore: number | null };
+  // Shown beside `revenue`, never added to it or to the target, forecast or run rate.
+  previousMonthClosures: PreviousMonthClosures;
   // Outstanding customer receivables (quoteAmount - paidAmount, summed) —
   // "dues" in Agent Activity's team-wide view. Not date-range scoped, unlike
   // the rest of this response (see QuotesService.getOutstandingByOwner) —
@@ -57,6 +59,40 @@ export interface AnalyticsDashboardOverview {
   // the redesigned Overview tab actually renders: every applicable
   // observation, not just the first match.
   insights: AiInsightItem[];
+}
+
+// Won deals that started in the month before the selected one and were closed
+// in the selected one. Three dates are kept apart (previous-month-closures.service.ts):
+// when a deal started, when it was closed, and the month its revenue counts in.
+export interface PreviousMonthClosedDeal {
+  id: string;
+  name: string;
+  value: number;
+  /** "YYYY-MM-DD": the earliest date the deal or one of its quotes was recorded in the CRM or HaiVE. */
+  startedOn: string;
+  startedFrom: 'deal' | 'quote';
+  /** "YYYY-MM-DD": when it was closed — recorded when it turned won, or (for deals closed before that was recorded) its closing date. */
+  closedOn: string;
+  closedFrom: 'recorded' | 'closing-date';
+  /** "YYYY-MM" of its closing date — the month its revenue counts in; null when it has no closing date (then it counts in no month). */
+  revenuePeriod: string | null;
+}
+
+export interface PreviousMonthClosures {
+  /** "YYYY-MM": the selected month — the deals were closed in it. */
+  period: string;
+  /** "YYYY-MM": the month before it — the deals started in it. */
+  previousPeriod: string;
+  count: number;
+  value: number;
+  /** Of those, the ones already inside the selected month's revenue (their closing date is in it). */
+  inThisMonthRevenue: { count: number; value: number };
+  /** Of those, the ones whose closing date puts their revenue in another month (or none). */
+  outsideThisMonthRevenue: { count: number; value: number };
+  /** Won deals closed in the selected month whose start is unknown — not counted above. */
+  unknownStart: { count: number; value: number };
+  /** Highest value first. */
+  deals: PreviousMonthClosedDeal[];
 }
 
 export interface PipelineMonth {

@@ -2,7 +2,7 @@ import { Controller, Get, Param, Post, UseGuards } from '@nestjs/common';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RequireSessionAuthGuard } from '../common/guards/require-session-auth.guard';
-import { JwtPayload } from '../auth/jwt-payload.interface';
+import { JwtPayload, loginIdOf } from '../auth/jwt-payload.interface';
 import { SessionsService } from './sessions.service';
 
 // Outside /auth — no credential ever appears in these request bodies, so
@@ -16,19 +16,19 @@ export class SessionsController {
 
   @Get()
   list(@CurrentUser() user: JwtPayload) {
-    return this.sessionsService.list(user.sub, user.jti!);
+    return this.sessionsService.list(loginIdOf(user), user.jti!);
   }
 
   @UseGuards(RequireSessionAuthGuard)
   @Post(':jti/revoke')
   async revoke(@CurrentUser() user: JwtPayload, @Param('jti') jti: string) {
-    await this.sessionsService.revoke(user.sub, jti, user.jti!);
+    await this.sessionsService.revoke(loginIdOf(user), jti, user.jti!);
     return { success: true };
   }
 
   @UseGuards(RequireSessionAuthGuard)
   @Post('revoke-all-others')
   revokeAllOthers(@CurrentUser() user: JwtPayload) {
-    return this.sessionsService.revokeAllOthers(user.sub, user.jti!);
+    return this.sessionsService.revokeAllOthers(loginIdOf(user), user.jti!);
   }
 }

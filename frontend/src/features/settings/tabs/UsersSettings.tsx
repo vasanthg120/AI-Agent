@@ -113,6 +113,7 @@ interface UserForm {
   department: string;
   aiAccessEnabled: boolean;
   voiceAccessEnabled: boolean;
+  sendInvite: boolean;
 }
 
 const emptyForm: UserForm = {
@@ -125,6 +126,7 @@ const emptyForm: UserForm = {
   department: '',
   aiAccessEnabled: true,
   voiceAccessEnabled: true,
+  sendInvite: false,
 };
 
 /** What's still wrong with the form, in the user's words — null when it can be submitted. */
@@ -233,6 +235,7 @@ export function UsersSettings() {
         department: form.department.trim() || undefined,
         aiAccessEnabled: form.aiAccessEnabled,
         voiceAccessEnabled: form.voiceAccessEnabled,
+        sendInvite: form.sendInvite || undefined,
       });
       setCreatedResult(result);
       toast.success(`${result.user.name} was created`);
@@ -269,6 +272,7 @@ export function UsersSettings() {
       department: user.department ?? '',
       aiAccessEnabled: user.aiAccessEnabled !== false,
       voiceAccessEnabled: user.voiceAccessEnabled !== false,
+      sendInvite: false,
     });
   };
 
@@ -525,10 +529,13 @@ export function UsersSettings() {
             {users.map((user) => {
               const isOwner = user.roles.includes('owner');
               const isSelf = user.id === currentUserId;
-              const locked = isOwner || isSelf;
-              const lockedReason = isOwner
-                ? 'The owner’s account can’t be deactivated or deleted'
-                : 'You can’t deactivate or delete your own account';
+              const linked = !!user.linkedFromMain;
+              const locked = isOwner || isSelf || linked;
+              const lockedReason = linked
+                ? 'This person has access through the Main Account, so it can only be changed from there'
+                : isOwner
+                  ? 'The owner’s account can’t be deactivated or deleted'
+                  : 'You can’t deactivate or delete your own account';
               return (
                 <div key={user.id} className={styles.userRow}>
                   <div className={styles.userInfo}>
@@ -551,6 +558,8 @@ export function UsersSettings() {
                     ),
                   )}
                   {user.storeId && <Badge variant="neutral">{storeName(user.storeId)}</Badge>}
+                  {user.linkedFromMain && <Badge variant="info">Main Account</Badge>}
+                  {user.pendingInvitation && <Badge variant="warning">Invited</Badge>}
                   {!user.active && <Badge variant="danger">Deactivated</Badge>}
                   {user.aiAccessEnabled === false && <Badge variant="warning">AI off</Badge>}
                   {user.voiceAccessEnabled === false && <Badge variant="warning">Voice off</Badge>}
@@ -571,8 +580,8 @@ export function UsersSettings() {
                       type="button"
                       variant="ghost"
                       size="sm"
-                      disabled={isOwner && !isSelf}
-                      title={isOwner && !isSelf ? 'Only the owner can edit the owner’s account' : undefined}
+                      disabled={(isOwner && !isSelf) || linked}
+                      title={linked ? lockedReason : isOwner && !isSelf ? 'Only the owner can edit the owner’s account' : undefined}
                       onClick={() => openEdit(user)}
                     >
                       Edit
@@ -610,19 +619,35 @@ export function UsersSettings() {
                     as <strong>{ROLE_LABEL[createdResult.user.roles[0]] ?? createdResult.user.roles[0]}</strong>
                   </>
                 )}
-                . They sign in at <strong>{window.location.origin}</strong> with:
+                {createdResult.tempPassword ? (
+                  <>
+                    . They sign in at <strong>{window.location.origin}</strong> with:
+                  </>
+                ) : (
+                  <>. An invitation to set their own password has gone to their email.</>
+                )}
               </p>
               <SettingsField label="Email">
                 <CopyableText value={createdResult.user.email} />
               </SettingsField>
-              <SettingsField label="Temporary password">
-                <CopyableText value={createdResult.tempPassword} />
-              </SettingsField>
-              <p className={styles.warning}>This password will not be shown again after you close this dialog.</p>
+              {createdResult.tempPassword ? (
+                <>
+                  <SettingsField label="Temporary password">
+                    <CopyableText value={createdResult.tempPassword} />
+                  </SettingsField>
+                  <p className={styles.warning}>This password will not be shown again after you close this dialog.</p>
+                </>
+              ) : (
+                createdResult.activationLink && (
+                  <SettingsField label="Activation link">
+                    <CopyableText value={createdResult.activationLink} />
+                  </SettingsField>
+                )
+              )}
             </div>
             <div className={styles.modalFooter}>
               <Button type="button" onClick={closeCreateModal}>
-                Done, I’ve copied it
+                {createdResult.tempPassword ? 'Done, I’ve copied it' : 'Done'}
               </Button>
             </div>
           </>
@@ -656,6 +681,17 @@ export function UsersSettings() {
                 onChange={(e) => setForm({ ...form, email: e.target.value })}
               />
               {roleFields(form, setForm)}
+              <div className={styles.inviteRow}>
+                <span>
+                  <span className={styles.inviteLabel}>Email an invitation instead</span>
+                  <span className={styles.inviteHint}>They set their own password through a secure link. No temporary password.</span>
+                </span>
+                <Switch
+                  checked={form.sendInvite}
+                  ariaLabel="Email an invitation instead of a temporary password"
+                  onChange={(checked) => setForm({ ...form, sendInvite: checked })}
+                />
+              </div>
               <details className={styles.moreOptions}>
                 <summary>More options</summary>
                 <Input

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import toast from 'react-hot-toast';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { FiAlertTriangle, FiCheckCircle, FiClock, FiExternalLink, FiInfo, FiKey, FiLoader, FiXCircle } from 'react-icons/fi';
+import { FiAlertTriangle, FiCheckCircle, FiClock, FiInfo, FiKey, FiLoader, FiXCircle } from 'react-icons/fi';
 import { Button, CopyableText, Input, Modal, Stepper } from '@/components/ui';
 import { env } from '@/config/env';
 import {
@@ -10,13 +10,15 @@ import {
   type CrmIntegration,
   type Discovery,
   type IntegrationError,
+  type SyncResult,
   type WebhookInfo,
 } from '@/services/crmIntegrationsService';
 import { extractErrorMessage } from '@/utils/errors';
 import { MappingEditor } from './MappingEditor';
 import styles from './integrations.module.css';
 
-type Step = 'connect' | 'data' | 'mapping' | 'sync';
+// 'done': the one screen after connecting a CRM that sets itself up (setup.autoSetup).
+type Step = 'connect' | 'data' | 'mapping' | 'sync' | 'done';
 
 const MODULE_TERM: Record<string, string> = { deals: 'deal', quotes: 'quote', contacts: 'contact', accounts: 'account' };
 const plural = (word: string) => (/(s|x|ch|sh)$/i.test(word) ? `${word}es` : /[^aeiou]y$/i.test(word) ? `${word.slice(0, -1)}ies` : `${word}s`);
@@ -24,6 +26,17 @@ const plural = (word: string) => (/(s|x|ch|sh)$/i.test(word) ? `${word}es` : /[^
 export function webhookAddress(webhook: WebhookInfo, module: string): string {
   const base = webhook.baseUrl || new URL(env.apiUrl, window.location.origin).toString().replace(/\/+$/, '');
   return `${base}${webhook.paths[module] ?? ''}`;
+}
+
+/** When a nightly CRM's next sync runs, in the viewer's own time: "today at 2:30 pm", "tomorrow at 2:30 pm". */
+export function nextRunText(iso: string): string {
+  const at = new Date(iso);
+  const now = new Date();
+  if (at.getTime() - now.getTime() < 15 * 60_000) return 'in the next few minutes';
+  const time = at.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+  if (at.toDateString() === now.toDateString()) return `today at ${time}`;
+  if (at.toDateString() === new Date(now.getTime() + 86_400_000).toDateString()) return `tomorrow at ${time}`;
+  return at.toLocaleString(undefined, { weekday: 'long', hour: 'numeric', minute: '2-digit' });
 }
 
 export function isLocalAddress(url: string): boolean {
@@ -78,40 +91,15 @@ export function CrmSetupWizard({ integration, onClose }: Props) {
   const queryClient = useQueryClient();
   const provider = integration?.id ?? '';
   const push = integration?.connection === 'push';
-  const oauth = integration?.setup.authMethod === 'oauth';
-  // Only Zoho supports "bring your own API Console app" today — Salesforce
-  // still only uses the platform's shared app, unchanged (see
-  // zoho.service.ts's own comment on why this was built Zoho-specific).
-  const isZoho = provider === 'zoho';
   const [step, setStep] = useState<Step>('connect');
   const [values, setValues] = useState<Record<string, string>>({});
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [redirecting, setRedirecting] = useState(false);
   const [error, setError] = useState<IntegrationError | null>(null);
   const [current, setCurrent] = useState<CrmIntegration | null>(integration);
   const [discovery, setDiscovery] = useState<Discovery | null>(null);
   const [webhookKey, setWebhookKey] = useState<string | null>(null);
-  const [syncResult, setSyncResult] = useState<{ status: string; error?: string; counts?: Record<string, number> } | null>(null);
-
-  // Zoho's own API Console app (Client ID/Secret/data center) — collected
-  // once, before the first redirect, since Zoho's app registry is per-data-
-  // center with no cross-DC visibility (a platform-shared app can't cover
-  // every customer's region). Falls back to the platform app transparently
-  // if the organization never fills this in (see zoho.service.ts's
-  // resolveAppCredentials) — this form is only shown when nothing resolves.
-  const [zohoAppForm, setZohoAppForm] = useState(false);
-  const [zohoClientId, setZohoClientId] = useState('');
-  const [zohoClientSecret, setZohoClientSecret] = useState('');
-  const [zohoRegion, setZohoRegion] = useState('us');
-  const [zohoAccountsServerUrl, setZohoAccountsServerUrl] = useState('');
-  const [savingZohoApp, setSavingZohoApp] = useState(false);
-
-  const { data: zohoAppStatus, refetch: refetchZohoAppStatus } = useQuery({
-    queryKey: ['zoho-app-credentials'],
-    queryFn: () => crmIntegrationsService.getZohoAppCredentialsStatus(),
-    enabled: isZoho && !!integration,
-  });
+  const [syncResult, setSyncResult] = useState<(SyncResult & { counts?: Record<string, number> }) | null>(null);
 
   // A fresh wizard each time it's opened for an integration.
   useEffect(() => {
@@ -123,21 +111,8 @@ export function CrmSetupWizard({ integration, onClose }: Props) {
     setDiscovery(null);
     setWebhookKey(null);
     setSyncResult(null);
-    setZohoAppForm(false);
-    setZohoClientId('');
-    setZohoClientSecret('');
-    setZohoRegion('us');
-    setZohoAccountsServerUrl('');
-    // Already set up but still waiting for its first record: pick up at the
-    // "send records" step (push CRMs). An OAuth CRM (Zoho/Salesforce) that
-    // already has a source when this wizard opens got there via the
-    // provider's own redirect-based callback (see IntegrationsPage.tsx's
-    // crm=<provider>_connected handling) — that callback already ran the
-    // "save credentials, read a first page, confirm it works" step
-    // connect() runs synchronously for every other CRM, so this also jumps
-    // straight to 'data' instead of re-showing a connect step with nothing
-    // to submit.
-    setStep(integration.source && (integration.connection === 'push' || oauth) ? 'data' : 'connect');
+    // Already set up but still waiting for its first record: pick up at the "send records" step.
+    setStep(integration.source && integration.connection === 'push' ? 'data' : 'connect');
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [integration?.id]);
 
@@ -179,68 +154,12 @@ export function CrmSetupWizard({ integration, onClose }: Props) {
       setCurrent(result.integration);
       setDiscovery(result.discovery ?? null);
       setWebhookKey(result.webhookKey ?? null);
-      setStep('data');
+      setStep(integration.setup.autoSetup ? 'done' : 'data');
       void refreshList();
     } catch (err) {
       setError(integrationErrorOf(err) ?? { message: extractErrorMessage(err), kind: 'other' });
     } finally {
       setBusy(false);
-    }
-  };
-
-  // Zoho/Salesforce: no fields to submit — sends the browser to the
-  // provider's own consent screen. The round trip back (full page
-  // navigation, not an XHR) lands on IntegrationsPage.tsx's
-  // crm=<provider>_connected handling, which reopens this same wizard
-  // already past 'connect' (see the reset effect above).
-  const connectOAuth = async () => {
-    if (provider !== 'zoho' && provider !== 'salesforce') return;
-    setRedirecting(true);
-    setError(null);
-    try {
-      window.location.href = await crmIntegrationsService.getOAuthConnectUrl(provider);
-    } catch (err) {
-      const apiError = integrationErrorOf(err);
-      // zohoAppStatus should already have caught this (the form shows
-      // automatically when !configured) — this is the fallback for a race
-      // (e.g. the org's own app credentials were deleted in another tab
-      // between loading the status and clicking Connect).
-      if (isZoho && apiError?.code === 'ZOHO_APP_CREDENTIALS_REQUIRED') {
-        setZohoAppForm(true);
-        void refetchZohoAppStatus();
-      } else {
-        setError(apiError ?? { message: extractErrorMessage(err), kind: 'other' });
-      }
-      setRedirecting(false);
-    }
-  };
-
-  const saveZohoApp = async () => {
-    if (!zohoClientId.trim() || !zohoClientSecret.trim()) {
-      setError({ message: 'Enter both the Client ID and Client Secret.', kind: 'other' });
-      return;
-    }
-    if (zohoRegion === 'other' && !zohoAccountsServerUrl.trim()) {
-      setError({ message: 'Enter your Zoho accounts server address.', kind: 'other' });
-      return;
-    }
-    setSavingZohoApp(true);
-    setError(null);
-    try {
-      await crmIntegrationsService.saveZohoAppCredentials({
-        clientId: zohoClientId.trim(),
-        clientSecret: zohoClientSecret.trim(),
-        region: zohoRegion,
-        accountsServerUrl: zohoRegion === 'other' ? zohoAccountsServerUrl.trim() : undefined,
-      });
-      await refetchZohoAppStatus();
-      setZohoAppForm(false);
-      setZohoClientSecret('');
-      toast.success('Zoho app credentials saved');
-    } catch (err) {
-      setError(integrationErrorOf(err) ?? { message: extractErrorMessage(err), kind: 'other' });
-    } finally {
-      setSavingZohoApp(false);
     }
   };
 
@@ -276,136 +195,26 @@ export function CrmSetupWizard({ integration, onClose }: Props) {
     { id: 'connect', label: 'Connect' },
     { id: 'data', label: push ? 'Send records' : 'Check data' },
     { id: 'mapping', label: 'Map fields' },
-    ...(push ? [] : [{ id: 'sync' as const, label: 'Start sync' }]),
+    ...(push ? [] : [{ id: 'sync' as const, label: integration.nightly ? 'First sync' : 'Start sync' }]),
   ];
   const order = steps.map((s) => s.id);
   const completed = order.slice(0, order.indexOf(step));
 
   const missing = integration.setup.fields.filter((f) => f.required && !(values[f.key] ?? '').trim());
+  // A CRM read once a night (Hoops): the first sync waits for its window unless the window is open now.
+  const nightly = integration.nightly;
+  // Connected with the key alone: no stepper, no data check, no mapping review.
+  const auto = !!integration.setup.autoSetup;
+  const schedule = current.source?.schedule;
   const received = (current.source?.webhook?.received ?? 0) > 0 || (suggestions?.modules.some((m) => m.sourceFields.length > 0) ?? false);
   const webhook = current.source?.webhook;
 
   return (
     <Modal open onClose={close} title={`Connect ${label}`} description={integration.description} maxWidth={step === 'mapping' ? 860 : 620}>
       <div className={styles.stack}>
-        <Stepper steps={steps} currentId={step} completedIds={completed} />
+        {!auto && <Stepper steps={steps} currentId={step} completedIds={completed} />}
 
-        {step === 'connect' && oauth && (
-          <div className={styles.stack}>
-            <div className={styles.twoLists}>
-              <div>
-                <strong>What HaiVE gets</strong>
-                <ul className={styles.checkList}>
-                  {integration.setup.provides.map((item) => (
-                    <li key={item}>{item}</li>
-                  ))}
-                </ul>
-              </div>
-              {integration.setup.limitations.length > 0 && (
-                <div>
-                  <strong>Good to know</strong>
-                  <ul className={styles.noteList}>
-                    {integration.setup.limitations.map((item) => (
-                      <li key={item}>{item}</li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-            </div>
-
-            <p className={styles.note}>
-              <FiInfo aria-hidden /> You’ll sign in to {label} and approve access. HaiVE never sees your {label} password — only an
-              access token, stored encrypted, that {label} can revoke at any time. Nothing is synced until you’ve reviewed the mapping.
-            </p>
-
-            {isZoho && zohoAppStatus === undefined && <p className={styles.note}>Checking your Zoho app settings…</p>}
-
-            {isZoho && zohoAppStatus && (zohoAppForm || !zohoAppStatus.configured) ? (
-              <>
-                <p className={styles.note}>
-                  <FiKey aria-hidden /> Zoho's app registry is separate per data center — enter the Client ID and Client Secret from{' '}
-                  <strong>your own</strong> Zoho API Console app (api-console.zoho.&#123;region&#125;), and the data center it was
-                  registered in.
-                </p>
-                <Input
-                  label="Client ID"
-                  value={zohoClientId}
-                  onChange={(e) => setZohoClientId(e.target.value)}
-                  autoComplete="off"
-                />
-                <Input
-                  label="Client Secret"
-                  type="password"
-                  value={zohoClientSecret}
-                  onChange={(e) => setZohoClientSecret(e.target.value)}
-                  autoComplete="new-password"
-                  leftIcon={<FiKey />}
-                />
-                <div>
-                  <span className={styles.fieldLabel}>Data center</span>
-                  <select className={styles.select} value={zohoRegion} onChange={(e) => setZohoRegion(e.target.value)}>
-                    {Object.entries(zohoAppStatus.dataCenters).map(([key, dc]) => (
-                      <option key={key} value={key}>
-                        {dc.label}
-                      </option>
-                    ))}
-                    <option value="other">Other (enter accounts server address)</option>
-                  </select>
-                </div>
-                {zohoRegion === 'other' && (
-                  <Input
-                    label="Zoho accounts server address"
-                    placeholder="https://accounts.zoho.com.cn"
-                    value={zohoAccountsServerUrl}
-                    onChange={(e) => setZohoAccountsServerUrl(e.target.value)}
-                  />
-                )}
-                {error && <ErrorNotice error={error} />}
-                <div className={styles.footer}>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    onClick={() => (zohoAppStatus.configured ? setZohoAppForm(false) : close())}
-                    disabled={savingZohoApp}
-                  >
-                    Cancel
-                  </Button>
-                  <Button type="button" loading={savingZohoApp} onClick={() => void saveZohoApp()}>
-                    Save &amp; continue
-                  </Button>
-                </div>
-              </>
-            ) : (
-              <>
-                {isZoho && zohoAppStatus?.configured && (
-                  <p className={styles.note}>
-                    <FiCheckCircle aria-hidden /> Using your own Zoho app (Client ID: {zohoAppStatus.clientId}) —{' '}
-                    <button type="button" className={styles.linkButton} onClick={() => setZohoAppForm(true)}>
-                      change
-                    </button>
-                  </p>
-                )}
-                {error && (
-                  <ErrorNotice error={error}>
-                    <Button size="sm" variant="secondary" loading={redirecting} onClick={() => void connectOAuth()}>
-                      Try again
-                    </Button>
-                  </ErrorNotice>
-                )}
-                <div className={styles.footer}>
-                  <Button type="button" variant="ghost" onClick={close} disabled={redirecting}>
-                    Cancel
-                  </Button>
-                  <Button type="button" leftIcon={<FiExternalLink />} loading={redirecting} onClick={() => void connectOAuth()}>
-                    Connect with {label}
-                  </Button>
-                </div>
-              </>
-            )}
-          </div>
-        )}
-
-        {step === 'connect' && !oauth && (
+        {step === 'connect' && (
           <form
             className={styles.stack}
             onSubmit={(e) => {
@@ -436,19 +245,37 @@ export function CrmSetupWizard({ integration, onClose }: Props) {
 
             {integration.setup.fields
               .filter((f) => !f.advanced)
-              .map((field) => (
-                <Input
-                  key={field.key}
-                  label={field.label}
-                  type={field.type === 'password' ? 'password' : 'text'}
-                  autoComplete={field.type === 'password' ? 'new-password' : 'off'}
-                  hint={field.hint}
-                  placeholder={field.placeholder}
-                  value={values[field.key] ?? ''}
-                  onChange={(e) => setValues({ ...values, [field.key]: e.target.value })}
-                  leftIcon={field.type === 'password' ? <FiKey /> : undefined}
-                />
-              ))}
+              .map((field) =>
+                field.type === 'select' ? (
+                  <label key={field.key} className={styles.selectField}>
+                    <span className={styles.selectFieldLabel}>{field.label}</span>
+                    <select
+                      className={styles.select}
+                      value={values[field.key] ?? ''}
+                      onChange={(e) => setValues({ ...values, [field.key]: e.target.value })}
+                    >
+                      {(field.options ?? []).map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                    {field.hint && <span className={styles.selectFieldHint}>{field.hint}</span>}
+                  </label>
+                ) : (
+                  <Input
+                    key={field.key}
+                    label={field.label}
+                    type={field.type === 'password' ? 'password' : 'text'}
+                    autoComplete={field.type === 'password' ? 'new-password' : 'off'}
+                    hint={field.hint}
+                    placeholder={field.placeholder}
+                    value={values[field.key] ?? ''}
+                    onChange={(e) => setValues({ ...values, [field.key]: e.target.value })}
+                    leftIcon={field.type === 'password' ? <FiKey /> : undefined}
+                  />
+                ),
+              )}
             {integration.setup.fields.some((f) => f.advanced) && (
               <details className={styles.details} open={showAdvanced} onToggle={(e) => setShowAdvanced((e.target as HTMLDetailsElement).open)}>
                 <summary>Advanced</summary>
@@ -466,7 +293,12 @@ export function CrmSetupWizard({ integration, onClose }: Props) {
               </details>
             )}
 
-            {push ? (
+            {auto ? (
+              <p className={styles.note}>
+                <FiInfo aria-hidden /> That’s all HaiVE needs. It checks the key by reading a few records, stores it encrypted, and
+                brings your {label} data in by itself from then on.
+              </p>
+            ) : push ? (
               <p className={styles.note}>
                 <FiInfo aria-hidden /> Nothing is typed into HaiVE. HaiVE gives you an address and a key; {label} sends each new record there.
               </p>
@@ -479,7 +311,7 @@ export function CrmSetupWizard({ integration, onClose }: Props) {
 
             {busy && !push && (
               <ul className={styles.lines}>
-                <Line state="busy">Signing in to {label} and reading a first page of data…</Line>
+                <Line state="busy">{auto ? `Checking the key with ${label}…` : `Signing in to ${label} and reading a first page of data…`}</Line>
               </ul>
             )}
             {error && (
@@ -494,10 +326,35 @@ export function CrmSetupWizard({ integration, onClose }: Props) {
                 Cancel
               </Button>
               <Button type="submit" loading={busy} disabled={missing.length > 0}>
-                {push ? `Set up ${label}` : 'Connect & check'}
+                {push ? `Set up ${label}` : auto ? 'Connect' : 'Connect & check'}
               </Button>
             </div>
           </form>
+        )}
+
+        {step === 'done' && (
+          <>
+            <ul className={styles.lines}>
+              <Line state="ok">API key accepted — {label} is connected</Line>
+              {nightly && schedule && !schedule.canSyncNow ? (
+                <Line state="wait">
+                  First sync {nextRunText(schedule.nextRunAt)} (your time) — {label} lets HaiVE read once a night, after{' '}
+                  {nightly.windowLabel}.
+                </Line>
+              ) : (
+                <Line state="ok">Your {label} records are coming in now — this takes a few minutes. You can close this window.</Line>
+              )}
+            </ul>
+            <p className={styles.note}>
+              <FiInfo aria-hidden /> From then on it stays up to date by itself{nightly ? ', every night' : ''}. Customers, contacts and quotes
+              appear on your dashboards and the Customers page; Manage shows each sync and lets you adjust the field mapping.
+            </p>
+            <div className={styles.footer}>
+              <Button type="button" onClick={close}>
+                Done
+              </Button>
+            </div>
+          </>
         )}
 
         {step === 'data' && !push && (
@@ -507,9 +364,11 @@ export function CrmSetupWizard({ integration, onClose }: Props) {
               <Line state="ok">Connected to {label}</Line>
               {Object.entries(discovery ?? {}).map(([module, found]) => (
                 <Line key={module} state={found.records > 0 ? 'ok' : 'warn'}>
-                  {found.records > 0
-                    ? `${found.records.toLocaleString()}${found.records >= 50 ? '+' : ''} ${termOf(module).toLowerCase()} found in the first page, with ${found.fields} fields`
-                    : `No ${termOf(module).toLowerCase()} found yet`}
+                  {found.records === 0
+                    ? `No ${termOf(module).toLowerCase()} found yet`
+                    : integration.nightly
+                      ? `${termOf(module)} found — ${found.fields} fields read from a small sample`
+                      : `${found.records.toLocaleString()}${found.records >= 50 ? '+' : ''} ${termOf(module).toLowerCase()} found in the first page, with ${found.fields} fields`}
                 </Line>
               ))}
               {suggestions ? (
@@ -614,6 +473,7 @@ export function CrmSetupWizard({ integration, onClose }: Props) {
               <Line state="ok">Connected to {label}</Line>
               <Line state="ok">Field mapping saved</Line>
               {busy && <Line state="busy">Syncing your {label} records… this can take a few minutes.</Line>}
+              {syncResult?.status === 'deferred' && <Line state="wait">{syncResult.message}</Line>}
               {syncResult?.status === 'ok' && (
                 <Line state="ok">
                   First sync finished —{' '}
@@ -632,14 +492,21 @@ export function CrmSetupWizard({ integration, onClose }: Props) {
                 </Button>
               </ErrorNotice>
             )}
-            {!syncResult && !busy && (
+            {!syncResult && !busy && nightly && (
+              <p className={styles.note}>
+                <FiInfo aria-hidden /> {label} lets HaiVE read once a night, after {nightly.windowLabel}
+                {schedule && !schedule.canSyncNow ? ` — the first sync runs ${nextRunText(schedule.nextRunAt)} (your time)` : ''}. It brings in
+                all your customers and the last 30 days of quotes; older quotes follow a little each night. There’s nothing else to do.
+              </p>
+            )}
+            {!syncResult && !busy && !nightly && (
               <p className={styles.note}>
                 <FiInfo aria-hidden /> The first sync brings in your existing {label} records. After that HaiVE keeps them up to date
                 automatically.
               </p>
             )}
             <div className={styles.footer}>
-              {syncResult?.status === 'ok' ? (
+              {syncResult?.status === 'ok' || syncResult?.status === 'deferred' || (nightly && !schedule?.canSyncNow) ? (
                 <Button type="button" onClick={close}>
                   Done
                 </Button>

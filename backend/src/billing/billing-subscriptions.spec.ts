@@ -34,6 +34,7 @@ import { PaymentRecord, PaymentRecordDocument, PaymentRecordSchema } from './sch
 import { Wallet, WalletDocument, WalletSchema } from './schemas/wallet.schema';
 import { WalletTransaction, WalletTransactionDocument, WalletTransactionSchema } from './schemas/wallet-transaction.schema';
 import { SubscriptionRenewalService } from './subscription-renewal.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import { WalletService } from './wallet.service';
 
 // Real-Mongo integration tests (this project's established live-testing
@@ -84,6 +85,7 @@ describe('Subscriptions (real Mongo)', () => {
   let connection: Connection;
   let subscriptionsService: BillingSubscriptionsService;
   let renewalService: SubscriptionRenewalService;
+  const notified = jest.fn(async () => undefined);
   let encryptionService: EncryptionService;
 
   let planModel: Model<BillingPlanDocument>;
@@ -144,6 +146,7 @@ describe('Subscriptions (real Mongo)', () => {
       providers: [
         BillingSubscriptionsService,
         SubscriptionRenewalService,
+        { provide: NotificationsService, useValue: { create: notified } },
         CouponsService,
         BillingInvoiceService,
         // WalletService/EncryptionService/PricingService are the real
@@ -427,6 +430,33 @@ describe('Subscriptions (real Mongo)', () => {
       expect(failedEvent?.metadata.reason).toBe('no_payment_method');
       const expiredEvent = await eventModel.findOne({ organizationId: org, type: 'expired' });
       expect(expiredEvent).toBeTruthy();
+    });
+
+    it('a failed renewal affects and notifies only that account, never its Main Account or a sibling', async () => {
+      const { plan, price } = await createPlanWithPrice({ key: `${TEST_PREFIX}-pro-separate` });
+      const failing = `${TEST_PREFIX}-org-separate-a`;
+      const sibling = `${TEST_PREFIX}-org-separate-b`;
+      await subscriptionsService.checkout(failing, 'user-1', { planId: plan._id.toString(), priceId: price._id.toString() });
+      await subscriptionsService.checkout(sibling, 'user-1', { planId: plan._id.toString(), priceId: price._id.toString() });
+      await subscriptionModel.updateOne({ organizationId: failing }, { $set: { currentPeriodEnd: new Date(Date.now() - 60_000) } });
+
+      const users = subscriptionModel.db.collection('users');
+      const email = (name: string) => `${TEST_PREFIX}-${name}@example.com`;
+      const { insertedId: owner } = await users.insertOne({ email: email('owner'), name: 'Owner', organizationId: failing, roles: ['owner', 'admin'] });
+      const { insertedId: siblingOwner } = await users.insertOne({ email: email('sibling'), name: 'Other', organizationId: sibling, roles: ['owner', 'admin'] });
+      await users.insertOne({ email: email('main'), name: 'Main', organizationId: failing, roles: ['owner'], linkedLoginUserId: 'someone', isLogin: false });
+
+      notified.mockClear();
+      await renewalService.processDueRenewals();
+
+      expect((await subscriptionModel.findOne({ organizationId: failing }))?.status).toBe('past_due');
+      expect((await subscriptionModel.findOne({ organizationId: sibling }))?.status).toBe('active');
+      const recipients = (notified.mock.calls as unknown as [string, { title: string }, string][]).filter(([, , org]) => org === failing || org === sibling);
+      expect(recipients.map(([id]) => id)).toEqual([owner.toString()]);
+      expect(recipients[0][1].title).toBe('Subscription renewal failed');
+      expect(recipients.map(([id]) => id)).not.toContain(siblingOwner.toString());
+
+      await users.deleteMany({ email: { $regex: `^${TEST_PREFIX}` } });
     });
   });
 });

@@ -1,9 +1,39 @@
-// Sales targets/deals are always INR for this deployment (see
-// backend/src/crm/schemas/sales-target.schema.ts's default) — 'en-IN' gives
-// the correct lakh/crore digit grouping, not just the ₹ symbol.
+import { useCurrencyStore } from '@/stores/currencyStore';
+
+// The sales/deals domain's amounts are in the currency of the CRM shown on the
+// dashboards (Pantheras CRM: INR, Hoops CRM: AUD — see stores/currencyStore).
+// Each is written the way its country writes it: 'en-IN' gives the lakh/crore
+// digit grouping (10,00,000), 'en-AU' the thousands one (1,000,000).
+const SALES_SYMBOL: Record<string, string> = { INR: '₹', AUD: 'A$', NZD: 'NZ$', USD: '$', GBP: '£', EUR: '€' };
+const SALES_LOCALE: Record<string, string> = { INR: 'en-IN', AUD: 'en-AU', NZD: 'en-NZ', GBP: 'en-GB' };
+
+const salesCurrency = () => useCurrencyStore.getState().currency || 'INR';
+
+/** The shown CRM's currency symbol (₹, A$…) — for amount fields. */
+export function currencySymbol(): string {
+  const code = salesCurrency();
+  return SALES_SYMBOL[code] ?? code;
+}
+
+function salesAmount(value: number, options: Intl.NumberFormatOptions): string {
+  const code = salesCurrency();
+  const number = value.toLocaleString(SALES_LOCALE[code] ?? 'en-US', options);
+  return SALES_SYMBOL[code] ? `${SALES_SYMBOL[code]}${number}` : `${code} ${number}`;
+}
+
+// Whole units, in the shown CRM's currency (the name stays from when it was always rupees).
 export function formatINR(value: number | null): string {
   if (value === null) return '—';
-  return `₹${value.toLocaleString('en-IN', { maximumFractionDigits: 0 })}`;
+  return salesAmount(value, { maximumFractionDigits: 0 });
+}
+
+// For reports, where figures are added up in front of the reader (sales
+// excluding tax + tax = sales including tax; a royalty owed to the paisa/cent):
+// the fraction is shown whenever an amount has one, never rounded away.
+export function formatINRExact(value: number | null): string {
+  if (value === null) return '—';
+  const whole = Math.abs(value - Math.round(value)) < 0.005;
+  return salesAmount(value, { minimumFractionDigits: whole ? 0 : 2, maximumFractionDigits: 2 });
 }
 
 // For reports, where figures are added up in front of the reader (sales

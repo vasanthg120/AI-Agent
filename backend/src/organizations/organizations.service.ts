@@ -1,7 +1,8 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
-import { Organization, OrganizationDocument, OrganizationVoiceSettings } from './schemas/organization.schema';
+import { Organization, OrganizationDocument, OrganizationProfile, OrganizationVoiceSettings } from './schemas/organization.schema';
+import { archivedOrganizationIds } from '../common/archived-organizations';
 import { Store, StoreDocument } from './schemas/store.schema';
 
 @Injectable()
@@ -28,8 +29,39 @@ export class OrganizationsService {
     return { organization, store };
   }
 
+  /** A sub-account is a normal organization (with its default store, exactly as
+   * registration creates one) that also records which Main Account it belongs
+   * to — so every existing module, cron and report works for it unchanged. */
+  async createSubOrganization(
+    parentOrganizationId: string,
+    data: { name: string; timezone: string; currency: string; profile: OrganizationProfile },
+  ): Promise<{ organization: OrganizationDocument; store: StoreDocument }> {
+    const { organization, store } = await this.createOrganizationWithOwner(data.name);
+    organization.parentOrganizationId = parentOrganizationId;
+    organization.timezone = data.timezone;
+    organization.currency = data.currency;
+    organization.profile = data.profile;
+    await organization.save();
+    store.timezone = data.timezone;
+    await store.save();
+    return { organization, store };
+  }
+
+  /** Undoes createSubOrganization when its owner account couldn't be created; it
+   * has nothing in it yet, so nothing else needs cleaning up. */
+  async removeEmptyOrganization(organizationId: string): Promise<void> {
+    await this.storeModel.deleteMany({ organizationId }).exec();
+    await this.orgModel.deleteOne({ _id: organizationId }).exec();
+  }
+
   findOrgById(id: string) {
     return this.orgModel.findById(id).exec();
+  }
+
+  /** What the per-request sign-in check needs, and nothing else — a business's
+   * logo is on the same document and shouldn't be loaded on every request. */
+  findOrgStatus(id: string) {
+    return this.orgModel.findById(id).select({ status: 1, parentOrganizationId: 1 }).lean().exec();
   }
 
   listStores(organizationId: string) {
@@ -69,8 +101,9 @@ export class OrganizationsService {
   /** Cron-only: not scoped to any single caller, iterates every store across
    * every tenant so StoreSettingsService's fixed-cadence checker can evaluate
    * each store's own opening/closing window independently. */
-  listAllStores() {
-    return this.storeModel.find().exec();
+  async listAllStores() {
+    const archived = await archivedOrganizationIds(this.orgModel.db);
+    return this.storeModel.find(archived.length ? { organizationId: { $nin: archived } } : {}).exec();
   }
 
   /** Atomically checks-and-marks in one write, closing the race window a

@@ -129,6 +129,26 @@ describe('Webhook data sources (real Mongo)', () => {
     expect(await connection.collection('crm_contacts').countDocuments({ organizationId: org, dataSourceId: hoops.id })).toBe(1);
   });
 
+  it('records when a pushed deal was closed: stamped when it turns won or lost, cleared when it reopens', async () => {
+    const hoops = await service.create(org, { label: 'Hoops' });
+    const push = (status: string) => service.ingest(hoops.id, 'deals', hoops.key, { id: 'j1', title: 'Roof repair', total: 1200, status });
+    const closedAt = async () => (await connection.collection('crm_deals').findOne({ organizationId: org, dataSourceId: hoops.id, externalId: 'j1' }))?.closedAt;
+
+    // First seen already closed: nobody knows when it closed.
+    await push('Completed');
+    expect(await closedAt()).toBeUndefined();
+    await push('Scheduled');
+    expect(await closedAt()).toBeUndefined();
+    await push('Completed');
+    const firstClose = await closedAt();
+    expect(firstClose).toBeInstanceOf(Date);
+    // The same status sent again is not a new closing.
+    await push('Completed');
+    expect(await closedAt()).toEqual(firstClose);
+    await push('Scheduled');
+    expect(await closedAt()).toBeUndefined();
+  });
+
   it('refuses a wrong, rotated or missing key, and a disconnected source', async () => {
     const hoops = await service.create(org, { label: 'Hoops' });
     await expect(service.ingest(hoops.id, 'contacts', 'hvk_wrong', { id: 1 })).rejects.toThrow('Unknown webhook address or key.');

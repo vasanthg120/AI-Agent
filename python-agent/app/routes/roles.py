@@ -108,8 +108,7 @@ def generate_role_from_description(
 
 @router.post("/roles/publish-source")
 def publish_source(payload: SourceRef, user: dict = Depends(get_current_user)):
-    _assert_may_manage_source(payload.documentId, user)
-    reassign_owner(payload.documentId, "*")
+    reassign_owner(payload.documentId, "*", user.get("organizationId"))
     return {"status": "published"}
 
 

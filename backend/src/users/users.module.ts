@@ -2,7 +2,9 @@ import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { AgentRole, AgentRoleSchema } from '../agent-roles/schemas/agent-role.schema';
 import { User, UserSchema } from './schemas/user.schema';
+import { InvitationsService } from './invitations.service';
 import { UsersController } from './users.controller';
+import { UsersIndexMigration } from './users-index.migration';
 import { UsersService } from './users.service';
 
 @Module({
@@ -20,7 +22,7 @@ import { UsersService } from './users.service';
   // — admin accounts are a separate credential now (see AdminAccount schema),
   // not a role tag on a User. UsersController stays strictly org-scoped.
   controllers: [UsersController],
-  providers: [UsersService],
-  exports: [UsersService],
+  providers: [UsersService, UsersIndexMigration, InvitationsService],
+  exports: [UsersService, InvitationsService],
 })
 export class UsersModule {}

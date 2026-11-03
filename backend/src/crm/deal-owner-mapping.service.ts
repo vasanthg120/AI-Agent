@@ -281,20 +281,16 @@ export class DealOwnerMappingService {
       )
       .exec();
 
-    let dealCount = 0;
-    if (resolvedOwnerId) {
-      const result = await this.dealModel.updateMany(
-        { organizationId, externalOwnerProvider: provider, externalOwnerRef },
-        { $set: { ownerId: resolvedOwnerId } },
-      );
-      dealCount = result.matchedCount;
-      // The same person owns the quotations the CRM lists under that owner — a
-      // link made for deals used to leave every synced quotation without a
-      // HaiVE owner, so quote work showed as nobody's.
-      await this.dealModel.db
-        .collection('crm_quotes')
-        .updateMany({ organizationId, sourceProvider: provider, quoteOwner: externalOwnerRef }, { $set: { ownerUserId: resolvedOwnerId } });
-    }
+    const result = await this.dealModel.updateMany(
+      { organizationId, externalOwnerProvider: provider, externalOwnerRef },
+      { $set: { ownerId } },
+    );
+    // The same person owns the quotations the CRM lists under that owner — a
+    // link made for deals used to leave every synced quotation without a
+    // HaiVE owner, so quote work showed as nobody's.
+    await this.dealModel.db
+      .collection('crm_quotes')
+      .updateMany({ organizationId, sourceProvider: provider, quoteOwner: externalOwnerRef }, { $set: { ownerUserId: ownerId } });
 
     const users = await this.usersService.findAll(organizationId);
     const userNameById = new Map(users.map((u) => [u._id.toString(), u.name]));

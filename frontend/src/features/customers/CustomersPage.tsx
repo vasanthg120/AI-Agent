@@ -5,13 +5,12 @@ import dayjs from 'dayjs';
 import toast from 'react-hot-toast';
 import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
+  FiActivity,
   FiAlertCircle,
   FiAlignJustify,
-  FiArchive,
   FiArrowDown,
-  FiBox,
-  FiCalendar,
-  FiCheckSquare,
+  FiBellOff,
+  FiCheckCircle,
   FiChevronLeft,
   FiChevronRight,
   FiClock,
@@ -29,16 +28,12 @@ import {
   FiMaximize2,
   FiMessageSquare,
   FiMoreHorizontal,
-  FiPackage,
   FiPhone,
-  FiPlus,
   FiRefreshCw,
-  FiRotateCcw,
   FiSearch,
-  FiShoppingBag,
-  FiTrendingUp,
   FiUserCheck,
   FiUsers,
+  FiXCircle,
 } from 'react-icons/fi';
 import type { IconType } from 'react-icons';
 import clsx from 'clsx';
@@ -72,27 +67,27 @@ import {
 } from '@/services/customersService';
 import { formatRelativeTime } from '@/utils/date';
 import { extractErrorMessage } from '@/utils/errors';
-import { AddCustomerModal } from './AddCustomerModal';
 import { CustomerPanel, type CustomerPreview, type PanelTab } from './CustomerPanel';
-import { QuoteDetailDrawer } from './QuoteDetailDrawer';
 import type { Job } from '@/services/customerJobsService';
 import { JobBoard } from './jobs/JobBoard';
 import { jobHeadline, JobPanel, type JobPreview } from './jobs/JobPanel';
 import { JobTag } from './jobs/JobTag';
 import { StageChip } from './StageChip';
 import { TYPE_VARIANT } from './status';
-import { CatalogTab } from './tabs/CatalogTab';
-import { PurchaseOrdersTab } from './tabs/PurchaseOrdersTab';
-import { SalesBoardTab } from './tabs/SalesBoardTab';
-import { ScheduleTab } from './tabs/ScheduleTab';
-import { StockTab } from './tabs/StockTab';
-import { TasksTab } from './tabs/TasksTab';
 import styles from './customers.module.css';
 import jobStyles from './jobs/jobs.module.css';
 
-// The numbers that matter, each one a filter: click to see just those customers.
-const TILES: { id: string; label: string; hint: string; icon: IconType; count: (s: CustomerStats) => number }[] = [
+// The numbers that matter, each one a filter: click to see just those customers. Two rows of six:
+// where the work stands (open, untouched, unanswered, unplanned), then how it ends (orders, payment, lost).
+const TILES: { id: string; label: string; hint: string; icon: IconType; count: (s: CustomerStats) => number; urgent?: boolean }[] = [
   { id: 'all', label: 'All customers', hint: 'Everyone in the selected source', icon: FiUsers, count: (s) => s.total },
+  {
+    id: 'open',
+    label: 'Open',
+    hint: 'An open inquiry or a quotation awaiting a decision — not lost',
+    icon: FiActivity,
+    count: (s) => s.open,
+  },
   {
     id: 'open_inquiry',
     label: 'Open inquiries',
@@ -101,11 +96,34 @@ const TILES: { id: string; label: string; hint: string; icon: IconType; count: (
     count: (s) => s.openInquiries,
   },
   {
-    id: 'existing',
-    label: 'Existing',
-    hint: 'Have ordered at least once',
-    icon: FiUserCheck,
-    count: (s) => s.existing,
+    id: 'not_actioned',
+    label: 'Not actioned',
+    hint: 'An open inquiry nobody has emailed or sent a quotation to yet',
+    icon: FiAlertCircle,
+    count: (s) => s.notActioned,
+    urgent: true,
+  },
+  {
+    id: 'no_reply',
+    label: 'No reply',
+    hint: 'You emailed them and they haven’t answered',
+    icon: FiMail,
+    count: (s) => s.noReply,
+  },
+  {
+    id: 'no_follow_up',
+    label: 'No follow-up',
+    hint: 'Nothing planned to follow up with them',
+    icon: FiBellOff,
+    count: (s) => s.noFollowUp,
+  },
+  {
+    id: 'follow_up',
+    label: 'Needs follow-up',
+    hint: 'A reply is owed, or it is time to chase',
+    icon: FiClock,
+    count: (s) => s.needsFollowUp,
+    urgent: true,
   },
   {
     id: 'quote_pending',
@@ -122,23 +140,42 @@ const TILES: { id: string; label: string; hint: string; icon: IconType; count: (
     count: (s) => s.paymentPending,
   },
   {
-    id: 'follow_up',
-    label: 'Needs follow-up',
-    hint: 'A reply is owed, or it is time to chase',
-    icon: FiClock,
-    count: (s) => s.needsFollowUp,
+    id: 'existing',
+    label: 'Existing',
+    hint: 'Have ordered at least once',
+    icon: FiUserCheck,
+    count: (s) => s.existing,
+  },
+  {
+    id: 'converted',
+    label: 'Converted',
+    hint: 'Ordered, with nothing open since — or their inquiry became an order',
+    icon: FiCheckCircle,
+    count: (s) => s.converted,
+  },
+  {
+    id: 'lost',
+    label: 'Lost',
+    hint: 'No order, and the deal was lost, the quotation rejected or the inquiry marked not interested',
+    icon: FiXCircle,
+    count: (s) => s.lost,
   },
 ];
 
-// Every way to narrow the table (the tiles above are shortcuts to six of them).
+// Every way to narrow the table (the tiles above are shortcuts to most of them).
 const VIEWS: { id: string; label: string }[] = [
   { id: 'all', label: 'All customers' },
+  { id: 'open', label: 'Open' },
   { id: 'open_inquiry', label: 'Open inquiries' },
+  { id: 'not_actioned', label: 'Not actioned' },
+  { id: 'no_reply', label: 'No reply' },
+  { id: 'no_follow_up', label: 'No follow-up' },
   { id: 'new', label: 'New customers' },
   { id: 'existing', label: 'Existing customers' },
   { id: 'returning', label: 'Returning customers' },
   { id: 'converted', label: 'Converted' },
   { id: 'not_converted', label: 'Not converted' },
+  { id: 'lost', label: 'Lost' },
   { id: 'active', label: 'Active' },
   { id: 'inactive', label: 'Inactive' },
   { id: 'quote_pending', label: 'Quote pending' },
@@ -151,17 +188,10 @@ const VIEWS: { id: string; label: string }[] = [
 // what happened last · then the six steps of the work, each a coloured chip
 // (Inquiry → Quote → Order → Payment → Email → Follow-up) · what to do. The
 // customer is always the first column; any of the others can be hidden.
-type ColumnId = 'owner' | 'phone' | 'contacts' | 'type' | 'activity' | StageKey | 'next';
+type ColumnId = 'owner' | 'type' | 'activity' | StageKey | 'next';
 const STAGE_COLUMNS: StageKey[] = ['inquiry', 'quote', 'order', 'payment', 'email', 'followUp'];
 const COLUMNS: { id: ColumnId; label: string; hint: string; sort?: CustomerSort }[] = [
-  {
-    id: 'owner',
-    label: 'Customer Rep',
-    hint: 'Who looks after them — set by hand, or who looks after them in your CRM',
-    sort: 'owner',
-  },
-  { id: 'phone', label: 'Phone', hint: 'Their phone number' },
-  { id: 'contacts', label: 'Contacts', hint: 'Everyone on record for them — add more from their detail page' },
+  { id: 'owner', label: 'Owner', hint: 'Who looks after them in your CRM', sort: 'owner' },
   {
     id: 'type',
     label: 'Type',
@@ -177,7 +207,7 @@ const COLUMNS: { id: ColumnId; label: string; hint: string; sort?: CustomerSort 
   {
     id: 'followUp',
     label: 'Follow-up',
-    hint: 'Reminders on their emails and your team’s tasks that are still to do',
+    hint: 'Reminders on their emails and follow-ups that are still to do',
     sort: 'followUp',
   },
   { id: 'next', label: 'Next step', hint: 'What to do now, and why', sort: 'urgency' },
@@ -273,26 +303,9 @@ function remember(key: string, value: unknown) {
 // in the address bar, so a reload stays where it was. The two panels belong to
 // the page, not to a tab: a customer leads to their jobs and a job back to its
 // customer, whichever board is behind.
-// The 8 top-level workspace tabs, all in-page inside this one route — no
-// standalone routes for any of these (see routes/index.tsx: none of these
-// ids has its own entry). "More" isn't a content tab — with 8 real tabs,
-// nothing overflows the strip, so there's nothing to put there yet.
-const MAIN_TABS: { id: string; label: string; icon: ReactNode }[] = [
-  { id: 'customers', label: 'Customers', icon: <FiUsers /> },
-  { id: 'sales-board', label: 'SalesBoard', icon: <FiTrendingUp /> },
-  { id: 'jobs', label: 'Job board', icon: <FiLayers /> },
-  { id: 'catalog', label: 'Catalog', icon: <FiPackage /> },
-  { id: 'purchase-orders', label: 'Purchase Orders', icon: <FiShoppingBag /> },
-  { id: 'stock', label: 'Stock', icon: <FiBox /> },
-  { id: 'schedule', label: 'Schedule', icon: <FiCalendar /> },
-  { id: 'tasks', label: 'Tasks', icon: <FiCheckSquare /> },
-];
-const MAIN_TAB_IDS = MAIN_TABS.map((t) => t.id);
-
 export function CustomersPage() {
   const [params, setParams] = useSearchParams();
-  const requestedTab = params.get('tab') ?? 'customers';
-  const tab = MAIN_TAB_IDS.includes(requestedTab) ? requestedTab : 'customers';
+  const tab = params.get('tab') === 'jobs' ? 'jobs' : 'customers';
   // A board is built the first time it is shown and kept from then on: going back to it is instant, and it
   // is as it was left — its search, its filters, its place in the list.
   const visited = useRef(new Set<string>());
@@ -306,7 +319,6 @@ export function CustomersPage() {
     preview?: CustomerPreview;
   } | null>(null);
   const [job, setJob] = useState<{ id: string; preview?: JobPreview } | null>(null);
-  const [quoteId, setQuoteId] = useState<string | null>(null);
   // One panel taking over from the other: the surface stays, only what is on it changes.
   const [handover, setHandover] = useState(false);
   // Which panel is open, for the callbacks below — which must stay the same from one render to the next.
@@ -316,9 +328,8 @@ export function CustomersPage() {
   // The boards are heavy (a table of chips each) and have nothing to do with a panel opening or closing over
   // them: they are memoised, and everything handed to them keeps its identity, so the panel's own motion
   // starts at once instead of waiting for the page behind it to be drawn again.
-  const goTo = useCallback((next: string) => setParams(next === 'customers' ? {} : { tab: next }), [setParams]);
+  const goTo = useCallback((next: string) => setParams(next === 'jobs' ? { tab: 'jobs' } : {}), [setParams]);
   const goToCustomers = useCallback(() => goTo('customers'), [goTo]);
-  const goToJobs = useCallback(() => goTo('jobs'), [goTo]);
   const openCustomer = useCallback((id: string, panelTab?: PanelTab, preview?: CustomerPreview) => {
     setHandover(false);
     setCustomer({ id, tab: panelTab, preview });
@@ -341,32 +352,28 @@ export function CustomersPage() {
     setHandover(false);
     setJob(null);
   }, []);
-  const openQuote = useCallback((id: string) => setQuoteId(id), []);
-  const closeQuote = useCallback(() => setQuoteId(null), []);
-  const goToJobBoardFromQuote = useCallback(() => {
-    closeQuote();
-    goToJobs();
-  }, [closeQuote, goToJobs]);
-
-  // Each board carries the tabs with its own one chosen: no two are on show together.
-  const tabStrips = useMemo(
+  const [customersTabs, jobsTabs] = useMemo(
     () =>
-      Object.fromEntries(
-        MAIN_TAB_IDS.map((active) => [
-          active,
-          <div key={active} className={jobStyles.pageTabs}>
-            <Tabs items={MAIN_TABS} activeId={active} onChange={goTo} />
-          </div>,
-        ]),
-      ) as Record<string, ReactNode>,
+      (['customers', 'jobs'] as const).map((active) => (
+        // Each board carries the tabs with its own one chosen: the two are never on show together.
+        <div key={active} className={jobStyles.pageTabs}>
+          <Tabs
+            items={[
+              { id: 'customers', label: 'Customers', icon: <FiUsers /> },
+              { id: 'jobs', label: 'Job board', icon: <FiLayers /> },
+            ]}
+            activeId={active}
+            onChange={goTo}
+          />
+        </div>
+      )),
     [goTo],
   );
-
   return (
     <>
       {visited.current.has('customers') && (
         <CustomersBoard
-          tabs={tabStrips.customers}
+          tabs={customersTabs}
           offstage={tab !== 'customers'}
           switched={switched}
           onOpenCustomer={openCustomer}
@@ -375,24 +382,12 @@ export function CustomersPage() {
       )}
       {visited.current.has('jobs') && (
         <JobBoard
-          tabs={tabStrips.jobs}
+          tabs={jobsTabs}
           offstage={tab !== 'jobs'}
           switched={switched}
           onOpenJob={openJob}
           onGoToCustomers={goToCustomers}
         />
-      )}
-      {visited.current.has('sales-board') && (
-        <SalesBoardTab tabs={tabStrips['sales-board']} offstage={tab !== 'sales-board'} onOpenQuote={openQuote} />
-      )}
-      {visited.current.has('catalog') && <CatalogTab tabs={tabStrips.catalog} offstage={tab !== 'catalog'} />}
-      {visited.current.has('purchase-orders') && (
-        <PurchaseOrdersTab tabs={tabStrips['purchase-orders']} offstage={tab !== 'purchase-orders'} onGoToJobBoard={goToJobs} />
-      )}
-      {visited.current.has('stock') && <StockTab tabs={tabStrips.stock} offstage={tab !== 'stock'} />}
-      {visited.current.has('schedule') && <ScheduleTab tabs={tabStrips.schedule} offstage={tab !== 'schedule'} />}
-      {visited.current.has('tasks') && (
-        <TasksTab tabs={tabStrips.tasks} offstage={tab !== 'tasks'} onOpenCustomer={(id) => openCustomer(id)} />
       )}
       <CustomerPanel
         customerId={customer?.id ?? null}
@@ -410,7 +405,6 @@ export function CustomersPage() {
         onClose={closeJob}
         onOpenCustomer={backToCustomer}
       />
-      <QuoteDetailDrawer quoteId={quoteId} onClose={closeQuote} onGoToJobBoard={goToJobBoardFromQuote} />
     </>
   );
 }
@@ -451,8 +445,6 @@ const CustomersBoard = memo(function CustomersBoard({
   const [period, setPeriod] = useState<DateRange>({});
   const [filters, setFilters] = useState<CustomerFilters>({});
   const [filtersOpen, setFiltersOpen] = useState(false);
-  const [includeArchived, setIncludeArchived] = useState(false);
-  const [addingCustomer, setAddingCustomer] = useState(false);
   const [hidden, setHidden] = useState<ColumnId[]>(() =>
     remembered<ColumnId[]>(HIDDEN_KEY, []).filter((id) => COLUMNS.some((c) => c.id === id)),
   );
@@ -483,7 +475,7 @@ const CustomersBoard = memo(function CustomersBoard({
   // The chosen days are the viewer's own days: sent as the exact moments they start and end.
   const from = period.dateFrom ? dayjs(period.dateFrom).startOf('day').toISOString() : undefined;
   const to = period.dateTo ? dayjs(period.dateTo).endOf('day').toISOString() : undefined;
-  const query = { source, from, to, view, search, sort, direction, filters, includeArchived };
+  const query = { source, from, to, view, search, sort, direction, filters };
   const { data, isLoading, isError, error, isFetching, refetch } = useQuery({
     queryKey: ['customers', { ...query, page }],
     queryFn: () => customersService.list({ ...query, page, pageSize: PAGE_SIZE }),
@@ -514,8 +506,10 @@ const CustomersBoard = memo(function CustomersBoard({
       const { results } = await customersService.sync(source);
       const failed = results.filter((r) => !r.ok);
       for (const r of failed) toast.error(`${r.source}: ${r.error ?? 'The sync failed.'}`, { duration: 8_000 });
-      if (failed.length < results.length)
-        toast.success(failed.length ? 'The other sources are up to date' : 'Customers are up to date');
+      // A CRM read once a night (Hoops): when it will be read.
+      for (const r of results.filter((x) => x.ok && x.note)) toast(`${r.source}: ${r.note}`, { duration: 8_000 });
+      const synced = results.filter((r) => r.ok && !r.note).length;
+      if (synced > 0) toast.success(failed.length ? 'The other sources are up to date' : 'Customers are up to date');
       await queryClient.invalidateQueries({ queryKey: ['customers'] });
     } catch (err) {
       toast.error(extractErrorMessage(err), { duration: 8_000 });
@@ -574,8 +568,8 @@ const CustomersBoard = memo(function CustomersBoard({
           ) : undefined
         }
         actions={
-          <div className={styles.headerActions}>
-            {data && data.sources.length > 0 && (
+          data && data.sources.length > 0 ? (
+            <div className={styles.headerActions}>
               <label className={styles.selectField}>
                 <span>Customer data source</span>
                 <select value={source} onChange={(e) => pick(() => setSource(e.target.value))}>
@@ -587,48 +581,22 @@ const CustomersBoard = memo(function CustomersBoard({
                   ))}
                 </select>
               </label>
-            )}
-            {canSync && (
-              <Button
-                type="button"
-                variant="secondary"
-                leftIcon={<FiRefreshCw />}
-                loading={syncing}
-                onClick={() => void sync()}
-              >
-                Sync now
-              </Button>
-            )}
-            <Button type="button" leftIcon={<FiPlus />} onClick={() => setAddingCustomer(true)}>
-              Add customer
-            </Button>
-          </div>
+              {canSync && (
+                <Button
+                  type="button"
+                  variant="secondary"
+                  leftIcon={<FiRefreshCw />}
+                  loading={syncing}
+                  onClick={() => void sync()}
+                >
+                  Sync now
+                </Button>
+              )}
+            </div>
+          ) : undefined
         }
       />
       {tabs}
-      {/* In `header` (not the main return below) because several states
-          return early before that point — no connected source, loading,
-          errored — and "Add Customer" must still work in every one of them,
-          since it's the alternative to having a CRM connected at all. */}
-      {addingCustomer && (
-        <AddCustomerModal
-          onClose={() => setAddingCustomer(false)}
-          onCreated={(created) => {
-            setAddingCustomer(false);
-            void queryClient.invalidateQueries({ queryKey: ['customers'] });
-            // Not the later `openCustomer` helper below — this callback can
-            // fire from a render that returned before that const was ever
-            // reached (isLoading/isError/no-source-connected), so it calls
-            // the prop directly instead of a binding that might not exist yet.
-            onOpenCustomer(created.id, undefined, {
-              name: created.name,
-              company: created.company,
-              owner: created.owner,
-              sources: created.sources,
-            });
-          }}
-        />
-      )}
     </>
   );
 
@@ -664,17 +632,14 @@ const CustomersBoard = memo(function CustomersBoard({
     );
   }
 
-  // No connected CRM used to mean no customers, full stop — not true any more: Phase 3's
-  // "Add Customer" can put a real customer here with zero sources connected. Only show the
-  // "connect a CRM" prompt when there's truly nothing to show either way.
-  if (data.sources.length === 0 && data.total === 0) {
+  if (data.sources.length === 0) {
     return (
       <div className={frame} hidden={offstage}>
         {header}
         <EmptyState
           icon={FiLink2}
-          title="Connect a CRM, or add your first customer"
-          description="Once a CRM is connected on the Integrations page, its customers appear here automatically — or add one by hand with the button above."
+          title="Connect a CRM to see your customers"
+          description="Once a CRM is connected on the Integrations page, its customers appear here automatically."
           action={
             <Button type="button" leftIcon={<FiLink2 />} onClick={() => navigate(ROUTES.settingsIntegrations)}>
               Open Integrations
@@ -700,21 +665,6 @@ const CustomersBoard = memo(function CustomersBoard({
   const columns = COLUMNS.filter((c) => !hidden.includes(c.id));
   const openCustomer = (who: Customer, tab?: PanelTab) =>
     onOpenCustomer(who.id, tab, { name: who.name, company: who.company, owner: who.owner, sources: who.sources });
-
-  const toggleArchive = async (who: Customer) => {
-    try {
-      if (who.archived) {
-        await customersService.restore(who.id);
-        toast.success(`${who.name} restored`);
-      } else {
-        await customersService.archive(who.id);
-        toast.success(`${who.name} archived`);
-      }
-      await queryClient.invalidateQueries({ queryKey: ['customers'] });
-    } catch (err) {
-      toast.error(extractErrorMessage(err), { duration: 8_000 });
-    }
-  };
 
   return (
     <div className={frame} hidden={offstage}>
@@ -753,7 +703,9 @@ const CustomersBoard = memo(function CustomersBoard({
       <div className={styles.tiles} role="tablist" aria-label="Filter customers">
         {TILES.map((tile) => {
           const active = view === tile.id;
-          const attention = tile.id === 'follow_up' && tile.count(stats) > 0;
+          // A backend from before a tile existed sends no count for it: 0, not a broken number.
+          const value = tile.count(stats) ?? 0;
+          const attention = !!tile.urgent && value > 0;
           return (
             <button
               key={tile.id}
@@ -769,7 +721,7 @@ const CustomersBoard = memo(function CustomersBoard({
               </span>
               <span className={styles.tileText}>
                 <strong>
-                  <AnimatedNumber value={tile.count(stats)} duration={0.45} />
+                  <AnimatedNumber value={value} duration={0.45} />
                 </strong>
                 <span>{tile.label}</span>
               </span>
@@ -814,15 +766,6 @@ const CustomersBoard = memo(function CustomersBoard({
             {filterCount > 0 && <span className={styles.toolCount}>{filterCount}</span>}
           </button>
           <ColumnPicker hidden={hidden} onToggle={toggleColumn} onReset={showAllColumns} />
-          <button
-            type="button"
-            className={clsx(styles.tool, includeArchived && styles.toolOn)}
-            aria-pressed={includeArchived}
-            title="Include customers that have been archived"
-            onClick={() => pick(() => setIncludeArchived((v) => !v))}
-          >
-            <FiArchive aria-hidden /> Archived
-          </button>
           <button
             type="button"
             className={clsx(styles.tool, styles.tableOnly, rowHeight === 'compact' && styles.toolOn)}
@@ -958,7 +901,6 @@ const CustomersBoard = memo(function CustomersBoard({
                     detailed={rowHeight !== 'compact'}
                     onOpen={(tab) => openCustomer(customer, tab)}
                     onOpenJob={onOpenJob}
-                    onToggleArchive={toggleArchive}
                   />
                 ))}
               </tbody>
@@ -1135,7 +1077,7 @@ function NextStep({ customer, detailed = true }: { customer: Customer; detailed?
 }
 
 // What can be done with a customer straight from their row.
-function rowActions(customer: Customer, onOpen: (tab?: PanelTab) => void, onToggleArchive: (customer: Customer) => void): DropdownItem[] {
+function rowActions(customer: Customer, onOpen: (tab?: PanelTab) => void): DropdownItem[] {
   const items: DropdownItem[] = [{ id: 'open', label: 'Open', icon: <FiMaximize2 />, onSelect: () => onOpen() }];
   if (customer.email)
     items.push({
@@ -1159,10 +1101,6 @@ function rowActions(customer: Customer, onOpen: (tab?: PanelTab) => void, onTogg
       separatorBefore: true,
       onSelect: () => onOpen('comments'),
     },
-    { id: 'task', label: 'Add task', icon: <FiCheckSquare />, onSelect: () => onOpen('tasks') },
-    customer.archived
-      ? { id: 'restore', label: 'Restore', icon: <FiRotateCcw />, separatorBefore: true, onSelect: () => onToggleArchive(customer) }
-      : { id: 'archive', label: 'Archive', icon: <FiArchive />, danger: true, separatorBefore: true, onSelect: () => onToggleArchive(customer) },
   );
   return items;
 }
@@ -1174,7 +1112,6 @@ function CustomerRow({
   detailed,
   onOpen,
   onOpenJob,
-  onToggleArchive,
 }: {
   customer: Customer;
   index: number;
@@ -1182,36 +1119,21 @@ function CustomerRow({
   detailed: boolean;
   onOpen: (tab?: PanelTab) => void;
   onOpenJob: (jobId: string, number?: string) => void;
-  onToggleArchive: (customer: Customer) => void;
 }) {
   const stage = (key: StageKey) => customer.stages.find((s) => s.key === key);
   const cell = (id: ColumnId) => {
     switch (id) {
-      case 'owner': {
-        const rep = customer.repName ?? customer.owner;
+      case 'owner':
         return (
           <td key={id} className={clsx(styles.ownerCell, styles.foldA)}>
-            {rep ? (
-              <span className={styles.owner} title={customer.repName ? `${rep} (set by hand)` : rep}>
-                <Avatar name={rep} size="sm" />
-                <span>{rep}</span>
+            {customer.owner ? (
+              <span className={styles.owner} title={customer.owner}>
+                <Avatar name={customer.owner} size="sm" />
+                <span>{customer.owner}</span>
               </span>
             ) : (
               NONE
             )}
-          </td>
-        );
-      }
-      case 'phone':
-        return (
-          <td key={id} className={styles.foldA}>
-            {customer.phone ?? NONE}
-          </td>
-        );
-      case 'contacts':
-        return (
-          <td key={id} className={styles.foldA}>
-            {customer.contactsCount > 0 ? customer.contactsCount : NONE}
           </td>
         );
       case 'type':
@@ -1272,9 +1194,9 @@ function CustomerRow({
             </div>
             {customer.company && <div className={styles.cellSub}>{customer.company}</div>}
             {/* What the Owner and Last activity columns say, where those columns have given up their room. */}
-            {detailed && columns.includes('owner') && (customer.repName ?? customer.owner) && (
-              <div className={clsx(styles.cellSub, styles.foldedA)} title={`Customer Rep: ${customer.repName ?? customer.owner}`}>
-                Customer Rep: {customer.repName ?? customer.owner}
+            {detailed && columns.includes('owner') && customer.owner && (
+              <div className={clsx(styles.cellSub, styles.foldedA)} title={`Owner: ${customer.owner}`}>
+                Owner: {customer.owner}
               </div>
             )}
             {detailed && columns.includes('activity') && customer.lastActivity && (
@@ -1313,7 +1235,7 @@ function CustomerRow({
           align="right"
           usePortal
           trigger={<IconButton icon={<FiMoreHorizontal />} size="sm" label={`Actions for ${customer.name}`} />}
-          items={rowActions(customer, onOpen, onToggleArchive)}
+          items={rowActions(customer, onOpen)}
         />
       </td>
     </tr>

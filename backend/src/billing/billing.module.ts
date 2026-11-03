@@ -61,6 +61,7 @@ import { StripePaymentProvider } from './providers/stripe-payment.provider';
 import { PricingService } from './pricing.service';
 import { ReservationService } from './reservation.service';
 import { SubscriptionRenewalService } from './subscription-renewal.service';
+import { NotificationsModule } from '../notifications/notifications.module';
 import { WalletService } from './wallet.service';
 import { BillingFeature, BillingFeatureSchema } from './schemas/billing-feature.schema';
 import { BillingGatewayConfig, BillingGatewayConfigSchema } from './schemas/billing-gateway-config.schema';
@@ -93,6 +94,7 @@ import { WebhookEvent, WebhookEventSchema } from './schemas/webhook-event.schema
 
 @Module({
   imports: [
+    NotificationsModule,
     MongooseModule.forFeature([
       { name: Wallet.name, schema: WalletSchema },
       { name: WalletTransaction.name, schema: WalletTransactionSchema },

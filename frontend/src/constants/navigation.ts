@@ -6,6 +6,7 @@ import {
   FiClock,
   FiCreditCard,
   FiDollarSign,
+  FiFolder,
   FiInbox,
   FiMessageSquare,
   FiMic,
@@ -80,6 +81,14 @@ export const NAV_GROUPS: NavGroup[] = [
         // feature key predates the page: it was "New Inquiries" before this view replaced it.
         hideForRoles: ['agent_user', 'user', 'consultant'],
         feature: 'inquiries',
+      },
+      {
+        id: 'files',
+        label: 'Files',
+        path: ROUTES.files,
+        icon: FiFolder,
+        // Everyone's own Google Drive / OneDrive, and the company folders shared with their role.
+        hint: 'Google Drive and OneDrive files, in one place',
       },
       {
         id: 'call-copilot',

@@ -1,6 +1,7 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { Document, SchemaTypes, Types } from 'mongoose';
 import type { CrmModule, CrmProviderId, FieldMappings, StatusMapping, Terminology } from '../provider-catalog';
+import type { SyncWindow } from '../sync-window';
 
 export type DataSourceDocument = DataSource & Document<Types.ObjectId>;
 
@@ -83,6 +84,15 @@ export class DataSource {
     lastStatus: SyncState;
     lastError?: string;
     lastCounts?: Record<string, number>;
+    lastSuccessAt?: Date;
+    // A CRM read only once a night, inside this window (Hoops) — see sync-window.ts.
+    window?: SyncWindow;
+    // How far back the first import and its nightly history reading go (null: everything).
+    historyFrom?: Date | null;
+    // Which of the connect form's history choices that was ('30', '90', '365', 'all').
+    historyChoice?: string;
+    // The adapter's own reading position between syncs (Hoops: how far down each list its history walk got).
+    adapterState?: Record<string, { skip?: number; at?: string; oldest?: string | null; done?: boolean }>;
   };
 
   @Prop({ type: SchemaTypes.Mixed, default: {} })

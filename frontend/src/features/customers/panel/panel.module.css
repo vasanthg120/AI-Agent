@@ -791,8 +791,9 @@
   color: var(--color-accent);
 }
 
+/* The words keep a usable width: on a narrow panel the buttons wrap below them rather than squeezing them. */
 .dropZone > div {
-  flex: 1;
+  flex: 1 1 220px;
   display: flex;
   flex-direction: column;
   gap: 2px;
@@ -929,4 +930,13 @@
   align-items: center;
   height: 17px;
   height: 1lh;
+}
+
+/* The buttons under a small dialog of the panel (the follow-up date). */
+.dialogActions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  margin-top: var(--space-4);
 }

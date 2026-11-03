@@ -1,6 +1,7 @@
 import { getConnectionToken, getModelToken, MongooseModule } from '@nestjs/mongoose';
 import { Test } from '@nestjs/testing';
-import { Connection, Model } from 'mongoose';
+import { Connection, Model, Types } from 'mongoose';
+import { runWithDataSourceScope } from '../data-sources/data-source-context';
 import { RoyaltyReportExportService } from '../royalty/royalty-report-export.service';
 import { RoyaltyReportService, royaltyOn } from '../royalty/royalty-report.service';
 import { RoyaltyRulesService } from '../royalty/royalty-rules.service';
@@ -130,7 +131,7 @@ describe('Sales, Gross Margin and Royalty reports (real Mongo)', () => {
   });
 
   afterAll(async () => {
-    for (const name of ['crm_quotes', 'crm_deals', 'users', 'reporting_settings', 'royalty_rules', 'royalty_invoices']) {
+    for (const name of ['crm_quotes', 'crm_deals', 'users', 'reporting_settings', 'royalty_rules', 'royalty_invoices', 'crm_data_sources']) {
       await connection.collection(name).deleteMany({ organizationId: { $regex: `^${PREFIX}` } });
     }
     await connection.close();
@@ -183,8 +184,9 @@ describe('Sales, Gross Margin and Royalty reports (real Mongo)', () => {
       }),
       // No tax line at all; its owner is known only by the CRM's name for them.
       quote('Q-4', 20000, '2026-09-30', { dealId: d2, clientDetails: { companyName: 'Kovai Mills' }, quoteOwner: 'crm-77', quoteOwnerLabel: 'Sanjay Kumar' }),
-      // Left out: a draft, one from another month, one of another organization.
+      // Left out: a draft, a voided one (Hoops), one from another month, one of another organization.
       quote('Q-3', 50000, '2026-09-12', { dealId: d1, quoteStatus: 'draft', taxes: [{ name: 'GST', amount: 2000 }] }),
+      quote('Q-6', 40000, '2026-09-14', { dealId: d1, quoteStatus: 'voided', taxes: [{ name: 'Tax', amount: 4000 }] }),
       quote('Q-5', 70000, '2026-10-01', { dealId: d1, taxes: [{ name: 'GST', amount: 3000 }] }),
       { ...quote('Q-9', 999999, '2026-09-15', { taxes: [{ name: 'GST', amount: 9 }] }), organizationId: `${org}-other` },
     ]);
@@ -359,5 +361,49 @@ describe('Sales, Gross Margin and Royalty reports (real Mongo)', () => {
     });
     // Another organization has its own quotations and no rule of ours.
     expect(await royalty.generateReport(`${org}-other`, ...SEPTEMBER)).toMatchObject({ royaltyRule: null, totalQuotes: 1, salesIncTax: 999999, totalDue: 0 });
+  });
+
+  it('two CRMs: a report counts only the one shown on dashboards, in its own currency — never rupees and dollars added together', async () => {
+    const pantheras = new Types.ObjectId();
+    const hoops = new Types.ObjectId();
+    await connection.collection('crm_data_sources').insertMany([
+      { _id: pantheras, organizationId: org, key: 'prospectconnect', provider: 'prospectconnect', metadata: {} },
+      { _id: hoops, organizationId: org, key: 'hoops', provider: 'hoops', metadata: { currency: 'AUD' } },
+    ]);
+    // The quotations seeded above are Pantheras'; two of Hoops' in the same month.
+    await connection.collection('crm_quotes').updateMany({ organizationId: org }, { $set: { dataSourceId: pantheras.toString() } });
+    await connection.collection('crm_quotes').insertMany([
+      {
+        organizationId: org,
+        dataSourceId: hoops.toString(),
+        quoteNumber: '4472',
+        quoteAmount: 78.1,
+        quoteStatus: 'viewed',
+        clientApprovalStatus: 'pending',
+        taxes: [{ name: 'Tax', amount: 7.1 }],
+        createdAt: day('2026-09-21'),
+      },
+      {
+        organizationId: org,
+        dataSourceId: hoops.toString(),
+        quoteNumber: '4473',
+        quoteAmount: 110,
+        quoteStatus: 'accepted',
+        clientApprovalStatus: 'approved',
+        taxes: [{ name: 'Tax', amount: 10 }],
+        createdAt: day('2026-09-22'),
+      },
+    ]);
+    const shown = (sourceId: Types.ObjectId) => ({ organizationId: org, mode: 'source' as const, sourceIds: [sourceId.toString()], nativeSourceId: 'native' });
+
+    const hoopsReport = await runWithDataSourceScope(shown(hoops), () => royalty.generateReport(org, ...SEPTEMBER));
+    expect(hoopsReport).toMatchObject({ currency: 'AUD', totalQuotes: 2, salesIncTax: 188.1, tax: 17.1, salesExTax: 171 });
+    const panthersReport = await runWithDataSourceScope(shown(pantheras), () => royalty.generateReport(org, ...SEPTEMBER));
+    expect(panthersReport).toMatchObject({ currency: 'INR', totalQuotes: 3, salesIncTax: 243000 });
+
+    // The export writes each in its own currency.
+    const exportRows = new RoyaltyReportExportService().buildRows(hoopsReport);
+    expect(exportRows.find((r) => r.item === 'Sales (Including Tax)')?.value).toBe('A$188.10');
+    expect(new RoyaltyReportExportService().buildRows(panthersReport).find((r) => r.item === 'Sales (Including Tax)')?.value).toBe('₹2,43,000.00');
   });
 });

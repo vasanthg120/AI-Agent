@@ -7,12 +7,16 @@ import { JwtPayload } from '../auth/jwt-payload.interface';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { UpdateProfileDto } from './dto/update-profile.dto';
+import { InvitationsService } from './invitations.service';
 import { UsersService } from './users.service';
 
 @UseGuards(JwtAuthGuard)
 @Controller('users')
 export class UsersController {
-  constructor(private usersService: UsersService) {}
+  constructor(
+    private usersService: UsersService,
+    private invitations: InvitationsService,
+  ) {}
 
   @Get('me')
   async me(@CurrentUser() user: JwtPayload) {
@@ -31,15 +35,26 @@ export class UsersController {
   @UseGuards(RolesGuard)
   @Roles('admin')
   async list(@CurrentUser() caller: JwtPayload) {
-    const users = await this.usersService.findAll(caller.organizationId);
+    const users = await this.usersService.findAllWithLinkedMembers(caller.organizationId);
     return users.map((u) => this.usersService.toPublic(u));
   }
 
   @Post()
   @UseGuards(RolesGuard)
   @Roles('admin')
-  create(@CurrentUser() caller: JwtPayload, @Body() dto: CreateUserDto) {
-    return this.usersService.createByAdmin(dto, caller.organizationId);
+  async create(@CurrentUser() caller: JwtPayload, @Body() dto: CreateUserDto) {
+    const created = await this.usersService.createByAdmin(dto, caller.organizationId);
+    if (!dto.sendInvite) return created;
+    const { activationLink } = await this.invitations.inviteById(created.user.id, caller.organizationId);
+    return { ...created, activationLink };
+  }
+
+  @Post(':id/resend-invitation')
+  @UseGuards(RolesGuard)
+  @Roles('admin')
+  async resendInvitation(@CurrentUser() caller: JwtPayload, @Param('id') id: string) {
+    const { activationLink } = await this.invitations.inviteById(id, caller.organizationId);
+    return { activationLink };
   }
 
   @Patch(':id')

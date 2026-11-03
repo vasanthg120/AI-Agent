@@ -1,13 +1,15 @@
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { JwtPayload } from '../auth/jwt-payload.interface';
+import { CloudConnectionsService } from '../cloud-files/cloud-connections.service';
 import { OutlookService } from './outlook.service';
 export declare class OutlookController {
     private outlookService;
     private jwtService;
     private config;
+    private cloudConnections;
     private readonly logger;
-    constructor(outlookService: OutlookService, jwtService: JwtService, config: ConfigService);
+    constructor(outlookService: OutlookService, jwtService: JwtService, config: ConfigService, cloudConnections: CloudConnectionsService);
     getEmails(): Promise<{
         id: string;
         from: string;

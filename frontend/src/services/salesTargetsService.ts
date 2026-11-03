@@ -23,8 +23,9 @@ export interface UpsertSalesTargetPayload {
 }
 
 export const salesTargetsService = {
-  async list(period: string): Promise<SalesTarget[]> {
-    const { data } = await axiosClient.get<SalesTarget[]>('/sales-targets', { params: { period } });
+  // currency: only the targets in it (each CRM's targets are in its own currency).
+  async list(period: string, currency?: string): Promise<SalesTarget[]> {
+    const { data } = await axiosClient.get<SalesTarget[]>('/sales-targets', { params: { period, ...(currency ? { currency } : {}) } });
     return data;
   },
 

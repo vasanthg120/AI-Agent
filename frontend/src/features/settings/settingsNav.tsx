@@ -13,6 +13,7 @@ import {
   FiLink2,
   FiClock,
   FiDatabase,
+  FiLayers,
 } from 'react-icons/fi';
 import { ROUTES } from '@/constants/routes';
 
@@ -28,6 +29,8 @@ export interface SettingsNavItem {
   /** Extra search terms — what someone might type when they don't know the tab's name. */
   keywords?: string[];
   requireRoles?: string[];
+  /** Only for a Main Account's own owner (a sub-account's owner holds the same role). */
+  requireMainOwner?: boolean;
 }
 
 export interface SettingsNavGroup {
@@ -37,6 +40,22 @@ export interface SettingsNavGroup {
 }
 
 export const SETTINGS_NAV: SettingsNavGroup[] = [
+  {
+    id: 'agency',
+    label: 'Agency Settings',
+    items: [
+      {
+        id: 'sub-accounts',
+        label: 'Manage Sub-Accounts',
+        icon: <FiLayers />,
+        path: ROUTES.settingsSubAccounts,
+        hint: 'Businesses under this account',
+        summary: 'Create and look after independent businesses under your Main Account, each with its own login, data and subscription.',
+        keywords: ['agency', 'franchise', 'branch', 'tenant', 'business', 'multi'],
+        requireMainOwner: true,
+      },
+    ],
+  },
   {
     id: 'preferences',
     label: 'Preferences',

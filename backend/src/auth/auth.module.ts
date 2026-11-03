@@ -39,6 +39,6 @@ import { AdminAuthService } from './admin-auth.service';
   ],
   controllers: [AuthController, OAuthController, TwoFactorController, AdminAuthController, AdminAccountsController],
   providers: [AuthService, JwtStrategy, OAuthService, TwoFactorService, AdminJwtStrategy, AdminAuthService],
-  exports: [JwtModule, PassportModule],
+  exports: [JwtModule, PassportModule, AuthService],
 })
 export class AuthModule {}

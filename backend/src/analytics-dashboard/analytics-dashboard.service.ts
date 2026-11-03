@@ -13,6 +13,7 @@ import { DashboardService } from '../dashboard/dashboard.service';
 import { EmailIntelligenceService } from '../email-intelligence/email-intelligence.service';
 import { OrganizationsService } from '../organizations/organizations.service';
 import { AiInsightItem, AnalyticsDashboardOverview, PipelineByMonth, PipelineMonth, ScopeInfo } from './analytics-dashboard.types';
+import { PreviousMonthClosuresService } from './previous-month-closures.service';
 
 // Unified view (two or more CRMs at once, only when explicitly chosen): the
 // same deal kept in two CRMs — same name, value and close date — counts once.
@@ -68,6 +69,7 @@ export class AnalyticsDashboardService {
     private emailIntelligenceService: EmailIntelligenceService,
     private dashboardService: DashboardService,
     private organizationsService: OrganizationsService,
+    private previousMonthClosuresService: PreviousMonthClosuresService,
   ) {}
 
   // Phase 24 — the frontend's date filter is now always a single whole
@@ -145,54 +147,67 @@ export class AnalyticsDashboardService {
       quoteDateMatch.dealId = { $in: scopedDeals.map((d) => d._id.toString()) };
     }
 
-    const [dealRows, quoteRows, achievement, workforceOverview, consultantRows, outstandingByOwner, revenueTrend, emailStats, customerBreakdown, storeName] =
-      await Promise.all([
-        this.dealModel
-          .aggregate<{ _id: string; count: number; value: number }>([
-            { $match: dealMatch },
-            ...unifiedDealDedupe(),
-            { $group: { _id: '$dealStatus', count: { $sum: 1 }, value: { $sum: '$monetaryValue' } } },
-          ])
-          .exec(),
-        this.quoteModel
-          .aggregate<{ _id: boolean; count: number; value: number }>([
-            { $match: quoteDateMatch },
-            { $group: { _id: { $eq: ['$clientApprovalStatus', 'approved'] }, count: { $sum: 1 }, value: { $sum: '$quoteAmount' } } },
-          ])
-          .exec(),
-        // dateFrom is always the 1st of a single selected month (see this
-        // method's own leading comment) — its own "YYYY-MM" prefix IS that
-        // month's period, so achievement/target now honestly tracks whichever
-        // month is selected instead of always "now".
-        this.salesAnalyticsService.getAchievement(organizationId, scope.level, scopeId, dateFrom.slice(0, 7)),
-        this.dashboardService.getOverview(caller),
-        this.dealPerformanceDashboardService.getConsultantPerformance(
-          organizationId,
-          dealMatch,
-          scope.level === 'store' ? scope.storeId : undefined,
-          undefined,
-          includeAllUsers,
-        ),
-        this.quotesService.getOutstandingByOwner(organizationId),
-        // Trailing 6 months ending on the selected month (dateFrom's own
-        // "YYYY-MM"), same reasoning as achievement above.
-        this.dealPerformanceDashboardService.getRevenueProgress(organizationId, scope.level, scopeId, 6, dateFrom.slice(0, 7)),
-        this.emailIntelligenceService.getActivityStats(
-          organizationId,
-          start,
-          end,
-          scope.level === 'store' ? scope.storeId : undefined,
-          scope.level === 'user' ? scope.userId : undefined,
-        ),
-        this.customerActivityService.getCustomerBreakdownForRange(
-          organizationId,
-          start,
-          end,
-          scope.level === 'store' ? scope.storeId : undefined,
-          scope.level === 'user' ? scope.userId : undefined,
-        ),
-        scope.level === 'store' && scope.storeId ? this.resolveStoreName(organizationId, scope.storeId) : Promise.resolve(undefined),
-      ]);
+    const [
+      dealRows,
+      quoteRows,
+      achievement,
+      workforceOverview,
+      consultantRows,
+      outstandingByOwner,
+      revenueTrend,
+      emailStats,
+      customerBreakdown,
+      storeName,
+      previousMonthClosures,
+    ] = await Promise.all([
+      this.dealModel
+        .aggregate<{ _id: string; count: number; value: number }>([
+          { $match: dealMatch },
+          ...unifiedDealDedupe(),
+          { $group: { _id: '$dealStatus', count: { $sum: 1 }, value: { $sum: '$monetaryValue' } } },
+        ])
+        .exec(),
+      this.quoteModel
+        .aggregate<{ _id: boolean; count: number; value: number }>([
+          { $match: quoteDateMatch },
+          { $group: { _id: { $eq: ['$clientApprovalStatus', 'approved'] }, count: { $sum: 1 }, value: { $sum: '$quoteAmount' } } },
+        ])
+        .exec(),
+      // dateFrom is always the 1st of a single selected month (see this
+      // method's own leading comment) — its own "YYYY-MM" prefix IS that
+      // month's period, so achievement/target now honestly tracks whichever
+      // month is selected instead of always "now".
+      this.salesAnalyticsService.getAchievement(organizationId, scope.level, scopeId, dateFrom.slice(0, 7)),
+      this.dashboardService.getOverview(caller),
+      this.dealPerformanceDashboardService.getConsultantPerformance(
+        organizationId,
+        dealMatch,
+        scope.level === 'store' ? scope.storeId : undefined,
+        undefined,
+        includeAllUsers,
+      ),
+      this.quotesService.getOutstandingByOwner(organizationId),
+      // Trailing 6 months ending on the selected month (dateFrom's own
+      // "YYYY-MM"), same reasoning as achievement above.
+      this.dealPerformanceDashboardService.getRevenueProgress(organizationId, scope.level, scopeId, 6, dateFrom.slice(0, 7)),
+      this.emailIntelligenceService.getActivityStats(
+        organizationId,
+        start,
+        end,
+        scope.level === 'store' ? scope.storeId : undefined,
+        scope.level === 'user' ? scope.userId : undefined,
+      ),
+      this.customerActivityService.getCustomerBreakdownForRange(
+        organizationId,
+        start,
+        end,
+        scope.level === 'store' ? scope.storeId : undefined,
+        scope.level === 'user' ? scope.userId : undefined,
+      ),
+      scope.level === 'store' && scope.storeId ? this.resolveStoreName(organizationId, scope.storeId) : Promise.resolve(undefined),
+      // Beside achievement, never added to it — see previous-month-closures.service.ts.
+      this.previousMonthClosuresService.get(organizationId, scope, period),
+    ]);
 
     const byStatus = new Map(dealRows.map((r) => [r._id, r]));
     const wonCount = byStatus.get('won')?.count ?? 0;
@@ -255,6 +270,7 @@ export class AnalyticsDashboardService {
       emailActivity: emailStats,
       deals: { wonCount, lostCount, openCount, wonValue, lostValue, openValue },
       revenue: { ...achievement, businessHealthScore },
+      previousMonthClosures,
       outstanding: { total: outstandingTotal },
       employeeLeaderboard,
       workBreakdown,

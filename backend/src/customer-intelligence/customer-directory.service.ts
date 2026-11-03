@@ -10,10 +10,8 @@ import { firstValueFrom } from 'rxjs';
 import { JwtPayload } from '../auth/jwt-payload.interface';
 import { ReservationService } from '../billing/reservation.service';
 import { heuristicBusinessName } from '../crm/customer-grouping.util';
-import { DataSourcesService } from '../data-sources/data-sources.service';
+import { DataSourcesService, currencyOf } from '../data-sources/data-sources.service';
 import { CRM_PROVIDERS } from '../data-sources/provider-catalog';
-import { UsersService } from '../users/users.service';
-import { AddCustomerContactDto, CreateCustomerDto, UpdateCustomerDto } from './dto/customer-profile.dto';
 import { buildCustomerDocuments, CustomerDocument, DocumentCharge, DocumentParty, Journey } from './customer-documents';
 import { CustomerMailService, EmailSummary } from './customer-mail.service';
 import { emailReplySpeeds, emailTimelineEvents, followUpTimelineEvents, TimelineEvent } from './customer-timeline';
@@ -53,12 +51,6 @@ export const TASKS_COLLECTION = 'customer_tasks';
 export const FILES_BUCKET = 'customer_files';
 /** Statuses the team set by hand: one record per customer, a status per step, and who changed what. */
 export const STATUSES_COLLECTION = 'customer_statuses';
-/** Phase 3 — the team's own edits on top of the computed view: archived,
- * the assigned rep, name/email/phone corrections, and contacts added by
- * hand. Same one-record-per-customer, customerKeys-consolidated shape as
- * STATUSES_COLLECTION (see setStatus's own comment) — "customer" has no
- * other persisted document to write these onto. */
-export const PROFILES_COLLECTION = 'customer_profiles';
 /** Jobs: quotations the team decided to produce (customer-jobs.service.ts writes them). */
 export const JOBS_COLLECTION = 'customer_jobs';
 const WORKSPACE_EVENT_LIMIT = 100;
@@ -105,13 +97,6 @@ export interface CustomerRow extends CustomerSummary {
   jobs: { id: string; number: string }[];
   /** The saved AI summary, when one was written and nothing has changed since. */
   aiSummary?: string;
-  /** Everyone their records name, newest first, including manual ones — the detail's own `people.length` (Phase 3's "Contacts" column needs the count on every row, not just the detail). */
-  contactsCount: number;
-  /** Set by hand (Phase 3) — archived customers are left out of the default list. */
-  archived: boolean;
-  /** Set by hand; falls back to the derived quote/deal owner (profile.owner) when unset. */
-  repUserId?: string;
-  repName?: string;
 }
 
 export interface CustomerAnalysis {
@@ -132,11 +117,6 @@ export interface CustomerPerson {
   name?: string;
   email?: string;
   phone?: string;
-  /** Set only for a contact added by hand (Phase 3) — never for one derived from a CRM record. */
-  role?: string;
-  manual?: boolean;
-  /** The id to remove it by (customer-profile.dto.ts's AddCustomerContactDto) — manual contacts only. */
-  id?: string;
 }
 
 /** One email exchanged with the customer, for the panel's list. */
@@ -192,6 +172,17 @@ export interface CustomerStats {
   paymentPending: number;
   outstanding: number;
   needsFollowUp: number;
+  /** An open inquiry or a quotation awaiting a decision, not lost. */
+  open: number;
+  /** An open inquiry nobody has emailed or quoted since. */
+  notActioned: number;
+  /** We wrote; they haven't answered. */
+  noReply: number;
+  /** Nothing planned to follow up (the Follow-up chip's "No follow-up"). */
+  noFollowUp: number;
+  /** The Order or Inquiry chip says "Converted". */
+  converted: number;
+  lost: number;
 }
 
 export interface CustomerQuery {
@@ -213,8 +204,6 @@ export interface CustomerQuery {
   direction?: string;
   page?: number;
   pageSize?: number;
-  /** 'true' shows archived customers too — same opt-in convention as every other "show the hidden ones" flag in this app (e.g. Product.isActive). */
-  includeArchived?: string;
 }
 
 interface Entry {
@@ -248,9 +237,6 @@ interface Entry {
   haystack: string;
   factsHash: string;
   aiSummary?: string;
-  archived: boolean;
-  repUserId?: string;
-  repName?: string;
 }
 
 interface Directory {
@@ -280,8 +266,18 @@ const VIEWS: Record<string, (p: CustomerProfile) => boolean> = {
   payment_pending: (p) => p.flags.includes('payment_pending') || p.flags.includes('payment_overdue'),
   payment_overdue: (p) => p.flags.includes('payment_overdue'),
   follow_up: (p) => p.flags.includes('reply_needed') || p.flags.includes('follow_up_required'),
-  converted: (p) => p.orders.count > 0,
+  // What the board's chips say "Converted": the Order chip (ordered, nothing open since) or the Inquiry chip (it became an order).
+  converted: (p) => stageStatus(p, 'order') === 'converted' || stageStatus(p, 'inquiry') === 'converted',
   not_converted: (p) => p.orders.count === 0,
+  // Something still under way: an open inquiry, or a quotation awaiting a decision — and not lost.
+  open: (p) => (p.inquiries.open || p.flags.includes('quote_pending')) && !isLost(p),
+  // An open inquiry nobody has done anything about: no email, no quotation, no status set by hand.
+  not_actioned: (p) => p.inquiries.open && !p.inquiries.actioned,
+  // We wrote and they haven't answered (the Email chip's "No reply yet").
+  no_reply: (p) => stageStatus(p, 'email') === 'follow_up',
+  // The Follow-up chip says "No follow-up": nothing planned (no follow-up, no email reminder) and not marked "not needed".
+  no_follow_up: (p) => stageStatus(p, 'followUp') === 'none',
+  lost: (p) => isLost(p),
   active: (p) => p.active,
   inactive: (p) => !p.active,
 };
@@ -289,6 +285,13 @@ const VIEWS: Record<string, (p: CustomerProfile) => boolean> = {
 // The board's filters: what each one reads off a customer. "none" stands for having no such thing.
 const NONE = 'none';
 const stageStatus = (p: CustomerProfile, key: StageKey) => p.stages.find((s) => s.key === key)?.status ?? NONE;
+/**
+ * No order, and the CRM says lost (every deal lost, every decided quotation rejected, nothing asked since) — or the
+ * team said so by hand: the inquiry "Not interested", or the quotation "Rejected" with no inquiry still open.
+ */
+const isLost = (p: CustomerProfile) =>
+  p.orders.count === 0 &&
+  (p.crm.status === 'lost' || stageStatus(p, 'inquiry') === 'not_interested' || (stageStatus(p, 'quote') === 'rejected' && !p.inquiries.open));
 
 /** What each status can be set to by hand, as the panel's dropdowns offer it. */
 export type StatusOptions = Record<StageKey, { status: string; label: string; tone: StageTone }[]>;
@@ -348,7 +351,6 @@ export class CustomerDirectoryService {
     private reservations: ReservationService,
     private http: HttpService,
     private jwt: JwtService,
-    private users: UsersService,
     config: ConfigService,
   ) {
     this.pythonAgentUrl = config.get<string>('pythonAgentUrl') ?? 'http://localhost:8000';
@@ -364,8 +366,8 @@ export class CustomerDirectoryService {
         .find({ organizationId, ...filter }, projection ? { projection } : undefined)
         .limit(MAX_RECORDS)
         .toArray();
-    const [sourceDocs, deals, quotes, invoices, contacts, payments, analyses, openTasks, statusDocs, jobDocs, profileDocs] = await Promise.all([
-      find('crm_data_sources', {}, { label: 1, provider: 1, status: 1, sync: 1 }),
+    const [sourceDocs, deals, quotes, invoices, contacts, payments, analyses, openTasks, statusDocs, jobDocs] = await Promise.all([
+      find('crm_data_sources', {}, { label: 1, provider: 1, status: 1, sync: 1, metadata: 1, isDefault: 1 }),
       find(
         'crm_deals',
         {},
@@ -437,8 +439,6 @@ export class CustomerDirectoryService {
       find(STATUSES_COLLECTION, {}, { customerKeys: 1, stages: 1 }),
       // The jobs made from quotations.
       find(JOBS_COLLECTION, {}, { customerKeys: 1, number: 1, seq: 1, quotationId: 1, 'statuses.progress': 1 }),
-      // What the team set by hand on the customer itself (Phase 3): archived, the assigned rep, corrections, manual contacts.
-      find(PROFILES_COLLECTION, {}),
     ]);
 
     const sources = sourceDocs.map((s) => {
@@ -455,6 +455,8 @@ export class CustomerDirectoryService {
       };
     });
     const providerOf = new Map(sources.map((s) => [s.id, s.provider]));
+    // Each CRM's amounts are in its own currency (Pantheras INR, Hoops AUD): a customer is shown in theirs.
+    const currencyOfSource = new Map(sourceDocs.map((s) => [s._id.toString(), currencyOf(s as { provider?: string; metadata?: Record<string, unknown> })]));
 
     // ---- every record, with what it says about who the customer is
     const pieces: Piece[] = [];
@@ -547,7 +549,8 @@ export class CustomerDirectoryService {
       paymentsByQuote.get(quotationId)!.push({ quotationId, amount: amount(p.amount), date });
     }
     const paymentsTracked = paymentsByQuote.size > 0 || quotes.some((q) => amount(q.paidAmount) > 0) || invoices.some((i) => lower(i.invoiceStatus) === 'paid');
-    const currency = text(quotes[0]?.currency) || text(invoices[0]?.currency) || 'INR';
+    const defaultSource = sourceDocs.find((s) => s.isDefault);
+    const currency = defaultSource ? currencyOfSource.get(defaultSource._id.toString())! : text(quotes[0]?.currency) || text(invoices[0]?.currency) || 'INR';
 
     // ---- the mail exchanged with every address any of them has used
     const addressesOf = (members: number[]) => [...new Set(members.map((i) => emailKey(pieces[i].identity.email)).filter(Boolean))];
@@ -576,17 +579,13 @@ export class CustomerDirectoryService {
         jobsByKey.get(key)!.push(job);
       }
     }
-    const profilesByKey = new Map<string, Doc[]>();
-    for (const doc of profileDocs) {
-      for (const key of Array.isArray(doc.customerKeys) ? doc.customerKeys.map(text) : []) {
-        if (!profilesByKey.has(key)) profilesByKey.set(key, []);
-        profilesByKey.get(key)!.push(doc);
-      }
-    }
     const now = new Date();
     const entries: Entry[] = [];
     for (const members of groups) {
       const mine = members.map((i) => pieces[i]).sort((a, b) => time(b.date) - time(a.date));
+      // Their quotations' currency first, else that of the CRM their records came from.
+      const ownSource = mine.find((p) => p.kind === 'quote' && p.sourceId)?.sourceId ?? mine.find((p) => p.sourceId)?.sourceId;
+      const customerCurrency = text(mine.find((p) => p.kind === 'quote')?.doc.currency).toUpperCase() || (ownSource && currencyOfSource.get(ownSource)) || currency;
       // The newest record that names something wins; a deal's title is only a fallback for the company.
       const named = [...mine.filter((p) => p.kind !== 'deal'), ...mine.filter((p) => p.kind === 'deal')];
       const pick = (field: keyof MatchIdentity) => named.map((p) => text(p.identity[field])).find(Boolean) || undefined;
@@ -725,7 +724,7 @@ export class CustomerDirectoryService {
 
       const profile = buildCustomerProfile({
         now,
-        currency,
+        currency: customerCurrency,
         paymentsTracked,
         enquiries,
         deals: dealRecords,
@@ -757,46 +756,20 @@ export class CustomerDirectoryService {
         )
         .digest('hex');
       const analysis = saved.get(id);
-
-      // Phase 3 — what the team set by hand on the customer itself (never
-      // touches `id`/`keys` above, both already fixed: an edit corrects how
-      // a customer displays, it must never change which records are theirs).
-      const profileOverride = [...new Set(keys.flatMap((key) => profilesByKey.get(key) ?? []))].sort(
-        (a, b) => time(asDate(b.updatedAt)) - time(asDate(a.updatedAt)),
-      )[0];
-      const archived = profileOverride?.archived === true;
-      const repUserId = text(profileOverride?.repUserId) || undefined;
-      const repName = text(profileOverride?.repName) || undefined;
-      const displayName = text(profileOverride?.nameOverride) || name;
-      const displayCompany = text(profileOverride?.companyOverride) || company;
-      const displayEmail = emailKey(profileOverride?.emailOverride) || email;
-      const displayPhone = (phoneKey(profileOverride?.phoneOverride) && text(profileOverride?.phoneOverride)) || phone;
-      const manualContacts: CustomerPerson[] = (Array.isArray(profileOverride?.contacts) ? profileOverride.contacts : []).map((c: Doc) => ({
-        id: text(c.id) || undefined,
-        name: text(c.name) || undefined,
-        email: text(c.email) || undefined,
-        phone: text(c.phone) || undefined,
-        role: text(c.role) || undefined,
-        manual: true,
-      }));
-
       entries.push({
         id,
-        name: displayName,
-        company: displayCompany && displayCompany !== displayName ? displayCompany : undefined,
-        email: displayEmail,
-        phone: displayPhone,
+        name,
+        company: company && company !== name ? company : undefined,
+        email,
+        phone,
         emails,
         keys,
         records: mine,
         enquiries,
         deals: dealRecords,
         payments: customerPayments,
-        people: [...manualContacts, ...people.slice(0, PEOPLE_LIMIT)],
+        people: people.slice(0, PEOPLE_LIMIT),
         address: normalized.map((n) => n.enquiry.person.address).find(Boolean),
-        archived,
-        repUserId,
-        repName,
         // A job found under two of their keys is still one job.
         jobs: [...new Set(keys.flatMap((key) => jobsByKey.get(key) ?? []))]
           .sort((a, b) => amount(b.seq) - amount(a.seq))
@@ -814,7 +787,7 @@ export class CustomerDirectoryService {
               source: sources.find((s) => s.id === latest.piece.sourceId)?.label ?? 'CRM',
             }
           : null,
-        haystack: [displayName, displayCompany, displayPhone, repName, ...emails, ...profile.quotations.map((q) => q.number), ...profile.invoiceList.map((i) => i.number)]
+        haystack: [name, company, phone, ...emails, ...profile.quotations.map((q) => q.number), ...profile.invoiceList.map((i) => i.number)]
           .filter(Boolean)
           .join(' ')
           .toLowerCase(),
@@ -840,10 +813,6 @@ export class CustomerDirectoryService {
       sources: directory.sources.filter((s) => entry.sourceIds.includes(s.id)).map((s) => s.label),
       jobs: entry.jobs.map(({ id, number }) => ({ id, number })),
       aiSummary: entry.aiSummary,
-      contactsCount: entry.people.length,
-      archived: entry.archived,
-      repUserId: entry.repUserId,
-      repName: entry.repName,
       ...summary,
     };
   }
@@ -851,166 +820,6 @@ export class CustomerDirectoryService {
   /** The team's comments, tasks and files change what the board shows: the next read starts afresh. */
   invalidate(organizationId: string) {
     this.cache.delete(organizationId);
-  }
-
-  // ---- Phase 3: the first real writes "customer" itself can receive ----
-  // No document named "customer" exists to CRUD (see this file's own
-  // header comment) — these all write through the exact same mechanism
-  // setStatus() above already proved correct: a small side collection, one
-  // record per customer, consolidated by customerKeys so a re-sync or
-  // re-cluster never loses the edit (see STATUSES_COLLECTION's comment).
-
-  private async repDisplay(organizationId: string, repUserId: string): Promise<string> {
-    const users = await this.users.findAll(organizationId);
-    const match = users.find((u) => u._id.toString() === repUserId && u.active !== false);
-    if (!match) throw new BadRequestException('That user isn’t eligible to be a customer rep in this organization.');
-    return match.name;
-  }
-
-  /** Just enough to populate the "Customer Rep" picker — GET /users itself is admin-only
-   * (users.controller.ts), stricter than this page's own owner/admin/manager tier. */
-  async listReps(organizationId: string): Promise<{ id: string; name: string }[]> {
-    const users = await this.users.findAll(organizationId);
-    return users.filter((u) => u.active !== false).map((u) => ({ id: u._id.toString(), name: u.name }));
-  }
-
-  /** The Tasks tab's one cross-customer lookup: a customer's display name by id, for the
-   * handful of ids a page of tasks actually names — never the whole directory. */
-  async namesByIds(organizationId: string, ids: string[]): Promise<Map<string, string>> {
-    const directory = await this.compute(organizationId);
-    const wanted = new Set(ids);
-    const map = new Map<string, string>();
-    for (const entry of directory.entries) if (wanted.has(entry.id)) map.set(entry.id, entry.name);
-    return map;
-  }
-
-  /** Reuses the exact matching rules clusterCustomers() itself uses (customer-matching.ts) — the
-   * same email/phone/company identity that decides two records are one customer decides whether a
-   * new one being added is really a duplicate. Company alone only matches when the candidate has
-   * neither email nor phone, same restraint as the clusterer's own rule 4. */
-  async findDuplicate(organizationId: string, candidate: { email?: string; phone?: string; company?: string }): Promise<CustomerRow | undefined> {
-    const directory = await this.compute(organizationId);
-    const email = candidate.email ? emailKey(candidate.email) : '';
-    const phone = candidate.phone ? phoneKey(candidate.phone) : '';
-    const company = candidate.company ? companyKey(candidate.company) : '';
-    let entry: Entry | undefined;
-    if (email) entry = directory.entries.find((e) => e.keys.includes(`e:${email}`));
-    if (!entry && phone) entry = directory.entries.find((e) => e.keys.includes(`p:${phone}`));
-    if (!entry && company && !email && !phone) entry = directory.entries.find((e) => companyKey(e.company) === company);
-    return entry ? this.row(entry, directory) : undefined;
-  }
-
-  /** "Add customer" creates a real crm_contacts record — the same collection a CRM sync already
-   * writes to, so this new customer is indistinguishable from a synced one everywhere else in the
-   * app (search, filters, the Job board's "convert to job", quote linking). Nothing new to maintain. */
-  async createCustomer(user: JwtPayload, dto: CreateCustomerDto): Promise<{ created?: CustomerRow; duplicate?: CustomerRow }> {
-    const organizationId = user.organizationId;
-    if (!dto.confirmDuplicate) {
-      const duplicate = await this.findDuplicate(organizationId, { email: dto.email, phone: dto.phone, company: dto.company });
-      if (duplicate) return { duplicate };
-    }
-
-    const repName = dto.repUserId ? await this.repDisplay(organizationId, dto.repUserId) : undefined;
-    const now = new Date();
-    const inserted = await this.connection.collection('crm_contacts').insertOne({
-      organizationId,
-      name: dto.name,
-      company: dto.company,
-      email: dto.email,
-      phone: dto.phone,
-      sourceCreatedAt: now,
-      createdAt: now,
-      updatedAt: now,
-    });
-
-    // The exact identityKey formula compute() derives for this one new record (see the entries loop
-    // above) — so the new customer's id is known immediately, not just after the next read discovers it.
-    const emailK = dto.email ? emailKey(dto.email) : '';
-    const phoneK = dto.phone ? phoneKey(dto.phone) : '';
-    const companyK = companyKey(dto.company);
-    const identityKey = emailK ? `e:${emailK}` : phoneK ? `p:${phoneK}` : companyK ? `c:${companyK}` : `n:${dto.name.toLowerCase()}|${inserted.insertedId.toString()}`;
-    const id = createHash('sha256').update(identityKey).digest('hex').slice(0, 24);
-    const keys = emailK || phoneK ? [...(emailK ? [`e:${emailK}`] : []), ...(phoneK ? [`p:${phoneK}`] : [])] : [`id:${id}`];
-
-    if (dto.repUserId) await this.upsertProfile(organizationId, id, keys, { repUserId: dto.repUserId, repName });
-    this.invalidate(organizationId);
-    const { entry, directory } = await this.found(organizationId, id);
-    return { created: this.row(entry, directory) };
-  }
-
-  async updateCustomer(organizationId: string, id: string, dto: UpdateCustomerDto): Promise<CustomerRow> {
-    const customer = await this.identity(organizationId, id);
-    const set: Doc = {};
-    if (dto.name !== undefined) set.nameOverride = dto.name;
-    if (dto.company !== undefined) set.companyOverride = dto.company;
-    if (dto.email !== undefined) set.emailOverride = dto.email;
-    if (dto.phone !== undefined) set.phoneOverride = dto.phone;
-    if (dto.repUserId !== undefined) {
-      set.repUserId = dto.repUserId || null;
-      set.repName = dto.repUserId ? await this.repDisplay(organizationId, dto.repUserId) : null;
-    }
-    await this.upsertProfile(organizationId, id, customer.keys, set);
-    this.invalidate(organizationId);
-    const { entry, directory } = await this.found(organizationId, id);
-    return this.row(entry, directory);
-  }
-
-  async setArchived(organizationId: string, id: string, archived: boolean): Promise<CustomerRow> {
-    const customer = await this.identity(organizationId, id);
-    await this.upsertProfile(organizationId, id, customer.keys, { archived });
-    this.invalidate(organizationId);
-    const { entry, directory } = await this.found(organizationId, id);
-    return this.row(entry, directory);
-  }
-
-  async addContact(organizationId: string, id: string, dto: AddCustomerContactDto): Promise<CustomerRow> {
-    const customer = await this.identity(organizationId, id);
-    const contact = { id: randomUUID(), name: dto.name, email: dto.email, phone: dto.phone, role: dto.role, addedAt: new Date() };
-    await this.upsertProfile(organizationId, id, customer.keys, {}, { $push: { contacts: contact } });
-    this.invalidate(organizationId);
-    const { entry, directory } = await this.found(organizationId, id);
-    return this.row(entry, directory);
-  }
-
-  async removeContact(organizationId: string, id: string, contactId: string): Promise<CustomerRow> {
-    const customer = await this.identity(organizationId, id);
-    await this.upsertProfile(organizationId, id, customer.keys, {}, { $pull: { contacts: { id: contactId } } });
-    this.invalidate(organizationId);
-    const { entry, directory } = await this.found(organizationId, id);
-    return this.row(entry, directory);
-  }
-
-  /** Same "newest kept current, older let go" consolidation as setStatus() above — a customer that
-   * was two rows before a re-sync merged them may have an override doc under each; the latest stays
-   * authoritative and the others stop being read (customerKeys cleared), instead of one at random. */
-  private async upsertProfile(organizationId: string, customerId: string, keys: string[], set: Doc, extra: Doc = {}): Promise<void> {
-    const profiles = this.connection.collection(PROFILES_COLLECTION);
-    const records = await profiles
-      .find({ organizationId, customerKeys: { $in: keys } }, { projection: { customerKeys: 1 } })
-      .sort({ updatedAt: -1 })
-      .toArray();
-    const at = new Date();
-    const [record, ...older] = records;
-    if (!record) {
-      await profiles.insertOne({
-        organizationId,
-        customerId,
-        customerKeys: keys,
-        archived: false,
-        contacts: [],
-        ...set,
-        ...(extra.$push ? { contacts: [extra.$push.contacts] } : {}),
-        createdAt: at,
-        updatedAt: at,
-      });
-      return;
-    }
-    const mergedKeys = [...new Set([...(Array.isArray(record.customerKeys) ? record.customerKeys.map(text) : []), ...keys])];
-    await profiles.updateOne(
-      { _id: record._id, organizationId },
-      { $set: { customerId, customerKeys: mergedKeys, updatedAt: at, ...set }, ...extra } as Doc,
-    );
-    if (older.length > 0) await profiles.updateMany({ _id: { $in: older.map((r) => r._id) }, organizationId }, { $set: { customerKeys: [] } });
   }
 
   /**
@@ -1032,8 +841,7 @@ export class CustomerDirectoryService {
     if ((from && Number.isNaN(from.getTime())) || (to && Number.isNaN(to.getTime())) || (from && to && from > to))
       throw new BadRequestException('Invalid date range.');
     const inPeriod = (e: Entry) => (!from && !to) || e.activityAt.some((at) => (!from || at >= from.getTime()) && (!to || at <= to.getTime()));
-    const includeArchived = query.includeArchived === 'true';
-    const inSource = directory.entries.filter((e) => (!source || e.sourceIds.includes(source)) && inPeriod(e) && (includeArchived || !e.archived));
+    const inSource = directory.entries.filter((e) => (!source || e.sourceIds.includes(source)) && inPeriod(e));
     const search = (query.search ?? '').trim().toLowerCase();
     const wanted = (Object.keys(FILTERS) as (keyof typeof FILTERS)[])
       .map((key) => [key, listOf(query[key])] as const)
@@ -1074,6 +882,12 @@ export class CustomerDirectoryService {
       paymentPending: count('payment_pending'),
       outstanding: inSource.reduce((sum, e) => sum + (e.profile.payment.outstanding ?? 0), 0),
       needsFollowUp: count('follow_up'),
+      open: count('open'),
+      notActioned: count('not_actioned'),
+      noReply: count('no_reply'),
+      noFollowUp: count('no_follow_up'),
+      converted: count('converted'),
+      lost: count('lost'),
     };
     const pageSize = Math.min(Math.max(Number(query.pageSize) || 25, 1), 100);
     const page = Math.max(Number(query.page) || 1, 1);
@@ -1169,7 +983,9 @@ export class CustomerDirectoryService {
         try {
           const result = (await this.dataSources.syncNow(organizationId, source.id)) as Record<string, unknown> | undefined;
           const failed = result?.status === 'error';
-          return { source: source.label, ok: !failed, error: failed ? text(result?.error) || 'The sync failed.' : undefined };
+          // A CRM read once a night (Hoops) says when it will be read instead: not a failure.
+          const note = result?.status === 'deferred' ? text(result?.message) || undefined : undefined;
+          return { source: source.label, ok: !failed, error: failed ? text(result?.error) || 'The sync failed.' : undefined, ...(note ? { note } : {}) };
         } catch (err) {
           this.logger.warn(`Sync of ${source.label} failed: ${(err as Error).message}`);
           return {
@@ -1258,8 +1074,8 @@ export class CustomerDirectoryService {
     for (const task of tasks) {
       const [added, done] = [asDate(task.createdAt), asDate(task.completedAt)];
       if (added)
-        events.push({ at: added, kind: 'task', title: `Task added${by(task.createdByName)}`, detail: short(task.title), attention: task.status === 'open' });
-      if (done && task.status === 'done') events.push({ at: done, kind: 'task', title: 'Task done', detail: short(task.title) });
+        events.push({ at: added, kind: 'task', title: `Follow-up set${by(task.createdByName)}`, detail: short(task.title), attention: task.status === 'open' });
+      if (done && task.status === 'done') events.push({ at: done, kind: 'task', title: 'Follow-up done', detail: short(task.title) });
     }
     for (const file of files) {
       const at = asDate(file.uploadDate);

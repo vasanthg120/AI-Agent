@@ -59,8 +59,13 @@ def cached_execute_tool(
         return execute_tool(name, tool_input, context, allowed_tools=allowed_tools)
 
     # Scoped by user_id so one user's cached result can never leak into
-    # another's tool call, even though most CRM data is shared (user_id="*").
-    key = cache_key("tool_result", name, {**tool_input, "_user_id": context.get("user_id", "")})
+    # another's tool call, and by organization because scheduled reports in
+    # every business all act as the same user_id ("*").
+    key = cache_key(
+        "tool_result",
+        name,
+        {**tool_input, "_user_id": context.get("user_id", ""), "_organization_id": context.get("organization_id", "")},
+    )
     cached = get_json(key)
     if cached is not None:
         return cached

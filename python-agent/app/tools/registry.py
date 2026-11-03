@@ -56,7 +56,6 @@ _MODULES = [
     gorilladash_lookup_tool,
     gorilladash_action_tool,
     crm_source_records_tool,
-    crm_write_tool,
     zapier_tool,
 ]
 

@@ -222,6 +222,32 @@ export function welcomeEmail(name: string, appUrl?: string): EmailContent {
   };
 }
 
+export function invitationEmail(name: string, businessName: string, link?: string): EmailContent {
+  const first = name.trim().split(/\s+/)[0] || 'there';
+  const business = businessName.trim() || 'HaiVE';
+  return {
+    subject: `You've been invited to ${business} on HaiVE`,
+    html: shell({
+      preview: `Set your password to start using ${business} on HaiVE.`,
+      eyebrow: 'Invitation',
+      title: `Welcome, ${escapeHtml(first)}`,
+      body: `${p(`An account has been created for you at <strong>${escapeHtml(business)}</strong> on HaiVE. Choose a password to activate it.`)}
+        ${link ? button('Activate your account', link) : p('Ask the person who invited you to send the activation link again.')}
+        ${p('This link works once and expires in 7 days.', `margin-top:14px;color:${C.muted};font-size:13px;`)}`,
+      footer: 'If you were not expecting this, you can ignore this email. No account is active until the link is used.',
+    }),
+    text: plain([
+      `Welcome, ${first}.`,
+      '',
+      `An account has been created for you at ${business} on HaiVE. Choose a password to activate it.`,
+      link && `\nActivate your account: ${link}`,
+      '',
+      'This link works once and expires in 7 days.',
+      'If you were not expecting this, you can ignore this email.',
+    ]),
+  };
+}
+
 export function verifyEmailOtp(code: string): EmailContent {
   return {
     subject: 'Verify your email — HaiVE',

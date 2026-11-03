@@ -47,3 +47,6 @@ __pycache__/
 
 __pycache__/
 *.pyc
+
+# Deploy state kept on the server by deploy.sh
+.deploy/

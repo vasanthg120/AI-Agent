@@ -117,6 +117,16 @@ export const authService = {
     return { success: true };
   },
 
+  async describeInvitation(token: string): Promise<{ email: string; name: string; businessName: string }> {
+    const { data } = await axiosClient.post<{ email: string; name: string; businessName: string }>('/auth/invitation/verify', { token });
+    return data;
+  },
+
+  async acceptInvitation(token: string, password: string): Promise<{ accessToken: string }> {
+    const { data } = await axiosClient.post<{ accessToken: string }>('/auth/invitation/accept', { token, password });
+    return data;
+  },
+
   async fetchCurrentUser(accessToken: string): Promise<User> {
     return toUser(await fetchProfile(accessToken));
   },
