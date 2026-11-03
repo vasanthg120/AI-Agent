@@ -754,7 +754,13 @@ function GmailOAuthTab() {
           configured, "Connect Gmail" on the customer Settings → Integrations page tells users to contact an administrator
           instead of attempting to connect.
         </p>
-        {configured && status !== 'loading' && status !== 'error' && (
+        {/* status !== 'loading'/'error' is redundant here (TS 4.4's aliased-
+            condition narrowing already proves it from `configured` alone,
+            which is why the now-removed explicit checks tripped TS2367 — a
+            true/false-literal comparison against a type status can no
+            longer be at this point) but was otherwise harmless until a
+            TypeScript upgrade turned it into a hard error. */}
+        {configured && (
           <div className={integrationsStyles.keyPreview}>Client ID: {status.clientId}</div>
         )}
         <div className={integrationsStyles.cardFooter}>
@@ -863,7 +869,13 @@ function OutlookOAuthTab() {
           on the customer Settings → Integrations page tells users to contact an administrator instead of attempting
           to connect.
         </p>
-        {configured && status !== 'loading' && status !== 'error' && (
+        {/* status !== 'loading'/'error' is redundant here (TS 4.4's aliased-
+            condition narrowing already proves it from `configured` alone,
+            which is why the now-removed explicit checks tripped TS2367 — a
+            true/false-literal comparison against a type status can no
+            longer be at this point) but was otherwise harmless until a
+            TypeScript upgrade turned it into a hard error. */}
+        {configured && (
           <div className={integrationsStyles.keyPreview}>Client ID: {status.clientId}</div>
         )}
         <div className={integrationsStyles.cardFooter}>
@@ -971,7 +983,13 @@ function XeroOAuthTab() {
           configured, "Connect" on the customer Settings → Integrations page tells users to contact an administrator
           instead of attempting to connect.
         </p>
-        {configured && status !== 'loading' && status !== 'error' && (
+        {/* status !== 'loading'/'error' is redundant here (TS 4.4's aliased-
+            condition narrowing already proves it from `configured` alone,
+            which is why the now-removed explicit checks tripped TS2367 — a
+            true/false-literal comparison against a type status can no
+            longer be at this point) but was otherwise harmless until a
+            TypeScript upgrade turned it into a hard error. */}
+        {configured && (
           <div className={integrationsStyles.keyPreview}>Client ID: {status.clientId}</div>
         )}
         <div className={integrationsStyles.cardFooter}>
@@ -1080,7 +1098,13 @@ function MyobOAuthTab() {
           configured, "Connect" on the customer Settings → Integrations page tells users to contact an administrator
           instead of attempting to connect.
         </p>
-        {configured && status !== 'loading' && status !== 'error' && (
+        {/* status !== 'loading'/'error' is redundant here (TS 4.4's aliased-
+            condition narrowing already proves it from `configured` alone,
+            which is why the now-removed explicit checks tripped TS2367 — a
+            true/false-literal comparison against a type status can no
+            longer be at this point) but was otherwise harmless until a
+            TypeScript upgrade turned it into a hard error. */}
+        {configured && (
           <div className={integrationsStyles.keyPreview}>Client ID: {status.clientId}</div>
         )}
         <div className={integrationsStyles.cardFooter}>

@@ -167,6 +167,13 @@ export interface Customer {
   stages: Stage[];
   // The saved AI summary, when one was written and nothing has changed since.
   aiSummary?: string;
+  // Everyone their records name, newest first, including manual ones — see CustomerDetail.people.
+  contactsCount: number;
+  // Phase 3 — set by hand; archived customers are left out of the default list.
+  archived: boolean;
+  // Set by hand; falls back to `owner` (the derived quote/deal owner) when unset.
+  repUserId?: string;
+  repName?: string;
 }
 
 export interface OrderComparison {
@@ -195,6 +202,11 @@ export interface CustomerPerson {
   name?: string;
   email?: string;
   phone?: string;
+  // Set only for a contact added by hand (Phase 3) — never for one derived from a CRM record.
+  role?: string;
+  manual?: boolean;
+  // Present on a manual contact only — what addContact/removeContact use.
+  id?: string;
 }
 
 // How a customer's records hang together: inquiry → deal → quotation → job → invoice → payment.
@@ -295,6 +307,13 @@ export interface CustomerTask {
   mine: boolean;
   jobId?: string;
   jobNumber?: string;
+}
+
+// Hoops-parity Tasks tab — the one cross-customer view this collection
+// never needed before.
+export interface CrossCustomerTask extends CustomerTask {
+  customerId: string;
+  customerName: string;
 }
 
 export interface CustomerFile {
@@ -455,6 +474,40 @@ export interface CustomerQuery {
   page?: number;
   pageSize?: number;
   filters?: CustomerFilters;
+  // true shows archived customers too — same opt-in convention as Product's isActive filter.
+  includeArchived?: boolean;
+}
+
+export interface CreateCustomerPayload {
+  name: string;
+  company?: string;
+  email?: string;
+  phone?: string;
+  repUserId?: string;
+  confirmDuplicate?: boolean;
+}
+
+export interface UpdateCustomerPayload {
+  name?: string;
+  company?: string;
+  email?: string;
+  phone?: string;
+  // '' clears the assignment back to the derived owner.
+  repUserId?: string;
+}
+
+export interface AddCustomerContactPayload {
+  name: string;
+  email?: string;
+  phone?: string;
+  role?: string;
+}
+
+export interface CreateCustomerResult {
+  created?: Customer;
+  // Set instead of `created` when the email/phone/company looked like an existing
+  // customer — resend with confirmDuplicate:true to create anyway.
+  duplicate?: Customer;
 }
 
 // What goes on the URL: empty values left out, each filter as one comma-separated list.
@@ -572,6 +625,54 @@ export const customersService = {
       params: refresh ? { refresh: true } : undefined,
       timeout: 120_000,
     });
+    return data;
+  },
+
+  // Phase 3 — "Add Customer". Creates a real crm_contacts record; when it
+  // looks like a duplicate of an existing customer, returns that match
+  // under `duplicate` instead — resend with confirmDuplicate:true to
+  // create anyway.
+  async create(payload: CreateCustomerPayload): Promise<CreateCustomerResult> {
+    const { data } = await axiosClient.post<CreateCustomerResult>('/customers', payload);
+    return data;
+  },
+
+  async update(id: string, payload: UpdateCustomerPayload): Promise<Customer> {
+    const { data } = await axiosClient.patch<Customer>(`/customers/${id}`, payload);
+    return data;
+  },
+
+  async archive(id: string): Promise<Customer> {
+    const { data } = await axiosClient.post<Customer>(`/customers/${id}/archive`);
+    return data;
+  },
+
+  async restore(id: string): Promise<Customer> {
+    const { data } = await axiosClient.post<Customer>(`/customers/${id}/restore`);
+    return data;
+  },
+
+  async addContact(id: string, payload: AddCustomerContactPayload): Promise<Customer> {
+    const { data } = await axiosClient.post<Customer>(`/customers/${id}/contacts`, payload);
+    return data;
+  },
+
+  async removeContact(id: string, contactId: string): Promise<Customer> {
+    const { data } = await axiosClient.delete<Customer>(`/customers/${id}/contacts/${contactId}`);
+    return data;
+  },
+
+  // Just enough to populate the "Customer Rep" picker — GET /users itself is admin-only,
+  // stricter than this page's own owner/admin/manager tier.
+  async listReps(): Promise<{ id: string; name: string }[]> {
+    const { data } = await axiosClient.get<{ id: string; name: string }[]>('/customers/reps');
+    return data;
+  },
+
+  // Hoops-parity Tasks tab — every task across every customer/job, not
+  // narrowed to one.
+  async listAllTasks(filters: { status?: 'open' | 'done'; mine?: boolean } = {}): Promise<CrossCustomerTask[]> {
+    const { data } = await axiosClient.get<CrossCustomerTask[]>('/customers/tasks', { params: filters });
     return data;
   },
 };

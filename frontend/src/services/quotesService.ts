@@ -103,6 +103,9 @@ export interface ListQuotesFilters {
   dateFrom?: string;
   dateTo?: string;
   clientApprovalStatus?: string;
+  // 'draft' | 'published' | 'sent' — mirrors backend quotes.service.ts's
+  // ListQuotesFilter exactly; added for the SalesBoard's status tabs.
+  quoteStatus?: string;
 }
 
 export interface ListQuotesResult {

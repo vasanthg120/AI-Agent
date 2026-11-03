@@ -32,10 +32,13 @@ export interface TenantAuthorizationStatus {
   authorizedByEmail?: string;
 }
 
-// Mirrors backend/src/integrations/auth-methods.ts's AuthType exactly.
-// OAuth-based platforms (Salesforce, Slack, HubSpot, ...) aren't included —
-// those need their own dedicated consent flow, not a credentials form.
-export type AuthType = 'apiKey' | 'apiKeyBaseUrl' | 'bearer' | 'basic' | 'customHeaders';
+// Mirrors backend/src/integrations/auth-methods.ts's AuthType exactly,
+// including 'oauth2' — it has no credentials-form rendering in this file
+// (see IntegrationsPage.tsx's selectableAuthTypesFor, which filters it back
+// out of every selectable list), but ProviderRule.allowedAuthTypes
+// (provider-rules.ts) can legitimately carry it for Zoho/Salesforce, so the
+// type here has to admit it too or that field can never type-check.
+export type AuthType = 'apiKey' | 'apiKeyBaseUrl' | 'bearer' | 'basic' | 'customHeaders' | 'oauth2';
 
 export interface AuthCredentials {
   apiKey?: string;

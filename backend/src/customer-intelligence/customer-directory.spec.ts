@@ -48,6 +48,7 @@ describe('Customers (real Mongo)', () => {
       reservations as never,
       http as never,
       { sign: () => 'jwt' } as never,
+      { findAll: async () => [] } as never,
       { get: () => 'http://agent' } as never,
     );
     gorilla = await source(org, 'gorilladash', 'Gorilla Dash');

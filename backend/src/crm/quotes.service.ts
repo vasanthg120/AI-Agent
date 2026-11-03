@@ -43,6 +43,10 @@ export interface ListQuotesFilter {
   dateFrom?: string;
   dateTo?: string;
   clientApprovalStatus?: string;
+  // 'draft' | 'published' | 'sent' — the only real values this field has
+  // ever been set to (confirmed by grep across every writer); filtered as a
+  // plain equality match, same shape as clientApprovalStatus below.
+  quoteStatus?: string;
   page?: number;
   pageSize?: number;
 }
@@ -142,6 +146,8 @@ export class QuotesService {
     // drill-down list's total always matches the donut's own count exactly.
     if (query.clientApprovalStatus === 'approved') match.clientApprovalStatus = 'approved';
     else if (query.clientApprovalStatus === 'not-approved') match.clientApprovalStatus = { $ne: 'approved' };
+
+    if (query.quoteStatus) match.quoteStatus = query.quoteStatus;
 
     if (storeConstraint || ownerConstraint) {
       const dealMatch: FilterQuery<Deal> = {

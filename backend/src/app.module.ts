@@ -48,6 +48,7 @@ import { AnalyticsDashboardModule } from './analytics-dashboard/analytics-dashbo
 import { RoyaltyModule } from './royalty/royalty.module';
 import { ReportingModule } from './reporting/reporting.module';
 import { VendorsModule } from './vendors/vendors.module';
+import { StatusDefinitionsModule } from './status-definitions/status-definitions.module';
 import { BusinessIntelligenceModule } from './business-intelligence/business-intelligence.module';
 import { MailModule } from './mail/mail.module';
 import { EncryptionModule } from './common/encryption/encryption.module';
@@ -116,6 +117,7 @@ import { HealthController } from './health/health.controller';
     RoyaltyModule,
     ReportingModule,
     VendorsModule,
+    StatusDefinitionsModule,
     BusinessIntelligenceModule,
     BillingModule,
     AiUsageModule,

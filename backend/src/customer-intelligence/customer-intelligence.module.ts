@@ -3,6 +3,7 @@ import { Module } from '@nestjs/common';
 import { AuthModule } from '../auth/auth.module';
 import { BillingModule } from '../billing/billing.module';
 import { GridFsService } from '../common/gridfs/gridfs.service';
+import { UsersModule } from '../users/users.module';
 import { CustomerDirectoryService } from './customer-directory.service';
 import { CustomerJobsController } from './customer-jobs.controller';
 import { CustomerJobsService } from './customer-jobs.service';
@@ -17,7 +18,7 @@ import { CustomersController } from './customers.controller';
 // (customer-workspace.service.ts) — and the jobs made from their quotations
 // (customer-jobs.service.ts). DataSourcesModule is global.
 @Module({
-  imports: [HttpModule.register({ timeout: 90_000 }), AuthModule, BillingModule],
+  imports: [HttpModule.register({ timeout: 90_000 }), AuthModule, BillingModule, UsersModule],
   controllers: [CustomersController, CustomerWorkspaceController, CustomerJobsController],
   providers: [CustomerMailService, CustomerDirectoryService, CustomerWorkspaceService, CustomerJobsService, GridFsService],
 })

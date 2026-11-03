@@ -1,0 +1,215 @@
+.wrap {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+  /* Switches to the card list below, by the room DataTable itself actually
+     has — not the window's width, so it still reads correctly next to an
+     open/closed sidebar, same reasoning as customers.module.css's own
+     named container. This one's anonymous: both the container and the
+     queried descendants live inside this same component, so no shared
+     name is needed. */
+  container-type: inline-size;
+}
+
+.tableWrap {
+  overflow-x: auto;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-bg-surface);
+  transition: opacity var(--duration-normal) var(--ease-out);
+}
+
+.tableWrap[aria-busy='true'] {
+  opacity: 0.55;
+}
+
+.table {
+  width: 100%;
+  min-width: 720px;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: var(--text-sm);
+  font-variant-numeric: tabular-nums;
+}
+
+.table th {
+  position: sticky;
+  top: 0;
+  text-align: left;
+  font-size: var(--text-xs);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--color-text-muted);
+  background: var(--color-bg-surface);
+  border-bottom: 1px solid var(--color-border);
+  white-space: nowrap;
+}
+
+.table td {
+  vertical-align: top;
+  line-height: 1.4;
+  color: var(--color-text-secondary);
+  background: var(--color-bg-surface);
+  border-bottom: 1px solid var(--color-border);
+  transition: background-color var(--duration-normal) var(--ease-out);
+}
+
+.table th:first-child,
+.table td:first-child {
+  padding-left: var(--space-4);
+}
+
+.table th:last-child,
+.table td:last-child {
+  padding-right: var(--space-4);
+}
+
+.table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.table strong {
+  color: var(--color-text-primary);
+}
+
+.alignRight {
+  text-align: right;
+}
+
+.alignCenter {
+  text-align: center;
+}
+
+/* Row height variants — padding only, so column widths never reflow. */
+.height_compact th,
+.height_compact td {
+  padding: 6px 10px;
+}
+
+.height_comfortable th,
+.height_comfortable td {
+  padding: 11px 12px;
+}
+
+.height_spacious th,
+.height_spacious td {
+  padding: 16px 14px;
+}
+
+.row {
+  cursor: default;
+  outline: none;
+}
+
+.rowClickable {
+  cursor: pointer;
+}
+
+.rowClickable:hover td,
+.rowClickable:focus-visible td {
+  background: color-mix(in srgb, var(--color-accent) 7%, var(--color-bg-surface));
+}
+
+.rowClickable:focus-visible td:first-child {
+  box-shadow: inset 3px 0 0 var(--color-accent);
+}
+
+.sortButton {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: none;
+  background: none;
+  padding: 0;
+  font: inherit;
+  text-transform: inherit;
+  letter-spacing: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+
+.sortButton svg {
+  opacity: 0;
+  transition: opacity var(--duration-fast) var(--ease-out), transform var(--duration-fast) var(--ease-out);
+}
+
+.sortActive svg {
+  opacity: 1;
+}
+
+.sortActive.sortAsc svg {
+  transform: rotate(180deg);
+}
+
+.sortButton:hover svg {
+  opacity: 0.6;
+}
+
+.skeletonBody {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: var(--space-3) var(--space-4);
+}
+
+/* ---- narrow-container fallback: cards instead of a horizontally-scrolled table ---- */
+
+.cardList {
+  display: none;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-bg-surface);
+}
+
+.card.rowClickable {
+  cursor: pointer;
+}
+
+.card.rowClickable:hover,
+.card.rowClickable:focus-visible {
+  background: color-mix(in srgb, var(--color-accent) 7%, var(--color-bg-surface));
+  outline: none;
+}
+
+.cardHead {
+  font-size: var(--text-sm);
+}
+
+.cardFacts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: var(--space-2) var(--space-3);
+  margin: 0;
+}
+
+.cardFacts dt {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  margin-bottom: 2px;
+}
+
+.cardFacts dd {
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+}
+
+@container (max-width: 560px) {
+  .tableWrap {
+    display: none;
+  }
+  .cardList {
+    display: flex;
+  }
+}

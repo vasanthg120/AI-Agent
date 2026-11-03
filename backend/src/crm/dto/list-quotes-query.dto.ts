@@ -14,6 +14,10 @@ export class ListQuotesQueryDto {
   @IsString()
   clientApprovalStatus?: string;
 
+  @IsOptional()
+  @IsString()
+  quoteStatus?: string;
+
   // Owner/admin only — ignored (never trusted) for manager/consultant.
   @IsOptional()
   @IsString()
