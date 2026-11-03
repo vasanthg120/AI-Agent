@@ -1,6 +1,7 @@
 import { JwtPayload } from '../auth/jwt-payload.interface';
 import { currentPeriod, periodToDateRange } from '../common/period.util';
 import { BiFilterQueryDto } from './dto/bi-filter-query.dto';
+import { holdsPermission, isPermissionManaged } from '../common/permissions/permission.decorator';
 
 // Spec requirement: no explicit range means "current month" — same default
 // period every other dashboard in this app already uses (period.util.ts).
@@ -27,6 +28,8 @@ export function resolveBiDateRange(filters: { dateFrom?: string; dateTo?: string
 export function scopeBiFilters<T extends BiFilterQueryDto>(user: JwtPayload, filters: T): T {
   const canOverride = user.roles.includes('admin') || user.roles.includes('owner');
   if (canOverride) return filters;
+  // Someone given Revenue & Analytics looks at the business, as an admin does.
+  if (isPermissionManaged(user) && holdsPermission(user, 'analytics', 'view')) return filters;
   if (user.roles.includes('manager')) {
     return { ...filters, storeId: user.storeId ? [user.storeId] : [] };
   }

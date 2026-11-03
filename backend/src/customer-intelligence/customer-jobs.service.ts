@@ -362,7 +362,7 @@ export class CustomerJobsService implements OnModuleInit {
         .map((event) => ({ at: asDate(event.at) ?? new Date(0), by: text(event.byName) || 'Team member', text: text(event.text) }))
         .reverse(),
       createdBy: text(doc.createdByName) || 'Team member',
-      canManage: this.workspace.canManage(caller),
+      canManage: this.workspace.canManage(caller, 'job_board'),
       options: OPTIONS,
     };
   }
@@ -605,7 +605,7 @@ export class CustomerJobsService implements OnModuleInit {
 
   /** Owners and administrators only. What was written, set to do and attached on the job stays with its customer. */
   async remove(caller: JwtPayload, jobId: string): Promise<void> {
-    if (!this.workspace.canManage(caller)) throw new ForbiddenException('Only an owner or an administrator can delete a job.');
+    if (!this.workspace.canManage(caller, 'job_board')) throw new ForbiddenException('Only an owner, an administrator or someone allowed to delete jobs can delete a job.');
     const { deletedCount } = await this.jobs().deleteOne({ _id: this.objectId(jobId), organizationId: caller.organizationId });
     if (!deletedCount) throw new NotFoundException('Job not found.');
     this.directory.invalidate(caller.organizationId);

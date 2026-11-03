@@ -8,11 +8,14 @@ import { ROUTES } from '@/constants/routes';
 import { agentRolesService, normalizeRoleCategory, ROLE_CATEGORY_LABEL, type AgentRole } from '@/services/agentRolesService';
 import { SettingsSection } from '../components/SettingsSection';
 import styles from './AgentRolesSettings.module.css';
+import { useAuthStore } from '@/stores/authStore';
+import { can } from '@/utils/access';
 
 // Agent Builder redesign — Create/Edit now live on a dedicated full-page
 // wizard (features/agent-builder/AgentBuilderPage.tsx), not a modal here.
 // This page stays the read-only list + admin-only edit/delete entry point.
 export function AgentRolesSettings() {
+  const me = useAuthStore((state) => state.user);
   const navigate = useNavigate();
   const [roles, setRoles] = useState<AgentRole[]>([]);
   const [loadingList, setLoadingList] = useState(true);
@@ -49,9 +52,11 @@ export function AgentRolesSettings() {
       title="AI Agents"
       description="Create and configure AI agents for your organization — built-in personas plus any you create from a template, your documents, or a description."
       footer={
-        <Button type="button" leftIcon={<FiPlus />} onClick={() => navigate(ROUTES.settingsAgentRolesNew)}>
-          Create AI Agent
-        </Button>
+        can(me, 'ai_roles', 'create') ? (
+          <Button type="button" leftIcon={<FiPlus />} onClick={() => navigate(ROUTES.settingsAgentRolesNew)}>
+            Create AI Agent
+          </Button>
+        ) : undefined
       }
     >
       {loadingList ? (
@@ -82,15 +87,19 @@ export function AgentRolesSettings() {
                       Test
                     </Button>
                   )}
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => navigate(ROUTES.settingsAgentRolesEdit.replace(':id', role._id!))}
-                  >
-                    Edit
-                  </Button>
-                  <IconButton icon={<FiTrash2 />} label="Delete role" size="sm" onClick={() => void handleDelete(role)} />
+                  {can(me, 'ai_roles', 'edit') && (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => navigate(ROUTES.settingsAgentRolesEdit.replace(':id', role._id!))}
+                    >
+                      Edit
+                    </Button>
+                  )}
+                  {can(me, 'ai_roles', 'delete') && (
+                    <IconButton icon={<FiTrash2 />} label="Delete role" size="sm" onClick={() => void handleDelete(role)} />
+                  )}
                 </div>
               )}
             </div>

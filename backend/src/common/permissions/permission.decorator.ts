@@ -13,8 +13,9 @@ export const NOT_DELEGABLE_KEY = 'app-module-not-delegable';
  * catalog. The action comes from the HTTP method (GET view, POST create,
  * PATCH/PUT edit, DELETE delete) unless given — a POST that only searches says
  * 'view', a download says 'export'. On a route it replaces the controller's.
+ * A route two pages share takes a list: any one of them is enough.
  */
-export const Permission = (module: AppModuleId, action?: PermissionAction) => SetMetadata(PERMISSION_KEY, { module, action });
+export const Permission = (module: AppModuleId | AppModuleId[], action?: PermissionAction) => SetMetadata(PERMISSION_KEY, { module, action });
 
 /**
  * Why a controller or route belongs to no module, so the coverage test knows it
@@ -32,9 +33,13 @@ export const NotDelegable = () => SetMetadata(NOT_DELEGABLE_KEY, true);
 
 export interface RoutePermission {
   module: string;
+  /** Every module that opens this route (usually just module). */
+  anyOf: string[];
   action: PermissionAction;
   label: string;
 }
+
+type PermissionTag = { module: string | string[]; action?: PermissionAction };
 
 /** The module and action a request needs, or null when the route belongs to no module. */
 export function routePermission(reflector: Reflector, context: ExecutionContext): RoutePermission | null {
@@ -46,17 +51,18 @@ export function routePermission(reflector: Reflector, context: ExecutionContext)
 // eslint-disable-next-line @typescript-eslint/ban-types
 export function permissionFor(reflector: Reflector, handler: Function, cls: Function, method: string): RoutePermission | null {
   // The route's own marking wins over its controller's, whichever kind it is.
-  let tag = reflector.get<{ module: string; action?: PermissionAction } | undefined>(PERMISSION_KEY, handler);
+  let tag = reflector.get<PermissionTag | undefined>(PERMISSION_KEY, handler);
   if (!tag) {
     if (reflector.get(PERMISSION_EXEMPT_KEY, handler)) return null;
-    tag = reflector.get<{ module: string; action?: PermissionAction } | undefined>(PERMISSION_KEY, cls);
+    tag = reflector.get<PermissionTag | undefined>(PERMISSION_KEY, cls);
   }
   if (!tag) return null;
-  const definition = moduleById(tag.module);
+  const anyOf = Array.isArray(tag.module) ? tag.module : [tag.module];
+  const definition = moduleById(anyOf[0]);
   let action = tag.action ?? actionForMethod(method);
   // A page with only view and manage: every change there is managing it.
   if (definition && action !== 'view' && !definition.actions.includes(action) && definition.actions.includes('manage')) action = 'manage';
-  return { module: tag.module, action, label: definition?.label ?? tag.module };
+  return { module: anyOf[0], anyOf, action, label: definition?.label ?? anyOf[0] };
 }
 
 export function isNotDelegable(reflector: Reflector, context: ExecutionContext): boolean {
@@ -76,6 +82,11 @@ export function holdsPermission(user: Pick<JwtPayload, 'permissions'> | null | u
   return !!user?.permissions?.includes(permissionKey(module, action));
 }
 
+/** Whether the person holds the route's action on any of the modules that open it. */
+export function holdsRoutePermission(user: Pick<JwtPayload, 'permissions'> | null | undefined, need: RoutePermission): boolean {
+  return need.anyOf.some((module) => holdsPermission(user, module, need.action));
+}
+
 const ACTION_VERB: Record<PermissionAction, string> = {
   view: 'open',
   create: 'add to',
@@ -85,6 +96,6 @@ const ACTION_VERB: Record<PermissionAction, string> = {
   manage: 'manage',
 };
 
-export function permissionDeniedMessage(need: RoutePermission): string {
+export function permissionDeniedMessage(need: Pick<RoutePermission, 'action' | 'label'>): string {
   return `You don’t have permission to ${ACTION_VERB[need.action]} ${need.label}. Ask an admin for access.`;
 }

@@ -58,8 +58,8 @@ describe('permission coverage', () => {
   it('every tagged route needs an action its module really has', () => {
     const wrong = routes
       .map((r) => ({ r, need: permissionFor(reflector, r.fn, r.cls, r.method) }))
-      .filter(({ need }) => need && !(moduleById(need.module)?.actions as readonly string[] | undefined)?.includes(need.action))
-      .map(({ r, need }) => `${r.controller}.${r.handler} → ${need!.module}:${need!.action}`);
+      .filter(({ need }) => need && need.anyOf.some((m) => !(moduleById(m)?.actions as readonly string[] | undefined)?.includes(need.action)))
+      .map(({ r, need }) => `${r.controller}.${r.handler} → ${need!.anyOf.join('|')}:${need!.action}`);
     expect(wrong).toEqual([]);
   });
 });

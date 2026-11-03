@@ -35,6 +35,7 @@ import { TeamPerformanceSummaryCards } from './components/TeamPerformanceSummary
 import { EmailResponseSlaTable } from './components/EmailResponseSlaTable';
 import { SlaDashboardSection } from './components/SlaDashboardSection';
 import styles from './analytics-dashboard.module.css';
+import { can, isPermissionManaged } from '@/utils/access';
 
 // Local-calendar-date formatter — deliberately NOT `.toISOString().slice(0,10)`,
 // which converts to UTC first: a Date constructed at LOCAL midnight on the
@@ -79,7 +80,7 @@ const TAB_ITEMS = [
   { id: 'customers', label: 'Customers & Email', icon: <FiMail /> },
   // Owner/admin only — matches vendor-profitability.controller.ts's own
   // tighter RBAC tier (margin data is more sensitive than pipeline data).
-  { id: 'bi-vendor', label: 'Vendor Profitability', icon: <FiTruck />, requireRoles: ['owner', 'admin'] },
+  { id: 'bi-vendor', label: 'Vendor Profitability', icon: <FiTruck />, requireRoles: ['owner', 'admin'], module: 'vendors' },
 ];
 
 // One line per tab saying which question it answers, shown under the tab bar
@@ -150,7 +151,10 @@ export function AnalyticsDashboardPage() {
   const [stores, setStores] = useState<{ id: string; name: string }[]>([]);
   const [drillDown, setDrillDown] = useState<DrillDownTarget | null>(null);
 
-  const visibleTabs = TAB_ITEMS.filter((t) => !t.requireRoles || t.requireRoles.some((r) => hasRole(user, r)));
+  // Someone with their own permission list sees a role-limited tab when they were given its page.
+  const visibleTabs = TAB_ITEMS.filter(
+    (t) => !t.requireRoles || t.requireRoles.some((r) => hasRole(user, r)) || (!!t.module && isPermissionManaged(user) && can(user, t.module)),
+  );
 
   useEffect(() => {
     if (!canOverrideStore) return;

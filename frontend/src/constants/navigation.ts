@@ -33,6 +33,7 @@ export const NAV_GROUPS: NavGroup[] = [
         label: 'Dashboard',
         path: ROUTES.dashboard,
         icon: FiBarChart2,
+        module: ['dashboard', 'analytics'],
         hint: 'Key numbers and trends at a glance',
       },
       {
@@ -40,6 +41,7 @@ export const NAV_GROUPS: NavGroup[] = [
         label: 'Agent Activity',
         path: ROUTES.agentActivity,
         icon: FiActivity,
+        module: 'dashboard',
         hint: 'What your AI agents are working on',
       },
       {
@@ -54,6 +56,7 @@ export const NAV_GROUPS: NavGroup[] = [
         label: 'Business Knowledge',
         path: ROUTES.businessKnowledge,
         icon: FiBookOpen,
+        module: 'business_knowledge',
         hint: 'What the AI knows about your business',
         // Owner/admin/manager only, matching CRM-dashboard-tier visibility.
         hideForRoles: ['agent_user', 'user', 'consultant'],
@@ -64,6 +67,7 @@ export const NAV_GROUPS: NavGroup[] = [
         label: 'AI Email Inbox',
         path: ROUTES.emailIntelligence,
         icon: FiInbox,
+        module: 'email',
         hint: 'AI-sorted inbox and emails waiting on you',
         // Self-scoped to the caller's own connected mailbox — every real role
         // benefits, hidden only for agent_user (an AI-persona account, not a
@@ -76,6 +80,7 @@ export const NAV_GROUPS: NavGroup[] = [
         label: 'Customers',
         path: ROUTES.customers,
         icon: FiUsers,
+        module: ['customers', 'job_board'],
         hint: 'Inquiries, quotes, invoices and email for every customer, in one view',
         // Owner/admin/manager, like the other sales pages (enforced by the API too). The
         // feature key predates the page: it was "New Inquiries" before this view replaced it.
@@ -87,6 +92,7 @@ export const NAV_GROUPS: NavGroup[] = [
         label: 'Files',
         path: ROUTES.files,
         icon: FiFolder,
+        module: 'files',
         // Everyone's own Google Drive / OneDrive, and the company folders shared with their role.
         hint: 'Google Drive and OneDrive files, in one place',
       },
@@ -95,6 +101,7 @@ export const NAV_GROUPS: NavGroup[] = [
         label: 'Call Copilot',
         path: ROUTES.callCopilot,
         icon: FiMic,
+        module: 'call_copilot',
         hint: 'Live call coaching, summaries and recordings',
         // Same reasoning as AI Email Inbox above — a live sales-call tool for
         // a real salesperson on the phone, not relevant to an AI-persona account.
@@ -106,6 +113,7 @@ export const NAV_GROUPS: NavGroup[] = [
         label: 'History',
         path: ROUTES.chatHistory,
         icon: FiMessageSquare,
+        module: 'ai_agent',
         hint: 'Your past conversations with the AI',
       },
     ],
@@ -119,6 +127,7 @@ export const NAV_GROUPS: NavGroup[] = [
         label: 'Finance AI',
         path: ROUTES.finance,
         icon: FiDollarSign,
+        module: 'finance',
         hint: 'Vendor payment documents, paid and pending',
         hideForRoles: ['agent_user', 'user', 'manager', 'consultant'],
       },
@@ -127,6 +136,7 @@ export const NAV_GROUPS: NavGroup[] = [
         label: 'Reporting',
         path: ROUTES.reporting,
         icon: FiPieChart,
+        module: 'reports',
         hint: 'Financial, customer and team performance',
         hideForRoles: ['agent_user', 'user', 'consultant'],
       },

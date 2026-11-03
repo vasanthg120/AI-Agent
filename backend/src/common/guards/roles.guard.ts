@@ -3,7 +3,7 @@ import { Reflector } from '@nestjs/core';
 import { JwtPayload } from '../../auth/jwt-payload.interface';
 import { AppFeature, FEATURE_KEY, isAiRoleAccount } from '../app-features';
 import { ROLES_KEY } from '../decorators/roles.decorator';
-import { holdsPermission, isNotDelegable, isPermissionManaged, permissionDeniedMessage, routePermission } from '../permissions/permission.decorator';
+import { holdsRoutePermission, isNotDelegable, isPermissionManaged, permissionDeniedMessage, routePermission } from '../permissions/permission.decorator';
 
 @Injectable()
 export class RolesGuard implements CanActivate {
@@ -27,7 +27,7 @@ export class RolesGuard implements CanActivate {
     if (isPermissionManaged(user)) {
       const need = routePermission(this.reflector, context);
       const delegable = !!need && required.includes('admin') && !isNotDelegable(this.reflector, context);
-      if (delegable && holdsPermission(user, need.module, need.action)) return true;
+      if (delegable && holdsRoutePermission(user, need)) return true;
       throw new ForbiddenException(delegable ? permissionDeniedMessage(need) : 'Insufficient role');
     }
 

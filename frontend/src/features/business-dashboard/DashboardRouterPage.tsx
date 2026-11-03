@@ -1,7 +1,9 @@
-import { Skeleton } from '@/components/ui';
+import { FiBarChart2 } from 'react-icons/fi';
+import { EmptyState, Skeleton } from '@/components/ui';
 import { useAccounts } from '@/features/sub-accounts/useAccounts';
 import { useAuthStore } from '@/stores/authStore';
 import { hasRole } from '@/utils/roles';
+import { can, isPermissionManaged } from '@/utils/access';
 import { DashboardPage as AgentWorkforceDashboardPage } from '@/features/dashboard/DashboardPage';
 import { AnalyticsDashboardPage } from '@/features/analytics-dashboard/AnalyticsDashboardPage';
 
@@ -26,6 +28,19 @@ export function DashboardRouterPage() {
 
   if (hasRole(user, 'owner') || hasRole(user, 'manager') || hasRole(user, 'consultant')) {
     return <AnalyticsDashboardPage />;
+  }
+  // Someone with their own permission list: Revenue & Analytics if they were given
+  // it, otherwise the agent dashboard if they were given that.
+  if (isPermissionManaged(user)) {
+    if (can(user, 'analytics')) return <AnalyticsDashboardPage />;
+    if (can(user, 'dashboard')) return <AgentWorkforceDashboardPage />;
+    return (
+      <EmptyState
+        icon={FiBarChart2}
+        title="No dashboard in your access"
+        description="Your access doesn’t include the dashboard. Use the menu to open the pages you can use, or ask an admin."
+      />
+    );
   }
   // Waits for the answer below rather than opening the wrong dashboard for a moment.
   if (isLoading) return <Skeleton height={320} />;

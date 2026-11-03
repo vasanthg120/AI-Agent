@@ -14,6 +14,8 @@ import { INVOICE_VARIANT, QUOTE_VARIANT } from '../status';
 import detailStyles from '../customer-detail.module.css';
 import { JourneyStepCard } from './DetailsTab';
 import styles from './panel.module.css';
+import { useAuthStore } from '@/stores/authStore';
+import { can } from '@/utils/access';
 
 const dash = '—';
 
@@ -254,7 +256,7 @@ function DocumentView({
             >
               Open job {document.job.number}
             </Button>
-          ) : (
+          ) : can(useAuthStore.getState().user, 'job_board', 'create') ? (
             <Button
               type="button"
               size="sm"
@@ -265,7 +267,7 @@ function DocumentView({
             >
               Convert to job
             </Button>
-          ))}
+          ) : null)}
       </div>
 
       <article className={styles.document}>

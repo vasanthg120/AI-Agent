@@ -2,7 +2,7 @@ import { CallHandler, ExecutionContext, ForbiddenException, Injectable, NestInte
 import { Reflector } from '@nestjs/core';
 import { Observable } from 'rxjs';
 import { JwtPayload } from '../../auth/jwt-payload.interface';
-import { holdsPermission, isNotDelegable, isPermissionManaged, permissionDeniedMessage, routePermission } from './permission.decorator';
+import { holdsRoutePermission, isNotDelegable, isPermissionManaged, permissionDeniedMessage, routePermission } from './permission.decorator';
 
 // Holds a person with their own permission list to it on every route that belongs
 // to a module — including routes every ordinary account may use, which no role
@@ -23,7 +23,7 @@ export class ModulePermissionInterceptor implements NestInterceptor {
     const need = routePermission(this.reflector, context);
     if (!need) return next.handle();
     if (isNotDelegable(this.reflector, context)) throw new ForbiddenException('Only owners and admins can do this.');
-    if (!holdsPermission(user, need.module, need.action)) throw new ForbiddenException(permissionDeniedMessage(need));
+    if (!holdsRoutePermission(user, need)) throw new ForbiddenException(permissionDeniedMessage(need));
     return next.handle();
   }
 }

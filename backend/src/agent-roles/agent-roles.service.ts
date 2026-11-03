@@ -3,7 +3,7 @@ import { BadRequestException, Injectable, Logger, NotFoundException } from '@nes
 import { ConfigService } from '@nestjs/config';
 import { InjectModel } from '@nestjs/mongoose';
 import { DEFAULT_ROLE_FEATURES } from '../common/app-features';
-import { normalizePermissions } from '../common/permissions/app-modules';
+import { defaultPermissionsOfRole, normalizePermissions } from '../common/permissions/app-modules';
 import FormData from 'form-data';
 import { Model } from 'mongoose';
 import { catchError, firstValueFrom, of } from 'rxjs';
@@ -65,7 +65,8 @@ export class AgentRolesService {
       status: 'active' as const,
       builtin: true,
     }));
-    return [...builtin, ...dynamic.map((d) => ({ ...d.toObject(), builtin: false }))];
+    // defaultPermissions as it applies: the role's own, or what its older features mean.
+    return [...builtin, ...dynamic.map((d) => ({ ...d.toObject(), defaultPermissions: defaultPermissionsOfRole(d), builtin: false }))];
   }
 
   async generateDraft(userId: string, organizationId: string, userJwt: string, file: Express.Multer.File) {

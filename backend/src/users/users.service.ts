@@ -376,6 +376,8 @@ export class UsersService {
       modules: APP_MODULES,
       alwaysIncluded: ['Profile & security', 'Notifications', 'To-Do & EOD', 'Timeline'],
       notGrantable: ['Billing & subscription', 'Sub-accounts', 'Audit log', 'Creating administrators'],
+      // Where a brand-new AI role's people start until the role says otherwise.
+      newRoleDefaults: permissionsFromFeatures(DEFAULT_ROLE_FEATURES),
     };
   }
 
@@ -440,7 +442,7 @@ export class UsersService {
     const { user } = session;
     if (isPermissionManaged(user)) {
       const label = moduleById(module)?.label ?? module;
-      return { user, refusal: holdsPermission(user, module, action) ? null : permissionDeniedMessage({ module, action, label }) };
+      return { user, refusal: holdsPermission(user, module, action) ? null : permissionDeniedMessage({ action, label }) };
     }
     if (olderFeature && isAiRoleAccount(user.roles) && !(await this.resolveFeatures(user))?.includes(olderFeature)) {
       return { user, refusal: 'Your AI role doesn’t include this feature. Ask an admin to enable it for the role.' };

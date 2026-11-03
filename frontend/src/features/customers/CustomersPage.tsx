@@ -93,6 +93,8 @@ import { StockTab } from './tabs/StockTab';
 import { TasksTab } from './tabs/TasksTab';
 import styles from './customers.module.css';
 import jobStyles from './jobs/jobs.module.css';
+import { useAuthStore } from '@/stores/authStore';
+import { can } from '@/utils/access';
 
 // The numbers that matter, each one a filter: click to see just those customers. Two rows of six:
 // where the work stands (open, untouched, unanswered, unplanned), then how it ends (orders, payment, lost).
@@ -344,8 +346,10 @@ const MAIN_TABS: { id: string; label: string; icon: ReactNode }[] = [
 const MAIN_TAB_IDS = MAIN_TABS.map((t) => t.id);
 
 export function CustomersPage() {
+  const me = useAuthStore((s) => s.user);
   const [params, setParams] = useSearchParams();
-  const requestedTab = params.get('tab') ?? 'customers';
+  // Someone given only the Job Board lands on it rather than on a customer list they can't open.
+  const requestedTab = params.get('tab') ?? (!can(me, 'customers') && can(me, 'job_board') ? 'jobs' : 'customers');
   const tab = MAIN_TAB_IDS.includes(requestedTab) ? requestedTab : 'customers';
   // A board is built the first time it is shown and kept from then on: going back to it is instant, and it
   // is as it was left — its search, its filters, its place in the list.
@@ -493,6 +497,7 @@ const CustomersBoard = memo(function CustomersBoard({
   onOpenJob: (jobId: string, number?: string) => void;
 }) {
   const navigate = useNavigate();
+  const me = useAuthStore((s) => s.user);
   const frame = clsx(styles.page, switched && styles.switched);
   const queryClient = useQueryClient();
   const [source, setSource] = useState('all');
@@ -644,7 +649,7 @@ const CustomersBoard = memo(function CustomersBoard({
                 </select>
               </label>
             )}
-            {canSync && (
+            {canSync && can(me, 'customers', 'edit') && (
               <Button
                 type="button"
                 variant="secondary"
@@ -655,9 +660,11 @@ const CustomersBoard = memo(function CustomersBoard({
                 Sync now
               </Button>
             )}
-            <Button type="button" leftIcon={<FiPlus />} onClick={() => setAddingCustomer(true)}>
-              Add customer
-            </Button>
+            {can(me, 'customers', 'create') && (
+              <Button type="button" leftIcon={<FiPlus />} onClick={() => setAddingCustomer(true)}>
+                Add customer
+              </Button>
+            )}
           </div>
         }
       />
@@ -890,15 +897,17 @@ const CustomersBoard = memo(function CustomersBoard({
           >
             <FiAlignJustify aria-hidden /> Compact rows
           </button>
-          <button
-            type="button"
-            className={styles.tool}
-            disabled={exporting || total === 0}
-            title="Download these customers as a spreadsheet (CSV)"
-            onClick={() => void exportBoard()}
-          >
-            <FiDownload aria-hidden /> {exporting ? 'Exporting…' : 'Export'}
-          </button>
+          {can(useAuthStore.getState().user, 'customers', 'export') && (
+            <button
+              type="button"
+              className={styles.tool}
+              disabled={exporting || total === 0}
+              title="Download these customers as a spreadsheet (CSV)"
+              onClick={() => void exportBoard()}
+            >
+              <FiDownload aria-hidden /> {exporting ? 'Exporting…' : 'Export'}
+            </button>
+          )}
           {filtered && (
             <Button type="button" variant="ghost" size="sm" onClick={clearFilters}>
               Clear
@@ -1217,10 +1226,15 @@ function rowActions(customer: Customer, onOpen: (tab?: PanelTab) => void, onTogg
       separatorBefore: true,
       onSelect: () => onOpen('comments'),
     },
-    customer.archived
-      ? { id: 'restore', label: 'Restore', icon: <FiRotateCcw />, separatorBefore: true, onSelect: () => onToggleArchive(customer) }
-      : { id: 'archive', label: 'Archive', icon: <FiArchive />, danger: true, separatorBefore: true, onSelect: () => onToggleArchive(customer) },
   );
+  // Archiving is a change to the customer: only for those who may edit customers.
+  if (can(useAuthStore.getState().user, 'customers', 'edit')) {
+    items.push(
+      customer.archived
+        ? { id: 'restore', label: 'Restore', icon: <FiRotateCcw />, separatorBefore: true, onSelect: () => onToggleArchive(customer) }
+        : { id: 'archive', label: 'Archive', icon: <FiArchive />, danger: true, separatorBefore: true, onSelect: () => onToggleArchive(customer) },
+    );
+  }
   return items;
 }
 

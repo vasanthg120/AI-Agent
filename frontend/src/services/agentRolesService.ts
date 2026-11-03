@@ -43,6 +43,9 @@ export interface AgentRole {
   // The app features people assigned to this role can use (see utils/access.ts).
   // Absent on roles created before this existed — treated as the default set.
   features?: string[];
+  // Where a new person given this role starts ("customers:edit"…): the role's own
+  // defaults, or what its older features mean. Changing it never changes anyone already on it.
+  defaultPermissions?: string[];
   // Unset (or null, while editing) = the existing message-length/round-based heuristic.
   modelTier?: 'fast' | 'standard' | null;
 }
@@ -57,6 +60,7 @@ type AgentRoleConfigFields = Pick<
   | 'assignedUserIds'
   | 'allowedTools'
   | 'features'
+  | 'defaultPermissions'
 >;
 
 export type UpdateAgentRolePayload = Partial<AgentRoleConfigFields> & {

@@ -14,6 +14,10 @@ export interface NavItem {
   // An app feature an AI role can include (see utils/access.ts). For an account
   // tied to an AI role, this — not hideForRoles — decides whether it is shown.
   feature?: string;
+  // The permission-catalog module this page belongs to. For someone with their own
+  // permission list, viewing that module (any one, for a list) — and nothing else —
+  // decides whether it shows.
+  module?: string | string[];
 }
 
 // One section of the sidebar's application nav — see constants/navigation.ts.

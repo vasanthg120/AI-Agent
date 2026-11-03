@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react';
 import { FiGrid, FiUsers } from 'react-icons/fi';
+import { PermissionGrid } from '@/features/settings/tabs/users/PermissionGrid';
+import { usePermissionCatalog } from '@/features/settings/tabs/users/useUsersData';
 import { Badge, MultiSelectDropdown, SectionCard, StringListEditor, Switch } from '@/components/ui';
 import { integrationsService } from '@/services/integrationsService';
 import type { AdminUser } from '@/services/usersService';
 import { defaultToolsForSystem, isSystemEnabled, TOOL_SYSTEMS } from '../toolCatalog';
 import type { FormState } from '../formState';
-import { APP_FEATURES, BASIC_FEATURES_TEXT } from '@/utils/access';
 import styles from './steps.module.css';
 
 type ProviderStatus = { connected: boolean; label: string };
@@ -19,6 +20,7 @@ export function StepAccess({
   update: (patch: Partial<FormState>) => void;
   users: AdminUser[];
 }) {
+  const { data: catalog } = usePermissionCatalog();
   const [providerStatus, setProviderStatus] = useState<
     Record<'outlook' | 'gmail' | 'crm' | 'gorilladash' | 'zapier', ProviderStatus | null>
   >({
@@ -135,30 +137,20 @@ export function StepAccess({
         Connect Outlook, Gmail, or CRM in Settings → Integrations if a badge above says "Not connected."
       </p>
 
-      <SectionCard title="What people with this role can use" icon={FiGrid}>
+      <SectionCard title="Where new people on this role start" icon={FiGrid}>
         <p className={styles.stepIntro}>
-          When you create a user and give them this AI role, they sign in with their own account and get:{' '}
-          {BASIC_FEATURES_TEXT}. Switch on anything else they should have.
+          When you create a user with this AI role, their pages and actions start from this — you can still change them for
+          each person. Changing it here never changes anyone already on the role.
         </p>
-        {APP_FEATURES.map((feature) => (
-          <div key={feature.id} className={styles.systemHeader}>
-            <div className={styles.systemHeaderLeft}>
-              <strong>{feature.label}</strong>
-              <span className={styles.systemDescription}>{feature.description}</span>
-            </div>
-            <Switch
-              checked={form.features.includes(feature.id)}
-              ariaLabel={feature.label}
-              onChange={(on) =>
-                update({
-                  features: on
-                    ? [...new Set([...form.features, feature.id])]
-                    : form.features.filter((f) => f !== feature.id),
-                })
-              }
-            />
-          </div>
-        ))}
+        {catalog ? (
+          <PermissionGrid
+            catalog={catalog}
+            value={form.defaultPermissions ?? catalog.newRoleDefaults}
+            onChange={(defaultPermissions) => update({ defaultPermissions })}
+          />
+        ) : (
+          <p className={styles.helperText}>Loading the list of pages…</p>
+        )}
       </SectionCard>
 
       <SectionCard title="Who can use this agent" icon={FiUsers}>

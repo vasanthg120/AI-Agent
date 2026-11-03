@@ -10,6 +10,7 @@ import { businessProfileService } from '@/services/businessProfileService';
 import { BusinessProfileForm } from './components/BusinessProfileForm';
 import { BusinessKnowledgeDocumentsSection } from './components/BusinessKnowledgeDocumentsSection';
 import styles from './business-knowledge.module.css';
+import { can, isPermissionManaged } from '@/utils/access';
 
 // Overview/AI Advisor/Recommendations/Relationships tabs were removed —
 // this page now only manages the two things that actually become permanent,
@@ -29,7 +30,8 @@ const TAB_IDS = TAB_ITEMS.map((t) => t.id);
 
 export function BusinessKnowledgePage() {
   const user = useAuthStore((s) => s.user);
-  const canEdit = hasRole(user, 'owner') || hasRole(user, 'admin');
+  // Owners and admins, or someone given Business Knowledge editing.
+  const canEdit = hasRole(user, 'owner') || hasRole(user, 'admin') || (isPermissionManaged(user) && can(user, 'business_knowledge', 'edit'));
   const queryClient = useQueryClient();
   const [searchParams, setSearchParams] = useSearchParams();
 

@@ -1,858 +1,370 @@
-import { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useMemo, useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
-import { FiAlertCircle, FiShield, FiTrash2, FiUserPlus, FiUsers } from 'react-icons/fi';
-import { Badge, Button, CopyableText, EmptyState, IconButton, Input, Modal, Skeleton, Switch } from '@/components/ui';
-import { extractErrorMessage } from '@/utils/errors';
-import { APP_FEATURES, BASIC_FEATURES_TEXT, DEFAULT_ROLE_FEATURES } from '@/utils/access';
-import { ROUTES } from '@/constants/routes';
-import { agentRolesService, type AgentRole } from '@/services/agentRolesService';
-import { organizationsService, type Store } from '@/services/organizationsService';
+import clsx from 'clsx';
+import { FiAlertTriangle, FiEdit2, FiMail, FiSearch, FiShield, FiTrash2, FiUserCheck, FiUserPlus, FiUsers } from 'react-icons/fi';
+import { Avatar, Badge, Button, EmptyState, IconButton, Input, Modal, Skeleton, StatTile, Switch } from '@/components/ui';
+import { usersService, type AdminUser } from '@/services/usersService';
 import { useAuthStore } from '@/stores/authStore';
-import { usersService, type AdminUser, type AssignableRole, type CreateUserResult } from '@/services/usersService';
-import { SettingsField, SettingsSection } from '../components/SettingsSection';
+import { can, isPermissionManaged } from '@/utils/access';
+import { extractErrorMessage } from '@/utils/errors';
+import { hasRole } from '@/utils/roles';
+import { SettingsSection } from '../components/SettingsSection';
+import { accessSummary, UserDrawer } from './users/UserDrawer';
+import { useAssignableAiRoles, usePermissionCatalog, useUsersList } from './users/useUsersData';
 import styles from './UsersSettings.module.css';
 
-const ROLE_BADGE: Record<string, 'info' | 'accent' | 'neutral' | 'success' | 'warning'> = {
-  owner: 'warning',
-  admin: 'info',
-  agent_user: 'accent',
-  user: 'neutral',
-  manager: 'success',
-  consultant: 'success',
-};
-
-// What each role can reach. Enforced by the server on every request (the
-// routes' own role checks) — this text describes those checks, it isn't what
-// applies them.
-const ROLES: { id: AssignableRole | 'owner'; label: string; summary: string; can: string[]; cannot: string[] }[] = [
-  {
-    id: 'owner',
-    label: 'Owner',
-    summary:
-      'The person who created the organization. Everything an Admin can do; can’t be changed or removed by anyone else.',
-    can: ['Everything in the workspace', 'Billing and credits', 'Users, AI agents, integrations and all settings'],
-    cannot: [],
-  },
-  {
-    id: 'admin',
-    label: 'Admin',
-    summary: 'Runs the workspace.',
-    can: [
-      'Every dashboard, Finance, Reporting, Business Knowledge, Customers',
-      'Create and manage users and AI agents',
-      'Connect integrations and change settings',
-    ],
-    cannot: ['Change or remove the Owner'],
-  },
-  {
-    id: 'agent_user',
-    label: 'Team member',
-    summary: 'Works with one AI role. What they can use is set by that AI role.',
-    can: [
-      'Chat with the AI agent of their AI role',
-      'Dashboard, Timeline, To-Do and EOD',
-      'Whatever else their AI role includes (AI Email Inbox, Call Copilot, Customers, Business Knowledge)',
-    ],
-    cannot: ['Billing, Finance and Reporting', 'Users, AI roles, integrations and other settings'],
-  },
-  {
-    id: 'manager',
-    label: 'Manager',
-    summary: 'Leads one store.',
-    can: [
-      'Their own store’s dashboards and team',
-      'Business Knowledge, Customers, Reporting',
-      'AI chat, AI Email Inbox, Call Copilot',
-    ],
-    cannot: ['Other stores’ data', 'Finance', 'Users, AI agents, integrations'],
-  },
-  {
-    id: 'consultant',
-    label: 'Consultant',
-    summary: 'A salesperson in one store.',
-    can: [
-      'Their personal dashboard and My Customer Activity',
-      'AI chat, their own AI Email Inbox, Call Copilot',
-      'To-do and EOD reports',
-    ],
-    cannot: ['Other people’s data', 'Finance, Reporting, Business Knowledge, Customers', 'Any admin settings'],
-  },
-  {
-    id: 'user',
-    label: 'Standard user',
-    summary: 'A general account, not tied to a store.',
-    can: ['Dashboard and Timeline', 'AI chat, their own AI Email Inbox, Call Copilot', 'To-do and EOD reports'],
-    cannot: ['Finance, Reporting, Business Knowledge, Customers', 'Any admin settings'],
-  },
+type Filter = 'all' | 'active' | 'invited' | 'off' | 'attention';
+const FILTERS: { id: Filter; label: string }[] = [
+  { id: 'all', label: 'All' },
+  { id: 'active', label: 'Active' },
+  { id: 'invited', label: 'Invited' },
+  { id: 'off', label: 'Deactivated' },
+  { id: 'attention', label: 'Needs attention' },
 ];
-const ROLE_LABEL = Object.fromEntries(ROLES.map((r) => [r.id, r.label])) as Record<string, string>;
-// The two kinds of account most workspaces need. Manager / Consultant only
-// make sense once the organization has stores, and "Standard user" is kept
-// only for accounts that already have it.
-const MAIN_TYPES: AssignableRole[] = ['agent_user', 'admin'];
-const TYPE_OPTION_LABEL: Record<string, string> = {
-  agent_user: 'Team member — works with an AI role',
-  admin: 'Admin — manages the workspace',
-  manager: 'Manager — leads one store',
-  consultant: 'Consultant — a salesperson in one store',
-  user: 'Standard user (no AI role)',
-};
 
-// Manager/Consultant dashboards are store-scoped — a store is required for
-// both (the server checks it belongs to this organization).
-const STORE_SCOPED_ROLES = new Set<string>(['manager', 'consultant']);
-const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const ALL_ROLES = '';
+const ADMINS = '__admins__';
 
-interface UserForm {
-  email: string;
-  name: string;
-  role: AssignableRole;
-  assignedAgentId: string;
-  storeId: string;
-  department: string;
-  aiAccessEnabled: boolean;
-  voiceAccessEnabled: boolean;
-  sendInvite: boolean;
+function formatDate(value?: string | null): string {
+  if (!value) return '—';
+  return new Date(value).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
 }
 
-const emptyForm: UserForm = {
-  email: '',
-  name: '',
-  // The normal case: a person who works with one of the AI roles.
-  role: 'agent_user',
-  assignedAgentId: '',
-  storeId: '',
-  department: '',
-  aiAccessEnabled: true,
-  voiceAccessEnabled: true,
-  sendInvite: false,
-};
-
-/** What's still wrong with the form, in the user's words — null when it can be submitted. */
-function problemWith(form: UserForm, mode: 'create' | 'edit', agents: AgentRole[], stores: Store[]): string | null {
-  if (!form.name.trim()) return 'Enter the person’s name.';
-  if (mode === 'create') {
-    if (!form.email.trim()) return 'Enter their email address.';
-    if (!EMAIL_PATTERN.test(form.email.trim())) return 'That email address doesn’t look right.';
-  }
-  if (form.role === 'agent_user') {
-    if (agents.length === 0)
-      return 'There are no active AI roles yet — create and activate one under Settings → AI Roles first.';
-    if (!form.assignedAgentId) return 'Choose the AI role for this person.';
-  }
-  if (STORE_SCOPED_ROLES.has(form.role)) {
-    if (stores.length === 0) return 'This organization has no stores yet — add one first, or pick another role.';
-    if (!form.storeId) return 'Choose the store this person belongs to.';
-  }
-  return null;
-}
-
+/**
+ * Settings → Users: everyone in this business with their AI role, the account
+ * type it gives them and how much they can use, and the way to add or change
+ * people (UserDrawer). Owners and admins manage anyone but the owner; someone
+ * given User Management manages only people whose access they have themselves.
+ */
 export function UsersSettings() {
-  const currentUserId = useAuthStore((state) => state.user?.id);
-  const navigate = useNavigate();
-  const [users, setUsers] = useState<AdminUser[]>([]);
-  const [agentRoles, setAgentRoles] = useState<AgentRole[]>([]);
-  const [stores, setStores] = useState<Store[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [loadError, setLoadError] = useState<string | null>(null);
+  const me = useAuthStore((state) => state.user);
+  const queryClient = useQueryClient();
+  const { data: users, isLoading, error, refetch } = useUsersList();
+  const { data: catalog } = usePermissionCatalog();
+  const { data: aiRoles = [] } = useAssignableAiRoles();
 
-  const [createOpen, setCreateOpen] = useState(false);
-  const [form, setForm] = useState<UserForm>(emptyForm);
+  const [search, setSearch] = useState('');
+  const [filter, setFilter] = useState<Filter>('all');
+  const [roleFilter, setRoleFilter] = useState(ALL_ROLES);
   const [creating, setCreating] = useState(false);
-  const [createdResult, setCreatedResult] = useState<CreateUserResult | null>(null);
+  const [editing, setEditing] = useState<AdminUser | null>(null);
+  const [deactivating, setDeactivating] = useState<AdminUser | null>(null);
+  const [deleting, setDeleting] = useState<AdminUser | null>(null);
+  const [busyId, setBusyId] = useState<string | null>(null);
 
-  const [editingUser, setEditingUser] = useState<AdminUser | null>(null);
-  const [editForm, setEditForm] = useState<UserForm>(emptyForm);
-  const [saving, setSaving] = useState(false);
+  const fullAdmin = hasRole(me, 'owner') || hasRole(me, 'admin');
+  const refresh = () => void queryClient.invalidateQueries({ queryKey: ['users'] });
 
-  const [deletingUser, setDeletingUser] = useState<AdminUser | null>(null);
-  const [deactivatingUser, setDeactivatingUser] = useState<AdminUser | null>(null);
-  const [busyUserId, setBusyUserId] = useState<string | null>(null);
-  const [rolesOpen, setRolesOpen] = useState(false);
-
-  const load = async () => {
-    // Only the first load shows the loading state; a refresh after a change keeps
-    // the current list on screen until the new one arrives (no flash).
-    if (users.length === 0) setLoading(true);
-    // Each list on its own: the agent or store list failing must not take the
-    // user list down with it (it used to — one failure emptied the whole page).
-    const [userList, roleList, storeList] = await Promise.allSettled([
-      usersService.list(),
-      agentRolesService.list(),
-      organizationsService.listStores(),
-    ]);
-    if (userList.status === 'fulfilled') {
-      setUsers(userList.value);
-      setLoadError(null);
-    } else {
-      setLoadError(extractErrorMessage(userList.reason));
-    }
-    if (roleList.status === 'fulfilled') setAgentRoles(roleList.value);
-    else toast.error(`AI agents couldn’t be loaded: ${extractErrorMessage(roleList.reason)}`);
-    if (storeList.status === 'fulfilled') setStores(storeList.value);
-    else toast.error(`Stores couldn’t be loaded: ${extractErrorMessage(storeList.reason)}`);
-    setLoading(false);
+  /** Whether the signed-in person may change this one at all (the server checks the same). */
+  const manageable = (user: AdminUser): boolean => {
+    if (user.linkedFromMain) return false;
+    if (user.roles.includes('owner')) return user.id === me?.id;
+    if (fullAdmin) return true;
+    if (!isPermissionManaged(me) || user.id === me?.id || user.accessMode !== 'permissions') return false;
+    return (user.permissions ?? []).every((p) => me?.permissions?.includes(p));
   };
 
-  // Agent User accounts lock to one org-created agent (see backend's
-  // resolveValidAgentIds) — built-in personas and drafts aren't assignable,
-  // so this dropdown only ever offers the agents someone actually created
-  // and activated.
-  const createdAgents = agentRoles.filter((role) => !role.builtin && role.status === 'active');
+  const list = useMemo(() => users ?? [], [users]);
+  const counts = useMemo(
+    () => ({
+      total: list.length,
+      active: list.filter((u) => u.active).length,
+      invited: list.filter((u) => u.pendingInvitation).length,
+      attention: list.filter((u) => u.needsAiRole).length,
+    }),
+    [list],
+  );
+  const roleOptions = useMemo(() => {
+    const seen = new Map<string, string>();
+    for (const u of list) if (u.aiRole && u.aiRole.status !== 'missing') seen.set(u.aiRole.slug, u.aiRole.name);
+    return [...seen.entries()].sort((a, b) => a[1].localeCompare(b[1]));
+  }, [list]);
 
-  useEffect(() => {
-    void load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  const openCreate = () => {
-    // With exactly one AI role (or one store) there is nothing to choose.
-    setForm({
-      ...emptyForm,
-      assignedAgentId: createdAgents.length === 1 ? createdAgents[0].slug : '',
-      storeId: stores.length === 1 ? stores[0]._id : '',
+  const rows = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return list.filter((u) => {
+      if (q && !`${u.name} ${u.email} ${u.accountType ?? ''} ${u.aiRole?.name ?? ''}`.toLowerCase().includes(q)) return false;
+      if (filter === 'active' && !u.active) return false;
+      if (filter === 'invited' && !u.pendingInvitation) return false;
+      if (filter === 'off' && u.active) return false;
+      if (filter === 'attention' && !u.needsAiRole) return false;
+      if (roleFilter === ADMINS && u.accessMode !== 'full') return false;
+      if (roleFilter && roleFilter !== ADMINS && u.aiRole?.slug !== roleFilter) return false;
+      return true;
     });
-    setCreatedResult(null);
-    setCreateOpen(true);
-  };
+  }, [list, search, filter, roleFilter]);
 
-  const closeCreateModal = () => {
-    setCreateOpen(false);
-    setForm(emptyForm);
-    setCreatedResult(null);
-  };
-
-  const handleCreate = async () => {
-    setCreating(true);
+  const act = async (user: AdminUser, run: () => Promise<unknown>, done: string) => {
+    setBusyId(user.id);
     try {
-      const result = await usersService.create({
-        email: form.email.trim(),
-        name: form.name.trim(),
-        role: form.role,
-        assignedAgentId: form.role === 'agent_user' ? form.assignedAgentId : undefined,
-        storeId: STORE_SCOPED_ROLES.has(form.role) ? form.storeId : undefined,
-        department: form.department.trim() || undefined,
-        aiAccessEnabled: form.aiAccessEnabled,
-        voiceAccessEnabled: form.voiceAccessEnabled,
-        sendInvite: form.sendInvite || undefined,
-      });
-      setCreatedResult(result);
-      toast.success(`${result.user.name} was created`);
-      await load();
+      await run();
+      toast.success(done);
+      refresh();
+      return true;
     } catch (err) {
-      toast.error(extractErrorMessage(err), { duration: 8_000 });
+      toast.error(extractErrorMessage(err));
+      return false;
     } finally {
-      setCreating(false);
+      setBusyId(null);
     }
   };
 
   const setActive = async (user: AdminUser, active: boolean) => {
-    setBusyUserId(user.id);
-    try {
-      const updated = await usersService.update(user.id, { active });
-      setUsers((prev) => prev.map((u) => (u.id === updated.id ? updated : u)));
-      toast.success(active ? `${user.name} can sign in again` : `${user.name} was deactivated and signed out`);
-      setDeactivatingUser(null);
-    } catch (err) {
-      toast.error(extractErrorMessage(err));
-    } finally {
-      setBusyUserId(null);
-    }
+    const ok = await act(user, () => usersService.update(user.id, { active }), active ? `${user.name} can sign in again` : `${user.name} was deactivated and signed out`);
+    if (ok) setDeactivating(null);
   };
 
-  const openEdit = (user: AdminUser) => {
-    setEditingUser(user);
-    setEditForm({
-      email: user.email,
-      name: user.name,
-      role: (user.roles.find((r) => r !== 'owner') as AssignableRole) ?? 'user',
-      assignedAgentId: user.assignedAgentId ?? '',
-      storeId: user.storeId ?? (stores.length === 1 ? stores[0]._id : ''),
-      department: user.department ?? '',
-      aiAccessEnabled: user.aiAccessEnabled !== false,
-      voiceAccessEnabled: user.voiceAccessEnabled !== false,
-      sendInvite: false,
-    });
+  const resendInvitation = (user: AdminUser) =>
+    act(user, () => usersService.resendInvitation(user.id), `A new invitation has gone to ${user.email}`);
+
+  const remove = async () => {
+    const user = deleting;
+    if (!user) return;
+    const ok = await act(user, () => usersService.remove(user.id), `${user.name} was deleted`);
+    if (ok) setDeleting(null);
   };
 
-  const handleEditSave = async () => {
-    if (!editingUser) return;
-    const isOwner = editingUser.roles.includes('owner');
-    setSaving(true);
-    try {
-      const updated = await usersService.update(editingUser.id, {
-        name: editForm.name.trim(),
-        department: editForm.department.trim(),
-        aiAccessEnabled: editForm.aiAccessEnabled,
-        voiceAccessEnabled: editForm.voiceAccessEnabled,
-        // The owner's role can't change (the server refuses it), so it isn't sent.
-        ...(isOwner
-          ? {}
-          : {
-              role: editForm.role,
-              assignedAgentId: editForm.role === 'agent_user' ? editForm.assignedAgentId : undefined,
-              storeId: STORE_SCOPED_ROLES.has(editForm.role) ? editForm.storeId : undefined,
-            }),
-      });
-      setUsers((prev) => prev.map((u) => (u.id === updated.id ? updated : u)));
-      toast.success('User updated');
-      setEditingUser(null);
-    } catch (err) {
-      toast.error(extractErrorMessage(err), { duration: 8_000 });
-    } finally {
-      setSaving(false);
-    }
-  };
+  const ready = !!catalog;
 
-  const confirmDelete = async () => {
-    if (!deletingUser) return;
-    setBusyUserId(deletingUser.id);
-    try {
-      await usersService.remove(deletingUser.id);
-      setUsers((prev) => prev.filter((u) => u.id !== deletingUser.id));
-      toast.success(`${deletingUser.name} was deleted`);
-      setDeletingUser(null);
-    } catch (err) {
-      toast.error(extractErrorMessage(err));
-    } finally {
-      setBusyUserId(null);
-    }
-  };
+  return (
+    <div className={styles.page}>
+      <div className={styles.tiles}>
+        <StatTile icon={FiUsers} label="People" value={counts.total} active={filter === 'all'} onClick={() => setFilter('all')} />
+        <StatTile icon={FiUserCheck} label="Active" value={counts.active} active={filter === 'active'} onClick={() => setFilter('active')} />
+        <StatTile icon={FiMail} label="Invited" value={counts.invited} active={filter === 'invited'} onClick={() => setFilter('invited')} />
+        <StatTile
+          icon={FiAlertTriangle}
+          label="Needs attention"
+          value={counts.attention}
+          active={filter === 'attention'}
+          onClick={() => setFilter('attention')}
+        />
+      </div>
 
-  // Falls back to a readable placeholder, never the raw id — an
-  // agent/store that's since been deleted shouldn't surface its Mongo id.
-  const agentName = (agentId?: string) => agentRoles.find((a) => a.slug === agentId)?.name ?? 'AI role removed';
-  const storeName = (storeId?: string) => stores.find((s) => s._id === storeId)?.name ?? 'Unknown store';
-
-  const createProblem = problemWith(form, 'create', createdAgents, stores);
-  const editingOwner = !!editingUser?.roles.includes('owner');
-  const editProblem = editingUser
-    ? problemWith(editingOwner ? { ...editForm, role: 'user' } : editForm, 'edit', createdAgents, stores)
-    : null;
-
-  // Which account types the dialog offers: the two main ones, the store-based
-  // ones once the organization has stores, and whatever the account already is.
-  const typeOptions = (current: AssignableRole): AssignableRole[] => {
-    const options: AssignableRole[] = [...MAIN_TYPES];
-    if (stores.length > 0) options.push('manager', 'consultant');
-    if (!options.includes(current)) options.push(current);
-    return options;
-  };
-
-  // Account type, plus what that type needs — shared by the create and edit dialogs.
-  const roleFields = (value: UserForm, onChange: (next: UserForm) => void) => {
-    const role = ROLES.find((r) => r.id === value.role);
-    const aiRole = createdAgents.find((a) => a.slug === value.assignedAgentId);
-    const aiRoleFeatures = aiRole?.features ?? DEFAULT_ROLE_FEATURES;
-    return (
-      <>
-        <SettingsField label="Account type" hint={value.role === 'agent_user' ? undefined : role?.summary}>
-          <select
-            className={styles.select}
-            value={value.role}
-            onChange={(e) => {
-              const next = e.target.value as AssignableRole;
-              onChange({
-                ...value,
-                role: next,
-                assignedAgentId: value.assignedAgentId || (createdAgents.length === 1 ? createdAgents[0].slug : ''),
-                storeId: value.storeId || (stores.length === 1 ? stores[0]._id : ''),
-              });
-            }}
-          >
-            {typeOptions(value.role).map((id) => (
-              <option key={id} value={id}>
-                {TYPE_OPTION_LABEL[id] ?? id}
-              </option>
-            ))}
-          </select>
-        </SettingsField>
-
-        {value.role === 'agent_user' &&
-          (createdAgents.length === 0 ? (
-            <div className={styles.formProblem}>
-              There are no active AI roles yet. Create one and activate it, then come back to add this person.{' '}
-              <Button type="button" variant="secondary" size="sm" onClick={() => navigate(ROUTES.settingsAgentRoles)}>
-                Go to AI Roles
-              </Button>
+      <SettingsSection
+        icon={<FiUsers />}
+        title="People"
+        description="Each person has their own sign-in and an AI role. The AI role is their AI agent and their account type; their access is set page by page."
+      >
+        <div className={styles.toolbar}>
+          <div className={styles.toolbarRow}>
+            <div className={styles.search}>
+              <Input
+                aria-label="Search people"
+                placeholder="Search by name, email or AI role"
+                leftIcon={<FiSearch />}
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+              />
             </div>
-          ) : (
-            <SettingsField
-              label="AI role"
-              hint="The AI agent this person works with. It also decides what they can use."
-            >
-              <select
-                className={styles.select}
-                value={value.assignedAgentId}
-                onChange={(e) => onChange({ ...value, assignedAgentId: e.target.value })}
-              >
-                <option value="" disabled>
-                  Select an AI role…
-                </option>
-                {createdAgents.map((a) => (
-                  <option key={a.slug} value={a.slug}>
-                    {a.name}
-                  </option>
-                ))}
-              </select>
-              {aiRole && (
-                <ul className={styles.permissionList}>
-                  <li className={styles.permissionCan}>{BASIC_FEATURES_TEXT}</li>
-                  {APP_FEATURES.map((feature) => (
-                    <li
-                      key={feature.id}
-                      className={aiRoleFeatures.includes(feature.id) ? styles.permissionCan : styles.permissionCannot}
-                    >
-                      {feature.label}
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </SettingsField>
-          ))}
-
-        {value.role !== 'agent_user' && role && (
-          <ul className={styles.permissionList}>
-            {role.can.map((line) => (
-              <li key={line} className={styles.permissionCan}>
-                {line}
-              </li>
-            ))}
-            {role.cannot.map((line) => (
-              <li key={line} className={styles.permissionCannot}>
-                {line}
-              </li>
-            ))}
-          </ul>
-        )}
-
-        {STORE_SCOPED_ROLES.has(value.role) && (
-          <SettingsField label="Store" hint="They only see this store’s data.">
-            <select
-              className={styles.select}
-              value={value.storeId}
-              disabled={stores.length === 0}
-              onChange={(e) => onChange({ ...value, storeId: e.target.value })}
-            >
-              <option value="" disabled>
-                {stores.length === 0 ? 'No stores yet' : 'Select a store…'}
-              </option>
-              {stores.map((s) => (
-                <option key={s._id} value={s._id}>
-                  {s.name}
+            <select className={styles.select} aria-label="Filter by AI role" value={roleFilter} onChange={(e) => setRoleFilter(e.target.value)}>
+              <option value={ALL_ROLES}>All AI roles</option>
+              <option value={ADMINS}>Owner & administrators</option>
+              {roleOptions.map(([slug, name]) => (
+                <option key={slug} value={slug}>
+                  {name}
                 </option>
               ))}
             </select>
-          </SettingsField>
-        )}
-      </>
-    );
-  };
-
-  const accessFields = (value: UserForm, onChange: (next: UserForm) => void) => (
-    <>
-      <SettingsField
-        label="AI access"
-        hint="Lets this person use AI features (chat, analysis) on the organization’s credits. Off blocks every AI request from this account."
-      >
-        <Switch
-          checked={value.aiAccessEnabled}
-          ariaLabel="AI access"
-          onChange={(checked) => onChange({ ...value, aiAccessEnabled: checked })}
-        />
-      </SettingsField>
-      <SettingsField
-        label="Voice AI access"
-        hint="Only the voice (speech-to-text / text-to-speech) feature — text chat is controlled by AI access above."
-      >
-        <Switch
-          checked={value.voiceAccessEnabled}
-          ariaLabel="Voice AI access"
-          onChange={(checked) => onChange({ ...value, voiceAccessEnabled: checked })}
-        />
-      </SettingsField>
-    </>
-  );
-
-  return (
-    <>
-      <SettingsSection
-        icon={<FiUserPlus />}
-        title="Create a New User"
-        description="Give a person their own sign-in and one of your AI roles. The AI role decides which AI agent they work with and what they can use."
-        footer={
-          <>
-            <Button type="button" variant="ghost" leftIcon={<FiShield />} onClick={() => setRolesOpen(true)}>
-              Account types
-            </Button>
-            <Button type="button" leftIcon={<FiUserPlus />} onClick={openCreate}>
-              Create User
-            </Button>
-          </>
-        }
-      >
-        <p>
-          Create the AI role first (Settings → AI Roles), then add the person here and pick that role. They get a
-          temporary password, shown once, to sign in with.
-        </p>
-      </SettingsSection>
-
-      <SettingsSection icon={<FiUsers />} title="Existing Users" description="All accounts in this workspace.">
-        {loading ? (
-          <div className={styles.userList} aria-busy="true">
-            <Skeleton height={64} />
-            <Skeleton height={64} />
-            <Skeleton height={64} />
+            {can(me, 'users', 'create') && (
+              <Button type="button" leftIcon={<FiUserPlus />} disabled={!ready} onClick={() => setCreating(true)}>
+                Create user
+              </Button>
+            )}
           </div>
-        ) : loadError ? (
+          <div className={styles.filters} role="group" aria-label="Filter people">
+            {FILTERS.map((option) => (
+              <button
+                key={option.id}
+                type="button"
+                className={option.id === filter ? styles.filterActive : styles.filter}
+                aria-pressed={option.id === filter}
+                onClick={() => setFilter(option.id)}
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {isLoading ? (
+          <div className={styles.rows} aria-busy="true">
+            <Skeleton height={76} />
+            <Skeleton height={76} />
+            <Skeleton height={76} />
+          </div>
+        ) : error ? (
           <EmptyState
             compact
-            icon={FiAlertCircle}
-            title="Users couldn’t be loaded"
-            description={loadError}
+            icon={FiAlertTriangle}
+            title="People couldn’t be loaded"
+            description={extractErrorMessage(error)}
             action={
-              <Button type="button" variant="secondary" size="sm" onClick={() => void load()}>
+              <Button type="button" variant="secondary" size="sm" onClick={() => void refetch()}>
                 Try again
               </Button>
             }
           />
-        ) : users.length === 0 ? (
+        ) : rows.length === 0 ? (
           <EmptyState
             compact
             icon={FiUsers}
-            title="No users yet"
-            description="Create the first account with the button above."
+            title={list.length === 0 ? 'No people yet' : 'Nobody matches'}
+            description={list.length === 0 ? 'Create the first account with “Create user”.' : 'Try another search or filter.'}
           />
         ) : (
-          <div className={styles.userList}>
-            {users.map((user) => {
+          <ul className={styles.rows}>
+            {rows.map((user) => {
               const isOwner = user.roles.includes('owner');
-              const isSelf = user.id === currentUserId;
-              const linked = !!user.linkedFromMain;
-              const locked = isOwner || isSelf || linked;
-              const lockedReason = linked
+              const isSelf = user.id === me?.id;
+              const mayChange = manageable(user);
+              const locked = isOwner || isSelf || !!user.linkedFromMain || !mayChange;
+              const lockedReason = user.linkedFromMain
                 ? 'This person has access through the Main Account, so it can only be changed from there'
                 : isOwner
                   ? 'The owner’s account can’t be deactivated or deleted'
-                  : 'You can’t deactivate or delete your own account';
+                  : isSelf
+                    ? 'You can’t deactivate or delete your own account'
+                    : 'Only an owner or admin can change this person';
+              const role = user.aiRole;
               return (
-                <div key={user.id} className={styles.userRow}>
-                  <div className={styles.userInfo}>
-                    <span className={styles.userName}>
-                      {user.name}
-                      {isSelf && <span className={styles.youTag}> (you)</span>}
+                <li key={user.id} className={clsx(styles.row, !user.active && styles.rowOff)}>
+                  <div className={styles.identity}>
+                    <Avatar name={user.name} size="md" />
+                    <span className={styles.identityText}>
+                      <span className={styles.name}>
+                        {user.name}
+                        {isSelf && <span className={styles.you}> (you)</span>}
+                      </span>
+                      <span className={styles.meta}>{user.email}</span>
                     </span>
-                    <span className={styles.userEmail}>{user.email}</span>
                   </div>
-                  {/* An owner is also an admin under the hood — one badge says it. */}
-                  {(isOwner ? ['owner'] : user.roles).map((r) =>
-                    r === 'agent_user' ? (
-                      <Badge key={r} variant="accent">
-                        {user.assignedAgentId ? agentName(user.assignedAgentId) : 'No AI role'}
+
+                  <div className={styles.roleBlock}>
+                    <span className={styles.badges}>
+                      <Badge variant={isOwner ? 'warning' : user.accessMode === 'full' ? 'info' : user.needsAiRole ? 'warning' : 'accent'}>
+                        {user.accountType ?? '—'}
                       </Badge>
-                    ) : (
-                      <Badge key={r} variant={ROLE_BADGE[r] ?? 'neutral'}>
-                        {ROLE_LABEL[r] ?? r}
-                      </Badge>
-                    ),
-                  )}
-                  {user.storeId && <Badge variant="neutral">{storeName(user.storeId)}</Badge>}
-                  {user.linkedFromMain && <Badge variant="info">Main Account</Badge>}
-                  {user.pendingInvitation && <Badge variant="warning">Invited</Badge>}
-                  {!user.active && <Badge variant="danger">Deactivated</Badge>}
-                  {user.aiAccessEnabled === false && <Badge variant="warning">AI off</Badge>}
-                  {user.voiceAccessEnabled === false && <Badge variant="warning">Voice off</Badge>}
-                  <div className={styles.userActions}>
-                    <span
-                      title={
-                        locked ? lockedReason : user.active ? 'Deactivate — they can no longer sign in' : 'Reactivate'
-                      }
-                    >
+                      {user.linkedFromMain && <Badge variant="info">Main Account</Badge>}
+                      {user.pendingInvitation && <Badge variant="warning">Invited</Badge>}
+                      {!user.active && <Badge variant="danger">Deactivated</Badge>}
+                      {user.aiAccessEnabled === false && <Badge variant="warning">AI off</Badge>}
+                    </span>
+                    <span className={styles.agent}>
+                      {user.accessMode === 'full' ? (
+                        <>
+                          <FiShield aria-hidden /> Every agent
+                        </>
+                      ) : role ? (
+                        <>
+                          <span className={styles.agentDot} style={{ background: role.avatarColor ?? 'var(--color-text-muted)' }} aria-hidden />
+                          {role.status === 'missing' ? 'AI role removed' : role.name}
+                          {role.status === 'draft' && ' (draft)'}
+                        </>
+                      ) : (
+                        'No AI role'
+                      )}
+                    </span>
+                    {user.needsAiRole && <span className={styles.attention}>Needs a new AI role</span>}
+                  </div>
+
+                  <dl className={styles.facts}>
+                    <div>
+                      <dt>Access</dt>
+                      <dd>{accessSummary(user, catalog)}</dd>
+                    </div>
+                    <div>
+                      <dt>Added</dt>
+                      <dd>{formatDate(user.createdAt)}</dd>
+                    </div>
+                  </dl>
+
+                  <div className={styles.actions}>
+                    {user.pendingInvitation && mayChange && !isOwner && (
+                      <Button type="button" variant="ghost" size="sm" disabled={busyId === user.id} onClick={() => void resendInvitation(user)}>
+                        Resend invite
+                      </Button>
+                    )}
+                    <span title={locked ? lockedReason : user.active ? 'Deactivate — they can no longer sign in' : 'Reactivate'}>
                       <Switch
                         checked={user.active}
-                        disabled={locked || busyUserId === user.id}
+                        disabled={locked || busyId === user.id || !can(me, 'users', 'edit')}
                         ariaLabel={`${user.name} can sign in`}
-                        onChange={(checked) => (checked ? void setActive(user, true) : setDeactivatingUser(user))}
+                        onChange={(checked) => (checked ? void setActive(user, true) : setDeactivating(user))}
                       />
                     </span>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      disabled={(isOwner && !isSelf) || linked}
-                      title={linked ? lockedReason : isOwner && !isSelf ? 'Only the owner can edit the owner’s account' : undefined}
-                      onClick={() => openEdit(user)}
-                    >
-                      Edit
-                    </Button>
                     <IconButton
-                      icon={<FiTrash2 />}
-                      label={locked ? lockedReason : `Delete ${user.name}`}
-                      title={locked ? lockedReason : `Delete ${user.name}`}
+                      icon={<FiEdit2 />}
+                      label={mayChange ? `Edit ${user.name}` : lockedReason}
+                      title={mayChange ? `Edit ${user.name}` : lockedReason}
                       size="sm"
-                      disabled={locked || busyUserId === user.id}
-                      onClick={() => setDeletingUser(user)}
+                      disabled={!mayChange || !ready || !can(me, 'users', 'edit')}
+                      onClick={() => setEditing(user)}
                     />
+                    {can(me, 'users', 'delete') && (
+                      <IconButton
+                        icon={<FiTrash2 />}
+                        label={locked ? lockedReason : `Delete ${user.name}`}
+                        title={locked ? lockedReason : `Delete ${user.name}`}
+                        size="sm"
+                        disabled={locked || busyId === user.id}
+                        onClick={() => setDeleting(user)}
+                      />
+                    )}
                   </div>
-                </div>
+                </li>
               );
             })}
-          </div>
+          </ul>
         )}
       </SettingsSection>
 
-      <Modal open={createOpen} onClose={closeCreateModal} title="Create User" maxWidth={520}>
-        {createdResult ? (
-          <>
-            <div className={styles.modalBody}>
-              <p>
-                <strong>{createdResult.user.name}</strong> was created
-                {createdResult.user.roles[0] === 'agent_user' ? (
-                  <>
-                    {' '}
-                    with the AI role <strong>{agentName(createdResult.user.assignedAgentId)}</strong>
-                  </>
-                ) : (
-                  <>
-                    {' '}
-                    as <strong>{ROLE_LABEL[createdResult.user.roles[0]] ?? createdResult.user.roles[0]}</strong>
-                  </>
-                )}
-                {createdResult.tempPassword ? (
-                  <>
-                    . They sign in at <strong>{window.location.origin}</strong> with:
-                  </>
-                ) : (
-                  <>. An invitation to set their own password has gone to their email.</>
-                )}
-              </p>
-              <SettingsField label="Email">
-                <CopyableText value={createdResult.user.email} />
-              </SettingsField>
-              {createdResult.tempPassword ? (
-                <>
-                  <SettingsField label="Temporary password">
-                    <CopyableText value={createdResult.tempPassword} />
-                  </SettingsField>
-                  <p className={styles.warning}>This password will not be shown again after you close this dialog.</p>
-                </>
-              ) : (
-                createdResult.activationLink && (
-                  <SettingsField label="Activation link">
-                    <CopyableText value={createdResult.activationLink} />
-                  </SettingsField>
-                )
-              )}
-            </div>
-            <div className={styles.modalFooter}>
-              <Button type="button" onClick={closeCreateModal}>
-                {createdResult.tempPassword ? 'Done, I’ve copied it' : 'Done'}
-              </Button>
-            </div>
-          </>
-        ) : (
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
-              if (!createProblem && !creating) void handleCreate();
-            }}
-          >
-            <div className={styles.modalBody}>
-              <Input
-                label="Name"
-                placeholder="e.g. Priya Raman"
-                autoFocus
-                maxLength={100}
-                value={form.name}
-                onChange={(e) => setForm({ ...form, name: e.target.value })}
-              />
-              <Input
-                label="Email"
-                type="email"
-                placeholder="name@company.com"
-                hint="They sign in with this address."
-                error={
-                  form.email.trim() && !EMAIL_PATTERN.test(form.email.trim())
-                    ? 'That email address doesn’t look right.'
-                    : undefined
-                }
-                value={form.email}
-                onChange={(e) => setForm({ ...form, email: e.target.value })}
-              />
-              {roleFields(form, setForm)}
-              <div className={styles.inviteRow}>
-                <span>
-                  <span className={styles.inviteLabel}>Email an invitation instead</span>
-                  <span className={styles.inviteHint}>They set their own password through a secure link. No temporary password.</span>
-                </span>
-                <Switch
-                  checked={form.sendInvite}
-                  ariaLabel="Email an invitation instead of a temporary password"
-                  onChange={(checked) => setForm({ ...form, sendInvite: checked })}
-                />
-              </div>
-              <details className={styles.moreOptions}>
-                <summary>More options</summary>
-                <Input
-                  label="Department (optional)"
-                  placeholder="e.g. Sales"
-                  value={form.department}
-                  onChange={(e) => setForm({ ...form, department: e.target.value })}
-                />
-                {accessFields(form, setForm)}
-              </details>
-              {createProblem && (form.name || form.email) && <p className={styles.formProblem}>{createProblem}</p>}
-            </div>
-            <div className={styles.modalFooter}>
-              <Button type="button" variant="ghost" onClick={closeCreateModal} disabled={creating}>
-                Cancel
-              </Button>
-              <Button type="submit" loading={creating} disabled={!!createProblem}>
-                Create User
-              </Button>
-            </div>
-          </form>
-        )}
-      </Modal>
+      {catalog && (
+        <>
+          <UserDrawer open={creating} onClose={() => setCreating(false)} catalog={catalog} aiRoles={aiRoles} me={me} onSaved={refresh} />
+          <UserDrawer open={!!editing} user={editing} onClose={() => setEditing(null)} catalog={catalog} aiRoles={aiRoles} me={me} onSaved={refresh} />
+        </>
+      )}
 
-      <Modal
-        open={!!editingUser}
-        onClose={() => (saving ? undefined : setEditingUser(null))}
-        title="Edit User"
-        description={editingUser?.email}
-        maxWidth={520}
-      >
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
-            if (!editProblem && !saving) void handleEditSave();
-          }}
-        >
-          <div className={styles.modalBody}>
-            <Input
-              label="Name"
-              maxLength={100}
-              value={editForm.name}
-              onChange={(e) => setEditForm({ ...editForm, name: e.target.value })}
-            />
-            {editingOwner ? (
-              <SettingsField label="Role" hint="The owner’s role can’t be changed.">
-                <Badge variant="warning">Owner</Badge>
-              </SettingsField>
-            ) : editingUser?.id === currentUserId ? (
-              <SettingsField label="Role" hint="You can’t change your own role — ask another admin.">
-                <Badge variant={ROLE_BADGE[editForm.role] ?? 'neutral'}>{ROLE_LABEL[editForm.role]}</Badge>
-              </SettingsField>
-            ) : (
-              roleFields(editForm, setEditForm)
-            )}
-            <details className={styles.moreOptions}>
-              <summary>More options</summary>
-              <Input
-                label="Department (optional)"
-                placeholder="e.g. Sales"
-                value={editForm.department}
-                onChange={(e) => setEditForm({ ...editForm, department: e.target.value })}
-              />
-              {accessFields(editForm, setEditForm)}
-            </details>
-            {editProblem && <p className={styles.formProblem}>{editProblem}</p>}
-          </div>
-          <div className={styles.modalFooter}>
-            <Button type="button" variant="ghost" onClick={() => setEditingUser(null)} disabled={saving}>
-              Cancel
-            </Button>
-            <Button type="submit" loading={saving} disabled={!!editProblem}>
-              Save Changes
-            </Button>
-          </div>
-        </form>
-      </Modal>
-
-      <Modal open={!!deactivatingUser} onClose={() => setDeactivatingUser(null)} title="Deactivate User" maxWidth={440}>
+      <Modal open={!!deactivating} onClose={() => setDeactivating(null)} title="Deactivate user" maxWidth={440}>
         <div className={styles.modalBody}>
           <p>
-            Deactivate <strong>{deactivatingUser?.name}</strong>? They are signed out everywhere and can’t sign in until
-            you reactivate them. Their data is kept.
+            Deactivate <strong>{deactivating?.name}</strong>? They are signed out everywhere and can’t sign in until you reactivate them. Their
+            data is kept.
           </p>
         </div>
         <div className={styles.modalFooter}>
-          <Button type="button" variant="ghost" onClick={() => setDeactivatingUser(null)}>
+          <Button type="button" variant="ghost" onClick={() => setDeactivating(null)}>
             Cancel
           </Button>
           <Button
             type="button"
             variant="danger"
-            loading={!!deactivatingUser && busyUserId === deactivatingUser.id}
-            onClick={() => deactivatingUser && void setActive(deactivatingUser, false)}
+            loading={!!deactivating && busyId === deactivating.id}
+            onClick={() => deactivating && void setActive(deactivating, false)}
           >
             Deactivate
           </Button>
         </div>
       </Modal>
 
-      <Modal open={!!deletingUser} onClose={() => setDeletingUser(null)} title="Delete User" maxWidth={440}>
+      <Modal open={!!deleting} onClose={() => setDeleting(null)} title="Delete user" maxWidth={440}>
         <div className={styles.modalBody}>
           <p>
-            Delete <strong>{deletingUser?.name}</strong> ({deletingUser?.email})? Their account is removed for good. To
-            only stop them signing in, deactivate them instead.
+            Delete <strong>{deleting?.name}</strong> ({deleting?.email})? Their account is removed for good. To only stop them signing in,
+            deactivate them instead.
           </p>
         </div>
         <div className={styles.modalFooter}>
-          <Button type="button" variant="ghost" onClick={() => setDeletingUser(null)}>
+          <Button type="button" variant="ghost" onClick={() => setDeleting(null)}>
             Cancel
           </Button>
-          <Button
-            type="button"
-            variant="danger"
-            loading={!!deletingUser && busyUserId === deletingUser.id}
-            onClick={() => void confirmDelete()}
-          >
-            Delete User
+          <Button type="button" variant="danger" loading={!!deleting && busyId === deleting.id} onClick={() => void remove()}>
+            Delete user
           </Button>
         </div>
       </Modal>
-
-      <Modal
-        open={rolesOpen}
-        onClose={() => setRolesOpen(false)}
-        title="Account types"
-        description="What each kind of account can see and do. These are checked by the server on every request."
-        maxWidth={640}
-      >
-        <div className={styles.modalBody}>
-          {ROLES.map((role) => (
-            <div key={role.id} className={styles.roleCard}>
-              <div className={styles.roleCardHead}>
-                <Badge variant={ROLE_BADGE[role.id] ?? 'neutral'}>{role.label}</Badge>
-                <span>{role.summary}</span>
-              </div>
-              <ul className={styles.permissionList}>
-                {role.can.map((line) => (
-                  <li key={line} className={styles.permissionCan}>
-                    {line}
-                  </li>
-                ))}
-                {role.cannot.map((line) => (
-                  <li key={line} className={styles.permissionCannot}>
-                    {line}
-                  </li>
-                ))}
-              </ul>
-            </div>
-          ))}
-          <p className={styles.hint}>
-            A team member’s access comes from their AI role: its tools, data and app features are set under Settings →
-            AI Roles.
-          </p>
-        </div>
-        <div className={styles.modalFooter}>
-          <Button type="button" onClick={() => setRolesOpen(false)}>
-            Close
-          </Button>
-        </div>
-      </Modal>
-    </>
+    </div>
   );
 }

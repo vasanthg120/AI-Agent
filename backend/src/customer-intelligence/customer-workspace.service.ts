@@ -9,6 +9,7 @@ import { CustomerDirectoryService, FILES_BUCKET, JOBS_COLLECTION, NOTES_COLLECTI
 import { STAGE_OPTIONS, StageKey } from './customer-profile.builder';
 import { CreateCustomerTaskDto, UpdateCustomerTaskDto } from './dto/customer-workspace.dto';
 import { PROOF_STATUSES } from './job-statuses';
+import { holdsPermission, isPermissionManaged } from '../common/permissions/permission.decorator';
 
 const STATUS_HISTORY_LIMIT = 60;
 
@@ -127,9 +128,11 @@ export class CustomerWorkspaceService {
     private gridFs: GridFsService,
   ) {}
 
-  /** Owners and administrators may remove what others added. */
-  canManage(caller: JwtPayload) {
-    return caller.roles.some((role) => role === 'owner' || role === 'admin');
+  /** Owners and administrators may remove what others added — and so may someone
+   * given "delete" on the page (Customers, or the Job Board for jobs). */
+  canManage(caller: JwtPayload, module: 'customers' | 'job_board' = 'customers') {
+    if (caller.roles.some((role) => role === 'owner' || role === 'admin')) return true;
+    return isPermissionManaged(caller) && holdsPermission(caller, module, 'delete');
   }
 
   private objectId(id: string, what: string) {

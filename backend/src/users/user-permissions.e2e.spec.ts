@@ -7,6 +7,7 @@ import { Connection, Types } from 'mongoose';
 import { AppModule } from '../app.module';
 import { AuthService } from '../auth/auth.service';
 import { MailService } from '../mail/mail.service';
+import { AnalyticsDashboardService } from '../analytics-dashboard/analytics-dashboard.service';
 import { AI_ROLE_UNAVAILABLE_MESSAGE } from './users.service';
 
 // People created with an AI role and their own page & action permissions, through
@@ -198,6 +199,22 @@ describe('Per-person permissions (whole app, real HTTP, real Mongo)', () => {
     it('a permission list is refused for an administrator', async () => {
       const res = await call('POST', '/users', ownerToken, { email: email('bad-admin'), name: 'x', role: 'admin', permissions: ['customers:view'] });
       expect(res.status).toBe(400);
+    });
+
+    it('the dashboard figures open with either Dashboard or Revenue & Analytics — the business’s only with the latter', async () => {
+      const spy = jest.spyOn(app.get(AnalyticsDashboardService), 'getOverview').mockResolvedValue({} as never);
+      try {
+        const none = await person('no-dash', { permissions: ['customers:view'] });
+        const dash = await person('dash', { permissions: ['dashboard:view'] });
+        const analyst = await person('analyst', { permissions: ['analytics:view'] });
+        expect((await call('GET', '/analytics-dashboard/overview?dateFrom=2026-11-01&dateTo=2026-11-03', none.token)).status).toBe(403);
+        expect((await call('GET', '/analytics-dashboard/overview?dateFrom=2026-11-01&dateTo=2026-11-03', dash.token)).status).toBe(200);
+        expect(spy.mock.calls.at(-1)?.[1]).toEqual({ level: 'user', userId: dash.id });
+        expect((await call('GET', '/analytics-dashboard/overview?dateFrom=2026-11-01&dateTo=2026-11-03', analyst.token)).status).toBe(200);
+        expect(spy.mock.calls.at(-1)?.[1]).toEqual({ level: 'org' });
+      } finally {
+        spy.mockRestore();
+      }
     });
   });
 
