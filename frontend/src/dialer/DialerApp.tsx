@@ -12,6 +12,11 @@ import { KeypadScreen } from './screens/KeypadScreen';
 const RecentsScreen = lazy(() => import('./screens/RecentsScreen').then((m) => ({ default: m.RecentsScreen })));
 const ContactsScreen = lazy(() => import('./screens/ContactsScreen').then((m) => ({ default: m.ContactsScreen })));
 const ScoresScreen = lazy(() => import('./screens/ScoresScreen').then((m) => ({ default: m.ScoresScreen })));
+const loadCallScreen = () => import('./screens/CallScreen');
+const CallScreen = lazy(() => loadCallScreen().then((m) => ({ default: m.CallScreen })));
+
+// The call screen opens the moment the call button is pressed: fetch it ahead, once the keypad is up.
+if (typeof window !== 'undefined') window.setTimeout(() => void loadCallScreen().catch(() => undefined), 1500);
 
 /**
  * HaiVE Dialer: its own page (/dialer/), its own installable app, the same
@@ -33,6 +38,7 @@ export function DialerApp() {
                     <Route path="contacts" element={<ContactsScreen />} />
                     <Route path="scores" element={<ScoresScreen />} />
                   </Route>
+                  <Route path="call/:provider/:id" element={<CallScreen />} />
                   <Route path="*" element={<Navigate to="/" replace />} />
                 </Routes>
               </Suspense>

@@ -10,14 +10,17 @@
 }
 
 .cardIcon {
-  border-radius: 9px;
+  border-radius: 8px;
   flex-shrink: 0;
+  width: 30px;
+  height: 30px;
 }
 
 .cardText {
   flex: 1;
   min-width: 0;
   font-size: var(--text-sm);
+  line-height: 1.3;
   color: var(--color-text-secondary);
 }
 

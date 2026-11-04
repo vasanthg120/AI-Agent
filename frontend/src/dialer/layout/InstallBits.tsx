@@ -58,7 +58,7 @@ export function InstallCard() {
     <>
       <div className={styles.card} role="region" aria-label="Install the Dialer">
         <img src="/dialer/icons/icon.svg" alt="" width={36} height={36} className={styles.cardIcon} />
-        <p className={styles.cardText}>Put the Dialer on your home screen, like any phone app.</p>
+        <p className={styles.cardText}>Add the Dialer to your home screen.</p>
         <button type="button" className={styles.cardButton} onClick={() => void install()}>
           <FiDownload aria-hidden /> Install
         </button>
