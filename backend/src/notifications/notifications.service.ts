@@ -98,6 +98,18 @@ export class NotificationsService {
     await this.notificationModel.updateOne({ _id: id, userId }, { read: true }).exec();
   }
 
+  /** A message for the HaiVE Dialer on this person's phone, if they turned it on
+   * there — and only while their organization allows push at all. */
+  async pushToDialer(userId: string, organizationId: string, payload: { title: string; body: string; url: string }): Promise<void> {
+    try {
+      const orgPolicy = await this.organizationsService.getNotificationPolicy(organizationId);
+      if (!orgPolicy.pushEnabled) return;
+      await this.webPushService.sendToApp(userId, 'dialer', payload);
+    } catch (err) {
+      this.logger.warn(`Dialer push failed: ${(err as Error).message}`);
+    }
+  }
+
   async markAllRead(userId: string) {
     await this.notificationModel.updateMany({ userId, read: false }, { read: true }).exec();
   }

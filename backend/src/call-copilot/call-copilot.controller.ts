@@ -139,6 +139,13 @@ export class CallCopilotController {
     // for the actual bytes will refuse to play it.
     const isOriginalUpload = fileId === session.originalRecordingFileId;
     res.set({ 'Content-Type': isOriginalUpload ? contentTypeFromFilename(session.originalFilename) : 'audio/webm' });
-    this.gridFs.openDownloadStream('call_recordings', fileId).pipe(res);
+    const stream = this.gridFs.openDownloadStream('call_recordings', fileId);
+    // A recording that is gone (deleted, or its upload never finished) answers
+    // 404 — an unhandled stream error would take the whole server down.
+    stream.on('error', () => {
+      if (res.headersSent) res.end();
+      else res.status(404).type('application/json').send({ statusCode: 404, message: 'Recording not found' });
+    });
+    stream.pipe(res);
   }
 }

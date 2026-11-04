@@ -7,6 +7,8 @@ import { UsersService } from '../users/users.service';
 export interface PushPayload {
   title: string;
   body: string;
+  // Where tapping it opens (the Dialer's service worker reads this; HaiVE's opens /).
+  url?: string;
 }
 
 // Real delivery for the Desktop/Mobile notification channels — VAPID-based
@@ -49,11 +51,27 @@ export class WebPushService {
     }
     const user = await this.usersService.findById(userId);
     if (!user) return;
+    // The Dialer's own subscriptions get only the Dialer's messages (sendToApp).
     const targets = user.pushSubscriptions.filter(
-      (s) => (s.deviceType === 'desktop' && allowed.allowDesktop) || (s.deviceType === 'mobile' && allowed.allowMobile),
+      (s) => !s.app && ((s.deviceType === 'desktop' && allowed.allowDesktop) || (s.deviceType === 'mobile' && allowed.allowMobile)),
     );
-    if (targets.length === 0) return;
+    await this.deliver(userId, targets, payload);
+  }
 
+  /** Sends to the subscriptions one app made for itself — the person turned
+   * these on in that app, so the HaiVE-wide device toggles don't apply. */
+  async sendToApp(userId: string, app: 'dialer', payload: PushPayload): Promise<void> {
+    if (!this.configured) {
+      this.logger.warn(`Push suppressed (VAPID not configured): "${payload.title}" -> user ${userId}`);
+      return;
+    }
+    const user = await this.usersService.findById(userId);
+    if (!user) return;
+    await this.deliver(userId, user.pushSubscriptions.filter((s) => s.app === app), payload);
+  }
+
+  private async deliver(userId: string, targets: PushSubscriptionEntry[], payload: PushPayload): Promise<void> {
+    if (targets.length === 0) return;
     const body = JSON.stringify(payload);
     await Promise.allSettled(
       targets.map(async (sub) => {

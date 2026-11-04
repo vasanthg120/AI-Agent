@@ -12,6 +12,7 @@ import { KeypadScreen } from './screens/KeypadScreen';
 const RecentsScreen = lazy(() => import('./screens/recents/RecentsScreen').then((m) => ({ default: m.RecentsScreen })));
 const ContactsScreen = lazy(() => import('./screens/contacts/ContactsScreen').then((m) => ({ default: m.ContactsScreen })));
 const ScoresScreen = lazy(() => import('./screens/scores/ScoresScreen').then((m) => ({ default: m.ScoresScreen })));
+const ReportScreen = lazy(() => import('./screens/report/ReportScreen').then((m) => ({ default: m.ReportScreen })));
 const loadCallScreen = () => import('./screens/CallScreen');
 const CallScreen = lazy(() => loadCallScreen().then((m) => ({ default: m.CallScreen })));
 
@@ -39,6 +40,8 @@ export function DialerApp() {
                     <Route path="scores" element={<ScoresScreen />} />
                   </Route>
                   <Route path="call/:provider/:id" element={<CallScreen />} />
+                  <Route path="report/session/:sessionId" element={<ReportScreen />} />
+                  <Route path="report/:provider/:id" element={<ReportScreen />} />
                   <Route path="*" element={<Navigate to="/" replace />} />
                 </Routes>
               </Suspense>

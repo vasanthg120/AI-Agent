@@ -77,6 +77,7 @@ export class NotificationsController {
       deviceType: classifyDeviceType(userAgent),
       userAgent,
       createdAt: new Date(),
+      ...(dto.app ? { app: dto.app } : {}),
     });
     return { success: true };
   }

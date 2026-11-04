@@ -89,6 +89,8 @@ export function SheetItem({
   href,
   selected,
   danger,
+  checked,
+  disabled,
 }: {
   icon?: ReactNode;
   label: string;
@@ -97,6 +99,9 @@ export function SheetItem({
   href?: string;
   selected?: boolean;
   danger?: boolean;
+  // Makes the row an on/off switch.
+  checked?: boolean;
+  disabled?: boolean;
 }) {
   const body = (
     <>
@@ -109,6 +114,7 @@ export function SheetItem({
         <span className={styles.itemLabel}>{label}</span>
         {hint && <span className={styles.itemHint}>{hint}</span>}
       </span>
+      {checked !== undefined && <span className={`${styles.switch} ${checked ? styles.switchOn : ''}`} aria-hidden />}
     </>
   );
   const className = `${styles.item} ${danger ? styles.itemDanger : ''}`;
@@ -120,7 +126,15 @@ export function SheetItem({
     );
   }
   return (
-    <button type="button" className={className} onClick={onClick} aria-current={selected || undefined}>
+    <button
+      type="button"
+      className={className}
+      onClick={onClick}
+      disabled={disabled}
+      aria-current={selected || undefined}
+      role={checked !== undefined ? 'switch' : undefined}
+      aria-checked={checked}
+    >
       {body}
     </button>
   );

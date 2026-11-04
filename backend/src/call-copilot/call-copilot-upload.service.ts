@@ -11,6 +11,7 @@ import FormData from 'form-data';
 import { GridFsService } from '../common/gridfs/gridfs.service';
 import { ReservationService } from '../billing/reservation.service';
 import { CallCopilotGateway } from './call-copilot.gateway';
+import { NotificationsService } from '../notifications/notifications.service';
 import { CallCopilotService } from './call-copilot.service';
 import { CallSession, CallSessionDocument } from './schemas/call-session.schema';
 import { UploadCallRecordingDto } from './dto/upload-call-recording.dto';
@@ -59,6 +60,7 @@ export class CallCopilotUploadService {
     private reservations: ReservationService,
     private callCopilotService: CallCopilotService,
     private gateway: CallCopilotGateway,
+    private notifications: NotificationsService,
   ) {
     this.pythonAgentUrl = this.config.get<string>('pythonAgentUrl') ?? 'http://localhost:8000';
   }
@@ -219,6 +221,13 @@ export class CallCopilotUploadService {
         // A phone call's report is complete (the Dialer shows it as ready from here).
         if (/^(plivo|twilio)-/.test(coached.originalFilename ?? '')) {
           this.logger.log(`call.report.ready org=${coached.organizationId} user=${coached.userId} session=${sessionId} score=${coached.overallScore ?? 'none'}`);
+          // No customer name or number in a lock-screen message.
+          const score = coached.overallScore !== undefined ? ` Score ${coached.overallScore.toFixed(1)}/10.` : '';
+          void this.notifications.pushToDialer(coached.userId, coached.organizationId, {
+            title: 'Your call report is ready',
+            body: `${coached.headline ?? 'Summary, score and coaching tips are in.'}${score}`.slice(0, 180),
+            url: `/dialer/report/session/${sessionId}`,
+          });
         }
         emit('call:coaching', {
           overallScore: coached.overallScore,

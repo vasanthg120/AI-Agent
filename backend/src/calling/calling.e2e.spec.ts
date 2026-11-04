@@ -400,6 +400,41 @@ describe('Dialer calling API (whole app, real HTTP, real Mongo, stand-in Plivo)'
     });
   });
 
+  describe('a call report whose recording is missing', () => {
+    it('answers 404 for the recording, and the server keeps running', async () => {
+      const session = await db.collection('call_sessions').insertOne({
+        organizationId: orgIds.main,
+        userId: ownerId,
+        status: 'ended',
+        source: 'upload',
+        originalFilename: 'plivo-missing.mp3',
+        originalRecordingFileId: new Types.ObjectId().toString(),
+        creditRequestId: `${PREFIX}-missing`,
+        transcript: [],
+        createdAt: new Date(),
+      });
+      const fileId = (await db.collection('call_sessions').findOne({ _id: session.insertedId }))!.originalRecordingFileId;
+      const audio = await call('GET', `/call-copilot/sessions/${session.insertedId}/audio/${fileId}`, tokens.owner);
+      expect(audio.status).toBe(404);
+      expect((await call('GET', '/calling/overview', tokens.owner)).status).toBe(200);
+    });
+  });
+
+  describe('"Your call report is ready" on the Dialer', () => {
+    it('the Dialer subscribes for its own messages; anything else is refused', async () => {
+      const keys = { p256dh: 'p256dh-key', auth: 'auth-key' };
+      const ok = await call('POST', '/notifications/push/subscribe', tokens.owner, { endpoint: 'https://push.example/dialer-1', keys, app: 'dialer' });
+      expect(ok.status).toBe(201);
+      const saved = await db.collection('users').findOne({ _id: new Types.ObjectId(ownerId) });
+      expect(saved?.pushSubscriptions.find((s: { endpoint: string }) => s.endpoint === 'https://push.example/dialer-1')).toMatchObject({ app: 'dialer' });
+      expect((await call('POST', '/notifications/push/subscribe', tokens.owner, { endpoint: 'https://push.example/x', keys, app: 'other' })).status).toBe(400);
+      // HaiVE's own subscribe call is unchanged: no app.
+      await call('POST', '/notifications/push/subscribe', tokens.owner, { endpoint: 'https://push.example/haive', keys });
+      const again = await db.collection('users').findOne({ _id: new Types.ObjectId(ownerId) });
+      expect(again?.pushSubscriptions.find((s: { endpoint: string }) => s.endpoint === 'https://push.example/haive').app).toBeUndefined();
+    });
+  });
+
   describe('contacts', () => {
     beforeAll(async () => {
       const priya = await call('POST', '/customers', tokens.owner, { name: `${PREFIX} Priya Raman`, phone: '+91 98400 12345', repUserId: caller.id });

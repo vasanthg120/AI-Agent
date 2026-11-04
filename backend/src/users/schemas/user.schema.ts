@@ -49,6 +49,11 @@ export class PushSubscriptionEntry {
   @Prop({ required: true, enum: ['desktop', 'mobile'] })
   deviceType: 'desktop' | 'mobile';
 
+  // Which app subscribed: 'dialer' is the installed HaiVE Dialer, which gets only
+  // its own messages ("Your call report is ready"); absent means HaiVE itself.
+  @Prop()
+  app?: 'dialer';
+
   @Prop()
   userAgent?: string;
 

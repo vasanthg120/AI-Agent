@@ -78,3 +78,45 @@ self.addEventListener('fetch', (event) => {
     );
   }
 });
+
+// ---- "Your call report is ready" -----------------------------------------------
+// Only the Dialer's own subscription gets these (the server keeps HaiVE's other
+// notifications for HaiVE's own worker, /sw.js). Tapping one opens the report in
+// the Dialer that is already open, or opens the Dialer.
+
+self.addEventListener('push', (event) => {
+  let payload = { title: 'HaiVE Dialer', body: '', url: '/dialer/' };
+  try {
+    if (event.data) payload = { ...payload, ...event.data.json() };
+  } catch {
+    // Not JSON: show the default rather than nothing.
+  }
+  event.waitUntil(
+    self.registration.showNotification(payload.title, {
+      body: payload.body,
+      icon: '/dialer/icons/icon-192.png',
+      badge: '/dialer/icons/icon-192.png',
+      tag: payload.url,
+      data: { url: payload.url },
+    }),
+  );
+});
+
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  const target = (event.notification.data && event.notification.data.url) || '/dialer/';
+  const url = new URL(target, self.location.origin);
+  // Never leave the Dialer for somewhere else from a notification.
+  const safe = url.origin === self.location.origin && url.pathname.startsWith('/dialer/') ? url.href : new URL('/dialer/', self.location.origin).href;
+  event.waitUntil(
+    (async () => {
+      const windows = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+      const open = windows.find((client) => new URL(client.url).pathname.startsWith('/dialer/'));
+      if (open) {
+        await open.focus();
+        return open.navigate(safe);
+      }
+      return self.clients.openWindow(safe);
+    })(),
+  );
+});
