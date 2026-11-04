@@ -367,8 +367,30 @@ Open `https://YOUR.DOMAIN` in a browser, sign in, open the chat (websocket) and 
 | Azure app registration (Outlook, OneDrive, Microsoft sign-in) → Authentication → Redirect URIs | `https://YOUR.DOMAIN/api/outlook/callback`, `https://YOUR.DOMAIN/api/outlook/admin-consent-callback`, `https://YOUR.DOMAIN/api/auth/oauth/microsoft/callback` |
 | Google Cloud OAuth clients | `https://YOUR.DOMAIN/api/gmail/callback`, `https://YOUR.DOMAIN/api/cloud-files/google/callback`, `https://YOUR.DOMAIN/api/auth/oauth/google/callback` |
 | Razorpay / Stripe / Cashfree → Webhooks | `https://YOUR.DOMAIN/api/billing/webhooks/razorpay` (or `/stripe`, `/cashfree`) |
-| Plivo / Twilio | taken from `PLIVO_PUBLIC_BASE_URL` / `PUBLIC_API_BASE_URL` automatically (no ngrok in production) |
+| Plivo / Twilio | taken from `PLIVO_PUBLIC_BASE_URL` (Twilio uses the same unless `TWILIO_PUBLIC_BASE_URL` is set) — it must be `https://YOUR.DOMAIN/api`; calling does **not** fall back to `PUBLIC_API_BASE_URL` (no ngrok in production) |
 | Zapier webhooks | the address the Integrations page shows (built from `PUBLIC_API_BASE_URL`) |
+
+### Step 12 — HaiVE Dialer (`/dialer/`) [nothing extra to install]
+The Dialer is a second page of the frontend image, at `https://YOUR.DOMAIN/dialer/`, installable on phones as its own app.
+- **HTTPS is required** — browsers only install apps and run service workers on https (certbot above covers it).
+- **Nginx:** nothing to change on the host. The frontend container's `frontend/nginx.conf` serves the Dialer's page for its own routes (`/dialer/recents`…), sends its page, service worker and manifest with `Cache-Control: no-cache` (so a deploy reaches installed Dialers on their next open), and the manifest as `application/manifest+json`. Serve `/dialer/sw.js` from this domain itself — never from a CDN or another host.
+- **Backend:** `PLIVO_PUBLIC_BASE_URL=https://YOUR.DOMAIN/api`. The Dialer's "calling is offline" check asks `<that address>/health`; when the check itself can't tell, the Dialer says nothing rather than block calls.
+- **"Your call report is ready" notifications (optional):** set `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY` and `VAPID_SUBJECT` (`mailto:you@YOUR.DOMAIN`) in `backend.env`. Generate the pair once, in `/var/www/AI-Agent/backend`: `node -e "console.log(require('web-push').generateVAPIDKeys())"`. The same keys serve HaiVE's own notifications; changing them later means everyone turns notifications on again.
+
+**Verify:**
+```bash
+curl -s https://YOUR.DOMAIN/dialer/recents | grep -o '<title>[^<]*'                        # <title>HaiVE Dialer
+curl -sI https://YOUR.DOMAIN/dialer/manifest.webmanifest | grep -i content-type             # application/manifest+json
+curl -sI https://YOUR.DOMAIN/dialer/sw.js | grep -i cache-control                           # no-cache
+```
+Then on a phone: open `https://YOUR.DOMAIN/dialer/` → Install (Android) or Share → Add to Home Screen (iPhone).
+
+**If the Dialer's offline cache ever has to be switched off:** replace `frontend/dialer/sw.js` with the three lines below and deploy. Every installed Dialer drops its worker and cache on its next open and carries on as a normal web page.
+```js
+self.addEventListener('install', () => self.skipWaiting());
+self.addEventListener('activate', (event) => event.waitUntil(caches.keys().then((keys) => Promise.all(keys.map((k) => caches.delete(k)))).then(() => self.registration.unregister())));
+self.addEventListener('fetch', () => {});
+```
 
 ---
 
@@ -624,3 +646,4 @@ Prices are AWS list prices as published by third-party trackers at the time of w
 | `deploy/backup/mongo-backup.sh` | Nightly MongoDB backup to S3 |
 | `deploy/env/*.example` | Templates for the server's three `.env` files |
 | `.gitattributes` | Keeps scripts and configs LF so they run on Linux whatever OS commits them |
+| `frontend/dialer/` | The HaiVE Dialer's page, service worker template and the Vite plugin that builds them (Step 12) |

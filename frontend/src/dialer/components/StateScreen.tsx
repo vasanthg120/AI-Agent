@@ -1,3 +1,4 @@
+import { useId } from 'react';
 import type { ReactNode } from 'react';
 import styles from './StateScreen.module.css';
 
@@ -8,21 +9,26 @@ export function StateScreen({
   children,
   actions,
   tone = 'neutral',
+  level = 1,
 }: {
   icon: ReactNode;
   title: string;
   children?: ReactNode;
   actions?: ReactNode;
   tone?: 'neutral' | 'warning' | 'danger';
+  // 2 when shown inside a screen that already has its own heading.
+  level?: 1 | 2;
 }) {
+  const titleId = useId();
+  const Heading = level === 1 ? 'h1' : 'h2';
   return (
-    <section className={styles.screen} aria-labelledby="state-title">
+    <section className={styles.screen} aria-labelledby={titleId}>
       <span className={`${styles.icon} ${styles[tone]}`} aria-hidden>
         {icon}
       </span>
-      <h1 id="state-title" className={styles.title}>
+      <Heading id={titleId} className={styles.title}>
         {title}
-      </h1>
+      </Heading>
       {children && <div className={styles.text}>{children}</div>}
       {actions && <div className={styles.actions}>{actions}</div>}
     </section>

@@ -107,7 +107,7 @@ export function ContactsScreen() {
       )}
 
       {search.length < 2 ? (
-        <StateScreen icon={<FiUsers />} title="Find a customer to call">
+        <StateScreen icon={<FiUsers />} title="Find a customer to call" level={2}>
           <p>Search your HaiVE customers by name, company or any part of their number.</p>
           {!seesEveryone && <p>You’ll see the customers you’re the Customer Rep of.</p>}
         </StateScreen>
@@ -120,6 +120,7 @@ export function ContactsScreen() {
           icon={<FiAlertTriangle />}
           tone="warning"
           title="Couldn’t search right now"
+          level={2}
           actions={<ActionButton onClick={() => void results.refetch()}>Try again</ActionButton>}
         />
       ) : list.length === 0 ? (

@@ -182,7 +182,9 @@ export function KeypadScreen() {
         event.preventDefault();
         backspace();
       } else if (event.key === 'Escape' || event.key === 'Delete') clear();
-      else if (event.key === 'Enter') void call();
+      // Enter on a focused key or button is that button's own press (keyboard and
+      // switch users); only with nothing in particular focused does it mean "call".
+      else if (event.key === 'Enter' && !target?.closest('button, a')) void call();
     };
     const onPaste = (event: ClipboardEvent) => {
       const target = event.target instanceof Element ? event.target : null;
@@ -239,6 +241,7 @@ export function KeypadScreen() {
 
   return (
     <div className={styles.screen}>
+      <h1 className="sr-only">Keypad</h1>
       <InstallCard />
 
       <div className={styles.line} aria-live="polite">

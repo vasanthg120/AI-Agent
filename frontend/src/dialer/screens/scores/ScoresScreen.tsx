@@ -55,7 +55,7 @@ export function ScoresScreen() {
       </dl>
 
       {reported.length === 0 ? (
-        <StateScreen icon={<FiAward />} title="No call reports yet">
+        <StateScreen icon={<FiAward />} title="No call reports yet" level={2}>
           <p>After a call, its transcript, summary, score and coaching tips appear here — usually a minute or two after you hang up.</p>
         </StateScreen>
       ) : (
