@@ -9,9 +9,9 @@ import { Gate } from './layout/Gate';
 import { KeypadScreen } from './screens/KeypadScreen';
 
 // The keypad opens with the app; every other screen loads the first time it's used.
-const RecentsScreen = lazy(() => import('./screens/RecentsScreen').then((m) => ({ default: m.RecentsScreen })));
-const ContactsScreen = lazy(() => import('./screens/ContactsScreen').then((m) => ({ default: m.ContactsScreen })));
-const ScoresScreen = lazy(() => import('./screens/ScoresScreen').then((m) => ({ default: m.ScoresScreen })));
+const RecentsScreen = lazy(() => import('./screens/recents/RecentsScreen').then((m) => ({ default: m.RecentsScreen })));
+const ContactsScreen = lazy(() => import('./screens/contacts/ContactsScreen').then((m) => ({ default: m.ContactsScreen })));
+const ScoresScreen = lazy(() => import('./screens/scores/ScoresScreen').then((m) => ({ default: m.ScoresScreen })));
 const loadCallScreen = () => import('./screens/CallScreen');
 const CallScreen = lazy(() => loadCallScreen().then((m) => ({ default: m.CallScreen })));
 
