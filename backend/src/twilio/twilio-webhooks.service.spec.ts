@@ -254,6 +254,9 @@ describe('Twilio webhooks (real Mongo)', () => {
 
       expect(fresh?.status).toBe('in_progress');
       expect(fresh?.callSid).toBe('CAagent1');
+      expect(fresh?.agentAnsweredAt).toBeInstanceOf(Date);
+      // Twilio will tell us the moment the customer picks up.
+      expect(xml).toContain(`statusCallbackEvent="answered" statusCallback="${BASE}/twilio/webhooks/answered?callId=${call._id}"`);
     });
 
     it('outbound: no announcement when the line has it turned off', async () => {
@@ -431,6 +434,7 @@ describe('Twilio webhooks (real Mongo)', () => {
 
       expect(fresh?.status).toBe('no_answer');
       expect(fresh?.failureReason).toMatch(/customer/i);
+      expect(fresh?.failureCode).toBe('no_answer_customer');
     });
 
     it('the agent not answering is reported as such', async () => {
@@ -452,6 +456,35 @@ describe('Twilio webhooks (real Mongo)', () => {
       expect(fresh?.failureReason).toMatch(
         /Your phone was not answered/,
       );
+      expect(fresh?.failureCode).toBe('no_answer_agent');
+    });
+
+    it("calls it \"calling offline\" when the agent's phone answered but our voice webhook never ran", async () => {
+      const call = await outboundCall();
+      await service.callStatus(signed(`/twilio/webhooks/status?callId=${call._id}`, { CallStatus: 'completed', CallDuration: '2' }), String(call._id));
+      expect(await calls.findById(call._id)).toMatchObject({ status: 'failed', failureCode: 'offline' });
+    });
+
+    it('stamps when the customer picked up — from the answered callback or the recording notice, once', async () => {
+      await line();
+      const call = await outboundCall({ status: 'in_progress' });
+      const answeredPath = `/twilio/webhooks/answered?callId=${call._id}`;
+      expect(await service.answered(signed(answeredPath, { CallStatus: 'in-progress' }), String(call._id))).toEqual({ status: 200, xml: expect.any(String) });
+      const first = (await calls.findById(call._id))?.answeredAt;
+      expect(first).toBeInstanceOf(Date);
+      await service.announce(signed(`/twilio/webhooks/announce?callId=${call._id}`, {}), String(call._id));
+      expect((await calls.findById(call._id))?.answeredAt?.getTime()).toBe(first?.getTime());
+
+      const viaNotice = await outboundCall({ status: 'in_progress' });
+      await service.announce(signed(`/twilio/webhooks/announce?callId=${viaNotice._id}`, {}), String(viaNotice._id));
+      expect((await calls.findById(viaNotice._id))?.answeredAt).toBeInstanceOf(Date);
+    });
+
+    it('refuses a forged "answered" callback', async () => {
+      const call = await outboundCall({ status: 'in_progress' });
+      const path = `/twilio/webhooks/answered?callId=${call._id}`;
+      expect(await service.answered({ originalUrl: path, body: {}, headers: {} }, String(call._id))).toEqual({ status: 403 });
+      expect((await calls.findById(call._id))?.answeredAt).toBeUndefined();
     });
 
     it('a completed dial records its duration', async () => {

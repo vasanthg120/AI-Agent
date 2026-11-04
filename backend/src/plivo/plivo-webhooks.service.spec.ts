@@ -148,6 +148,16 @@ describe('Plivo webhooks (real Mongo)', () => {
       const after = await calls.findById(call._id);
       expect(after?.status).toBe('in_progress');
       expect(after?.callUuid).toBe('uuid-1');
+      expect(after?.agentAnsweredAt).toBeInstanceOf(Date);
+      // Plivo will tell us the moment the customer picks up.
+      expect(xmlOf(result)).toContain(`callbackUrl="${BASE}/plivo/webhooks/dial-event?callId=${call._id}"`);
+    });
+
+    it('does not reopen a call whose hangup report arrived first', async () => {
+      const call = await outboundCall({ status: 'failed', failureCode: 'offline' });
+      const path = `/plivo/webhooks/answer?callId=${call._id}`;
+      await service.answer(signed(path, { CallUUID: 'uuid-late' }), String(call._id));
+      expect(await calls.findById(call._id)).toMatchObject({ status: 'failed', failureCode: 'offline' });
     });
 
     it('refuses a request that is not signed, or signed with the wrong token, and does not touch the call', async () => {
@@ -375,11 +385,77 @@ describe('Plivo webhooks (real Mongo)', () => {
       expect(await calls.findById(call._id)).toMatchObject({ status: 'completed', durationSeconds: 9 });
     });
 
+    it("keeps a busy customer busy when the agent's leg then reports \"completed\" (the known bug)", async () => {
+      const call = await outboundCall({ status: 'in_progress', agentAnsweredAt: new Date() });
+      const path = `/plivo/webhooks/hangup?callId=${call._id}`;
+      await service.hangup(signed(path, { DialStatus: 'busy', DialHangupCause: 'USER_BUSY' }), String(call._id));
+      await service.hangup(signed(path, { CallUUID: 'a-leg', CallStatus: 'completed', Duration: '12', HangupCauseName: 'Normal Hangup' }), String(call._id));
+      const after = await calls.findById(call._id);
+      expect(after).toMatchObject({ status: 'busy', failureCode: 'busy', dialOutcomeKnown: true, hangupCause: 'Normal Hangup', durationSeconds: 12 });
+      expect(after?.failureReason).toBe('Call busy.');
+    });
+
+    it('names a customer who did not answer, and a number that does not exist', async () => {
+      const noAnswer = await outboundCall({ status: 'in_progress' });
+      await service.hangup(signed(`/plivo/webhooks/hangup?callId=${noAnswer._id}`, { DialStatus: 'no-answer' }), String(noAnswer._id));
+      expect((await calls.findById(noAnswer._id))?.failureCode).toBe('no_answer_customer');
+
+      const wrong = await outboundCall({ status: 'in_progress' });
+      await service.hangup(signed(`/plivo/webhooks/hangup?callId=${wrong._id}`, { DialStatus: 'failed', DialHangupCause: 'UNALLOCATED_NUMBER' }), String(wrong._id));
+      expect((await calls.findById(wrong._id))?.failureCode).toBe('invalid_number');
+    });
+
+    it("says the agent's phone wasn't answered when it never was", async () => {
+      const call = await outboundCall();
+      await service.hangup(signed(`/plivo/webhooks/hangup?callId=${call._id}`, { CallStatus: 'no-answer', HangupCauseName: 'No Answer' }), String(call._id));
+      expect(await calls.findById(call._id)).toMatchObject({ status: 'no_answer', failureCode: 'no_answer_agent' });
+    });
+
+    it('calls it "calling offline" when the agent answered but Plivo could not reach us (the 1-second call)', async () => {
+      const call = await outboundCall();
+      await service.hangup(
+        signed(`/plivo/webhooks/hangup?callId=${call._id}`, { CallStatus: 'completed', Duration: '1', HangupCauseName: 'Error Reaching Answer URL' }),
+        String(call._id),
+      );
+      expect(await calls.findById(call._id)).toMatchObject({
+        status: 'failed',
+        failureCode: 'offline',
+        failureReason: 'Plivo: Error Reaching Answer URL.',
+        hangupCause: 'Error Reaching Answer URL',
+      });
+    });
+
     it('acknowledges a call it does not know without error, and refuses a forged one', async () => {
       expect(await service.hangup(unsigned('/plivo/webhooks/hangup', { CallUUID: 'nobody' }), undefined)).toEqual({ status: 200, xml: '<Response></Response>' });
       const call = await outboundCall({ status: 'in_progress' });
       expect(await service.hangup(unsigned(`/plivo/webhooks/hangup?callId=${call._id}`, { DialStatus: 'failed' }), String(call._id))).toEqual({ status: 403 });
       expect((await calls.findById(call._id))?.status).toBe('in_progress');
+    });
+  });
+
+  describe('dial events (the far end picked up)', () => {
+    it('stamps the moment the customer answered, once', async () => {
+      const call = await outboundCall({ status: 'in_progress' });
+      const path = `/plivo/webhooks/dial-event?callId=${call._id}`;
+      expect(await service.dialEvent(signed(path, { DialAction: 'answer', DialBLegStatus: 'answer' }), String(call._id))).toEqual({
+        status: 200,
+        xml: '<Response></Response>',
+      });
+      const first = (await calls.findById(call._id))?.answeredAt;
+      expect(first).toBeInstanceOf(Date);
+      await service.dialEvent(signed(path, { DialAction: 'answer' }), String(call._id));
+      await service.dialEvent(signed(path, { DialAction: 'hangup', DialBLegStatus: 'hangup' }), String(call._id));
+      expect((await calls.findById(call._id))?.answeredAt?.getTime()).toBe(first?.getTime());
+    });
+
+    it('ignores other events, and refuses forged or unknown ones', async () => {
+      const call = await outboundCall({ status: 'in_progress' });
+      const path = `/plivo/webhooks/dial-event?callId=${call._id}`;
+      await service.dialEvent(signed(path, { DialAction: 'digits' }), String(call._id));
+      expect((await calls.findById(call._id))?.answeredAt).toBeUndefined();
+      expect(await service.dialEvent(unsigned(path, { DialAction: 'answer' }), String(call._id))).toEqual({ status: 403 });
+      expect((await calls.findById(call._id))?.answeredAt).toBeUndefined();
+      expect(await service.dialEvent(signed('/plivo/webhooks/dial-event?callId=nope', { DialAction: 'answer' }), 'nope')).toEqual({ status: 404 });
     });
   });
 });

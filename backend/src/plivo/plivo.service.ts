@@ -10,6 +10,7 @@ import { ConnectIntegrationDto } from '../integrations/dto/connect-integration.d
 import { IntegrationsService } from '../integrations/integrations.service';
 import { UsersService } from '../users/users.service';
 import { StartPlivoCallDto, UpsertPlivoLineDto } from './dto/plivo.dto';
+import { classifyFailureText } from '../calling/call-outcome';
 import { maskPhone, normalizePhone } from './plivo-phone';
 import { PlivoCall, PlivoCallDocument } from './schemas/plivo-call.schema';
 import { PlivoLine, PlivoLineDocument } from './schemas/plivo-line.schema';
@@ -19,6 +20,12 @@ const PROVIDER = 'plivo';
 // phone twice and bill two calls.
 const CALL_IN_PROGRESS_WINDOW_MS = 2 * 60_000;
 const CALL_LOG_LIMIT = 30;
+
+/** What the calling layer adds to a call it starts (see CallingService.startCall). */
+export interface StartCallExtras {
+  clientRequestId?: string;
+  customerName?: string;
+}
 
 export interface PlivoCredentials {
   authId: string;
@@ -208,7 +215,7 @@ export class PlivoService {
   // `preNormalized`: the calling layer has already turned the number into digits
   // with its country code (so a short international number isn't mistaken for a
   // national one and given the default country code a second time).
-  async startCall(user: JwtPayload, dto: StartPlivoCallDto, preNormalized = false): Promise<PlivoCallDocument> {
+  async startCall(user: JwtPayload, dto: StartPlivoCallDto, preNormalized = false, extras: StartCallExtras = {}): Promise<PlivoCallDocument> {
     const creds = await this.getCredentials(user.organizationId);
     if (!creds) throw new BadRequestException('Plivo is not connected yet. Ask an administrator to connect it in Settings → Calling.');
     const urls = this.webhookUrls();
@@ -240,6 +247,8 @@ export class PlivoService {
       dealId: dto.dealId,
       languageCode: line.languageCode,
       status: 'initiated',
+      ...(extras.clientRequestId ? { clientRequestId: extras.clientRequestId } : {}),
+      ...(extras.customerName ? { customerName: extras.customerName } : {}),
     });
 
     const callId = call._id.toString();
@@ -267,6 +276,7 @@ export class PlivoService {
       this.logger.warn(`Plivo call for user ${user.sub} failed to start: ${message}`);
       call.status = 'failed';
       call.failureReason = message;
+      call.failureCode = classifyFailureText(message) ?? 'provider_error';
       await call.save();
       throw new BadRequestException(message);
     }
@@ -274,10 +284,11 @@ export class PlivoService {
 
   // ---- call log -------------------------------------------------------------
 
-  /** Recent calls: the caller's own, or the whole organization's for an admin. */
-  listCalls(user: JwtPayload, orgWide: boolean): Promise<PlivoCallDocument[]> {
+  /** Recent calls: the caller's own, or the whole organization's for an admin —
+   * `before` pages back through older ones. */
+  listCalls(user: JwtPayload, orgWide: boolean, before?: Date): Promise<PlivoCallDocument[]> {
     return this.callModel
-      .find({ organizationId: user.organizationId, ...(orgWide ? {} : { userId: user.sub }) })
+      .find({ organizationId: user.organizationId, ...(orgWide ? {} : { userId: user.sub }), ...(before ? { createdAt: { $lt: before } } : {}) })
       .sort({ createdAt: -1 })
       .limit(CALL_LOG_LIMIT)
       .exec();
@@ -288,6 +299,11 @@ export class PlivoService {
     const call = await this.callModel.findOne({ _id: id, organizationId: user.organizationId, ...(orgWide ? {} : { userId: user.sub }) }).exec();
     if (!call) throw new NotFoundException('Call not found.');
     return call;
+  }
+
+  /** The call this person already started with this Dialer request key, if any. */
+  findByRequestKey(user: JwtPayload, clientRequestId: string): Promise<PlivoCallDocument | null> {
+    return this.callModel.findOne({ organizationId: user.organizationId, userId: user.sub, clientRequestId }).exec();
   }
 
   hasCallInProgress(userId: string): Promise<boolean> {

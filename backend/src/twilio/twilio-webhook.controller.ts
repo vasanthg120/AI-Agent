@@ -25,6 +25,12 @@ export class TwilioWebhookController {
     return this.send(res, await this.webhooks.announce(req, callId));
   }
 
+  @Post('answered')
+  @HttpCode(200)
+  async answered(@Req() req: Request, @Res() res: Response, @Query('callId') callId?: string, @Body() _body?: Record<string, unknown>) {
+    return this.send(res, await this.webhooks.answered(req, callId));
+  }
+
   @Post('dial-status')
   @HttpCode(200)
   async dialStatus(@Req() req: Request, @Res() res: Response, @Query('callId') callId?: string, @Body() _body?: Record<string, unknown>) {

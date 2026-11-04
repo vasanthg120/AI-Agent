@@ -27,6 +27,12 @@ export class PlivoWebhookController {
     return this.send(res, await this.webhooks.recordingReady(req, callId));
   }
 
+  @Post('dial-event')
+  @HttpCode(200)
+  async dialEvent(@Req() req: Request, @Res() res: Response, @Query('callId') callId?: string, @Body() _body?: Record<string, unknown>) {
+    return this.send(res, await this.webhooks.dialEvent(req, callId));
+  }
+
   @Post('hangup')
   @HttpCode(200)
   async hangup(@Req() req: Request, @Res() res: Response, @Query('callId') callId?: string, @Body() _body?: Record<string, unknown>) {

@@ -216,6 +216,10 @@ export class CallCopilotUploadService {
     void this.callCopilotService
       .generateCoaching(ended, fullText)
       .then((coached) => {
+        // A phone call's report is complete (the Dialer shows it as ready from here).
+        if (/^(plivo|twilio)-/.test(coached.originalFilename ?? '')) {
+          this.logger.log(`call.report.ready org=${coached.organizationId} user=${coached.userId} session=${sessionId} score=${coached.overallScore ?? 'none'}`);
+        }
         emit('call:coaching', {
           overallScore: coached.overallScore,
           categoryScores: coached.categoryScores,

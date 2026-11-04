@@ -56,8 +56,31 @@ export class TwilioCall {
   @Prop()
   failureReason?: string;
 
+  // What went wrong, as one of calling/call-outcome.ts's CallFailure codes, when
+  // the webhook that reported it could tell (the reason above is its wording).
+  @Prop()
+  failureCode?: string;
+
+  // When the agent picked up (outbound: our voice webhook ran), and when the far
+  // end picked up (the customer, outbound; the agent, inbound) — the moment the
+  // two were connected, which the Dialer's "In call" timer counts from.
+  @Prop()
+  agentAnsweredAt?: Date;
+
+  @Prop()
+  answeredAt?: Date;
+
   @Prop()
   durationSeconds?: number;
+
+  // The Dialer's key for one tap of its call button: the same key again is the
+  // same call, never a second one (unique per user, see the index below).
+  @Prop()
+  clientRequestId?: string;
+
+  // Who was called, as the caller picked them (a customer from Contacts).
+  @Prop()
+  customerName?: string;
 
   // Twilio's recording id (RE…). Unique, and claimed atomically when the
   // recording webhook arrives, so a redelivered webhook never imports twice.
@@ -86,3 +109,4 @@ export class TwilioCall {
 export const TwilioCallSchema = SchemaFactory.createForClass(TwilioCall);
 TwilioCallSchema.index({ organizationId: 1, createdAt: -1 });
 TwilioCallSchema.index({ userId: 1, createdAt: -1 });
+TwilioCallSchema.index({ userId: 1, clientRequestId: 1 }, { unique: true, partialFilterExpression: { clientRequestId: { $type: 'string' } } });

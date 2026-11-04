@@ -28,5 +28,7 @@ import { CustomersController } from './customers.controller';
   imports: [HttpModule.register({ timeout: 90_000 }), AuthModule, BillingModule, UsersModule, AuditModule, CloudFilesModule],
   controllers: [CustomersController, CustomerWorkspaceController, CustomerJobsController, CustomerCloudController, CustomerCloudSyncController],
   providers: [CustomerMailService, CustomerDirectoryService, CustomerWorkspaceService, CustomerJobsService, CustomerCloudService, CustomerCloudSyncService, GridFsService],
+  // The Dialer's Contacts search (calling/) reads the same directory the Customers page shows.
+  exports: [CustomerDirectoryService],
 })
 export class CustomerIntelligenceModule {}
