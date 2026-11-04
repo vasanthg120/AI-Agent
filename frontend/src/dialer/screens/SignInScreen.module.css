@@ -1,0 +1,101 @@
+.screen {
+  min-height: 100%;
+  display: grid;
+  place-items: center;
+  padding: calc(var(--space-6) + var(--safe-top)) var(--space-5) calc(var(--space-6) + var(--safe-bottom));
+}
+
+.card {
+  width: 100%;
+  max-width: 400px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.logo {
+  align-self: center;
+  border-radius: 16px;
+}
+
+.title {
+  font-size: var(--text-2xl);
+  font-weight: 700;
+  text-align: center;
+  line-height: 1.2;
+}
+
+.subtitle {
+  text-align: center;
+  color: var(--color-text-secondary);
+  font-size: var(--text-lg);
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  font-weight: 600;
+}
+
+.field input {
+  min-height: 50px;
+  padding: 0 var(--space-4);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border-strong);
+  background: var(--color-bg-input);
+  font-size: var(--text-lg); /* 16px+: iOS doesn't zoom into the field */
+  font-weight: 400;
+}
+
+.field input:focus-visible {
+  outline: 3px solid var(--color-accent);
+  outline-offset: 0;
+  border-color: transparent;
+}
+
+.field input[aria-invalid='true'] {
+  border-color: var(--dialer-end);
+}
+
+.error {
+  color: var(--color-danger-ink);
+  background: var(--color-danger-soft);
+  padding: var(--space-3);
+  border-radius: var(--radius-md);
+}
+
+.submit {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  min-height: 52px;
+  border: 0;
+  border-radius: var(--radius-full);
+  background: var(--color-accent);
+  color: var(--color-accent-contrast);
+  font-size: var(--text-lg);
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.submit:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.link {
+  align-self: center;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-height: var(--touch);
+  padding: 0 var(--space-3);
+  border: 0;
+  background: none;
+  color: var(--dialer-accent-ink);
+  font-weight: 600;
+  text-decoration: none;
+  cursor: pointer;
+}

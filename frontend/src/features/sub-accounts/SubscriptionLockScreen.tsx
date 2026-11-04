@@ -2,7 +2,9 @@ import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import { FiLock } from 'react-icons/fi';
-import { Button } from '@/components/ui';
+// Directly, not via the ui index: the Dialer shows this screen too, and the index
+// would bring every UI component (and the full animation library) along.
+import { Button } from '@/components/ui/Button';
 import { ROUTES } from '@/constants/routes';
 import { useAuthStore } from '@/stores/authStore';
 import { extractErrorMessage } from '@/utils/errors';
@@ -30,7 +32,9 @@ export function isOpenWhenLocked(pathname: string): boolean {
 
 // Shown in place of the page when a sub-account has no live subscription. Its data
 // is safe and its team can still sign in; it just has to subscribe to carry on.
-export function SubscriptionLockScreen() {
+// `outsideApp`: shown by another app on the site (the Dialer), so Billing is a
+// plain link into HaiVE and going home comes back to `homeDestination`.
+export function SubscriptionLockScreen({ outsideApp = false, homeDestination }: { outsideApp?: boolean; homeDestination?: string } = {}) {
   const { data, current, home } = useAccounts();
   const switchAccount = useAuthStore((state) => state.switchAccount);
   const [switching, setSwitching] = useState(false);
@@ -41,7 +45,7 @@ export function SubscriptionLockScreen() {
     if (!data) return;
     setSwitching(true);
     try {
-      await switchAccount(data.homeOrganizationId);
+      await switchAccount(data.homeOrganizationId, homeDestination);
     } catch (err) {
       toast.error(extractErrorMessage(err));
       setSwitching(false);
@@ -60,9 +64,15 @@ export function SubscriptionLockScreen() {
           Billing and account settings stay open.
         </p>
         <div className={styles.actions}>
-          <Link to={ROUTES.pricing} className={styles.primaryLink}>
-            Go to Billing
-          </Link>
+          {outsideApp ? (
+            <a href={ROUTES.pricing} className={styles.primaryLink}>
+              Go to Billing
+            </a>
+          ) : (
+            <Link to={ROUTES.pricing} className={styles.primaryLink}>
+              Go to Billing
+            </Link>
+          )}
           {visiting && home && (
             <Button type="button" variant="ghost" loading={switching} onClick={() => void goHome()}>
               Back to {home.accountType === 'main' ? 'Main Account' : home.name}

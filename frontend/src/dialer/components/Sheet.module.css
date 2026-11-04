@@ -1,0 +1,93 @@
+.layer {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-modal);
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  align-items: center;
+}
+
+.backdrop {
+  position: absolute;
+  inset: 0;
+  background: var(--dialer-backdrop);
+}
+
+.panel {
+  position: relative;
+  width: 100%;
+  max-width: 520px;
+  max-height: 85vh;
+  overflow-y: auto;
+  background: var(--dialer-sheet);
+  border-radius: var(--radius-xl) var(--radius-xl) 0 0;
+  box-shadow: var(--shadow-lg);
+  padding: var(--space-2) var(--space-3) calc(var(--space-4) + var(--safe-bottom));
+}
+
+.grabber {
+  display: block;
+  width: 40px;
+  height: 4px;
+  margin: 0 auto var(--space-3);
+  border-radius: var(--radius-full);
+  background: var(--color-border-strong);
+}
+
+.title {
+  font-size: var(--text-lg);
+  font-weight: 650;
+  padding: 0 var(--space-2) var(--space-3);
+}
+
+.item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  width: 100%;
+  min-height: 52px;
+  padding: var(--space-2) var(--space-3);
+  border: 0;
+  border-radius: var(--radius-md);
+  background: transparent;
+  text-align: left;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.item:hover,
+.item[aria-current='true'] {
+  background: var(--color-bg-hover);
+}
+
+.itemDanger {
+  color: var(--dialer-end);
+}
+
+.itemIcon {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: var(--radius-full);
+  background: var(--color-bg-hover);
+  font-size: 18px;
+  flex-shrink: 0;
+}
+
+.itemText {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.itemLabel {
+  font-size: var(--text-lg);
+  font-weight: 550;
+}
+
+.itemHint {
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+}
