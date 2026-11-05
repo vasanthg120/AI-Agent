@@ -16,6 +16,7 @@ export declare class PushSubscriptionEntry {
         auth: string;
     };
     deviceType: 'desktop' | 'mobile';
+    app?: 'dialer';
     userAgent?: string;
     createdAt: Date;
 }
@@ -35,6 +36,7 @@ export declare class User {
     storeId?: string;
     roles: string[];
     assignedAgentId?: string;
+    permissions?: string[];
     department?: string;
     active: boolean;
     voiceAccessEnabled: boolean;

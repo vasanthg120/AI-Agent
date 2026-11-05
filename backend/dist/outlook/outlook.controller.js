@@ -21,6 +21,7 @@ const jwt_auth_guard_1 = require("../common/guards/jwt-auth.guard");
 const current_user_decorator_1 = require("../common/decorators/current-user.decorator");
 const cloud_connections_service_1 = require("../cloud-files/cloud-connections.service");
 const outlook_service_1 = require("./outlook.service");
+const permission_decorator_1 = require("../common/permissions/permission.decorator");
 let OutlookController = OutlookController_1 = class OutlookController {
     constructor(outlookService, jwtService, config, cloudConnections) {
         this.outlookService = outlookService;
@@ -130,6 +131,7 @@ __decorate([
 __decorate([
     (0, common_1.UseGuards)(jwt_auth_guard_1.JwtAuthGuard),
     (0, common_1.Get)('connect-url'),
+    (0, permission_decorator_1.Permission)('email', 'manage'),
     __param(0, (0, current_user_decorator_1.CurrentUser)()),
     __metadata("design:type", Function),
     __metadata("design:paramtypes", [Object]),
@@ -138,6 +140,7 @@ __decorate([
 __decorate([
     (0, common_1.Get)('callback'),
     (0, common_1.Redirect)(),
+    (0, permission_decorator_1.PermissionExempt)('public'),
     __param(0, (0, common_1.Query)('code')),
     __param(1, (0, common_1.Query)('state')),
     __param(2, (0, common_1.Query)('error')),
@@ -149,6 +152,7 @@ __decorate([
 __decorate([
     (0, common_1.UseGuards)(jwt_auth_guard_1.JwtAuthGuard),
     (0, common_1.Get)('admin-consent-url'),
+    (0, permission_decorator_1.Permission)('integrations', 'manage'),
     __param(0, (0, current_user_decorator_1.CurrentUser)()),
     __metadata("design:type", Function),
     __metadata("design:paramtypes", [Object]),
@@ -157,6 +161,7 @@ __decorate([
 __decorate([
     (0, common_1.Get)('admin-consent-callback'),
     (0, common_1.Redirect)(),
+    (0, permission_decorator_1.PermissionExempt)('public'),
     __param(0, (0, common_1.Query)('tenant')),
     __param(1, (0, common_1.Query)('admin_consent')),
     __param(2, (0, common_1.Query)('state')),
@@ -193,6 +198,7 @@ __decorate([
 __decorate([
     (0, common_1.UseGuards)(jwt_auth_guard_1.JwtAuthGuard),
     (0, common_1.Post)('accounts/:email/activate'),
+    (0, permission_decorator_1.Permission)('email', 'manage'),
     __param(0, (0, current_user_decorator_1.CurrentUser)()),
     __param(1, (0, common_1.Param)('email')),
     __metadata("design:type", Function),
@@ -202,6 +208,7 @@ __decorate([
 __decorate([
     (0, common_1.UseGuards)(jwt_auth_guard_1.JwtAuthGuard),
     (0, common_1.Put)('accounts/:email/handler'),
+    (0, permission_decorator_1.Permission)('integrations', 'manage'),
     __param(0, (0, current_user_decorator_1.CurrentUser)()),
     __param(1, (0, common_1.Param)('email')),
     __param(2, (0, common_1.Body)()),
@@ -221,12 +228,14 @@ __decorate([
 __decorate([
     (0, common_1.UseGuards)(jwt_auth_guard_1.JwtAuthGuard),
     (0, common_1.Get)('org-accounts'),
+    (0, permission_decorator_1.Permission)('integrations', 'view'),
     __param(0, (0, current_user_decorator_1.CurrentUser)()),
     __metadata("design:type", Function),
     __metadata("design:paramtypes", [Object]),
     __metadata("design:returntype", void 0)
 ], OutlookController.prototype, "listOrgAccounts", null);
 exports.OutlookController = OutlookController = OutlookController_1 = __decorate([
+    (0, permission_decorator_1.Permission)('email'),
     (0, common_1.Controller)('outlook'),
     __metadata("design:paramtypes", [outlook_service_1.OutlookService,
         jwt_1.JwtService,

@@ -20,6 +20,7 @@ const jwt_auth_guard_1 = require("../common/guards/jwt-auth.guard");
 const roles_guard_1 = require("../common/guards/roles.guard");
 const update_store_settings_dto_1 = require("./dto/update-store-settings.dto");
 const store_settings_service_1 = require("./store-settings.service");
+const permission_decorator_1 = require("../common/permissions/permission.decorator");
 let StoreSettingsController = class StoreSettingsController {
     constructor(storeSettingsService) {
         this.storeSettingsService = storeSettingsService;
@@ -64,6 +65,7 @@ __decorate([
 ], StoreSettingsController.prototype, "runNow", null);
 exports.StoreSettingsController = StoreSettingsController = __decorate([
     (0, common_1.UseGuards)(jwt_auth_guard_1.JwtAuthGuard),
+    (0, permission_decorator_1.Permission)('settings'),
     (0, common_1.Controller)('store-settings'),
     __metadata("design:paramtypes", [store_settings_service_1.StoreSettingsService])
 ], StoreSettingsController);

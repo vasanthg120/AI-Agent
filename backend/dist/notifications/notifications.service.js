@@ -76,6 +76,17 @@ let NotificationsService = NotificationsService_1 = class NotificationsService {
     async markRead(userId, id) {
         await this.notificationModel.updateOne({ _id: id, userId }, { read: true }).exec();
     }
+    async pushToDialer(userId, organizationId, payload) {
+        try {
+            const orgPolicy = await this.organizationsService.getNotificationPolicy(organizationId);
+            if (!orgPolicy.pushEnabled)
+                return;
+            await this.webPushService.sendToApp(userId, 'dialer', payload);
+        }
+        catch (err) {
+            this.logger.warn(`Dialer push failed: ${err.message}`);
+        }
+    }
     async markAllRead(userId) {
         await this.notificationModel.updateMany({ userId, read: false }, { read: true }).exec();
     }

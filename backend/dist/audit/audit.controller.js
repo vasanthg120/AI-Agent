@@ -19,6 +19,7 @@ const roles_decorator_1 = require("../common/decorators/roles.decorator");
 const jwt_auth_guard_1 = require("../common/guards/jwt-auth.guard");
 const roles_guard_1 = require("../common/guards/roles.guard");
 const audit_service_1 = require("./audit.service");
+const permission_decorator_1 = require("../common/permissions/permission.decorator");
 let AuditController = class AuditController {
     constructor(auditService) {
         this.auditService = auditService;
@@ -38,6 +39,7 @@ __decorate([
 exports.AuditController = AuditController = __decorate([
     (0, common_1.UseGuards)(jwt_auth_guard_1.JwtAuthGuard, roles_guard_1.RolesGuard),
     (0, roles_decorator_1.Roles)('admin'),
+    (0, permission_decorator_1.PermissionExempt)('not_grantable'),
     (0, common_1.Controller)('audit-logs'),
     __metadata("design:paramtypes", [audit_service_1.AuditService])
 ], AuditController);

@@ -21,6 +21,7 @@ const roles_guard_1 = require("../common/guards/roles.guard");
 const connect_integration_dto_1 = require("./dto/connect-integration.dto");
 const test_connection_dto_1 = require("./dto/test-connection.dto");
 const integrations_service_1 = require("./integrations.service");
+const permission_decorator_1 = require("../common/permissions/permission.decorator");
 let IntegrationsController = class IntegrationsController {
     constructor(integrationsService) {
         this.integrationsService = integrationsService;
@@ -66,6 +67,7 @@ __decorate([
     (0, common_1.Post)('crm/sync'),
     (0, common_1.UseGuards)(roles_guard_1.RolesGuard),
     (0, roles_decorator_1.Roles)('admin'),
+    (0, permission_decorator_1.Permission)('crm_integrations', 'manage'),
     __param(0, (0, current_user_decorator_1.CurrentUser)()),
     __metadata("design:type", Function),
     __metadata("design:paramtypes", [Object]),
@@ -113,6 +115,7 @@ __decorate([
 ], IntegrationsController.prototype, "disconnect", null);
 exports.IntegrationsController = IntegrationsController = __decorate([
     (0, common_1.UseGuards)(jwt_auth_guard_1.JwtAuthGuard),
+    (0, permission_decorator_1.Permission)('integrations'),
     (0, common_1.Controller)('integrations'),
     __metadata("design:paramtypes", [integrations_service_1.IntegrationsService])
 ], IntegrationsController);

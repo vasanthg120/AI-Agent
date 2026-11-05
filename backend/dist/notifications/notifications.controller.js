@@ -22,6 +22,7 @@ const update_notification_preferences_dto_1 = require("./dto/update-notification
 const push_subscribe_dto_1 = require("./dto/push-subscribe.dto");
 const notifications_service_1 = require("./notifications.service");
 const web_push_service_1 = require("./web-push.service");
+const permission_decorator_1 = require("../common/permissions/permission.decorator");
 let NotificationsController = class NotificationsController {
     constructor(notificationsService, webPushService) {
         this.notificationsService = notificationsService;
@@ -57,6 +58,7 @@ let NotificationsController = class NotificationsController {
             deviceType: (0, session_meta_util_1.classifyDeviceType)(userAgent),
             userAgent,
             createdAt: new Date(),
+            ...(dto.app ? { app: dto.app } : {}),
         });
         return { success: true };
     }
@@ -136,6 +138,7 @@ __decorate([
 ], NotificationsController.prototype, "unsubscribePush", null);
 exports.NotificationsController = NotificationsController = __decorate([
     (0, common_1.UseGuards)(jwt_auth_guard_1.JwtAuthGuard),
+    (0, permission_decorator_1.PermissionExempt)('personal'),
     (0, common_1.Controller)('notifications'),
     __metadata("design:paramtypes", [notifications_service_1.NotificationsService,
         web_push_service_1.WebPushService])

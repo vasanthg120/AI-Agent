@@ -66,6 +66,15 @@ let ChatGateway = ChatGateway_1 = class ChatGateway {
             return;
         }
         const agentId = body.agentId ?? (user.roles?.includes('agent_user') ? user.assignedAgentId : undefined);
+        const access = await this.usersService.socketAccess(user, 'ai_agent', 'create');
+        if (access.refusal) {
+            client.emit('error', { message: access.refusal });
+            return;
+        }
+        if (access.user && (await this.usersService.aiRoleUnavailable(access.user))) {
+            client.emit('error', { message: users_service_1.AI_ROLE_UNAVAILABLE_MESSAGE });
+            return;
+        }
         let conversationId = body.conversationId;
         const attachmentIds = Array.isArray(body.attachmentIds) && body.attachmentIds.every((id) => typeof id === 'string') ? body.attachmentIds.slice(0, 10) : undefined;
         client.emit('typing', { typing: true });

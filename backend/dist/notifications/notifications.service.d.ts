@@ -29,6 +29,11 @@ export declare class NotificationsService {
         __v: number;
     })[]>;
     markRead(userId: string, id: string): Promise<void>;
+    pushToDialer(userId: string, organizationId: string, payload: {
+        title: string;
+        body: string;
+        url: string;
+    }): Promise<void>;
     markAllRead(userId: string): Promise<void>;
     getPreferences(userId: string, organizationId: string | undefined): Promise<{
         desktopPush: boolean;

@@ -22,6 +22,7 @@ const list_tasks_query_dto_1 = require("./dto/list-tasks-query.dto");
 const update_task_status_dto_1 = require("./dto/update-task-status.dto");
 const tasks_export_service_1 = require("./tasks-export.service");
 const tasks_service_1 = require("./tasks.service");
+const permission_decorator_1 = require("../common/permissions/permission.decorator");
 let TasksController = class TasksController {
     constructor(tasksService, tasksExportService) {
         this.tasksService = tasksService;
@@ -137,6 +138,7 @@ __decorate([
 ], TasksController.prototype, "updateStatus", null);
 exports.TasksController = TasksController = __decorate([
     (0, common_1.UseGuards)(jwt_auth_guard_1.JwtAuthGuard),
+    (0, permission_decorator_1.PermissionExempt)('personal'),
     (0, common_1.Controller)('tasks'),
     __metadata("design:paramtypes", [tasks_service_1.TasksService,
         tasks_export_service_1.TasksExportService])

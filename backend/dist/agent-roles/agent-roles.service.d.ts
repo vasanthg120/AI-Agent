@@ -19,6 +19,7 @@ export declare class AgentRolesService {
         status: "active";
         builtin: boolean;
     } | {
+        defaultPermissions: string[];
         builtin: boolean;
         organizationId: string;
         slug: string;
@@ -65,6 +66,7 @@ export declare class AgentRolesService {
         allowedTools: string[];
         modelTier?: "fast" | "standard";
         features?: string[];
+        defaultPermissions?: string[];
         avatarColor: string;
         createdBy: string;
         _id: import("mongoose").Types.ObjectId;
@@ -96,6 +98,7 @@ export declare class AgentRolesService {
         allowedTools: string[];
         modelTier?: "fast" | "standard";
         features?: string[];
+        defaultPermissions?: string[];
         avatarColor: string;
         createdBy: string;
         _id: import("mongoose").Types.ObjectId;
@@ -127,6 +130,7 @@ export declare class AgentRolesService {
         allowedTools: string[];
         modelTier?: "fast" | "standard";
         features?: string[];
+        defaultPermissions?: string[];
         avatarColor: string;
         createdBy: string;
         _id: import("mongoose").Types.ObjectId;
@@ -158,6 +162,7 @@ export declare class AgentRolesService {
         allowedTools: string[];
         modelTier?: "fast" | "standard";
         features?: string[];
+        defaultPermissions?: string[];
         avatarColor: string;
         createdBy: string;
         _id: import("mongoose").Types.ObjectId;

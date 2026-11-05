@@ -28,6 +28,7 @@ const jwt_auth_guard_1 = require("../common/guards/jwt-auth.guard");
 const require_session_auth_guard_1 = require("../common/guards/require-session-auth.guard");
 const current_user_decorator_1 = require("../common/decorators/current-user.decorator");
 const jwt_payload_interface_1 = require("./jwt-payload.interface");
+const permission_decorator_1 = require("../common/permissions/permission.decorator");
 const AUTH_THROTTLE = { default: { limit: 5, ttl: 60_000 } };
 function sessionMeta(req) {
     return { userAgent: req.headers['user-agent'], ip: req.ip };
@@ -160,6 +161,7 @@ __decorate([
     __metadata("design:returntype", Promise)
 ], AuthController.prototype, "logout", null);
 exports.AuthController = AuthController = __decorate([
+    (0, permission_decorator_1.PermissionExempt)('personal'),
     (0, common_1.Controller)('auth'),
     __metadata("design:paramtypes", [auth_service_1.AuthService])
 ], AuthController);

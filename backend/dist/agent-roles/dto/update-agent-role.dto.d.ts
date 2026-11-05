@@ -10,5 +10,6 @@ export declare class UpdateAgentRoleDto {
     assignedUserIds?: string[];
     allowedTools?: string[];
     features?: AppFeature[];
+    defaultPermissions?: string[];
     modelTier?: 'fast' | 'standard' | null;
 }
