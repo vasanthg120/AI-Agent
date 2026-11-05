@@ -17,6 +17,7 @@ const common_1 = require("@nestjs/common");
 const current_user_decorator_1 = require("../common/decorators/current-user.decorator");
 const jwt_auth_guard_1 = require("../common/guards/jwt-auth.guard");
 const crm_service_1 = require("./crm.service");
+const permission_decorator_1 = require("../common/permissions/permission.decorator");
 let CrmController = class CrmController {
     constructor(crmService) {
         this.crmService = crmService;
@@ -72,6 +73,7 @@ let CrmController = class CrmController {
 exports.CrmController = CrmController;
 __decorate([
     (0, common_1.Post)('contact/upsert'),
+    (0, permission_decorator_1.Permission)('customers', 'create'),
     __param(0, (0, current_user_decorator_1.CurrentUser)()),
     __param(1, (0, common_1.Body)()),
     __metadata("design:type", Function),
@@ -143,6 +145,7 @@ __decorate([
 ], CrmController.prototype, "listQuotes", null);
 exports.CrmController = CrmController = __decorate([
     (0, common_1.UseGuards)(jwt_auth_guard_1.JwtAuthGuard),
+    (0, permission_decorator_1.Permission)('customers', 'view'),
     (0, common_1.Controller)('crm'),
     __metadata("design:paramtypes", [crm_service_1.CrmService])
 ], CrmController);

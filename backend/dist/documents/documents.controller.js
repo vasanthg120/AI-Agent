@@ -19,6 +19,7 @@ const jwt_auth_guard_1 = require("../common/guards/jwt-auth.guard");
 const current_user_decorator_1 = require("../common/decorators/current-user.decorator");
 const upload_limits_1 = require("../common/upload-limits");
 const documents_service_1 = require("./documents.service");
+const permission_decorator_1 = require("../common/permissions/permission.decorator");
 let DocumentsController = class DocumentsController {
     constructor(documentsService) {
         this.documentsService = documentsService;
@@ -41,6 +42,7 @@ __decorate([
 ], DocumentsController.prototype, "upload", null);
 exports.DocumentsController = DocumentsController = __decorate([
     (0, common_1.UseGuards)(jwt_auth_guard_1.JwtAuthGuard),
+    (0, permission_decorator_1.Permission)('ai_agent', 'create'),
     (0, common_1.Controller)('documents'),
     __metadata("design:paramtypes", [documents_service_1.DocumentsService])
 ], DocumentsController);

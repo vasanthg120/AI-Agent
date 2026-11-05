@@ -4,9 +4,11 @@ import { ChatService } from './chat.service';
 import { RenameConversationDto } from './dto/rename-conversation.dto';
 import { SendMessageDto } from './dto/send-message.dto';
 import { SetConversationFlagDto } from './dto/set-conversation-flag.dto';
+import { UsersService } from '../users/users.service';
 export declare class ChatController {
     private chatService;
-    constructor(chatService: ChatService);
+    private usersService;
+    constructor(chatService: ChatService, usersService: UsersService);
     listAgents(user: JwtPayload): Promise<Omit<{
         assignedDepartments: string[];
         assignedUserIds: string[];

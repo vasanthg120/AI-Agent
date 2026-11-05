@@ -19,6 +19,7 @@ const current_user_decorator_1 = require("../common/decorators/current-user.deco
 const get_overview_query_dto_1 = require("./dto/get-overview-query.dto");
 const get_trend_query_dto_1 = require("./dto/get-trend-query.dto");
 const dashboard_service_1 = require("./dashboard.service");
+const permission_decorator_1 = require("../common/permissions/permission.decorator");
 let DashboardController = class DashboardController {
     constructor(dashboardService) {
         this.dashboardService = dashboardService;
@@ -49,6 +50,7 @@ __decorate([
 ], DashboardController.prototype, "trend", null);
 exports.DashboardController = DashboardController = __decorate([
     (0, common_1.UseGuards)(jwt_auth_guard_1.JwtAuthGuard),
+    (0, permission_decorator_1.Permission)('dashboard'),
     (0, common_1.Controller)('dashboard'),
     __metadata("design:paramtypes", [dashboard_service_1.DashboardService])
 ], DashboardController);

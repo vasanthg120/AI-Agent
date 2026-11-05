@@ -9,6 +9,7 @@ export interface JwtPayload {
     storeId?: string;
     assignedAgentId?: string;
     features?: string[];
+    permissions?: string[];
     department?: string;
     voiceAccessEnabled?: boolean;
     aiAccessEnabled?: boolean;

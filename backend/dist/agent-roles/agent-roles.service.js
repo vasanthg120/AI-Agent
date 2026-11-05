@@ -22,6 +22,7 @@ const common_1 = require("@nestjs/common");
 const config_1 = require("@nestjs/config");
 const mongoose_1 = require("@nestjs/mongoose");
 const app_features_1 = require("../common/app-features");
+const app_modules_1 = require("../common/permissions/app-modules");
 const form_data_1 = __importDefault(require("form-data"));
 const mongoose_2 = require("mongoose");
 const rxjs_1 = require("rxjs");
@@ -46,7 +47,7 @@ let AgentRolesService = AgentRolesService_1 = class AgentRolesService {
             status: 'active',
             builtin: true,
         }));
-        return [...builtin, ...dynamic.map((d) => ({ ...d.toObject(), builtin: false }))];
+        return [...builtin, ...dynamic.map((d) => ({ ...d.toObject(), defaultPermissions: (0, app_modules_1.defaultPermissionsOfRole)(d), builtin: false }))];
     }
     async generateDraft(userId, organizationId, userJwt, file) {
         const form = new form_data_1.default();
@@ -105,6 +106,7 @@ let AgentRolesService = AgentRolesService_1 = class AgentRolesService {
             assignedUserIds: dto.assignedUserIds ?? [],
             allowedTools: dto.allowedTools ?? [],
             features: dto.features ?? app_features_1.DEFAULT_ROLE_FEATURES,
+            defaultPermissions: dto.defaultPermissions ? (0, app_modules_1.normalizePermissions)(dto.defaultPermissions) : undefined,
             modelTier: dto.modelTier ?? undefined,
             status: 'draft',
             avatarColor,
@@ -117,6 +119,8 @@ let AgentRolesService = AgentRolesService_1 = class AgentRolesService {
         if (!existing)
             throw new common_1.NotFoundException('Role not found');
         const activating = dto.status === 'active' && existing.status !== 'active';
+        if (dto.defaultPermissions)
+            dto.defaultPermissions = (0, app_modules_1.normalizePermissions)(dto.defaultPermissions);
         for (const [key, value] of Object.entries(dto)) {
             if (value !== undefined)
                 existing[key] = value;

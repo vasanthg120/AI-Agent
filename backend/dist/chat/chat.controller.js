@@ -21,10 +21,13 @@ const chat_service_1 = require("./chat.service");
 const rename_conversation_dto_1 = require("./dto/rename-conversation.dto");
 const send_message_dto_1 = require("./dto/send-message.dto");
 const set_conversation_flag_dto_1 = require("./dto/set-conversation-flag.dto");
+const permission_decorator_1 = require("../common/permissions/permission.decorator");
+const users_service_1 = require("../users/users.service");
 const CHAT_THROTTLE = { default: { limit: 20, ttl: 60_000 } };
 let ChatController = class ChatController {
-    constructor(chatService) {
+    constructor(chatService, usersService) {
         this.chatService = chatService;
+        this.usersService = usersService;
     }
     listAgents(user) {
         return this.chatService.listAgents(user);
@@ -47,11 +50,13 @@ let ChatController = class ChatController {
         await this.chatService.deleteConversation(user.sub, id);
         return { status: 'ok' };
     }
-    sendMessage(user, req, dto) {
+    async sendMessage(user, req, dto) {
         this.assertAiAccessAllowed(user);
         const bearerToken = (req.headers.authorization ?? '').replace(/^Bearer\s+/i, '');
         const isLockedAgentUser = user.roles.includes('agent_user') && !user.roles.includes('admin');
         const agentId = isLockedAgentUser ? user.assignedAgentId : dto.agentId;
+        if (isLockedAgentUser && (await this.usersService.aiRoleUnavailable(user)))
+            throw new common_1.ForbiddenException(users_service_1.AI_ROLE_UNAVAILABLE_MESSAGE);
         return this.chatService.sendMessage(user.sub, user.organizationId, bearerToken, dto.message, dto.conversationId, agentId, dto.attachmentIds);
     }
     assertAiAccessAllowed(user) {
@@ -85,6 +90,7 @@ __decorate([
 ], ChatController.prototype, "getConversation", null);
 __decorate([
     (0, common_1.Patch)('conversations/:id'),
+    (0, permission_decorator_1.Permission)('ai_agent', 'view'),
     __param(0, (0, current_user_decorator_1.CurrentUser)()),
     __param(1, (0, common_1.Param)('id')),
     __param(2, (0, common_1.Body)()),
@@ -94,6 +100,7 @@ __decorate([
 ], ChatController.prototype, "renameConversation", null);
 __decorate([
     (0, common_1.Patch)('conversations/:id/flag'),
+    (0, permission_decorator_1.Permission)('ai_agent', 'view'),
     __param(0, (0, current_user_decorator_1.CurrentUser)()),
     __param(1, (0, common_1.Param)('id')),
     __param(2, (0, common_1.Body)()),
@@ -117,11 +124,13 @@ __decorate([
     __param(2, (0, common_1.Body)()),
     __metadata("design:type", Function),
     __metadata("design:paramtypes", [Object, Object, send_message_dto_1.SendMessageDto]),
-    __metadata("design:returntype", void 0)
+    __metadata("design:returntype", Promise)
 ], ChatController.prototype, "sendMessage", null);
 exports.ChatController = ChatController = __decorate([
     (0, common_1.UseGuards)(jwt_auth_guard_1.JwtAuthGuard),
+    (0, permission_decorator_1.Permission)('ai_agent'),
     (0, common_1.Controller)('chat'),
-    __metadata("design:paramtypes", [chat_service_1.ChatService])
+    __metadata("design:paramtypes", [chat_service_1.ChatService,
+        users_service_1.UsersService])
 ], ChatController);
 //# sourceMappingURL=chat.controller.js.map
