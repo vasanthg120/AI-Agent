@@ -13,7 +13,14 @@ import { heuristicBusinessName } from '../crm/customer-grouping.util';
 import { DataSourcesService, currencyOf } from '../data-sources/data-sources.service';
 import { CRM_PROVIDERS } from '../data-sources/provider-catalog';
 import { UsersService } from '../users/users.service';
-import { AddCustomerContactDto, CreateCustomerDto, UpdateCustomerDto } from './dto/customer-profile.dto';
+import {
+  AddCustomerContactDto,
+  type AddressType,
+  CreateCustomerAddressDto,
+  CreateCustomerDto,
+  type CustomerType,
+  UpdateCustomerDto,
+} from './dto/customer-profile.dto';
 import { buildCustomerDocuments, CustomerDocument, DocumentCharge, DocumentParty, Journey } from './customer-documents';
 import { CustomerMailService, EmailSummary } from './customer-mail.service';
 import { emailReplySpeeds, emailTimelineEvents, followUpTimelineEvents, TimelineEvent } from './customer-timeline';
@@ -70,6 +77,10 @@ type Doc = Record<string, any>;
 const text = (value: unknown): string => (typeof value === 'string' || typeof value === 'number' ? String(value).trim() : '');
 const lower = (value: unknown): string => text(value).toLowerCase();
 const amount = (value: unknown): number => (typeof value === 'number' && Number.isFinite(value) ? value : Number(value) || 0);
+// Unlike amount() above, a missing or non-numeric value stays undefined here
+// rather than becoming 0 — 0% markup/discount is a real, meaningful value
+// distinct from "not set" (minimumMarkupPct/salesDiscountPct).
+const numberOrUndefined = (value: unknown): number | undefined => (typeof value === 'number' && Number.isFinite(value) ? value : undefined);
 const asDate = (value: unknown): Date | undefined => {
   if (value instanceof Date) return Number.isNaN(value.getTime()) ? undefined : value;
   if (typeof value === 'string' && value) {
@@ -112,6 +123,24 @@ export interface CustomerRow extends CustomerSummary {
   /** Set by hand; falls back to the derived quote/deal owner (profile.owner) when unset. */
   repUserId?: string;
   repName?: string;
+  /** Hoops-parity Add/Edit Customer fields — set by hand, saved in HaiVE only (customer_profiles), same as repUserId/contacts above. */
+  customerType: CustomerType;
+  website?: string;
+  industryType?: string;
+  minimumMarkupPct?: number;
+  salesDiscountPct?: number;
+  profileNote?: string;
+  /** Multiple, typed addresses (billing/shipping/other) — distinct from the single legacy `address` string an enquiry system may have recorded (CustomerDetail.address, unaffected). */
+  addresses: CustomerAddress[];
+}
+
+export interface CustomerAddress {
+  id: string;
+  type: AddressType;
+  address: string;
+  addressLine2?: string;
+  city?: string;
+  state?: string;
 }
 
 export interface CustomerAnalysis {
@@ -262,6 +291,13 @@ interface Entry {
   archived: boolean;
   repUserId?: string;
   repName?: string;
+  customerType: CustomerType;
+  website?: string;
+  industryType?: string;
+  minimumMarkupPct?: number;
+  salesDiscountPct?: number;
+  profileNote?: string;
+  addresses: CustomerAddress[];
 }
 
 interface Directory {
@@ -432,7 +468,7 @@ export class CustomerDirectoryService {
           dueDate: 1,
           expirationDate: 1,
           quoteOwnerLabel: 1,
-          lineItems: 1,
+          items: 1,
           taxes: 1,
           fees: 1,
           externalId: 1,
@@ -813,6 +849,27 @@ export class CustomerDirectoryService {
         role: text(c.role) || undefined,
         manual: true,
       }));
+      // Hoops-parity Add/Edit Customer fields — all set by hand, all optional, all saved in HaiVE only.
+      const customerTypeOverride = text(profileOverride?.customerType);
+      const customerType: CustomerType =
+        customerTypeOverride === 'business' || customerTypeOverride === 'individual'
+          ? customerTypeOverride
+          : displayCompany
+            ? 'business'
+            : 'individual';
+      const website = text(profileOverride?.website) || undefined;
+      const industryType = text(profileOverride?.industryType) || undefined;
+      const minimumMarkupPct = numberOrUndefined(profileOverride?.minimumMarkupPct);
+      const salesDiscountPct = numberOrUndefined(profileOverride?.salesDiscountPct);
+      const profileNote = text(profileOverride?.profileNote) || undefined;
+      const addresses: CustomerAddress[] = (Array.isArray(profileOverride?.addresses) ? profileOverride.addresses : []).map((a: Doc) => ({
+        id: text(a.id),
+        type: (['billing', 'shipping', 'other'].includes(text(a.type)) ? text(a.type) : 'other') as AddressType,
+        address: text(a.address),
+        addressLine2: text(a.addressLine2) || undefined,
+        city: text(a.city) || undefined,
+        state: text(a.state) || undefined,
+      }));
 
       entries.push({
         id,
@@ -831,6 +888,13 @@ export class CustomerDirectoryService {
         archived,
         repUserId,
         repName,
+        customerType,
+        website,
+        industryType,
+        minimumMarkupPct,
+        salesDiscountPct,
+        profileNote,
+        addresses,
         // A job found under two of their keys is still one job.
         jobs: [...new Set(keys.flatMap((key) => jobsByKey.get(key) ?? []))]
           .sort((a, b) => amount(b.seq) - amount(a.seq))
@@ -878,6 +942,13 @@ export class CustomerDirectoryService {
       archived: entry.archived,
       repUserId: entry.repUserId,
       repName: entry.repName,
+      customerType: entry.customerType,
+      website: entry.website,
+      industryType: entry.industryType,
+      minimumMarkupPct: entry.minimumMarkupPct,
+      salesDiscountPct: entry.salesDiscountPct,
+      profileNote: entry.profileNote,
+      addresses: entry.addresses,
       ...summary,
     };
   }
@@ -966,7 +1037,24 @@ export class CustomerDirectoryService {
     const id = createHash('sha256').update(identityKey).digest('hex').slice(0, 24);
     const keys = emailK || phoneK ? [...(emailK ? [`e:${emailK}`] : []), ...(phoneK ? [`p:${phoneK}`] : [])] : [`id:${id}`];
 
-    if (dto.repUserId) await this.upsertProfile(organizationId, id, keys, { repUserId: dto.repUserId, repName });
+    const profileSet: Doc = {};
+    if (dto.repUserId) {
+      profileSet.repUserId = dto.repUserId;
+      profileSet.repName = repName;
+    }
+    // Defaults to 'business' when a company name was given, 'individual' otherwise — same inference compute()
+    // falls back to for a row with no override at all — so an explicit choice is only stored when it actually
+    // differs from what would have been inferred anyway.
+    const inferredType: CustomerType = dto.company ? 'business' : 'individual';
+    if (dto.customerType && dto.customerType !== inferredType) profileSet.customerType = dto.customerType;
+    if (dto.website) profileSet.website = dto.website;
+    if (dto.industryType) profileSet.industryType = dto.industryType;
+    if (dto.minimumMarkupPct !== undefined) profileSet.minimumMarkupPct = dto.minimumMarkupPct;
+    if (dto.salesDiscountPct !== undefined) profileSet.salesDiscountPct = dto.salesDiscountPct;
+    if (dto.profileNote) profileSet.profileNote = dto.profileNote;
+    if (dto.addresses?.length) profileSet.addresses = dto.addresses.map((a) => ({ ...a, id: randomUUID() }));
+    if (dto.contacts?.length) profileSet.contacts = dto.contacts.map((c) => ({ ...c, id: randomUUID(), addedAt: now }));
+    if (Object.keys(profileSet).length > 0) await this.upsertProfile(organizationId, id, keys, profileSet);
     this.invalidate(organizationId);
     const { entry, directory } = await this.found(organizationId, id);
     return { created: this.row(entry, directory) };
@@ -983,6 +1071,13 @@ export class CustomerDirectoryService {
       set.repUserId = dto.repUserId || null;
       set.repName = dto.repUserId ? await this.repDisplay(organizationId, dto.repUserId) : null;
     }
+    if (dto.customerType !== undefined) set.customerType = dto.customerType;
+    // '' clears the field back to "not recorded" (null, not the empty string — row() reads text(undefined/null) as undefined either way).
+    if (dto.website !== undefined) set.website = dto.website || null;
+    if (dto.industryType !== undefined) set.industryType = dto.industryType || null;
+    if (dto.minimumMarkupPct !== undefined) set.minimumMarkupPct = dto.minimumMarkupPct;
+    if (dto.salesDiscountPct !== undefined) set.salesDiscountPct = dto.salesDiscountPct;
+    if (dto.profileNote !== undefined) set.profileNote = dto.profileNote || null;
     await this.upsertProfile(organizationId, id, customer.keys, set);
     this.invalidate(organizationId);
     const { entry, directory } = await this.found(organizationId, id);
@@ -1014,6 +1109,23 @@ export class CustomerDirectoryService {
     return this.row(entry, directory);
   }
 
+  async addAddress(organizationId: string, id: string, dto: CreateCustomerAddressDto): Promise<CustomerRow> {
+    const customer = await this.identity(organizationId, id);
+    const address = { id: randomUUID(), type: dto.type, address: dto.address, addressLine2: dto.addressLine2, city: dto.city, state: dto.state };
+    await this.upsertProfile(organizationId, id, customer.keys, {}, { $push: { addresses: address } });
+    this.invalidate(organizationId);
+    const { entry, directory } = await this.found(organizationId, id);
+    return this.row(entry, directory);
+  }
+
+  async removeAddress(organizationId: string, id: string, addressId: string): Promise<CustomerRow> {
+    const customer = await this.identity(organizationId, id);
+    await this.upsertProfile(organizationId, id, customer.keys, {}, { $pull: { addresses: { id: addressId } } });
+    this.invalidate(organizationId);
+    const { entry, directory } = await this.found(organizationId, id);
+    return this.row(entry, directory);
+  }
+
   /** Same "newest kept current, older let go" consolidation as setStatus() above — a customer that
    * was two rows before a re-sync merged them may have an override doc under each; the latest stays
    * authoritative and the others stop being read (customerKeys cleared), instead of one at random. */
@@ -1026,14 +1138,21 @@ export class CustomerDirectoryService {
     const at = new Date();
     const [record, ...older] = records;
     if (!record) {
+      // $push has nothing to push onto yet on a brand-new doc — seed each of
+      // its fields as a one-item array instead. Generic over whichever
+      // field(s) extra.$push names (contacts, addresses, ...), not
+      // hardcoded to one — a second $push-using caller (addAddress) after
+      // addContact surfaced this the first time it wasn't.
+      const pushed = Object.fromEntries(Object.entries(extra.$push ?? {}).map(([field, value]) => [field, [value]]));
       await profiles.insertOne({
         organizationId,
         customerId,
         customerKeys: keys,
         archived: false,
         contacts: [],
+        addresses: [],
         ...set,
-        ...(extra.$push ? { contacts: [extra.$push.contacts] } : {}),
+        ...pushed,
         createdAt: at,
         updatedAt: at,
       });
@@ -1385,9 +1504,12 @@ export class CustomerDirectoryService {
       quotations: entry.profile.quotations.map((line) => {
         const record = piece('quote', line.id);
         const dealId = text(record?.doc.dealId) || undefined;
-        // A quotation made in HaiVE carries its own lines. A CRM may keep them on the deal the
-        // quotation was raised from instead (Pantheras does): those are then the quotation's items.
-        const own: Doc[] = Array.isArray(record?.doc.lineItems) ? record.doc.lineItems : [];
+        // A quotation made in HaiVE carries its own lines, on Quote.items (quote.schema.ts) — not
+        // "lineItems"; that field name never existed on the schema, so this always read an empty
+        // array until now, silently hiding every native quote's items from the Job panel/board's
+        // own Product Information section. A CRM may keep them on the deal the quotation was
+        // raised from instead (Pantheras does): those are then the quotation's items.
+        const own: Doc[] = Array.isArray(record?.doc.items) ? record.doc.items : [];
         const onDeal: Doc[] = own.length === 0 && dealId ? ((piece('deal', dealId)?.doc.products as Doc[] | undefined) ?? []) : [];
         const charge = (kind: DocumentCharge['kind'], rows: unknown) =>
           (Array.isArray(rows) ? (rows as Doc[]) : []).map((row): DocumentCharge => ({

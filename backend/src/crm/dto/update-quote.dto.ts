@@ -1,7 +1,9 @@
 import { Type } from 'class-transformer';
-import { ArrayMinSize, IsArray, IsNumber, IsOptional, IsString, Matches, Min, ValidateNested } from 'class-validator';
+import { ArrayMinSize, IsArray, IsBoolean, IsIn, IsNumber, IsOptional, IsString, Matches, Min, ValidateNested } from 'class-validator';
 import { QuoteClientDetailsDto } from './create-quote.dto';
 import { QuoteItemDto } from './quote-item.dto';
+
+const QUOTE_CUSTOMER_TYPES = ['new', 'bau'] as const;
 
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -64,4 +66,77 @@ export class UpdateQuoteDto {
   @ValidateNested({ each: true })
   @Type(() => QuoteItemDto)
   items?: QuoteItemDto[];
+
+  // --- Hoops-parity SalesBoard (additive) ---
+
+  @IsOptional()
+  @IsString()
+  salesStatus?: string;
+
+  @IsOptional()
+  @IsString()
+  classification?: string;
+
+  @IsOptional()
+  @IsString()
+  paymentInvoiceStatus?: string;
+
+  @IsOptional()
+  @IsString()
+  orderStatus?: string;
+
+  @IsOptional()
+  @IsString()
+  paymentStatus?: string;
+
+  @IsOptional()
+  @IsString()
+  deliveryStatus?: string;
+
+  @IsOptional()
+  @IsString()
+  artworkStatus?: string;
+
+  @IsOptional()
+  @IsString()
+  productionReadyStatus?: string;
+
+  @IsOptional()
+  @IsString()
+  completedStatus?: string;
+
+  @IsOptional()
+  @IsString()
+  productionHouseVendorId?: string;
+
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  vendorIds?: string[];
+
+  @IsOptional()
+  @IsString()
+  decorationId?: string;
+
+  @IsOptional()
+  @IsIn(QUOTE_CUSTOMER_TYPES)
+  customerType?: string;
+
+  @IsOptional()
+  @Matches(DATE, { message: 'deliveryDate must be YYYY-MM-DD' })
+  deliveryDate?: string;
+
+  // The reassignable "Owner" — distinct from createdByUserId below, which
+  // never changes after creation. Reuses the same real userId shape
+  // ownerUserId already had; see quote.schema.ts's comment for why this is
+  // safe for Employee Productivity reporting (reassignment makes that
+  // report MORE accurate, not less, by reflecting who actually owns the
+  // quote today).
+  @IsOptional()
+  @IsString()
+  ownerUserId?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  archived?: boolean;
 }

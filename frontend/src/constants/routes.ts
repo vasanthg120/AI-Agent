@@ -5,6 +5,8 @@ export const ROUTES = {
   oauthCallback: '/oauth/callback',
   // Where an invitation email's link lands (sub-account owners, invited employees).
   activate: '/activate',
+  // SalesBoard's "Copy Guest View Link" — public, token-only, no session.
+  quoteGuestView: '/quotes/guest/:token',
 
   dashboard: '/dashboard',
   agentActivity: '/agent-activity',

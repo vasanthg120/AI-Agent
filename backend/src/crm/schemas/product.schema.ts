@@ -38,6 +38,43 @@ export class Product {
   @Prop({ default: true, index: true })
   isActive: boolean;
 
+  // Hoops-parity Catalog (vendor/image/sizes/colors, Pre-Built Items) — all
+  // additive/optional so every pre-existing Product (and every Quote line
+  // item referencing one by _id/name/currency only, see quotes.service.ts)
+  // is untouched. Vendor is a soft reference (validated org-scoped at the
+  // DTO layer, same convention as Deal.leadSource) rather than a Mongoose
+  // ref — Vendor lives in a separate top-level module (VendorsModule) and
+  // this schema has no reason to couple to its document shape.
+  @Prop({ index: true })
+  vendorId?: string;
+
+  // GridFS file id (catalog_product_images bucket) — null until an image is
+  // uploaded via POST crm/products/:id/image. Only one image per product,
+  // matching Hoops' "Primary Image" field exactly (its own form note: "You
+  // can only select one image for the Product's primary image").
+  @Prop()
+  imageFileId?: string;
+
+  @Prop()
+  imageMimeType?: string;
+
+  @Prop({ type: [String], default: [] })
+  sizes: string[];
+
+  @Prop({ type: [String], default: [] })
+  colors: string[];
+
+  // A Pre-Built Item is the same underlying record as a Product — Hoops'
+  // own Pre-Built Items tab shows the identical card UI (image, name, "..."
+  // menu), just without the vendor/code facts a sourced Product carries,
+  // and its own "ADD PRE-BUILT ITEMS" flow never demonstrates a vendor/code
+  // field being required. Modeled as a discriminator rather than a second
+  // schema+collection: a prebuilt item is a Product that skips the
+  // vendor/code requirement, nothing else about it is a different kind of
+  // entity, and Quote line items reference both kinds identically.
+  @Prop({ enum: ['product', 'prebuilt'], default: 'product', index: true })
+  kind: 'product' | 'prebuilt';
+
   @Prop()
   createdBy?: string;
 

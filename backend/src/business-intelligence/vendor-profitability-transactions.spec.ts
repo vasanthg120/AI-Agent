@@ -4,16 +4,20 @@ import { ConfigService } from '@nestjs/config';
 import { HttpService } from '@nestjs/axios';
 import { JwtService } from '@nestjs/jwt';
 import { Connection, Model } from 'mongoose';
+import { GridFsService } from '../common/gridfs/gridfs.service';
 import { Deal, DealDocument, DealSchema } from '../crm/schemas/deal.schema';
+import { Decoration, DecorationSchema } from '../crm/schemas/decoration.schema';
 import { Product, ProductDocument, ProductSchema } from '../crm/schemas/product.schema';
 import { Quote, QuoteDocument, QuoteSchema } from '../crm/schemas/quote.schema';
 import { QuoteCounter, QuoteCounterDocument, QuoteCounterSchema } from '../crm/schemas/quote-counter.schema';
+import { QuoteGridFsService } from '../crm/quote-gridfs.service';
 import { QuotePayment, QuotePaymentDocument, QuotePaymentSchema } from '../crm/schemas/quote-payment.schema';
 import { QuotePaymentsService } from '../crm/quote-payments.service';
 import { QuotesService } from '../crm/quotes.service';
 import { FinanceDocument, FinanceDocumentDocument, FinanceDocumentSchema } from '../finance/schemas/finance-document.schema';
 import { Vendor, VendorDocument, VendorSchema } from '../vendors/schemas/vendor.schema';
 import { VendorQuote, VendorQuoteDocument, VendorQuoteSchema } from '../vendors/schemas/vendor-quote.schema';
+import { VendorsService } from '../vendors/vendors.service';
 import { VendorProfitabilityService } from './vendor-profitability.service';
 
 // Real-Mongo integration tests for the per-transaction Vendor Profitability
@@ -47,6 +51,7 @@ describe('Vendor Profitability — per-transaction view (real Mongo)', () => {
         MongooseModule.forFeature([
           { name: Deal.name, schema: DealSchema },
           { name: Product.name, schema: ProductSchema },
+          { name: Decoration.name, schema: DecorationSchema },
           { name: Quote.name, schema: QuoteSchema },
           { name: QuoteCounter.name, schema: QuoteCounterSchema },
           { name: QuotePayment.name, schema: QuotePaymentSchema },
@@ -59,6 +64,9 @@ describe('Vendor Profitability — per-transaction view (real Mongo)', () => {
         VendorProfitabilityService,
         QuotePaymentsService,
         QuotesService,
+        VendorsService,
+        GridFsService,
+        QuoteGridFsService,
         { provide: HttpService, useValue: {} },
         { provide: JwtService, useValue: { sign: () => 'fake-token' } },
         { provide: ConfigService, useValue: { get: () => undefined } },

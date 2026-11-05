@@ -7,6 +7,9 @@ import { DashboardModule } from '../dashboard/dashboard.module';
 import { OrganizationsModule } from '../organizations/organizations.module';
 import { TimelineModule } from '../timeline/timeline.module';
 import { UsersModule } from '../users/users.module';
+import { VendorsModule } from '../vendors/vendors.module';
+import { CustomerIntelligenceModule } from '../customer-intelligence/customer-intelligence.module';
+import { GridFsService } from '../common/gridfs/gridfs.service';
 import { Account, AccountSchema } from './schemas/account.schema';
 import { Contact, ContactSchema } from './schemas/contact.schema';
 import { CustomerActivitySummary, CustomerActivitySummarySchema } from './schemas/customer-activity-summary.schema';
@@ -16,6 +19,7 @@ import {
 } from './schemas/customer-activity-personal-summary.schema';
 import { Deal, DealSchema } from './schemas/deal.schema';
 import { DealOwnerMapping, DealOwnerMappingSchema } from './schemas/deal-owner-mapping.schema';
+import { Decoration, DecorationSchema } from './schemas/decoration.schema';
 import { EmailIntelligenceItem, EmailIntelligenceItemSchema } from '../email-intelligence/schemas/email-intelligence-item.schema';
 import { Note, NoteSchema } from './schemas/note.schema';
 import { Product, ProductSchema } from './schemas/product.schema';
@@ -31,8 +35,14 @@ import { CrmService } from './crm.service';
 import { CustomerActivityController } from './customer-activity.controller';
 import { CustomerActivityService } from './customer-activity.service';
 import { QuotesController } from './quotes.controller';
+import { QuoteGuestController } from './quote-guest.controller';
+import { QuoteDocumentsService } from './quote-documents.service';
 import { ProductsController } from './products.controller';
 import { ProductsService } from './products.service';
+import { DecorationsController } from './decorations.controller';
+import { DecorationsService } from './decorations.service';
+import { CatalogGridFsService } from './catalog-gridfs.service';
+import { QuoteGridFsService } from './quote-gridfs.service';
 import { DealPerformanceDashboardService } from './deal-performance-dashboard.service';
 import { DealsController } from './deals.controller';
 import { DealsExportService } from './deals-export.service';
@@ -56,6 +66,7 @@ import { SalesTargetController } from './sales-target.controller';
       { name: QuotePayment.name, schema: QuotePaymentSchema },
       { name: Note.name, schema: NoteSchema },
       { name: Product.name, schema: ProductSchema },
+      { name: Decoration.name, schema: DecorationSchema },
       { name: Tag.name, schema: TagSchema },
       { name: SalesTarget.name, schema: SalesTargetSchema },
       { name: QuoteCounter.name, schema: QuoteCounterSchema },
@@ -73,6 +84,13 @@ import { SalesTargetController } from './sales-target.controller';
     OrganizationsModule,
     UsersModule,
     AuthModule,
+    // Hoops-parity Catalog's vendor picker/validation (Product.vendorId,
+    // Decoration.vendorId) — VendorsModule is a leaf module (only
+    // Auth/Users/Organizations), so this import is one-directional and safe.
+    VendorsModule,
+    // SalesBoard's "Job #" column / "View Linked Job" action — one-directional
+    // (see customer-intelligence.module.ts's own comment on its CustomerJobsService export).
+    CustomerIntelligenceModule,
     // Reuses ReservationService.reserve/settle/release for Customer
     // Activity's "Generate Summary" AI call — see
     // customer-activity.service.ts's own comment.
@@ -96,7 +114,9 @@ import { SalesTargetController } from './sales-target.controller';
     DealsController,
     CustomerActivityController,
     QuotesController,
+    QuoteGuestController,
     ProductsController,
+    DecorationsController,
   ],
   providers: [
     CrmService,
@@ -114,7 +134,12 @@ import { SalesTargetController } from './sales-target.controller';
     CustomerActivityService,
     QuotesService,
     QuotePaymentsService,
+    QuoteDocumentsService,
     ProductsService,
+    DecorationsService,
+    GridFsService,
+    CatalogGridFsService,
+    QuoteGridFsService,
   ],
   // Consumed by EmailIntelligenceModule: CustomerActivityService.gatherCorrelationContext
   // (Phase 14b) and QuotesService.createDraftQuote (Phase 14e, post-send actions).

@@ -120,4 +120,29 @@ export class MailService {
       return false;
     }
   }
+
+  // SalesBoard's "Send" record action (quotes.service.ts's sendQuote, via
+  // quote-documents.service.ts) — the one caller that needs a real file
+  // attached, so it's its own method rather than extending the shared,
+  // attachment-less send() above. Same boolean-returning contract as
+  // sendDailyReportEmail just above, for the same reason: the caller needs
+  // to know whether this specific send actually went out before it updates
+  // quoteStatus.
+  async sendDocumentEmail(
+    to: string,
+    { subject, html, text, attachment }: { subject: string; html: string; text: string; attachment: { filename: string; content: Buffer } },
+  ): Promise<boolean> {
+    if (!this.transporter) {
+      this.logger.warn(`Email suppressed (SMTP not configured): "${subject}" -> ${to}`);
+      return false;
+    }
+    try {
+      const info = await this.transporter.sendMail({ from: this.from, to, subject, html, text, attachments: [attachment] });
+      this.logger.log(`Email "${subject}" -> ${to} accepted by SMTP server (${info.response})`);
+      return true;
+    } catch (err) {
+      this.logger.error(`Failed to send email "${subject}" to ${to}: ${(err as Error).message}`);
+      return false;
+    }
+  }
 }

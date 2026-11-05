@@ -1,9 +1,12 @@
-import { Body, Controller, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { Body, Controller, Get, Param, Patch, Post, Query, Res, UploadedFile, UseGuards, UseInterceptors } from '@nestjs/common';
+import { Response } from 'express';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
 import { JwtPayload } from '../auth/jwt-payload.interface';
+import { UPLOAD_FILE_INTERCEPTOR_OPTIONS } from '../common/upload-limits';
 import { CreateProductDto } from './dto/create-product.dto';
 import { UpdateProductDto } from './dto/update-product.dto';
 import { ListProductsQueryDto } from './dto/list-products-query.dto';
@@ -56,5 +59,20 @@ export class ProductsController {
   @Roles('owner', 'admin', 'manager')
   deactivate(@CurrentUser() user: JwtPayload, @Param('id') id: string) {
     return this.productsService.setActive(user.organizationId, id, false);
+  }
+
+  @Post(':id/image')
+  @Roles('owner', 'admin', 'manager')
+  @UseInterceptors(FileInterceptor('file', UPLOAD_FILE_INTERCEPTOR_OPTIONS))
+  setImage(@CurrentUser() user: JwtPayload, @Param('id') id: string, @UploadedFile() file: Express.Multer.File) {
+    return this.productsService.setImage(user.organizationId, id, file);
+  }
+
+  @Get(':id/image')
+  @Roles('owner', 'admin', 'manager', 'consultant')
+  async getImage(@CurrentUser() user: JwtPayload, @Param('id') id: string, @Res() res: Response) {
+    const { stream, filename, mimeType } = await this.productsService.getImageStream(user.organizationId, id);
+    res.set({ 'Content-Type': mimeType, 'Content-Disposition': `inline; filename="${filename}"` });
+    stream.pipe(res);
   }
 }

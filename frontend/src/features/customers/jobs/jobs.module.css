@@ -70,6 +70,13 @@ button.jobTag:focus-visible {
   max-width: 126px;
   padding-left: 5px;
   padding-right: 5px;
+  /* A column title's single word must never be wider than the column
+     itself (e.g. "PRODUCTION", uppercase) — without this, a browser
+     refuses to break the word and lets it run into the next header
+     instead of wrapping. overflow:hidden is the last-resort backstop if
+     even a broken word still doesn't fit. */
+  overflow-wrap: break-word;
+  overflow: hidden;
 }
 
 .dateCell {

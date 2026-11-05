@@ -1,10 +1,16 @@
 import { getModelToken, MongooseModule } from '@nestjs/mongoose';
 import { Test } from '@nestjs/testing';
 import { Connection, Model } from 'mongoose';
+import { GridFsService } from '../common/gridfs/gridfs.service';
+import { Vendor, VendorSchema } from '../vendors/schemas/vendor.schema';
+import { VendorQuote, VendorQuoteSchema } from '../vendors/schemas/vendor-quote.schema';
+import { VendorsService } from '../vendors/vendors.service';
 import { Deal, DealDocument, DealSchema } from './schemas/deal.schema';
+import { Decoration, DecorationSchema } from './schemas/decoration.schema';
 import { Product, ProductDocument, ProductSchema } from './schemas/product.schema';
 import { Quote, QuoteDocument, QuoteSchema } from './schemas/quote.schema';
 import { QuoteCounter, QuoteCounterDocument, QuoteCounterSchema } from './schemas/quote-counter.schema';
+import { QuoteGridFsService } from './quote-gridfs.service';
 import { QuotePayment, QuotePaymentDocument, QuotePaymentSchema } from './schemas/quote-payment.schema';
 import { QuotesService } from './quotes.service';
 import { QuotePaymentsService } from './quote-payments.service';
@@ -34,12 +40,15 @@ describe('Quotes — native creation, pricing, and sync protection (real Mongo)'
         MongooseModule.forFeature([
           { name: Deal.name, schema: DealSchema },
           { name: Product.name, schema: ProductSchema },
+          { name: Decoration.name, schema: DecorationSchema },
           { name: Quote.name, schema: QuoteSchema },
           { name: QuoteCounter.name, schema: QuoteCounterSchema },
           { name: QuotePayment.name, schema: QuotePaymentSchema },
+          { name: Vendor.name, schema: VendorSchema },
+          { name: VendorQuote.name, schema: VendorQuoteSchema },
         ]),
       ],
-      providers: [QuotesService, QuotePaymentsService],
+      providers: [QuotesService, QuotePaymentsService, VendorsService, GridFsService, QuoteGridFsService],
     }).compile();
 
     connection = moduleRef.get(getModelToken(Quote.name)).db;

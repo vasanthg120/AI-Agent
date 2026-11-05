@@ -27,6 +27,9 @@ const SubAccountDetailPage = lazy(() =>
 const OAuthCallbackPage = lazy(() =>
   import('@/features/auth/OAuthCallbackPage').then((m) => ({ default: m.OAuthCallbackPage })),
 );
+const QuoteGuestViewPage = lazy(() =>
+  import('@/features/customers/QuoteGuestViewPage').then((m) => ({ default: m.QuoteGuestViewPage })),
+);
 
 const DashboardRouterPage = lazy(() =>
   import('@/features/business-dashboard/DashboardRouterPage').then((m) => ({ default: m.DashboardRouterPage })),
@@ -260,6 +263,9 @@ export function AppRoutes() {
         {/* Unguarded: reached mid-flow with no session yet — the page
             itself establishes one from the token in the URL. */}
         <Route path={ROUTES.oauthCallback} element={<OAuthCallbackPage />} />
+        {/* SalesBoard's "Copy Guest View Link" — fully public, no session
+            at all, same unguarded shape as the activate route below. */}
+        <Route path={ROUTES.quoteGuestView} element={<QuoteGuestViewPage />} />
         <Route
           path={ROUTES.activate}
           element={

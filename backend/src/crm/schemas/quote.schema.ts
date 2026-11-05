@@ -195,6 +195,118 @@ export class Quote {
   @Prop({ default: 0 })
   taxAmount: number;
 
+  // --- Hoops-parity SalesBoard (additive) ---
+  //
+  // Nine independent status axes (Phase 3 A-I of the spec) — each its own
+  // free string governed by status-definitions (same convention as
+  // quoteStatus/clientApprovalStatus above), never a shared field, and
+  // never touched by SYNC_OWNED_FIELDS (quotes.service.ts) since none of
+  // these concepts exist in any connected CRM — purely HaiVE's own
+  // tracking layer, editable regardless of whether the quote is synced.
+  @Prop()
+  salesStatus?: string;
+
+  @Prop()
+  classification?: string;
+
+  @Prop()
+  paymentInvoiceStatus?: string;
+
+  @Prop()
+  orderStatus?: string;
+
+  // A manual, hand-set label — independent of (and never overwritten by)
+  // the computed paid/outstanding derived from quoteAmount/paidAmount
+  // above, same separation Accounting Status keeps (computed only, never
+  // stored — see quotes.service.ts's row-mapping).
+  @Prop()
+  paymentStatus?: string;
+
+  @Prop()
+  deliveryStatus?: string;
+
+  @Prop()
+  artworkStatus?: string;
+
+  @Prop()
+  productionReadyStatus?: string;
+
+  @Prop()
+  completedStatus?: string;
+
+  // Soft references (org-scoped and validated at the service layer, same
+  // convention as Product.vendorId) — Vendor has no distinct "production
+  // house" type (confirmed: Vendor.category is free text), so this just
+  // points at an ordinary Vendor the team treats as one.
+  @Prop()
+  productionHouseVendorId?: string;
+
+  @Prop({ type: [String], default: [] })
+  vendorIds: string[];
+
+  // The Catalog's own Decoration price list (crm/schemas/decoration.schema.ts) — built
+  // today for an unrelated task, reused here as the lookup this field points at.
+  @Prop()
+  decorationId?: string;
+
+  // Per-quote "is this a brand-new customer or one we already do business
+  // with" tag — deliberately its own field, not Customer.customerType
+  // (which is the Business/Individual record-type added earlier today on
+  // an entirely different document).
+  @Prop()
+  customerType?: string;
+
+  // Distinct from expirationDate (quote validity) and dueDate (payment
+  // expectation, reused as "Payment Deadline" — see quotes.service.ts's
+  // row-mapping comment) — when the finished order itself is expected out
+  // the door.
+  @Prop()
+  deliveryDate?: string;
+
+  // One reference attachment per quote (GridFS — see
+  // catalog-gridfs.service.ts's sibling pattern for the exact shape this
+  // follows). Deliberately singular, matching every reference screenshot's
+  // own "Reference" column; a quote needing more belongs on its Job once
+  // converted, which already has real multi-file support.
+  @Prop()
+  referenceFileId?: string;
+
+  @Prop()
+  referenceFileName?: string;
+
+  @Prop()
+  referenceFileMimeType?: string;
+
+  // Set once, at creation, by createQuote — never reassigned afterward
+  // (ownerUserId above IS reassignable and serves as "Owner"; this is the
+  // separate, immutable "Created By"). Quotes created before this field
+  // existed, and every synced quote, correctly have no value here —
+  // "Unknown", never a guess (the spec's own explicit requirement).
+  @Prop()
+  createdByUserId?: string;
+
+  // Same archive-not-delete convention as customer_profiles.archived —
+  // "Delete Quotation" in the UI archives; nothing calls deleteOne.
+  @Prop({ default: false })
+  archived: boolean;
+
+  // The public Guest View link's own opaque token — regenerated (not
+  // guessable from the quote's id/number), present only once "Copy Guest
+  // View Link" has been used at least once. Its own expiry is
+  // expirationDate above (the quote's real validity date), not a second,
+  // invented one.
+  @Prop()
+  guestViewToken?: string;
+
+  // Real, request-driven tracking — set only inside the public guest-view
+  // route itself (quotes.controller.ts's guestView), never inferred from
+  // an email send or any other action.
+  @Prop()
+  viewedAt?: Date;
+
+  @Prop({ default: 0 })
+  viewCount: number;
+
   // Managed automatically by { timestamps: true } above — see deal.schema.ts's
   // identical comment.
   createdAt: Date;

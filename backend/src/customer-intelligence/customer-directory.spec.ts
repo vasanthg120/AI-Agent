@@ -681,14 +681,15 @@ describe('Customers (real Mongo)', () => {
     // Nothing of the CRM's own ids reaches the page.
     expect(JSON.stringify(documents)).not.toMatch(/externalId|"p1"/);
 
-    // A quotation written in HaiVE carries its own lines: those win over the deal's.
+    // A quotation written in HaiVE carries its own lines (Quote.items, see
+    // quote.schema.ts) — those win over the deal's.
     await connection
       .collection('crm_quotes')
       .updateOne(
         { organizationId: org, quoteNumber: 'Q-2' },
         {
           $set: {
-            lineItems: [{ description: 'Polo t-shirt — annual day', quantity: 300, unitPrice: 400, lineSubtotal: 120000, lineTotal: 120000 }],
+            items: [{ description: 'Polo t-shirt — annual day', quantity: 300, unitPrice: 400, lineSubtotal: 120000, lineTotal: 120000 }],
             taxes: [],
           },
         },

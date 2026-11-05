@@ -21,6 +21,8 @@ import type { IconType } from 'react-icons';
 import clsx from 'clsx';
 import { AnimatedNumber, Avatar, Badge, Button, EmptyState, Input, PageHeader, Skeleton } from '@/components/ui';
 import { customerJobsService, type Job, type JobSort, type JobStatusKey } from '@/services/customerJobsService';
+import { decorationsService } from '@/services/decorationsService';
+import { vendorsService } from '@/services/vendorsService';
 import { extractErrorMessage } from '@/utils/errors';
 import { formatDate } from '../format';
 import { StageChip } from '../StageChip';
@@ -57,7 +59,7 @@ const opensOnKey = (onOpen: () => void) => (e: KeyboardEvent) => {
 const arrival = (index: number) => ({ '--i': Math.min(index, 12) }) as CSSProperties;
 
 // The Job board: every quotation the team decided to produce, one row per job,
-// with its seven statuses as coloured chips. A job is made from a quotation
+// with its eight statuses as coloured chips. A job is made from a quotation
 // ("Convert to job" on the customer) and is saved in HaiVE only. Statuses are
 // changed in the job's panel — a click on a row opens it.
 export const JobBoard = memo(function JobBoard({
@@ -86,10 +88,23 @@ export const JobBoard = memo(function JobBoard({
   const [direction, setDirection] = useState<'asc' | 'desc'>('desc');
   const [statuses, setStatuses] = useState<StatusFilters>({});
   const [owner, setOwner] = useState('');
+  const [productionHouseVendorId, setProductionHouseVendorId] = useState('');
+  const [showVoided, setShowVoided] = useState(false);
+  const [decorationId, setDecorationId] = useState('');
+  const [vendorId, setVendorId] = useState('');
+  const [xeroLinked, setXeroLinked] = useState<'' | 'only' | 'unlinked'>('');
+  const [hasReference, setHasReference] = useState<'' | 'only' | 'missing'>('');
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [page, setPage] = useState(1);
   const listRef = useRef<HTMLDivElement>(null);
   const paged = useRef(false);
+
+  const vendorOptions = useQuery({ queryKey: ['vendors', 'picker'], queryFn: () => vendorsService.listPicker(), staleTime: 60_000 });
+  const decorationOptions = useQuery({
+    queryKey: ['decorations', 'picker'],
+    queryFn: () => decorationsService.listFiltered({}, 1, 100).then((r) => r.items),
+    staleTime: 60_000,
+  });
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -104,7 +119,20 @@ export const JobBoard = memo(function JobBoard({
     paged.current = true;
   }, [page]);
 
-  const query = { view, search, sort, direction, owner, statuses };
+  const query = {
+    view,
+    search,
+    sort,
+    direction,
+    owner,
+    statuses,
+    productionHouseVendorId: productionHouseVendorId || undefined,
+    voided: showVoided ? ('include' as const) : undefined,
+    decorationId: decorationId || undefined,
+    vendorId: vendorId || undefined,
+    xeroLinked: xeroLinked || undefined,
+    hasReference: hasReference || undefined,
+  };
   const { data, isLoading, isError, error, isFetching, refetch } = useQuery({
     queryKey: ['customer-jobs', 'list', { ...query, page }],
     queryFn: () => customerJobsService.list({ ...query, page, pageSize: PAGE_SIZE }),
@@ -190,9 +218,23 @@ export const JobBoard = memo(function JobBoard({
   }
 
   const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
-  const filterCount = Object.values(statuses).filter(Boolean).length + (owner ? 1 : 0);
+  const filterCount =
+    Object.values(statuses).filter(Boolean).length +
+    (owner ? 1 : 0) +
+    (productionHouseVendorId ? 1 : 0) +
+    (showVoided ? 1 : 0) +
+    (decorationId ? 1 : 0) +
+    (vendorId ? 1 : 0) +
+    (xeroLinked ? 1 : 0) +
+    (hasReference ? 1 : 0);
   const filtered = view !== 'all' || search !== '' || filterCount > 0;
   const clearFilters = () => {
+    setProductionHouseVendorId('');
+    setShowVoided(false);
+    setDecorationId('');
+    setVendorId('');
+    setXeroLinked('');
+    setHasReference('');
     setSearchInput('');
     setStatuses({});
     setOwner('');
@@ -333,6 +375,68 @@ export const JobBoard = memo(function JobBoard({
               </select>
             </label>
           )}
+          {(vendorOptions.data?.length ?? 0) > 0 && (
+            <label className={styles.selectField}>
+              <span>Production house</span>
+              <select value={productionHouseVendorId} onChange={(e) => pick(() => setProductionHouseVendorId(e.target.value))}>
+                <option value="">Any</option>
+                {vendorOptions.data?.map((v) => (
+                  <option key={v._id} value={v._id}>
+                    {v.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+          <label className={styles.selectField}>
+            <span>Voided jobs</span>
+            <select value={showVoided ? 'include' : 'exclude'} onChange={(e) => pick(() => setShowVoided(e.target.value === 'include'))}>
+              <option value="exclude">Hide</option>
+              <option value="include">Show alongside active jobs</option>
+            </select>
+          </label>
+          {(decorationOptions.data?.length ?? 0) > 0 && (
+            <label className={styles.selectField}>
+              <span>Decoration</span>
+              <select value={decorationId} onChange={(e) => pick(() => setDecorationId(e.target.value))}>
+                <option value="">Any</option>
+                {decorationOptions.data?.map((d) => (
+                  <option key={d._id} value={d._id}>
+                    {d.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+          {(vendorOptions.data?.length ?? 0) > 0 && (
+            <label className={styles.selectField}>
+              <span>Vendor</span>
+              <select value={vendorId} onChange={(e) => pick(() => setVendorId(e.target.value))}>
+                <option value="">Any</option>
+                {vendorOptions.data?.map((v) => (
+                  <option key={v._id} value={v._id}>
+                    {v.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+          <label className={styles.selectField}>
+            <span>Invoice — Xero</span>
+            <select value={xeroLinked} onChange={(e) => pick(() => setXeroLinked(e.target.value as typeof xeroLinked))}>
+              <option value="">Any</option>
+              <option value="only">Linked</option>
+              <option value="unlinked">Not linked</option>
+            </select>
+          </label>
+          <label className={styles.selectField}>
+            <span>Reference</span>
+            <select value={hasReference} onChange={(e) => pick(() => setHasReference(e.target.value as typeof hasReference))}>
+              <option value="">Any</option>
+              <option value="only">Attached</option>
+              <option value="missing">Not attached</option>
+            </select>
+          </label>
         </div>
       )}
 
@@ -380,6 +484,13 @@ export const JobBoard = memo(function JobBoard({
                   {head('Due date', 'When the job has to be finished', 'due', jobStyles.foldC)}
                   {head('Owner', 'Who looks after the quotation in your CRM', 'owner', jobStyles.foldA)}
                   {head('Customer', 'Who the job is for', 'customer', jobStyles.foldB)}
+                  {head('Created by', 'Who converted the quotation into this job', undefined, jobStyles.foldA)}
+                  {head('In Hands', 'When the finished goods must be with the customer', undefined, jobStyles.foldA)}
+                  {head('Production house', 'The vendor producing this job', undefined, jobStyles.foldA)}
+                  {head('Decoration', 'From the Catalog', undefined, jobStyles.foldA)}
+                  {head('Vendors', 'Every vendor on this job', undefined, jobStyles.foldA)}
+                  {head('Reference', 'Whether a reference file is attached', undefined, jobStyles.foldA)}
+                  {head('Invoice — Xero', 'Whether a Xero invoice is linked', undefined, jobStyles.foldA)}
                   {options.columns.map((column) => (
                     <th
                       key={column.key}
@@ -405,6 +516,7 @@ export const JobBoard = memo(function JobBoard({
                   >
                     <td className={clsx(styles.customerCell, jobStyles.jobCell)}>
                       <strong>{job.number}</strong>
+                      {job.voided && <Badge variant="danger">Voided</Badge>}
                       <div className={styles.cellSub}>{job.title}</div>
                       {/* What the other columns say, where they have given up their room. */}
                       {job.customer.name !== job.title && (
@@ -420,6 +532,13 @@ export const JobBoard = memo(function JobBoard({
                         {[
                           job.quotationNumber ? `From ${job.quotationNumber}` : '',
                           job.owner ? `Owner: ${job.owner}` : '',
+                          job.createdBy ? `Created by ${job.createdBy}` : '',
+                          job.productionHouseVendorName ? `Production: ${job.productionHouseVendorName}` : '',
+                          job.inHandsDate ? `In hands ${formatDate(job.inHandsDate)}` : '',
+                          job.decorationName ? `Decoration: ${job.decorationName}` : '',
+                          job.vendorNames.length > 0 ? `Vendors: ${job.vendorNames.join(', ')}` : '',
+                          job.referenceFileId ? 'Reference attached' : '',
+                          job.xeroInvoiceNumber ? `Xero invoice ${job.xeroInvoiceNumber}` : '',
                         ]
                           .filter(Boolean)
                           .join(' · ')}
@@ -445,6 +564,17 @@ export const JobBoard = memo(function JobBoard({
                       {job.customer.company && job.customer.company !== job.customer.name && (
                         <div className={styles.cellSub}>{job.customer.name}</div>
                       )}
+                    </td>
+                    <td className={clsx(jobStyles.dateCell, jobStyles.foldA)}>{job.createdBy ?? NONE}</td>
+                    <td className={clsx(jobStyles.dateCell, jobStyles.foldA)}>{job.inHandsDate ? formatDate(job.inHandsDate) : NONE}</td>
+                    <td className={clsx(jobStyles.dateCell, jobStyles.foldA)}>{job.productionHouseVendorName ?? NONE}</td>
+                    <td className={clsx(jobStyles.dateCell, jobStyles.foldA)}>{job.decorationName ?? NONE}</td>
+                    <td className={clsx(jobStyles.dateCell, jobStyles.foldA)}>{job.vendorNames.length > 0 ? job.vendorNames.join(', ') : NONE}</td>
+                    <td className={clsx(jobStyles.dateCell, jobStyles.foldA)}>
+                      {job.referenceFileId ? <Badge variant="success">Attached</Badge> : NONE}
+                    </td>
+                    <td className={clsx(jobStyles.dateCell, jobStyles.foldA)}>
+                      {job.xeroInvoiceNumber ? <Badge variant="success">{job.xeroInvoiceNumber}</Badge> : NONE}
                     </td>
                     {job.statuses.map((chip) => (
                       <td key={chip.key} className={jobStyles.chipCol}>
@@ -484,7 +614,9 @@ export const JobBoard = memo(function JobBoard({
                         .join(' · ')}
                     </span>
                   </div>
-                  {job.done ? (
+                  {job.voided ? (
+                    <Badge variant="danger">Voided</Badge>
+                  ) : job.done ? (
                     <Badge variant="success">Done</Badge>
                   ) : job.overdue ? (
                     <Badge variant="danger">Overdue</Badge>

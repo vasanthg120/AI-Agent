@@ -37,6 +37,69 @@ export class StatusDefinitionsService {
       { key: 'published', label: 'Published', color: '#2563eb' },
       { key: 'sent', label: 'Sent', color: '#16a34a' },
     ],
+    // Added for the SalesBoard (Hoops-parity Phase 3, categories A-I) — nine
+    // independent axes with no pre-existing enum to reflect (unlike the
+    // three entries above), since the spec requests these as brand-new
+    // HaiVE-native concepts. Every label/color below is a starting default
+    // only — exactly like every other entry here, an admin can relabel any
+    // key via relabel() with zero code changes, so wording is never locked in.
+    'quote.salesStatus': [
+      { key: 'open', label: 'Open', color: '#6b7280' },
+      { key: 'quoted', label: 'Quoted', color: '#2563eb' },
+      { key: 'negotiating', label: 'Negotiating', color: '#d97706' },
+      { key: 'won', label: 'Won', color: '#16a34a' },
+      { key: 'lost', label: 'Lost', color: '#dc2626' },
+    ],
+    'quote.classification': [
+      { key: 'standard', label: 'Standard', color: '#6b7280' },
+      { key: 'rush', label: 'Rush', color: '#dc2626' },
+      { key: 'reorder', label: 'Reorder', color: '#2563eb' },
+      { key: 'sample', label: 'Sample', color: '#7c3aed' },
+    ],
+    'quote.paymentInvoiceStatus': [
+      { key: 'not_invoiced', label: 'Not Invoiced', color: '#6b7280' },
+      { key: 'invoiced', label: 'Invoiced', color: '#2563eb' },
+      { key: 'partially_paid', label: 'Partially Paid', color: '#d97706' },
+      { key: 'paid', label: 'Paid', color: '#16a34a' },
+    ],
+    'quote.orderStatus': [
+      { key: 'pending', label: 'Pending', color: '#6b7280' },
+      { key: 'confirmed', label: 'Confirmed', color: '#2563eb' },
+      { key: 'in_production', label: 'In Production', color: '#d97706' },
+      { key: 'shipped', label: 'Shipped', color: '#0891b2' },
+      { key: 'delivered', label: 'Delivered', color: '#16a34a' },
+      { key: 'cancelled', label: 'Cancelled', color: '#dc2626' },
+    ],
+    'quote.paymentStatus': [
+      { key: 'unpaid', label: 'Unpaid', color: '#6b7280' },
+      { key: 'partially_paid', label: 'Partially Paid', color: '#d97706' },
+      { key: 'paid', label: 'Paid', color: '#16a34a' },
+      { key: 'refunded', label: 'Refunded', color: '#dc2626' },
+    ],
+    'quote.deliveryStatus': [
+      { key: 'not_shipped', label: 'Not Shipped', color: '#6b7280' },
+      { key: 'processing', label: 'Processing', color: '#d97706' },
+      { key: 'shipped', label: 'Shipped', color: '#0891b2' },
+      { key: 'delivered', label: 'Delivered', color: '#16a34a' },
+      { key: 'delayed', label: 'Delayed', color: '#dc2626' },
+    ],
+    'quote.artworkStatus': [
+      { key: 'not_started', label: 'Not Started', color: '#6b7280' },
+      { key: 'awaiting_approval', label: 'Awaiting Approval', color: '#d97706' },
+      { key: 'approved', label: 'Approved', color: '#16a34a' },
+      { key: 'revision_requested', label: 'Revision Requested', color: '#dc2626' },
+    ],
+    'quote.productionReadyStatus': [
+      { key: 'not_ready', label: 'Not Ready', color: '#6b7280' },
+      { key: 'ready', label: 'Ready', color: '#2563eb' },
+      { key: 'in_progress', label: 'In Progress', color: '#d97706' },
+      { key: 'complete', label: 'Complete', color: '#16a34a' },
+    ],
+    'quote.completedStatus': [
+      { key: 'not_completed', label: 'Not Completed', color: '#6b7280' },
+      { key: 'completed', label: 'Completed', color: '#16a34a' },
+      { key: 'completed_late', label: 'Completed Late', color: '#d97706' },
+    ],
   };
 
   constructor(@InjectModel(StatusDefinition.name) private model: Model<StatusDefinitionDocument>) {}

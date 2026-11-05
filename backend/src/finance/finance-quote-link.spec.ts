@@ -5,11 +5,17 @@ import { HttpService } from '@nestjs/axios';
 import { JwtService } from '@nestjs/jwt';
 import { NotFoundException } from '@nestjs/common';
 import { Connection, Model } from 'mongoose';
+import { GridFsService } from '../common/gridfs/gridfs.service';
 import { Deal, DealDocument, DealSchema } from '../crm/schemas/deal.schema';
+import { Decoration, DecorationSchema } from '../crm/schemas/decoration.schema';
 import { Product, ProductDocument, ProductSchema } from '../crm/schemas/product.schema';
 import { Quote, QuoteDocument, QuoteSchema } from '../crm/schemas/quote.schema';
 import { QuoteCounter, QuoteCounterDocument, QuoteCounterSchema } from '../crm/schemas/quote-counter.schema';
+import { QuoteGridFsService } from '../crm/quote-gridfs.service';
 import { QuotesService } from '../crm/quotes.service';
+import { Vendor, VendorSchema } from '../vendors/schemas/vendor.schema';
+import { VendorQuote, VendorQuoteSchema } from '../vendors/schemas/vendor-quote.schema';
+import { VendorsService } from '../vendors/vendors.service';
 import { UsersService } from '../users/users.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { FinanceDocument, FinanceDocumentDocument, FinanceDocumentSchema } from './schemas/finance-document.schema';
@@ -46,14 +52,20 @@ describe('Finance AI <-> Customer Quote linking (real Mongo)', () => {
         MongooseModule.forFeature([
           { name: Deal.name, schema: DealSchema },
           { name: Product.name, schema: ProductSchema },
+          { name: Decoration.name, schema: DecorationSchema },
           { name: Quote.name, schema: QuoteSchema },
           { name: QuoteCounter.name, schema: QuoteCounterSchema },
           { name: FinanceDocument.name, schema: FinanceDocumentSchema },
+          { name: Vendor.name, schema: VendorSchema },
+          { name: VendorQuote.name, schema: VendorQuoteSchema },
         ]),
       ],
       providers: [
         FinanceDocumentsService,
         QuotesService,
+        VendorsService,
+        GridFsService,
+        QuoteGridFsService,
         { provide: FinanceGridFsService, useValue: {} },
         { provide: HttpService, useValue: {} },
         { provide: JwtService, useValue: { sign: () => 'fake-token' } },

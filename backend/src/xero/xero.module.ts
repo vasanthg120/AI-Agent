@@ -9,5 +9,9 @@ import { XeroService } from './xero.service';
   imports: [HttpModule.register({ timeout: 15_000 }), AuthModule, IntegrationsModule],
   controllers: [XeroController],
   providers: [XeroService],
+  // JobBoard's "Invoice Status — Xero" (customer-intelligence.module.ts)
+  // reads whether this org has Xero connected at all before attempting
+  // anything through the generic DynamicExecutorService.
+  exports: [XeroService],
 })
 export class XeroModule {}

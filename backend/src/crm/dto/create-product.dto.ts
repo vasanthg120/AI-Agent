@@ -1,4 +1,4 @@
-import { IsBoolean, IsNumber, IsOptional, IsString, Min, MinLength } from 'class-validator';
+import { IsArray, IsBoolean, IsIn, IsNumber, IsOptional, IsString, Min, MinLength } from 'class-validator';
 
 export class CreateProductDto {
   @IsString()
@@ -24,4 +24,22 @@ export class CreateProductDto {
   @IsOptional()
   @IsBoolean()
   isActive?: boolean;
+
+  @IsOptional()
+  @IsString()
+  vendorId?: string;
+
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  sizes?: string[];
+
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  colors?: string[];
+
+  @IsOptional()
+  @IsIn(['product', 'prebuilt'])
+  kind?: 'product' | 'prebuilt';
 }
