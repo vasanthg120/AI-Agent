@@ -16,6 +16,7 @@ from typing import Optional
 
 import requests
 from sarvamai import SarvamAI
+from sarvamai.core.api_error import ApiError
 from sarvamai.speech_to_text_job.job import SpeechToTextJob
 
 from app.config import settings
@@ -54,6 +55,15 @@ class SarvamApiError(Exception):
         super().__init__(user_message)
         self.user_message = user_message
         self.status_code = status_code
+
+
+def _batch_error(exc: Exception, fallback: str) -> SarvamApiError:
+    """A batch-API failure from the SDK, as a user-facing error. An empty Sarvam
+    wallet (402 insufficient_quota_error) is named outright: retrying won't fix
+    it, and the generic message made it look like a HaiVE bug."""
+    if isinstance(exc, ApiError) and exc.status_code == 402:
+        return SarvamApiError("Sarvam AI (speech-to-text) is out of credits. Top up the Sarvam account, then try again.", status_code=502)
+    return SarvamApiError(fallback, status_code=502)
 
 
 def resolve_language_code(language: str) -> str:
@@ -274,7 +284,7 @@ def start_batch_transcription(
             job.start()
         except Exception as exc:  # noqa: BLE001 - any SDK/HTTP failure here is a real, user-facing Sarvam error
             logger.warning("Sarvam batch STT job creation failed: %s", exc)
-            raise SarvamApiError("Could not start processing this recording. Please try again.", status_code=502) from exc
+            raise _batch_error(exc, "Could not start processing this recording. Please try again.") from exc
 
         return job.job_id
     finally:
@@ -294,7 +304,7 @@ def get_batch_job_status(job_id: str) -> dict:
         status = job.get_status()
     except Exception as exc:  # noqa: BLE001
         logger.warning("Sarvam batch STT status check failed for job %s: %s", job_id, exc)
-        raise SarvamApiError("Could not check the recording's processing status.", status_code=502) from exc
+        raise _batch_error(exc, "Could not check the recording's processing status.") from exc
 
     state = (status.job_state or "").lower()
     if state in ("accepted", "pending", "running"):
@@ -323,7 +333,7 @@ def download_batch_job_result(job_id: str) -> dict:
             job.download_outputs(tmp_dir)
         except Exception as exc:  # noqa: BLE001
             logger.warning("Sarvam batch STT result download failed for job %s: %s", job_id, exc)
-            raise SarvamApiError("Could not retrieve the transcription result.", status_code=502) from exc
+            raise _batch_error(exc, "Could not retrieve the transcription result.") from exc
 
         transcript_parts: list[str] = []
         entries: list[dict] = []
@@ -409,7 +419,7 @@ def start_batch_transcription(
             job.start()
         except Exception as exc:  # noqa: BLE001 - any SDK/HTTP failure here is a real, user-facing Sarvam error
             logger.warning("Sarvam batch STT job creation failed: %s", exc)
-            raise SarvamApiError("Could not start processing this recording. Please try again.", status_code=502) from exc
+            raise _batch_error(exc, "Could not start processing this recording. Please try again.") from exc
 
         return job.job_id
     finally:
@@ -429,7 +439,7 @@ def get_batch_job_status(job_id: str) -> dict:
         status = job.get_status()
     except Exception as exc:  # noqa: BLE001
         logger.warning("Sarvam batch STT status check failed for job %s: %s", job_id, exc)
-        raise SarvamApiError("Could not check the recording's processing status.", status_code=502) from exc
+        raise _batch_error(exc, "Could not check the recording's processing status.") from exc
 
     state = (status.job_state or "").lower()
     if state in ("accepted", "pending", "running"):
@@ -458,7 +468,7 @@ def download_batch_job_result(job_id: str) -> dict:
             job.download_outputs(tmp_dir)
         except Exception as exc:  # noqa: BLE001
             logger.warning("Sarvam batch STT result download failed for job %s: %s", job_id, exc)
-            raise SarvamApiError("Could not retrieve the transcription result.", status_code=502) from exc
+            raise _batch_error(exc, "Could not retrieve the transcription result.") from exc
 
         transcript_parts: list[str] = []
         entries: list[dict] = []

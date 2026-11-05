@@ -1,4 +1,18 @@
-import { Body, Controller, Get, NotFoundException, Param, Post, Query, Res, UploadedFile, UseGuards, UseInterceptors } from '@nestjs/common';
+import {
+  BadGatewayException,
+  BadRequestException,
+  Body,
+  Controller,
+  Get,
+  NotFoundException,
+  Param,
+  Post,
+  Query,
+  Res,
+  UploadedFile,
+  UseGuards,
+  UseInterceptors,
+} from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { Response } from 'express';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
@@ -109,7 +123,21 @@ export class CallCopilotController {
       .map((s) => s.text)
       .filter(Boolean)
       .join(' ');
-    return this.callCopilotService.generateCoaching(session, fullTranscript);
+    // generateCoaching is best-effort and returns the session untouched when it
+    // can't coach — fine at call-end, but here a button would seem to do nothing.
+    if (!fullTranscript.trim()) {
+      throw new BadRequestException(
+        session.status === 'error'
+          ? 'This call was never transcribed, so there’s nothing for the AI Coach to review.'
+          : 'This call has no transcript yet, so there’s nothing for the AI Coach to review.',
+      );
+    }
+    const coachedBefore = session.coachingGeneratedAt?.getTime();
+    const coached = await this.callCopilotService.generateCoaching(session, fullTranscript);
+    if (!coached.coachingGeneratedAt || coached.coachingGeneratedAt.getTime() === coachedBefore) {
+      throw new BadGatewayException('The AI Coach couldn’t review this call right now. Please try again in a minute.');
+    }
+    return coached;
   }
 
   // The AI Coach's spoken script in the language picked in the panel — the

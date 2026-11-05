@@ -7,6 +7,7 @@ import { JwtService } from '@nestjs/jwt';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { firstValueFrom } from 'rxjs';
+import { AxiosError } from 'axios';
 import FormData from 'form-data';
 import { GridFsService } from '../common/gridfs/gridfs.service';
 import { ReservationService } from '../billing/reservation.service';
@@ -145,9 +146,12 @@ export class CallCopilotUploadService {
     }
 
     void this.processUpload(session, buffer, dto).catch(async (err) => {
-      const message = 'Processing this recording failed. The original file was saved.';
-      this.logger.error(`Call copilot upload processing failed for session ${session._id}: ${(err as Error).message}`);
-      await this.callCopilotService.errorSession(session, (err as Error).message);
+      // python-agent's own reason (e.g. "Sarvam AI … is out of credits") is
+      // safe to show; Axios's "Request failed with status code 502" says nothing.
+      const detail = agentDetail(err);
+      const message = detail ?? 'Processing this recording failed. The original file was saved.';
+      this.logger.error(`Call copilot upload processing failed for session ${session._id}: ${detail ?? (err as Error).message}`);
+      await this.callCopilotService.errorSession(session, detail ?? (err as Error).message);
       this.gateway.emitToUser(userId, 'call:error', { sessionId: session._id.toString(), message });
     });
 
@@ -287,6 +291,12 @@ export class CallCopilotUploadService {
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/** The `detail` of an HTTPException python-agent raised, if that's what failed. */
+function agentDetail(err: unknown): string | null {
+  const detail = (err as AxiosError<{ detail?: unknown }>).response?.data?.detail;
+  return typeof detail === 'string' && detail ? detail : null;
 }
 
 // Splits an already-complete transcript into fixed-size word windows for
