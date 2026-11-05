@@ -53,8 +53,8 @@ jobs:
       ENCRYPTION_KEY: ci-only-encryption-key
       NODE_ENV: test
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: 22
           cache: npm
@@ -64,8 +64,11 @@ jobs:
         run: npx tsc --noEmit -p tsconfig.json
       # In band: some billing specs compare organization-wide totals before and after,
       # which other suites running at the same moment would disturb.
+      # --forceExit: the specs that start the whole app leave its timers and connections open, so
+      # Jest never quits by itself after the last test — without it the job sat idle until the
+      # 40-minute limit cancelled it (run #11, 2026-11-03). Results are reported before it exits.
       - name: Tests
-        run: npx jest --ci --runInBand
+        run: npx jest --ci --runInBand --forceExit
 
   frontend:
     name: Frontend · typecheck and build
@@ -75,14 +78,14 @@ jobs:
       run:
         working-directory: frontend
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Production addresses are set
         run: |
           if [ -z "${{ vars.VITE_API_URL }}" ] || [ -z "${{ vars.VITE_SOCKET_URL }}" ]; then
             echo "::error::Set the repository variables VITE_API_URL and VITE_SOCKET_URL (Settings → Secrets and variables → Actions → Variables)."
             exit 1
           fi
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: 22
           cache: npm
@@ -99,8 +102,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
       - run: python -m compileall -q python-agent/app
@@ -117,7 +120,7 @@ jobs:
       matrix:
         service: [backend, python-agent, frontend]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: docker/setup-buildx-action@v3
       - uses: docker/build-push-action@v6
         with:
