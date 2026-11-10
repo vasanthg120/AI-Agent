@@ -1,7 +1,8 @@
 import { FileDropUpload } from '@/components/common/FileDropUpload';
 import { financeDocumentsService, type FinanceDocument } from '@/services/financeDocumentsService';
 
-const ACCEPTED_EXTENSIONS = '.pdf,.png,.jpg,.jpeg,.gif,.webp,.xlsx,.xls,.csv,.docx';
+// Also used by QuoteCostingSection's upload box.
+export const FINANCE_DOCUMENT_EXTENSIONS = '.pdf,.png,.jpg,.jpeg,.gif,.webp,.xlsx,.xls,.csv,.docx';
 
 export interface FinanceDocumentUploadProps {
   onDocumentReady: (doc: FinanceDocument) => void;
@@ -13,7 +14,7 @@ export interface FinanceDocumentUploadProps {
 export function FinanceDocumentUpload({ onDocumentReady }: FinanceDocumentUploadProps) {
   return (
     <FileDropUpload
-      accept={ACCEPTED_EXTENSIONS}
+      accept={FINANCE_DOCUMENT_EXTENSIONS}
       hint="Invoices and receipts — PDF, images, Excel, CSV or Word. The AI reads the vendor, amount and due date for you."
       upload={(file) => financeDocumentsService.upload(file)}
       onUploaded={onDocumentReady}

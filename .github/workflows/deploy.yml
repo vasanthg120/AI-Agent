@@ -175,9 +175,14 @@ jobs:
           script: |
             set -euo pipefail
             cd /var/www/AI-Agent
+            if [ -z "${SHA:-}" ]; then
+            echo "ERROR: Missing deployment SHA"
+            exit 1
+            fi
             git fetch --quiet origin main
+            git cat-file -e "${SHA}^{commit}"
             git reset --hard "$SHA"
-            ./deploy.sh "$SHA"
+            sudo /var/www/AI-Agent/deploy.sh "$SHA"
       - name: Close SSH again
         if: always() && steps.gate.outputs.ip != ''
         run: |

@@ -76,4 +76,10 @@ export class FinanceFilterQueryDto {
   @IsNumber()
   @Min(0)
   amountMax?: number;
+
+  // Linked to a customer quote or not — quote costing lists the unlinked
+  // documents that can still be added to a quote.
+  @IsOptional()
+  @IsIn(['linked', 'unlinked'])
+  quoteLink?: 'linked' | 'unlinked';
 }

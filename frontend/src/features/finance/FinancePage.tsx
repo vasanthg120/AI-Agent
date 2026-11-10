@@ -43,6 +43,7 @@ import { FinanceFilterBar } from './components/FinanceFilterBar';
 import { FinanceSavedViewsBar } from './components/FinanceSavedViewsBar';
 import { FinanceSummaryPanel } from './components/FinanceSummaryPanel';
 import { FinanceDocumentUpload } from './components/FinanceDocumentUpload';
+import { QuoteCostingSection } from './components/QuoteCostingSection';
 import { FinanceDocumentReviewModal } from './components/FinanceDocumentReviewModal';
 import { FinanceDocumentListView } from './components/FinanceDocumentListView';
 import { MonthlyExpenseTrendChart } from './components/MonthlyExpenseTrendChart';
@@ -179,6 +180,7 @@ export function FinancePage() {
   const refreshOverview = () => {
     void queryClient.invalidateQueries({ queryKey: ['finance-dashboard-overview'] });
     void queryClient.invalidateQueries({ queryKey: ['dash-vendor-profitability-transactions'] });
+    void queryClient.invalidateQueries({ queryKey: ['finance-quote-costing'] });
   };
 
   const handleGenerateSummary = async (regenerate: boolean) => {
@@ -266,6 +268,13 @@ export function FinancePage() {
           />
         </SectionCard>
       )}
+
+      <QuoteCostingSection
+        canUpload={can(useAuthStore.getState().user, 'finance', 'create')}
+        canEdit={can(useAuthStore.getState().user, 'finance', 'edit')}
+        onOpenDocument={setReviewDoc}
+        onDocumentsChanged={refreshOverview}
+      />
 
       <FinanceFilterBar filters={filters} onChange={setFilters} />
 
