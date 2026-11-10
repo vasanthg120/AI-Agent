@@ -97,6 +97,20 @@ export class AgentExecution {
 
   @Prop({ index: true })
   occurredAt: Date;
+
+  // Set only when python-agent actually created a Langfuse trace for this
+  // call (Langfuse enabled, sampled in, SDK call succeeded) — never
+  // fabricated, absent means no trace exists for this row. langfuseTraceUrl
+  // is the exact string the Langfuse SDK's own get_trace_url(trace_id=...)
+  // returns at write time (langfuse_config.py) — includes the project id,
+  // which only the SDK/API can resolve, so this is never reconstructed from
+  // parts in NestJS or the frontend. The AI Usage dashboard's "View Trace"
+  // button just opens langfuseTraceUrl directly when present.
+  @Prop()
+  langfuseTraceId?: string;
+
+  @Prop()
+  langfuseTraceUrl?: string;
 }
 
 export const AgentExecutionSchema = SchemaFactory.createForClass(AgentExecution);

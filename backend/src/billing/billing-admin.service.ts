@@ -1,7 +1,7 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectModel } from '@nestjs/mongoose';
-import { Model } from 'mongoose';
+import { Model, Types } from 'mongoose';
 import { AgentExecution, AgentExecutionDocument } from '../command-center/schemas/agent-execution.schema';
 import { CommandCenterService } from '../command-center/command-center.service';
 import { Organization, OrganizationDocument, OrganizationStatus } from '../organizations/schemas/organization.schema';
@@ -660,7 +660,16 @@ export class BillingAdminService {
         this.subscriptionModel.find({ status: 'active' }, { planId: 1 }).exec(),
       ]);
 
-    const planIds = [...new Set(activeSubscriptions.map((s) => s.planId))];
+    // planId is a plain string field (no ref/ObjectId validation at the
+    // schema level), so a malformed row — confirmed live: two leftover
+    // `planId: 'none'` test fixtures (calling.e2e.spec.ts/
+    // tenant-isolation.e2e.spec.ts's own subscription stubs) never cleaned
+    // out of this database — would otherwise crash this whole endpoint with
+    // a Mongoose CastError before any series data is returned. Same
+    // "filter to valid ObjectIds first" pattern
+    // ai-usage-admin.service.ts's validObjectIds already uses for the
+    // identical shape of problem.
+    const planIds = [...new Set(activeSubscriptions.map((s) => s.planId).filter((id) => Types.ObjectId.isValid(id)))];
     const plans = planIds.length > 0 ? await this.planModel.find({ _id: { $in: planIds } }, { name: 1 }).exec() : [];
     const nameByPlanId = new Map(plans.map((p) => [p._id.toString(), p.name]));
     const countByPlan = new Map<string, number>();

@@ -465,20 +465,21 @@ export function AdminAiUsagePage() {
                 <th>Total</th>
                 <th>Cost</th>
                 <th>Status</th>
+                <th>Trace</th>
               </tr>
             </thead>
             <tbody>
               {requestsLoading &&
                 Array.from({ length: 10 }).map((_, i) => (
                   <tr key={i}>
-                    <td colSpan={9}>
+                    <td colSpan={10}>
                       <Skeleton height={20} />
                     </td>
                   </tr>
                 ))}
               {!requestsLoading && requestRows.length === 0 && (
                 <tr>
-                  <td colSpan={9} className={shared.emptyState}>
+                  <td colSpan={10} className={shared.emptyState}>
                     No requests match these filters.
                   </td>
                 </tr>
@@ -496,6 +497,15 @@ export function AdminAiUsagePage() {
                     <td>{money(r.cost)}</td>
                     <td>
                       <Badge variant={r.status === 'success' ? 'success' : 'danger'}>{r.status}</Badge>
+                    </td>
+                    <td>
+                      {r.langfuseTraceUrl ? (
+                        <a href={r.langfuseTraceUrl} target="_blank" rel="noopener noreferrer">
+                          View Trace
+                        </a>
+                      ) : (
+                        '—'
+                      )}
                     </td>
                   </tr>
                 ))}

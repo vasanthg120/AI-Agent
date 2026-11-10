@@ -72,13 +72,19 @@ export class AnalyticsDashboardService {
     private previousMonthClosuresService: PreviousMonthClosuresService,
   ) {}
 
-  // Phase 24 — the frontend's date filter is now always a single whole
-  // calendar month (MonthYearFilterPopup), so every widget can honestly
-  // follow dateFrom's own month instead of being locked to "now" — the old
-  // "can't fabricate a pro-rated number for an arbitrary range" constraint
-  // no longer applies once the range itself is always exactly one month.
-  // achievement (widget 3) uses dateFrom's month directly; revenueTrend
-  // (widget 8) uses it as the trailing-6-month window's end instead of "now".
+  // Phase 24 — the frontend's date filter was, at the time, always a single
+  // whole calendar month (MonthYearFilterPopup), so every widget could
+  // honestly follow dateFrom's own month instead of being locked to "now".
+  // DashboardHeroHeader later added an "Advanced" start/end picker (an
+  // arbitrary span, not necessarily one calendar month) — achievement
+  // (widget 3) and revenueTrend (widget 8) deliberately stayed month-scoped
+  // (a sales target only exists per calendar month, can't be pro-rated
+  // across an arbitrary span), and the frontend discloses that one caveat
+  // next to the Advanced picker ("Revenue-against-target figures reflect
+  // the target for the start date's month"). Deal counts (wonCount/
+  // lostCount/openCount below) carry no such caveat anywhere in the UI, so
+  // they must honestly follow the real [dateFrom, dateTo] span, not just
+  // dateFrom's month — see dealMatch below.
   async getOverview(
     caller: JwtPayload,
     scope: ScopeInfo,
@@ -113,15 +119,19 @@ export class AnalyticsDashboardService {
     // that actually reflects real business timing, not sync-ingestion time.
     // A deal with no expectedClosingDate set is honestly excluded from every
     // period rather than guessed into one — same accepted tradeoff
-    // getAchievement itself already has. dateFrom is always the 1st of a
-    // single selected month (see this method's own leading comment), so its
-    // own "YYYY-MM" prefix IS that period.
+    // getAchievement itself already has. expectedClosingDate is stored as a
+    // "YYYY-MM-DD" string (deal.schema.ts), the same format dateFrom/dateTo
+    // are validated to (get-analytics-overview-query.dto.ts), so a plain
+    // string $gte/$lte range compares correctly without parsing — and,
+    // unlike a dateFrom-month-prefix regex, correctly spans an Advanced
+    // picker's arbitrary multi-month range instead of silently collapsing it
+    // to just dateFrom's own month.
     const start = new Date(`${dateFrom}T00:00:00.000Z`);
     const end = new Date(`${dateTo}T23:59:59.999Z`);
     const period = dateFrom.slice(0, 7);
     const dealMatch: Record<string, unknown> = {
       organizationId,
-      expectedClosingDate: { $regex: `^${period}` },
+      expectedClosingDate: { $gte: dateFrom, $lte: dateTo },
       ...(scope.level === 'store' && scope.storeId ? { storeId: scope.storeId } : {}),
       ...(scope.level === 'user' && scope.userId ? { ownerId: scope.userId } : {}),
     };

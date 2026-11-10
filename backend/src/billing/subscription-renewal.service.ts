@@ -3,7 +3,7 @@ import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import { NotificationsService } from '../notifications/notifications.service';
 import { ConfigService } from '@nestjs/config';
 import { InjectModel } from '@nestjs/mongoose';
-import { Model } from 'mongoose';
+import { Model, Types } from 'mongoose';
 import { EncryptionService } from '../common/encryption/encryption.service';
 import { PAYMENT_PROVIDER, PaymentProviderAdapter } from './providers/payment-provider.interface';
 import { WalletService } from './wallet.service';
@@ -96,6 +96,19 @@ export class SubscriptionRenewalService {
       return;
     }
 
+    // planPriceId is a plain string field (no ref/ObjectId validation at the
+    // schema level — see billing-subscription.schema.ts) — Mongoose's
+    // findById throws a CastError instead of returning null for a
+    // non-ObjectId value, which would otherwise crash this whole cron tick's
+    // remaining subscriptions. Confirmed live against a malformed row (two
+    // leftover `planPriceId: 'none'` test fixtures — see
+    // calling.e2e.spec.ts/tenant-isolation.e2e.spec.ts's own subscription
+    // stubs — that never got cleaned out of this database). Treated exactly
+    // like a real missing price: same recordFailure/notify path.
+    if (!Types.ObjectId.isValid(subscription.planPriceId)) {
+      await this.recordFailure(subscription, 'price_missing');
+      return;
+    }
     const price = await this.priceModel.findById(subscription.planPriceId).exec();
     if (!price) {
       await this.recordFailure(subscription, 'price_missing');

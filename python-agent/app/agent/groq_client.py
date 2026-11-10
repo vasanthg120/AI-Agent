@@ -97,6 +97,7 @@ def call(
         model=settings.groq_model,
         request_id=request_id,
     ) as usage:
+        usage["input"] = messages
         accumulated: list[str] = []
         stream = _client(api_key).chat.completions.create(
             model=settings.groq_model,
@@ -144,6 +145,7 @@ def call(
                 accumulated.append(delta)
                 if on_event:
                     on_event({"type": "delta", "text": delta})
+        usage["output"] = "".join(accumulated)
 
     return [
         {

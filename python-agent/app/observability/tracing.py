@@ -34,6 +34,7 @@ from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor, ConsoleSpanExporter, SimpleSpanProcessor
 
+from app.core import langfuse_config
 from app.observability import execution_store
 from app.observability.cost import estimate_cost
 
@@ -119,6 +120,33 @@ def traced_llm_call(
                 span.set_attribute("tokens.output", output_tokens)
                 if cost_usd is not None:
                     span.set_attribute("cost.usd", cost_usd)
+            # A third sink alongside the OTel span above and the Mongo write
+            # below — see app/core/langfuse_config.py's own module docstring
+            # for the full reasoning. Deliberately its own try/except,
+            # separate from the Mongo write's: Langfuse being briefly down
+            # must never also cost us the Mongo row (billing/AI-Usage
+            # dashboard data), and vice versa.
+            langfuse_trace_id: str | None = None
+            langfuse_trace_url: str | None = None
+            try:
+                langfuse_trace_id, langfuse_trace_url = langfuse_config.record_llm_generation(
+                    name,
+                    organization_id=organization_id,
+                    user_id=user_id,
+                    conversation_id=conversation_id,
+                    request_id=request_id,
+                    provider=provider,
+                    model=model,
+                    input_tokens=input_tokens,
+                    output_tokens=output_tokens,
+                    cost_usd=cost_usd,
+                    success=success,
+                    error=error,
+                    input_data=usage.get("input"),
+                    output_data=usage.get("output"),
+                )
+            except Exception:
+                pass  # observability must never break the actual LLM call
             try:
                 execution_store.record_llm_execution(
                     organization_id=organization_id,
@@ -136,6 +164,8 @@ def traced_llm_call(
                     success=success,
                     error=error,
                     request_id=request_id,
+                    langfuse_trace_id=langfuse_trace_id,
+                    langfuse_trace_url=langfuse_trace_url,
                 )
             except Exception:
                 pass  # persistence must never break the actual LLM call
@@ -161,6 +191,16 @@ def traced_tool_call(
             success = outcome.get("success", True)
             span.set_attribute("latency_ms", latency_ms)
             span.set_attribute("success", success)
+            try:
+                langfuse_config.record_tool_span(
+                    name,
+                    organization_id=organization_id,
+                    user_id=user_id,
+                    conversation_id=conversation_id,
+                    success=success,
+                )
+            except Exception:
+                pass  # observability must never break the actual tool call
             try:
                 execution_store.record_tool_execution(
                     organization_id=organization_id,

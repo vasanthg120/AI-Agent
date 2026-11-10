@@ -57,6 +57,9 @@ export interface AnthropicUsageRequestRow {
   totalTokens: number;
   cost: number | null;
   status: 'success' | 'failed';
+  // Set only when python-agent actually created a Langfuse trace for this
+  // row — absent means no trace exists, never a guessed/reconstructed link.
+  langfuseTraceUrl: string | null;
 }
 
 export interface AnthropicUsageRequestsPage {

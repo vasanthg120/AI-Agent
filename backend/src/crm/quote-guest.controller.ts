@@ -1,4 +1,5 @@
 import { Controller, Get, Param } from '@nestjs/common';
+import { PermissionExempt } from '../common/permissions/permission.decorator';
 import { QuotesService } from './quotes.service';
 
 // The public side of "Copy Guest View Link" — deliberately its own
@@ -9,6 +10,7 @@ import { QuotesService } from './quotes.service';
 // RolesGuard). A token here stands in for auth entirely — see
 // QuotesService.getByGuestToken's own comment on why it's opaque and
 // unguessable, and why this never falls back to the authenticated getOne.
+@PermissionExempt('public')
 @Controller('crm/quotes/guest')
 export class QuoteGuestController {
   constructor(private quotesService: QuotesService) {}

@@ -60,6 +60,19 @@ xlrd==2.0.1
 beautifulsoup4==4.12.3
 requests==2.32.3
 groq==1.6.0
+langfuse==5.2.0
+# langfuse pulls in a newer opentelemetry-sdk (1.45.x) than the one
+# crewai -> chromadb's own grpc OTel exporter was built against (1.44.x) —
+# left unpinned before this, since opentelemetry-* was always a transitive
+# dependency (see app/observability/tracing.py's own docstring: "a crewai
+# dependency, previously unused by this app's own code"). Without this
+# explicit pin, a fresh install resolves a broken combination: crewai
+# (used by app/crm_tools/crew_reports.py's scheduled report crew) fails at
+# import time with "ModuleNotFoundError: opentelemetry.exporter.otlp.proto.
+# common._exporter_metrics" — confirmed live. Pinning the grpc exporter to
+# the same 1.45.2 line resolves it; `pip check` reports no broken
+# requirements with this combination.
+opentelemetry-exporter-otlp-proto-grpc==1.45.2
 
 # Official SDK, used only by app/integrations/sarvam_client.py's batch-STT
 # functions (uploaded call recordings) — the existing sync speech-to-text/

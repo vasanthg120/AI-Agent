@@ -33,6 +33,8 @@ def record_llm_execution(
     request_id: str = "",
     cache_creation_input_tokens: int = 0,
     cache_read_input_tokens: int = 0,
+    langfuse_trace_id: str | None = None,
+    langfuse_trace_url: str | None = None,
 ) -> None:
     now = datetime.now(timezone.utc)
     get_db().agent_executions.insert_one(
@@ -71,6 +73,12 @@ def record_llm_execution(
             # this collection's sole writer is pymongo, which bypasses
             # Mongoose's document middleware entirely.
             "createdAt": now,
+            # Only set when Langfuse actually created a trace for this call
+            # (see app/core/langfuse_config.py) — None means no trace exists
+            # for this row, same "never fabricated" rule every other
+            # optional field here follows.
+            "langfuseTraceId": langfuse_trace_id,
+            "langfuseTraceUrl": langfuse_trace_url,
         }
     )
 

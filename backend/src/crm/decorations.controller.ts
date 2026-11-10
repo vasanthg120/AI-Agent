@@ -21,6 +21,7 @@ import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
 import { JwtPayload } from '../auth/jwt-payload.interface';
 import { UPLOAD_FILE_INTERCEPTOR_OPTIONS } from '../common/upload-limits';
+import { Permission } from '../common/permissions/permission.decorator';
 import { CreateDecorationDto } from './dto/create-decoration.dto';
 import { UpdateDecorationDto } from './dto/update-decoration.dto';
 import { ListDecorationsQueryDto } from './dto/list-decorations-query.dto';
@@ -29,10 +30,13 @@ import { buildImportTemplateCsv, DecorationsService } from './decorations.servic
 
 // Hoops-parity Catalog — same JwtAuthGuard+RolesGuard tiers as
 // ProductsController (read: owner/admin/manager/consultant, write:
-// owner/admin/manager). Route order matters: 'query'/'import-template'/
-// 'import/preview'/'import/commit' are static segments and must be
-// registered before ':id', same rule products.controller.ts documents.
+// owner/admin/manager), and the same 'customers' module/method-inferred
+// @Permission tagging ProductsController/CustomersController use. Route
+// order matters: 'query'/'import-template'/'import/preview'/'import/commit'
+// are static segments and must be registered before ':id', same rule
+// products.controller.ts documents.
 @UseGuards(JwtAuthGuard, RolesGuard)
+@Permission('customers')
 @Controller('crm/decorations')
 export class DecorationsController {
   constructor(private decorationsService: DecorationsService) {}
