@@ -1,4 +1,4 @@
-import { IsString, ValidateNested } from 'class-validator';
+import { IsIn, IsOptional, IsString, ValidateNested } from 'class-validator';
 import { Type } from 'class-transformer';
 
 class PushKeysDto {
@@ -19,6 +19,11 @@ export class PushSubscribeDto {
   @ValidateNested()
   @Type(() => PushKeysDto)
   keys: PushKeysDto;
+
+  // The HaiVE Dialer subscribes for its own messages only; HaiVE leaves this out.
+  @IsOptional()
+  @IsIn(['dialer'])
+  app?: 'dialer';
 }
 
 export class PushUnsubscribeDto {

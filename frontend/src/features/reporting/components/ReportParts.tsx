@@ -6,6 +6,8 @@ import clsx from 'clsx';
 import { FiArrowDown, FiArrowUp, FiDownload, FiSearch } from 'react-icons/fi';
 import { Button, EmptyState } from '@/components/ui';
 import styles from '../reporting.module.css';
+import { useAuthStore } from '@/stores/authStore';
+import { can } from '@/utils/access';
 
 const EASE = [0.16, 1, 0.3, 1] as const;
 
@@ -119,9 +121,11 @@ export function ReportTable<T>({
         <span className={styles.tableCount}>
           {visible.length} of {rows.length}
         </span>
-        <Button type="button" variant="outline" size="sm" leftIcon={<FiDownload />} onClick={download} disabled={visible.length === 0}>
-          Download CSV
-        </Button>
+        {can(useAuthStore.getState().user, 'reports', 'export') && (
+          <Button type="button" variant="outline" size="sm" leftIcon={<FiDownload />} onClick={download} disabled={visible.length === 0}>
+            Download CSV
+          </Button>
+        )}
       </div>
 
       {visible.length === 0 ? (

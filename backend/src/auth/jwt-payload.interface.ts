@@ -22,6 +22,11 @@ export interface JwtPayload {
   // (see common/app-features.ts). Resolved from the database on every
   // request by JwtStrategy — never read from the token itself.
   features?: string[];
+  // For a person created with their own page & action permissions
+  // ("customers:edit", see common/permissions/app-modules.ts). Absent for owners,
+  // admins and older accounts. Read from the database on every request, like
+  // features — never from the token.
+  permissions?: string[];
   department?: string;
   // Provider/model-availability control, NOT an AI on/off switch — chat
   // (Anthropic) stays automatically available regardless of this field; it

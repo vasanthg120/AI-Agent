@@ -7,6 +7,7 @@ import { Roles } from '../common/decorators/roles.decorator';
 import { JwtPayload } from '../auth/jwt-payload.interface';
 import { EmailIntelligenceService } from '../email-intelligence/email-intelligence.service';
 import { AiFollowupSummaryService } from './ai-followup-summary.service';
+import { Permission } from '../common/permissions/permission.decorator';
 
 // `regenerate: true` deliberately bypasses generateSummary's own daily
 // cache — same throttle shape as finance-dashboard.controller.ts's own
@@ -14,6 +15,7 @@ import { AiFollowupSummaryService } from './ai-followup-summary.service';
 const GENERATE_SUMMARY_THROTTLE = { default: { limit: 5, ttl: 60_000 } };
 
 @UseGuards(JwtAuthGuard, RolesGuard)
+@Permission('analytics')
 @Controller('business-intelligence/ai-followup-summary')
 export class AiFollowupSummaryController {
   constructor(
@@ -51,6 +53,7 @@ export class AiFollowupSummaryController {
   @Post('generate')
   @Roles('owner', 'admin', 'manager')
   @Throttle(GENERATE_SUMMARY_THROTTLE)
+  @Permission('analytics', 'view')
   generate(@CurrentUser() user: JwtPayload, @Body() body: { regenerate?: boolean }) {
     return this.aiFollowupSummaryService.generateSummary(user, body?.regenerate ?? false);
   }

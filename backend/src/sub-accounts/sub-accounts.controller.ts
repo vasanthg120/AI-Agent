@@ -10,11 +10,13 @@ import { RequireSessionAuthGuard } from '../common/guards/require-session-auth.g
 import { RolesGuard } from '../common/guards/roles.guard';
 import { ArchiveSubAccountDto, CreateSubAccountDto, GrantAccessDto, SetSubAccountStatusDto, SwitchAccountDto, UpdateSubAccountDto } from './dto/sub-account.dto';
 import { SubAccountsService } from './sub-accounts.service';
+import { PermissionExempt } from '../common/permissions/permission.decorator';
 
 // The header's account switcher: open to anyone signed in, and it only ever shows
 // or enters businesses this login belongs to. Beside OrganizationsController on the
 // same path because AuthModule (needed here) already depends on OrganizationsModule.
 @UseGuards(JwtAuthGuard)
+@PermissionExempt('personal')
 @Controller('organizations')
 export class AccountsController {
   constructor(
@@ -40,6 +42,7 @@ export class AccountsController {
 // sub-account's own owner, who holds the same role, is refused there).
 @UseGuards(JwtAuthGuard, RequireSessionAuthGuard, RolesGuard)
 @Roles('owner')
+@PermissionExempt('not_grantable')
 @Controller('sub-accounts')
 export class SubAccountsController {
   constructor(private subAccounts: SubAccountsService) {}

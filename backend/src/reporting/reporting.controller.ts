@@ -11,11 +11,13 @@ import { UpdateReportingSettingsDto } from './dto/update-reporting-settings.dto'
 import { SalesReportService } from './sales-report.service';
 import { GrossMarginReportService } from './gross-margin-report.service';
 import { ReportingSettingsService } from './reporting-settings.service';
+import { Permission } from '../common/permissions/permission.decorator';
 
 // Same CRUD-tier RBAC as the Royalty report (owner/admin/manager, manager
 // store-scoped) — these are read-only aggregate reports over the same
 // underlying CRM data.
 @UseGuards(JwtAuthGuard, RolesGuard)
+@Permission('reports')
 @Controller('reporting')
 export class ReportingController {
   constructor(
@@ -51,6 +53,7 @@ export class ReportingController {
   // Org-wide financial configuration: the same tighter tier as the royalty rule itself.
   @Put('settings')
   @Roles('owner', 'admin')
+  @Permission('settings', 'manage')
   async updateSettings(@CurrentUser() user: JwtPayload, @Body() dto: UpdateReportingSettingsDto) {
     const who = await this.usersService.findById(user.sub);
     return this.settingsService.setGrossMarginPct(user.organizationId, dto.grossMarginPct ?? null, { id: user.sub, name: who?.name || user.email });

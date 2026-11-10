@@ -18,6 +18,7 @@ import { UpsertDealOwnerMappingDto } from './dto/upsert-deal-owner-mapping.dto';
 import { DealsService } from './deals.service';
 import { DealsExportService } from './deals-export.service';
 import { DealOwnerMappingService } from './deal-owner-mapping.service';
+import { Permission } from '../common/permissions/permission.decorator';
 
 const EXPORT_ROW_CAP = 5000;
 
@@ -31,6 +32,7 @@ const EXPORT_ROW_CAP = 5000;
 // /crm/deals/owner-mappings would match :id with id="owner-mappings"
 // instead (same rule tasks.controller.ts documents).
 @UseGuards(JwtAuthGuard)
+@Permission('customers')
 @Controller('crm/deals')
 export class DealsController {
   constructor(
@@ -71,6 +73,7 @@ export class DealsController {
   @Get('export')
   @UseGuards(RolesGuard)
   @Roles('owner', 'admin', 'manager')
+  @Permission('customers', 'export')
   async export(@CurrentUser() user: JwtPayload, @Query() query: ExportDealsQueryDto, @Res() res: Response) {
     const canOverride = user.roles.includes('admin') || user.roles.includes('owner');
     const storeConstraint = canOverride ? undefined : user.storeId;
@@ -124,6 +127,7 @@ export class DealsController {
   @Get('owner-mappings')
   @UseGuards(RolesGuard)
   @Roles('owner', 'admin')
+  @Permission('settings', 'view')
   listOwnerMappings(@CurrentUser() user: JwtPayload) {
     return this.dealOwnerMappingService.listExternalOwners(user.organizationId);
   }
@@ -131,6 +135,7 @@ export class DealsController {
   @Post('owner-mappings')
   @UseGuards(RolesGuard)
   @Roles('owner', 'admin')
+  @Permission('settings', 'manage')
   upsertOwnerMapping(@CurrentUser() user: JwtPayload, @Body() dto: UpsertDealOwnerMappingDto) {
     // ownerIds (new, multi-user) takes precedence when both are somehow
     // sent; ownerId alone (the original, still-accepted shape) behaves
@@ -150,6 +155,7 @@ export class DealsController {
   @Delete('owner-mappings/:mappingId')
   @UseGuards(RolesGuard)
   @Roles('owner', 'admin')
+  @Permission('settings', 'manage')
   async deleteOwnerMapping(@CurrentUser() user: JwtPayload, @Param('mappingId') mappingId: string) {
     await this.dealOwnerMappingService.deleteMapping(user.organizationId, mappingId);
     return { status: 'ok' };
@@ -164,6 +170,7 @@ export class DealsController {
   @Get('assignment')
   @UseGuards(RolesGuard)
   @Roles('owner', 'admin')
+  @Permission('settings', 'view')
   listForAssignment(@CurrentUser() user: JwtPayload, @Query() query: ListAssignmentDealsQueryDto) {
     return this.dealOwnerMappingService.listDealsForAssignment(user.organizationId, query, query.needsMapping ?? false);
   }
@@ -212,6 +219,7 @@ export class DealsController {
   @HttpCode(200)
   @UseGuards(RolesGuard)
   @Roles('owner', 'admin', 'manager')
+  @Permission('customers', 'edit')
   async assignBulk(@CurrentUser() user: JwtPayload, @Body() dto: AssignDealsBulkDto) {
     const ownerId = await this.assertAssignable(user.organizationId, dto.ownerId);
     const canOverride = user.roles.includes('admin') || user.roles.includes('owner');

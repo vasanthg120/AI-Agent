@@ -7,6 +7,7 @@ import { Roles } from '../common/decorators/roles.decorator';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { GorillaDashService } from './gorilladash.service';
+import { Permission } from '../common/permissions/permission.decorator';
 
 export class ConnectGorillaDashDto {
   @IsString()
@@ -24,6 +25,7 @@ export class ConnectGorillaDashDto {
 // through the dashboards and the AI tools.
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Roles('owner', 'admin')
+@Permission('crm_integrations')
 @Controller('gorilladash')
 export class GorillaDashController {
   constructor(private gorilladash: GorillaDashService) {}

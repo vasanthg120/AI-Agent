@@ -1,12 +1,14 @@
 import { Controller, Get, Param, Post, Query, UseGuards } from '@nestjs/common';
 import { AdminJwtAuthGuard } from '../common/guards/admin-jwt-auth.guard';
 import { BillingSubscriptionsService } from './billing-subscriptions.service';
+import { PermissionExempt } from '../common/permissions/permission.decorator';
 
 // Admin-haive Subscriptions page — platform_admin only, matching every other
 // admin surface. Cancel/reactivate reuse BillingSubscriptionsService's exact
 // customer-facing soft-cancel primitive; renewal logic in
 // subscription-renewal.service.ts is untouched.
 @UseGuards(AdminJwtAuthGuard)
+@PermissionExempt('platform')
 @Controller('billing/admin/subscriptions')
 export class BillingAdminSubscriptionsController {
   constructor(private subscriptionsService: BillingSubscriptionsService) {}

@@ -14,6 +14,7 @@ const common_1 = require("@nestjs/common");
 const core_1 = require("@nestjs/core");
 const app_features_1 = require("../app-features");
 const roles_decorator_1 = require("../decorators/roles.decorator");
+const permission_decorator_1 = require("../permissions/permission.decorator");
 let RolesGuard = class RolesGuard {
     constructor(reflector) {
         this.reflector = reflector;
@@ -29,6 +30,13 @@ let RolesGuard = class RolesGuard {
         const userRoles = user?.roles ?? [];
         if (required.some((r) => userRoles.includes(r)))
             return true;
+        if ((0, permission_decorator_1.isPermissionManaged)(user)) {
+            const need = (0, permission_decorator_1.routePermission)(this.reflector, context);
+            const delegable = !!need && required.includes('admin') && !(0, permission_decorator_1.isNotDelegable)(this.reflector, context);
+            if (delegable && (0, permission_decorator_1.holdsRoutePermission)(user, need))
+                return true;
+            throw new common_1.ForbiddenException(delegable ? (0, permission_decorator_1.permissionDeniedMessage)(need) : 'Insufficient role');
+        }
         const feature = this.reflector.getAllAndOverride(app_features_1.FEATURE_KEY, [context.getHandler(), context.getClass()]);
         const routeHasOwnRoles = !!this.reflector.get(roles_decorator_1.ROLES_KEY, context.getHandler());
         if (feature && !routeHasOwnRoles && (0, app_features_1.isAiRoleAccount)(userRoles) && user?.features?.includes(feature))

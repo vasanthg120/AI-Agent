@@ -7,8 +7,10 @@ import { JwtPayload } from '../auth/jwt-payload.interface';
 import { ConnectIntegrationDto } from './dto/connect-integration.dto';
 import { TestConnectionDto } from './dto/test-connection.dto';
 import { IntegrationsService } from './integrations.service';
+import { Permission } from '../common/permissions/permission.decorator';
 
 @UseGuards(JwtAuthGuard)
+@Permission('integrations')
 @Controller('integrations')
 export class IntegrationsController {
   constructor(private integrationsService: IntegrationsService) {}
@@ -38,6 +40,7 @@ export class IntegrationsController {
   @Post('crm/sync')
   @UseGuards(RolesGuard)
   @Roles('admin')
+  @Permission('crm_integrations', 'manage')
   syncCrmNow(@CurrentUser() user: JwtPayload) {
     return this.integrationsService.syncCrmNow(user.organizationId);
   }

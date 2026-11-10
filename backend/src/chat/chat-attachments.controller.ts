@@ -7,12 +7,14 @@ import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { UPLOAD_FILE_INTERCEPTOR_OPTIONS } from '../common/upload-limits';
 import { ChatAttachmentsService } from './chat-attachments.service';
+import { Permission } from '../common/permissions/permission.decorator';
 
 // Documents attached in the AI chat: uploaded here first (validated, text
 // extracted, stored encrypted), then referenced by id when the message is
 // sent (SendMessageDto.attachmentIds). Every mutating call is recorded by the
 // global AuditInterceptor.
 @UseGuards(JwtAuthGuard)
+@Permission('ai_agent')
 @Controller('chat/attachments')
 export class ChatAttachmentsController {
   constructor(private attachments: ChatAttachmentsService) {}

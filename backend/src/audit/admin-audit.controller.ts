@@ -1,6 +1,7 @@
 import { Controller, Get, Query, UseGuards } from '@nestjs/common';
 import { AdminJwtAuthGuard } from '../common/guards/admin-jwt-auth.guard';
 import { AuditService } from './audit.service';
+import { PermissionExempt } from '../common/permissions/permission.decorator';
 
 // Split out of AuditController — platform-wide, unscoped by organization
 // (Admin-haive's Audit Logs page). Gated by the separate admin credential
@@ -9,6 +10,7 @@ import { AuditService } from './audit.service';
 // rather than overriding them, so this had to be its own controller rather
 // than a method-level guard on AuditController.
 @UseGuards(AdminJwtAuthGuard)
+@PermissionExempt('platform')
 @Controller('audit-logs')
 export class AdminAuditController {
   constructor(private auditService: AuditService) {}

@@ -8,8 +8,10 @@ import { RolesGuard } from '../common/guards/roles.guard';
 import { currentDataSourceScope } from './data-source-context';
 import { DataSourcesService } from './data-sources.service';
 import { HiddenMetricsDto, UpdateDataSourceDto } from './dto/update-data-source.dto';
+import { Permission, PermissionExempt } from '../common/permissions/permission.decorator';
 
 @UseGuards(JwtAuthGuard)
+@Permission('crm_integrations')
 @Controller('data-sources')
 export class DataSourcesController {
   constructor(private dataSources: DataSourcesService) {}
@@ -17,6 +19,7 @@ export class DataSourcesController {
   // What anyone needs to read the dashboard honestly: the sources, which one
   // this request is using, and where each metric comes from (or why it can't).
   @Get('overview')
+  @PermissionExempt('personal')
   async overview(@CurrentUser() user: JwtPayload) {
     const scope = currentDataSourceScope() ?? (await this.dataSources.resolveScope(user.organizationId, undefined));
     return this.dataSources.overview(user, scope);
@@ -24,6 +27,7 @@ export class DataSourcesController {
 
   // Which metrics this person has hidden on their own dashboard.
   @Put('preferences')
+  @PermissionExempt('personal')
   async preferences(@CurrentUser() user: JwtPayload, @Body() dto: HiddenMetricsDto) {
     return {
       hiddenMetrics: await this.dataSources.setHiddenMetrics(user.sub, dto.hiddenMetrics),

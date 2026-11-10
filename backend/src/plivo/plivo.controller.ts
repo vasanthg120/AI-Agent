@@ -9,6 +9,7 @@ import { ConnectPlivoDto, StartPlivoCallDto, UpsertPlivoLineDto } from './dto/pl
 import { PlivoWebhooksService } from './plivo-webhooks.service';
 import { PlivoCallDocument } from './schemas/plivo-call.schema';
 import { PlivoService } from './plivo.service';
+import { Permission } from '../common/permissions/permission.decorator';
 
 const canManage = (user: JwtPayload) => user.roles.some((role) => role === 'owner' || role === 'admin');
 
@@ -41,6 +42,7 @@ const IMPORT_STUCK_AFTER_MS = 15 * 60_000;
 // rings whose phone; every signed-in user can see their own line and place a
 // call from it.
 @UseGuards(JwtAuthGuard)
+@Permission('call_copilot')
 @Controller('plivo')
 export class PlivoController {
   constructor(
@@ -71,6 +73,7 @@ export class PlivoController {
   @Post('connect')
   @UseGuards(RolesGuard)
   @Roles('owner', 'admin')
+  @Permission('integrations', 'manage')
   connect(@CurrentUser() user: JwtPayload, @Body() dto: ConnectPlivoDto) {
     return this.plivo.connect(user.organizationId, dto.authId.trim(), dto.authToken.trim());
   }
@@ -78,6 +81,7 @@ export class PlivoController {
   @Delete('connect')
   @UseGuards(RolesGuard)
   @Roles('owner', 'admin')
+  @Permission('integrations', 'manage')
   async disconnect(@CurrentUser() user: JwtPayload) {
     await this.plivo.disconnect(user.organizationId);
     return { connected: false };
@@ -86,6 +90,7 @@ export class PlivoController {
   @Put('lines')
   @UseGuards(RolesGuard)
   @Roles('owner', 'admin')
+  @Permission('integrations', 'manage')
   upsertLine(@CurrentUser() user: JwtPayload, @Body() dto: UpsertPlivoLineDto) {
     return this.plivo.upsertLine(user.organizationId, dto);
   }
@@ -93,6 +98,7 @@ export class PlivoController {
   @Delete('lines/:id')
   @UseGuards(RolesGuard)
   @Roles('owner', 'admin')
+  @Permission('integrations', 'manage')
   deleteLine(@CurrentUser() user: JwtPayload, @Param('id') id: string) {
     return this.plivo.deleteLine(user.organizationId, id);
   }

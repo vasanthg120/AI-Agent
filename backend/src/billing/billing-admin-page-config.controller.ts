@@ -2,8 +2,10 @@ import { Body, Controller, Get, Put, UseGuards } from '@nestjs/common';
 import { AdminJwtAuthGuard } from '../common/guards/admin-jwt-auth.guard';
 import { BillingPageConfigService } from './billing-page-config.service';
 import { UpdateBillingPageConfigDto } from './dto/update-billing-page-config.dto';
+import { PermissionExempt } from '../common/permissions/permission.decorator';
 
 @UseGuards(AdminJwtAuthGuard)
+@PermissionExempt('platform')
 @Controller('billing/admin/page-config')
 export class BillingAdminPageConfigController {
   constructor(private pageConfigService: BillingPageConfigService) {}

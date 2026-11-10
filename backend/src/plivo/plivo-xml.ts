@@ -16,6 +16,9 @@ export interface RecordAndDialOptions {
   recordingCallbackUrl: string;
   // Where Plivo POSTs how the dialed leg ended (DialStatus, ...).
   dialActionUrl: string;
+  // Where Plivo POSTs the dialed leg's events as they happen (DialAction
+  // "answer" the moment the far end picks up, then "hangup").
+  dialEventsUrl?: string;
   // The number shown to the person being dialed.
   callerId: string;
   // Digits only, country code included.
@@ -34,11 +37,12 @@ export interface RecordAndDialOptions {
  * separate stereo channels, which keeps "who said what" recoverable.
  */
 export function recordAndDialXml(options: RecordAndDialOptions): string {
-  const { recordingCallbackUrl, dialActionUrl, callerId, destination, ringTimeoutSeconds = 40 } = options;
+  const { recordingCallbackUrl, dialActionUrl, dialEventsUrl, callerId, destination, ringTimeoutSeconds = 40 } = options;
+  const events = dialEventsUrl ? ` callbackUrl="${escapeXml(dialEventsUrl)}" callbackMethod="POST"` : '';
   return [
     '<Response>',
     `  <Record startOnDialAnswer="true" fileFormat="mp3" recordChannelType="stereo" callbackUrl="${escapeXml(recordingCallbackUrl)}" callbackMethod="POST"/>`,
-    `  <Dial callerId="${escapeXml(callerId)}" timeout="${Math.max(5, Math.floor(ringTimeoutSeconds))}" action="${escapeXml(dialActionUrl)}" method="POST">`,
+    `  <Dial callerId="${escapeXml(callerId)}" timeout="${Math.max(5, Math.floor(ringTimeoutSeconds))}" action="${escapeXml(dialActionUrl)}" method="POST"${events}>`,
     `    <Number>${escapeXml(destination)}</Number>`,
     '  </Dial>',
     '</Response>',

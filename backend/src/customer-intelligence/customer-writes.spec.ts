@@ -6,6 +6,8 @@ import { CustomerDirectoryService } from './customer-directory.service';
 import { CustomerMailService } from './customer-mail.service';
 import { UsersModule } from '../users/users.module';
 import { UsersService } from '../users/users.service';
+import { ConfigModule } from '@nestjs/config';
+import { MailModule } from '../mail/mail.module';
 
 // Phase 3 — "customer" has no document of its own (see customer-directory.
 // service.ts's own header comment); these are the first real write
@@ -25,7 +27,10 @@ describe('Customers — writes (real Mongo)', () => {
   beforeAll(async () => {
     const uri = process.env.MONGODB_URI ?? process.env.MONGO_URI;
     if (!uri) throw new Error('MONGODB_URI/MONGO_URI must be set to run these integration tests.');
-    const moduleRef = await Test.createTestingModule({ imports: [MongooseModule.forRoot(uri), UsersModule] }).compile();
+    const moduleRef = await Test.createTestingModule({
+      // UsersModule sends invitation emails (MailService), which the app provides globally.
+      imports: [ConfigModule.forRoot({ isGlobal: true, ignoreEnvFile: true }), MailModule, MongooseModule.forRoot(uri), UsersModule],
+    }).compile();
     connection = moduleRef.get(getConnectionToken());
     users = moduleRef.get(UsersService);
   });

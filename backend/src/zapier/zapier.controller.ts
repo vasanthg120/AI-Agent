@@ -7,6 +7,7 @@ import { Roles } from '../common/decorators/roles.decorator';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { ZapierService } from './zapier.service';
+import { Permission } from '../common/permissions/permission.decorator';
 
 export class ConnectZapierDto {
   @IsString()
@@ -18,6 +19,7 @@ export class ConnectZapierDto {
 // Owners and admins connect Zapier; everyone uses it through the AI.
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Roles('owner', 'admin')
+@Permission('integrations')
 @Controller('zapier')
 export class ZapierController {
   constructor(private zapier: ZapierService) {}

@@ -5,6 +5,7 @@ import { AxiosError } from 'axios';
 import { Model, isValidObjectId } from 'mongoose';
 import { firstValueFrom } from 'rxjs';
 import { CallCopilotUploadService } from '../call-copilot/call-copilot-upload.service';
+import { CallFailure, classifyFailureText } from '../calling/call-outcome';
 import { assertPublicHttpUrl } from '../common/security/ssrf-guard';
 import { NotificationsService } from '../notifications/notifications.service';
 import { EMPTY_RESPONSE_XML, recordAndDialXml, speakAndHangupXml } from './plivo-xml';
@@ -39,6 +40,14 @@ const DIAL_STATUS_TO_CALL_STATUS: Record<string, PlivoCallStatus> = {
   cancel: 'cancelled',
   failed: 'failed',
 };
+
+/** What the dialed leg's outcome means for the person who placed the call. */
+function dialFailureCode(outcome: PlivoCallStatus, direction: 'outbound' | 'inbound', hangupCause: string): CallFailure {
+  if (outcome === 'busy') return 'busy';
+  if (outcome === 'no_answer') return direction === 'outbound' ? 'no_answer_customer' : 'no_answer_agent';
+  if (outcome === 'cancelled') return 'cancelled';
+  return classifyFailureText(hangupCause) ?? 'provider_error';
+}
 
 const text = (value: unknown): string => (typeof value === 'string' ? value : value == null ? '' : String(value));
 const header = (value: string | string[] | undefined): string | undefined => (Array.isArray(value) ? value[0] : value);
@@ -100,7 +109,10 @@ export class PlivoWebhooksService {
       const call = await this.findCall(callIdParam);
       if (!call) return { status: 404 };
       if (!(await this.isAuthentic(call.organizationId, req))) return { status: 403 };
-      await this.callModel.updateOne({ _id: call._id }, { $set: { status: 'in_progress', ...(callUuid ? { callUuid } : {}) } }).exec();
+      await this.callModel.updateOne({ _id: call._id }, { $min: { agentAnsweredAt: new Date() }, ...(callUuid ? { $set: { callUuid } } : {}) }).exec();
+      // A hangup report that overtook this request has already settled the call;
+      // it must not be reopened as "in progress".
+      await this.callModel.updateOne({ _id: call._id, status: 'initiated' }, { $set: { status: 'in_progress' } }).exec();
       return { status: 200, xml: this.dialXml(call._id.toString(), call.plivoNumber, call.customerNumber) };
     }
 
@@ -140,9 +152,25 @@ export class PlivoWebhooksService {
     return recordAndDialXml({
       recordingCallbackUrl: `${base}/plivo/webhooks/recording?callId=${callId}`,
       dialActionUrl: `${base}/plivo/webhooks/hangup?callId=${callId}`,
+      dialEventsUrl: `${base}/plivo/webhooks/dial-event?callId=${callId}`,
       callerId,
       destination,
     });
+  }
+
+  // ---- The dialed leg's events -------------------------------------------------
+
+  /** Plivo reports the dialed leg as it goes. Only "answer" is kept: the moment
+   * the far end picked up, which the Dialer's "In call" timer starts from. */
+  async dialEvent(req: WebhookRequest, callIdParam: string | undefined): Promise<WebhookResult> {
+    const call = await this.findCall(callIdParam);
+    if (!call) return { status: 404 };
+    if (!(await this.isAuthentic(call.organizationId, req))) return { status: 403 };
+    const body = req.body ?? {};
+    if ([text(body.DialAction), text(body.DialBLegStatus)].some((value) => value.toLowerCase() === 'answer')) {
+      await this.callModel.updateOne({ _id: call._id, answeredAt: { $exists: false } }, { $set: { answeredAt: new Date() } }).exec();
+    }
+    return { status: 200, xml: EMPTY_RESPONSE_XML };
   }
 
   // ---- Recording ready -------------------------------------------------------
@@ -202,13 +230,54 @@ export class PlivoWebhooksService {
     if (!call) return { status: 200, xml: EMPTY_RESPONSE_XML };
     if (!(await this.isAuthentic(call.organizationId, req))) return { status: 403 };
 
-    const outcome = DIAL_STATUS_TO_CALL_STATUS[text(body.DialStatus || body.CallStatus).toLowerCase()];
+    const dialStatus = text(body.DialStatus).toLowerCase();
+    const fromDial = dialStatus !== '';
+    const outcome = DIAL_STATUS_TO_CALL_STATUS[dialStatus || text(body.CallStatus).toLowerCase()];
     const duration = Number(text(body.Duration || body.BillDuration));
-    const set: Record<string, unknown> = {};
-    if (outcome) set.status = outcome;
-    if (Number.isFinite(duration) && duration > 0) set.durationSeconds = duration;
-    if (outcome && outcome !== 'completed') set.failureReason = `Call ${outcome.replace('_', ' ')}.`;
-    if (Object.keys(set).length) await this.callModel.updateOne({ _id: call._id }, { $set: set }).exec();
+    const hangupCause = text(body.HangupCauseName);
+
+    // True whichever leg reports it.
+    const facts: Record<string, unknown> = {};
+    if (Number.isFinite(duration) && duration > 0) facts.durationSeconds = duration;
+    if (!fromDial && hangupCause) facts.hangupCause = hangupCause;
+    if (Object.keys(facts).length) await this.callModel.updateOne({ _id: call._id }, { $set: facts }).exec();
+    if (!outcome) return { status: 200, xml: EMPTY_RESPONSE_XML };
+
+    if (fromDial) {
+      // The dialed leg (the customer, outbound; the agent, inbound): its outcome is the call's.
+      const set: Record<string, unknown> = { status: outcome, dialOutcomeKnown: true };
+      if (outcome !== 'completed') {
+        set.failureReason = `Call ${outcome.replace('_', ' ')}.`;
+        set.failureCode = dialFailureCode(outcome, call.direction, text(body.DialHangupCause));
+      }
+      await this.callModel.updateOne({ _id: call._id }, { $set: set }).exec();
+      return { status: 200, xml: EMPTY_RESPONSE_XML };
+    }
+
+    // The calling leg ended (the agent's phone, outbound). Its "completed" only
+    // means that leg hung up — which is also how a call ends when the customer
+    // was busy — so it never overwrites the dial's own outcome.
+    const set: Record<string, unknown> = { status: outcome };
+    if (call.direction === 'outbound' && call.status === 'initiated') {
+      // Our Answer webhook never ran, so the customer was never dialled.
+      if (outcome === 'completed') {
+        set.status = 'failed';
+        set.failureCode = 'offline';
+        set.failureReason = hangupCause ? `Plivo: ${hangupCause}.` : 'Plivo could not reach HaiVE when your phone answered.';
+      } else if (outcome === 'no_answer' || outcome === 'busy') {
+        set.failureCode = 'no_answer_agent';
+        set.failureReason = 'Your phone was not answered, so the customer was not called.';
+      } else if (outcome === 'cancelled') {
+        set.failureCode = 'cancelled';
+        set.failureReason = 'Call cancelled.';
+      } else {
+        set.failureCode = 'provider_error';
+        set.failureReason = `Your phone could not be reached${hangupCause ? ` (${hangupCause})` : ''}.`;
+      }
+    } else if (outcome !== 'completed') {
+      set.failureReason = `Call ${outcome.replace('_', ' ')}.`;
+    }
+    await this.callModel.updateOne({ _id: call._id, dialOutcomeKnown: { $ne: true } }, { $set: set }).exec();
     return { status: 200, xml: EMPTY_RESPONSE_XML };
   }
 

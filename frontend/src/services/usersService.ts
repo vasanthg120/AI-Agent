@@ -30,6 +30,63 @@ export interface AdminUser {
   linkedFromMain?: boolean;
   // Invited and hasn't set a password yet.
   pendingInvitation?: boolean;
+  createdAt?: string;
+  // Read from their AI role ("Sales Agent"), or Owner / Administrator — never stored.
+  accountType?: string;
+  // 'full' (owner/admin), 'permissions' (their own list) or 'older' (fixed role / AI role features).
+  accessMode?: AccessMode;
+  aiRole?: AiRoleSummary | null;
+  // Their own page & action permissions ("customers:edit"); null unless accessMode is 'permissions'.
+  permissions?: string[] | null;
+  // An older team member: what their AI role's features give them today, in the same terms.
+  olderPermissions?: string[] | null;
+  // Their AI role is gone or back in draft.
+  needsAiRole?: boolean;
+}
+
+export type AccessMode = 'full' | 'permissions' | 'older';
+
+export interface AiRoleSummary {
+  slug: string;
+  name: string;
+  category: string;
+  status: 'active' | 'draft' | 'missing';
+  avatarColor?: string;
+  description?: string;
+}
+
+/** An active AI role a person can be given, with where it starts them. */
+export interface AssignableAiRole {
+  slug: string;
+  name: string;
+  description: string;
+  category: string;
+  avatarColor?: string;
+  allowedTools: string[];
+  accountType: string;
+  defaultPermissions: string[];
+  people: number;
+}
+
+export type PermissionAction = 'view' | 'create' | 'edit' | 'delete' | 'export' | 'manage';
+
+export interface PermissionModule {
+  id: string;
+  label: string;
+  group: 'workspace' | 'operations' | 'administration';
+  description: string;
+  actions: PermissionAction[];
+  actionHints: Partial<Record<PermissionAction, string>>;
+}
+
+/** The server's one list of pages and actions (GET /users/permission-catalog). */
+export interface PermissionCatalog {
+  groups: { id: PermissionModule['group']; label: string }[];
+  modules: PermissionModule[];
+  alwaysIncluded: string[];
+  notGrantable: string[];
+  /** Where a brand-new AI role's people start until the role says otherwise. */
+  newRoleDefaults: string[];
 }
 
 export interface CreateUserPayload {
@@ -43,6 +100,10 @@ export interface CreateUserPayload {
   aiAccessEnabled?: boolean;
   // Email them a link to set their own password instead of a temporary one.
   sendInvite?: boolean;
+  // Their own page & action permissions — only with an AI role.
+  permissions?: string[];
+  // Created switched off (can't sign in until reactivated).
+  active?: boolean;
 }
 
 export interface CreateUserResult {
@@ -61,9 +122,21 @@ export interface UpdateUserPayload {
   department?: string;
   voiceAccessEnabled?: boolean;
   aiAccessEnabled?: boolean;
+  // Replaces their page & action permissions (moves an older account onto its own list).
+  permissions?: string[];
 }
 
 export const usersService = {
+  async permissionCatalog(): Promise<PermissionCatalog> {
+    const { data } = await axiosClient.get<PermissionCatalog>('/users/permission-catalog');
+    return data;
+  },
+
+  async aiRoles(): Promise<AssignableAiRole[]> {
+    const { data } = await axiosClient.get<AssignableAiRole[]>('/users/ai-roles');
+    return data;
+  },
+
   async resendInvitation(id: string): Promise<{ activationLink?: string }> {
     const { data } = await axiosClient.post<{ activationLink?: string }>(`/users/${id}/resend-invitation`);
     return data;

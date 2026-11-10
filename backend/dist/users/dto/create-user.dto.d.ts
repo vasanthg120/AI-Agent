@@ -6,6 +6,8 @@ export declare class CreateUserDto {
     assignedAgentId?: string;
     storeId?: string;
     department?: string;
+    permissions?: string[];
+    active?: boolean;
     sendInvite?: boolean;
     voiceAccessEnabled?: boolean;
     aiAccessEnabled?: boolean;

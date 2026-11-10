@@ -3,11 +3,13 @@ import { AdminJwtAuthGuard } from '../common/guards/admin-jwt-auth.guard';
 import { BillingAdminCurrenciesService } from './billing-admin-currencies.service';
 import { CreateCurrencyDto } from './dto/create-currency.dto';
 import { UpdateCurrencyDto } from './dto/update-currency.dto';
+import { PermissionExempt } from '../common/permissions/permission.decorator';
 
 // Phase 1 catalog admin surface — platform_admin only, matching every other
 // billing-admin-*.controller.ts's gate (global catalog, not one customer's
 // data). Nothing here is reachable by a customer-scoped route yet.
 @UseGuards(AdminJwtAuthGuard)
+@PermissionExempt('platform')
 @Controller('billing/admin/currencies')
 export class BillingAdminCurrenciesController {
   constructor(private currenciesService: BillingAdminCurrenciesService) {}

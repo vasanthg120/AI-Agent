@@ -36,6 +36,9 @@ interface BackendUserProfile {
   assignedAgentId?: string;
   aiRoleName?: string;
   features?: string[];
+  permissions?: string[] | null;
+  accessMode?: 'full' | 'permissions' | 'older';
+  accountType?: string;
   department?: string;
   // Self-editable profile fields (PATCH /users/me). Absent until the user
   // first saves them — timezone/language then fall back to the device's.
@@ -57,6 +60,9 @@ function toUser(profile: BackendUserProfile): User {
     assignedAgentId: profile.assignedAgentId,
     aiRoleName: profile.aiRoleName,
     features: profile.features,
+    permissions: profile.permissions ?? null,
+    accessMode: profile.accessMode,
+    accountType: profile.accountType,
     department: profile.department,
     avatarUrl: profile.avatarUrl,
     phone: profile.phone,

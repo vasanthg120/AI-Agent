@@ -8,6 +8,7 @@ import { RolesGuard } from '../common/guards/roles.guard';
 import { SaveZohoAppCredentialsDto } from '../zoho/dto/save-app-credentials.dto';
 import { SelectOrganizationDto } from './dto/select-organization.dto';
 import { ZohoBooksService } from './zohobooks.service';
+import { Permission, PermissionExempt } from '../common/permissions/permission.decorator';
 
 // Mirrors zoho.controller.ts's shape exactly (own app-credentials routes,
 // connect-url, callback) plus one route Zoho CRM doesn't need: selecting
@@ -15,6 +16,7 @@ import { ZohoBooksService } from './zohobooks.service';
 // more than one (see zohobooks.service.ts). status/disconnect live here
 // too, same as xero.controller.ts — Books isn't a CRM, so none of this goes
 // through crm-integrations.
+@Permission('integrations')
 @Controller('zohobooks')
 export class ZohoBooksController {
   private readonly logger = new Logger(ZohoBooksController.name);
@@ -41,12 +43,14 @@ export class ZohoBooksController {
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('owner', 'admin')
   @Get('connect-url')
+  @Permission('integrations', 'manage')
   async getConnectUrl(@CurrentUser() user: JwtPayload) {
     return { url: await this.zohoBooks.buildAuthorizeUrl(user.organizationId) };
   }
 
   @Get('callback')
   @Redirect()
+  @PermissionExempt('public')
   async callback(
     @Query('code') code?: string,
     @Query('state') state?: string,

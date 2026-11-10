@@ -3,6 +3,7 @@ import { BadRequestException, Injectable, Logger, NotFoundException } from '@nes
 import { ConfigService } from '@nestjs/config';
 import { InjectModel } from '@nestjs/mongoose';
 import { DEFAULT_ROLE_FEATURES } from '../common/app-features';
+import { defaultPermissionsOfRole, normalizePermissions } from '../common/permissions/app-modules';
 import FormData from 'form-data';
 import { Model } from 'mongoose';
 import { catchError, firstValueFrom, of } from 'rxjs';
@@ -64,7 +65,8 @@ export class AgentRolesService {
       status: 'active' as const,
       builtin: true,
     }));
-    return [...builtin, ...dynamic.map((d) => ({ ...d.toObject(), builtin: false }))];
+    // defaultPermissions as it applies: the role's own, or what its older features mean.
+    return [...builtin, ...dynamic.map((d) => ({ ...d.toObject(), defaultPermissions: defaultPermissionsOfRole(d), builtin: false }))];
   }
 
   async generateDraft(userId: string, organizationId: string, userJwt: string, file: Express.Multer.File) {
@@ -142,6 +144,7 @@ export class AgentRolesService {
       assignedUserIds: dto.assignedUserIds ?? [],
       allowedTools: dto.allowedTools ?? [],
       features: dto.features ?? DEFAULT_ROLE_FEATURES,
+      defaultPermissions: dto.defaultPermissions ? normalizePermissions(dto.defaultPermissions) : undefined,
       modelTier: dto.modelTier ?? undefined,
       status: 'draft',
       avatarColor,
@@ -155,6 +158,7 @@ export class AgentRolesService {
     if (!existing) throw new NotFoundException('Role not found');
 
     const activating = dto.status === 'active' && existing.status !== 'active';
+    if (dto.defaultPermissions) dto.defaultPermissions = normalizePermissions(dto.defaultPermissions);
     // dto's optional class fields are own `undefined` properties (TS target
     // ES2022's useDefineForClassFields) even when absent from the request
     // body — a plain Object.assign would null out every field the caller

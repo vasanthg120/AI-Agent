@@ -7,10 +7,12 @@ import { JwtService } from '@nestjs/jwt';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { firstValueFrom } from 'rxjs';
+import { AxiosError } from 'axios';
 import FormData from 'form-data';
 import { GridFsService } from '../common/gridfs/gridfs.service';
 import { ReservationService } from '../billing/reservation.service';
 import { CallCopilotGateway } from './call-copilot.gateway';
+import { NotificationsService } from '../notifications/notifications.service';
 import { CallCopilotService } from './call-copilot.service';
 import { CallSession, CallSessionDocument } from './schemas/call-session.schema';
 import { UploadCallRecordingDto } from './dto/upload-call-recording.dto';
@@ -59,6 +61,7 @@ export class CallCopilotUploadService {
     private reservations: ReservationService,
     private callCopilotService: CallCopilotService,
     private gateway: CallCopilotGateway,
+    private notifications: NotificationsService,
   ) {
     this.pythonAgentUrl = this.config.get<string>('pythonAgentUrl') ?? 'http://localhost:8000';
   }
@@ -143,9 +146,12 @@ export class CallCopilotUploadService {
     }
 
     void this.processUpload(session, buffer, dto).catch(async (err) => {
-      const message = 'Processing this recording failed. The original file was saved.';
-      this.logger.error(`Call copilot upload processing failed for session ${session._id}: ${(err as Error).message}`);
-      await this.callCopilotService.errorSession(session, (err as Error).message);
+      // python-agent's own reason (e.g. "Sarvam AI … is out of credits") is
+      // safe to show; Axios's "Request failed with status code 502" says nothing.
+      const detail = agentDetail(err);
+      const message = detail ?? 'Processing this recording failed. The original file was saved.';
+      this.logger.error(`Call copilot upload processing failed for session ${session._id}: ${detail ?? (err as Error).message}`);
+      await this.callCopilotService.errorSession(session, detail ?? (err as Error).message);
       this.gateway.emitToUser(userId, 'call:error', { sessionId: session._id.toString(), message });
     });
 
@@ -216,6 +222,17 @@ export class CallCopilotUploadService {
     void this.callCopilotService
       .generateCoaching(ended, fullText)
       .then((coached) => {
+        // A phone call's report is complete (the Dialer shows it as ready from here).
+        if (/^(plivo|twilio)-/.test(coached.originalFilename ?? '')) {
+          this.logger.log(`call.report.ready org=${coached.organizationId} user=${coached.userId} session=${sessionId} score=${coached.overallScore ?? 'none'}`);
+          // No customer name or number in a lock-screen message.
+          const score = coached.overallScore !== undefined ? ` Score ${coached.overallScore.toFixed(1)}/10.` : '';
+          void this.notifications.pushToDialer(coached.userId, coached.organizationId, {
+            title: 'Your call report is ready',
+            body: `${coached.headline ?? 'Summary, score and coaching tips are in.'}${score}`.slice(0, 180),
+            url: `/dialer/report/session/${sessionId}`,
+          });
+        }
         emit('call:coaching', {
           overallScore: coached.overallScore,
           categoryScores: coached.categoryScores,
@@ -274,6 +291,12 @@ export class CallCopilotUploadService {
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/** The `detail` of an HTTPException python-agent raised, if that's what failed. */
+function agentDetail(err: unknown): string | null {
+  const detail = (err as AxiosError<{ detail?: unknown }>).response?.data?.detail;
+  return typeof detail === 'string' && detail ? detail : null;
 }
 
 // Splits an already-complete transcript into fixed-size word windows for

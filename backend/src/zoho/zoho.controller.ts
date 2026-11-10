@@ -7,6 +7,7 @@ import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { SaveZohoAppCredentialsDto } from './dto/save-app-credentials.dto';
 import { ZohoService } from './zoho.service';
+import { Permission, PermissionExempt } from '../common/permissions/permission.decorator';
 
 // Zoho CRM's real OAuth flow — mirrors outlook.controller.ts's shape
 // (connect-url -> signed JWT state -> provider consent -> callback -> token
@@ -14,6 +15,7 @@ import { ZohoService } from './zoho.service';
 // ORGANIZATION, not per user (see zoho.service.ts), so connect-url requires
 // the same owner/admin role CrmIntegrationsController already requires for
 // every other CRM connect action, and the state carries organizationId only.
+@Permission('crm_integrations')
 @Controller('zoho')
 export class ZohoController {
   private readonly logger = new Logger(ZohoController.name);
@@ -45,6 +47,7 @@ export class ZohoController {
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('owner', 'admin')
   @Get('connect-url')
+  @Permission('crm_integrations', 'manage')
   async getConnectUrl(@CurrentUser() user: JwtPayload) {
     return { url: await this.zoho.buildAuthorizeUrl(user.organizationId) };
   }
@@ -56,6 +59,7 @@ export class ZohoController {
   // `location` is informational only and not used.
   @Get('callback')
   @Redirect()
+  @PermissionExempt('public')
   async callback(
     @Query('code') code?: string,
     @Query('state') state?: string,

@@ -118,6 +118,19 @@ describe('Plivo call XML', () => {
     expect(hostile).toContain('1&amp;2');
   });
 
+  it("asks for the dialed leg's events only when given somewhere to send them", () => {
+    expect(xml).not.toContain(' callbackUrl="https://x.io/plivo/webhooks/dial');
+    const withEvents = recordAndDialXml({
+      recordingCallbackUrl: 'r',
+      dialActionUrl: 'a',
+      dialEventsUrl: 'https://x.io/plivo/webhooks/dial-event?callId=abc&x=1',
+      callerId: 'c',
+      destination: 'd',
+    });
+    expect(withEvents).toContain(' callbackUrl="https://x.io/plivo/webhooks/dial-event?callId=abc&amp;x=1" callbackMethod="POST">');
+    expect(withEvents.indexOf('callbackUrl="https://x.io/plivo/webhooks/dial-event')).toBeGreaterThan(withEvents.indexOf('<Dial '));
+  });
+
   it('has a ring timeout that never drops below a sane minimum', () => {
     expect(recordAndDialXml({ recordingCallbackUrl: 'r', dialActionUrl: 'a', callerId: 'c', destination: 'd', ringTimeoutSeconds: 1 })).toContain('timeout="5"');
   });

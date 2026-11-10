@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="HaiVE Dialer">
+  <!-- The same mark full-bleed, inside the central safe zone, for launchers that
+       cut their own shape (Android "maskable") and for iOS, which rounds it. -->
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#1e1e1e"/>
+      <stop offset="1" stop-color="#070707"/>
+    </linearGradient>
+    <g id="bars" fill="#f6ae1e">
+      <rect x="64" y="25" width="128" height="24" rx="12"/>
+      <rect x="37" y="71" width="55" height="24" rx="12"/>
+      <rect x="107" y="71" width="111" height="24" rx="12"/>
+      <rect x="11" y="116" width="151" height="24" rx="12"/>
+      <rect x="179" y="116" width="66" height="24" rx="12"/>
+      <rect x="38" y="161" width="180" height="24" rx="12"/>
+      <rect x="64" y="207" width="37" height="24" rx="12"/>
+      <rect x="115" y="207" width="77" height="24" rx="12"/>
+    </g>
+    <g id="badge">
+      <circle cx="380" cy="380" r="106" fill="#0b0b0b"/>
+      <circle cx="380" cy="380" r="90" fill="#ed7e2c"/>
+      <path transform="translate(317.6 317.6) scale(5.2)" fill="#ffffff" d="M20.01 15.38c-1.23 0-2.42-.2-3.53-.56a.977.977 0 0 0-1.01.24l-1.57 1.97c-2.83-1.35-5.48-3.9-6.89-6.83l1.95-1.66c.27-.28.35-.67.24-1.02-.37-1.11-.56-2.3-.56-3.53 0-.54-.45-.99-.99-.99H4.19C3.65 3 3 3.24 3 3.99 3 13.28 10.73 21 20.01 21c.71 0 .99-.63.99-1.18v-3.45c0-.54-.45-.99-.99-.99z"/>
+    </g>
+  </defs>
+  <rect width="512" height="512" fill="url(#bg)"/>
+  <g transform="translate(256 256) scale(0.72) translate(-256 -256)">
+    <use href="#bars" transform="translate(49.15 38.25) scale(1.35)"/>
+    <use href="#badge"/>
+  </g>
+</svg>

@@ -63,6 +63,10 @@ __decorate([
 __decorate([
     (0, mongoose_1.Prop)(),
     __metadata("design:type", String)
+], PushSubscriptionEntry.prototype, "app", void 0);
+__decorate([
+    (0, mongoose_1.Prop)(),
+    __metadata("design:type", String)
 ], PushSubscriptionEntry.prototype, "userAgent", void 0);
 __decorate([
     (0, mongoose_1.Prop)({ required: true }),
@@ -132,6 +136,10 @@ __decorate([
     (0, mongoose_1.Prop)(),
     __metadata("design:type", String)
 ], User.prototype, "assignedAgentId", void 0);
+__decorate([
+    (0, mongoose_1.Prop)({ type: [String], default: undefined }),
+    __metadata("design:type", Array)
+], User.prototype, "permissions", void 0);
 __decorate([
     (0, mongoose_1.Prop)(),
     __metadata("design:type", String)

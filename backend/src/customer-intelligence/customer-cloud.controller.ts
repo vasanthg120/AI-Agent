@@ -21,6 +21,7 @@ import {
   LinkCustomerFolderDto,
   UpdateCloudLinkDto,
 } from './dto/customer-cloud.dto';
+import { Permission } from '../common/permissions/permission.decorator';
 
 // A customer's Google Drive / OneDrive documents, from the Customers panel. Same
 // audience as the page; every call is scoped to the caller's organization and to
@@ -30,6 +31,7 @@ import {
 @Roles('owner', 'admin', 'manager')
 @Feature('inquiries')
 @UseFilters(CloudErrorFilter)
+@Permission('customers')
 @Controller()
 export class CustomerCloudController {
   constructor(private cloud: CustomerCloudService) {}

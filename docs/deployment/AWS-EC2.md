@@ -20,11 +20,91 @@ group id), `<EC2-IP>` (the Elastic IP).
 
 ---
 
+## 0. Where things stand (checked 2026-11-05) and the order to do it in
+
+### 0.1 From your terminals to the server
+
+Today you run each part in its own terminal on your PC. On the server, Docker runs all of them:
+
+| On your PC today | On the server |
+|---|---|
+| `backend` → `npm start` | `backend` container (Node 22, the compiled NestJS app) |
+| `frontend` → `npm run dev` (Vite) | `frontend` container: the production build served by Nginx, the Dialer included at `/dialer/` |
+| `python-agent` → `run-forever.ps1` | `python-agent` container |
+| local `mongod` | `mongo` container (data in a Docker volume, backed up nightly — section 7) |
+| — (Redis isn't running locally) | `redis` container (job queues, cache) |
+| — | `qdrant` container (AI search vectors) |
+| `ngrok http 3000` for Plivo/Twilio | **Not needed.** The server has its own HTTPS address: set `PLIVO_PUBLIC_BASE_URL=https://YOUR.DOMAIN/api` (step 11) |
+| closing a window stops a service | Docker restarts a crashed container and starts everything at boot |
+
+**Why there is no PM2.** PM2 keeps Node processes alive, restarts them and rotates their logs. Here Docker already does
+all of that, for the Python service too, which PM2 isn't made for. `restart: unless-stopped` restarts crashed containers
+and starts them at boot, log rotation is in `docker-compose.prod.yml`, and `deploy.sh` adds health checks and automatic
+rollback. PM2 inside a container would be a second supervisor fighting Docker's. If you ever run the backend outside
+Docker, PM2 is the right tool there.
+
+### 0.2 What already exists, and what was wrong
+
+Everything in section 13 is on `main`, and GitHub already runs `.github/workflows/deploy.yml` on every push to `main`.
+**All 11 runs so far failed, and nothing has ever been deployed by it:**
+
+| Run | Why it failed | Status |
+|---|---|---|
+| #1–#10 (Sep 23 – Oct 16) | An older workflow ("Deploy AI Agent") with no server set up | Replaced |
+| #11 (Nov 3) — frontend | The repository variables `VITE_API_URL` / `VITE_SOCKET_URL` aren't set | **You:** step 8.2 |
+| #11 — backend tests | Cancelled at the 40-minute limit. The tests had finished: the specs that start the whole app leave timers and connections open, so Jest never quit. Two such runs were still hanging on this PC two days later | **Fixed:** `--forceExit` in the workflow |
+| — | No EC2 server, no `EC2_HOST` / `EC2_USER` / `EC2_SSH_KEY` secrets | **You:** sections 5–8 |
+
+Checked on 2026-11-05, without Docker (it isn't installed on this PC): the backend suite run exactly as CI runs it
+(`--ci --runInBand --forceExit`) passes, 100 suites and 1,015 tests in about 4 minutes, and exits. The frontend production build passes with
+production addresses and includes the Dialer. The AI service's virtualenv matches every pin in `requirements.txt`, on
+Python 3.12 like its image. Every setting the code reads from your local `.env` files is in the production templates
+(`deploy/env/`). No service writes lasting files to its own disk, so a redeploy loses nothing. **The three Docker images
+have never been built.** The pipeline's "Docker build" job is their first real test.
+
+### 0.3 Decide these first
+
+1. **The repository `vasanthg120/AI-Agent` is public.** Anyone can read and clone the whole source code. No `.env` file or
+   key is in any branch on GitHub. A 2026-07-28 commit that contained both `.env` files exists only on your PC and was never
+   pushed. Recommended: Settings → General → Danger zone → Change visibility → **Private**. Two effects: the server then needs
+   the read-only deploy key (step 7.2), and GitHub Actions on a private repository has a monthly allowance of free minutes
+   (2,000 on the Free plan; a full run here uses about 30–45 runner-minutes, so roughly 45–65 deploys a month).
+2. **Region.** pollen.haive.tech already runs HaiVE on an EC2 server in **Sydney (ap-southeast-2)**, set up by hand, not by
+   this pipeline. Decide whether the new server replaces it. Pick the region closest to most of your users: Mumbai
+   (`ap-south-1`) for India, Sydney (`ap-southeast-2`) for Australian customers (Hoops is AUD/AEST). Sydney costs roughly a
+   fifth more. If you choose Sydney, replace `ap-south-1` with `ap-southeast-2` in every command and policy below.
+3. **What is on `main` is what goes live.** The HaiVE Dialer and the user-permissions work are on `feature/haive-dialer`
+   (main + 9 commits) and not on `main` yet. Merge them when you want them in production.
+4. **A domain** (e.g. `app.haive.tech`) whose DNS you can edit. HTTPS, the Dialer and every OAuth sign-in need it.
+
+### 0.4 Order of work
+
+| # | Do this | Where | Section |
+|---|---|---|---|
+| 1 | Decisions above (visibility, region, domain) | — | 0.3 |
+| 2 | AWS account safety, security group, IAM role, S3 backup bucket | AWS | Steps 1–3, 7.1 |
+| 3 | Launch t3.large Ubuntu 24.04, Elastic IP, DNS `A` record | AWS + DNS | Steps 4–5 |
+| 4 | Run `deploy/ec2-bootstrap.sh` (Docker, Nginx, Certbot, firewall, swap, `deploy` user) | EC2 | Step 6 |
+| 5 | SSH keys: GitHub → server, server → GitHub | Local + GitHub | Step 7 |
+| 6 | Clone to `/var/www/AI-Agent`, fill the three `.env` files | EC2 | Step 8 |
+| 7 | First deploy by hand, create the first admin | EC2 | Step 9 |
+| 8 | Nginx site + HTTPS | EC2 | Step 10 |
+| 9 | Point Azure/Google/Razorpay/Plivo/Twilio at `https://YOUR.DOMAIN/api/...` | Their consoles | Step 11 |
+| 10 | Secrets `EC2_HOST`, `EC2_USER`, `EC2_SSH_KEY`; variables `VITE_API_URL`, `VITE_SOCKET_URL` | GitHub | 8.2 |
+| 11 | Push to `main` (or Actions → Run workflow) and watch all jobs turn green | Local + GitHub | 8.5 |
+| 12 | Nightly backups + daily snapshots | EC2 + AWS | 7.1–7.2 |
+| 13 | Install the Dialer on a phone, place one real call | Phone | Step 12 |
+
+From then on, a push to `main` deploys by itself: tests → image build check → the server builds that commit → health
+check → live, or the previous build is put back automatically.
+
+---
+
 ## 1. Summary
 
 | | Recommendation |
 |---|---|
-| Region | **ap-south-1 (Mumbai)** — your users and customers are in India |
+| Region | **ap-south-1 (Mumbai)** for users in India, or **ap-southeast-2 (Sydney)** for Australian customers — where pollen.haive.tech runs today (0.3) |
 | Instance | **t3.large** — 2 vCPU, 8 GiB RAM, x86_64 |
 | OS | **Ubuntu Server 24.04 LTS** (x86_64), supported until 2029 |
 | Storage | **60 GiB gp3** root volume, encrypted (3,000 IOPS / 125 MB/s included) |
@@ -244,7 +324,7 @@ The repository's `deploy/ec2-bootstrap.sh` installs and configures everything: D
 (from Docker's repository), Nginx, Certbot, the AWS CLI v2, git, a 4 GB swap file, the `deploy` user (member of
 the `docker` group only), SSH keys-only/no-root, the UFW firewall (22/80/443), fail2ban and automatic security updates.
 
-[Local] copy it up (the repository is private, so not via raw.githubusercontent):
+[Local] copy it up (works whether the repository is public or private):
 ```bash
 scp -i ~/Downloads/haive-admin.pem deploy/ec2-bootstrap.sh ubuntu@<EC2-IP>:~
 ```
@@ -367,8 +447,30 @@ Open `https://YOUR.DOMAIN` in a browser, sign in, open the chat (websocket) and 
 | Azure app registration (Outlook, OneDrive, Microsoft sign-in) → Authentication → Redirect URIs | `https://YOUR.DOMAIN/api/outlook/callback`, `https://YOUR.DOMAIN/api/outlook/admin-consent-callback`, `https://YOUR.DOMAIN/api/auth/oauth/microsoft/callback` |
 | Google Cloud OAuth clients | `https://YOUR.DOMAIN/api/gmail/callback`, `https://YOUR.DOMAIN/api/cloud-files/google/callback`, `https://YOUR.DOMAIN/api/auth/oauth/google/callback` |
 | Razorpay / Stripe / Cashfree → Webhooks | `https://YOUR.DOMAIN/api/billing/webhooks/razorpay` (or `/stripe`, `/cashfree`) |
-| Plivo / Twilio | taken from `PLIVO_PUBLIC_BASE_URL` / `PUBLIC_API_BASE_URL` automatically (no ngrok in production) |
+| Plivo / Twilio | taken from `PLIVO_PUBLIC_BASE_URL` (Twilio uses the same unless `TWILIO_PUBLIC_BASE_URL` is set) — it must be `https://YOUR.DOMAIN/api`; calling does **not** fall back to `PUBLIC_API_BASE_URL` (no ngrok in production) |
 | Zapier webhooks | the address the Integrations page shows (built from `PUBLIC_API_BASE_URL`) |
+
+### Step 12 — HaiVE Dialer (`/dialer/`) [nothing extra to install]
+The Dialer is a second page of the frontend image, at `https://YOUR.DOMAIN/dialer/`, installable on phones as its own app.
+- **HTTPS is required** — browsers only install apps and run service workers on https (certbot above covers it).
+- **Nginx:** nothing to change on the host. The frontend container's `frontend/nginx.conf` serves the Dialer's page for its own routes (`/dialer/recents`…), sends its page, service worker and manifest with `Cache-Control: no-cache` (so a deploy reaches installed Dialers on their next open), and the manifest as `application/manifest+json`. Serve `/dialer/sw.js` from this domain itself — never from a CDN or another host.
+- **Backend:** `PLIVO_PUBLIC_BASE_URL=https://YOUR.DOMAIN/api`. The Dialer's "calling is offline" check asks `<that address>/health`; when the check itself can't tell, the Dialer says nothing rather than block calls.
+- **"Your call report is ready" notifications (optional):** set `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY` and `VAPID_SUBJECT` (`mailto:you@YOUR.DOMAIN`) in `backend.env`. Generate the pair once, in `/var/www/AI-Agent/backend`: `node -e "console.log(require('web-push').generateVAPIDKeys())"`. The same keys serve HaiVE's own notifications; changing them later means everyone turns notifications on again.
+
+**Verify:**
+```bash
+curl -s https://YOUR.DOMAIN/dialer/recents | grep -o '<title>[^<]*'                        # <title>HaiVE Dialer
+curl -sI https://YOUR.DOMAIN/dialer/manifest.webmanifest | grep -i content-type             # application/manifest+json
+curl -sI https://YOUR.DOMAIN/dialer/sw.js | grep -i cache-control                           # no-cache
+```
+Then on a phone: open `https://YOUR.DOMAIN/dialer/` → Install (Android) or Share → Add to Home Screen (iPhone).
+
+**If the Dialer's offline cache ever has to be switched off:** replace `frontend/dialer/sw.js` with the three lines below and deploy. Every installed Dialer drops its worker and cache on its next open and carries on as a normal web page.
+```js
+self.addEventListener('install', () => self.skipWaiting());
+self.addEventListener('activate', (event) => event.waitUntil(caches.keys().then((keys) => Promise.all(keys.map((k) => caches.delete(k)))).then(() => self.registration.unregister())));
+self.addEventListener('fetch', () => {});
+```
 
 ---
 
@@ -434,7 +536,7 @@ target: instance `haive-prod` (or tag the volume `Backup=haive-daily` and target
 
 ```
 push to main
-  ├─ Backend · typecheck and tests     tsc + 636 Jest tests against a throwaway MongoDB/Redis (~5 min)
+  ├─ Backend · typecheck and tests     tsc + 1,015 Jest tests against a throwaway MongoDB/Redis (~5 min)
   ├─ Frontend · typecheck and build    tsc -b + vite build with the production URLs        (~2 min)
   └─ AI service · syntax check         python -m compileall                                   (<1 min)
         │ all green
@@ -554,6 +656,7 @@ sudo certbot certificates; sudo ufw status; sudo fail2ban-client status sshd
 |---|---|
 | Actions: `ssh: handshake failed` / `i/o timeout` | Port 22 not open to the runner (security group / SSH gate variables), wrong `EC2_USER`, or the public key is not in `/home/deploy/.ssh/authorized_keys`. Test from your PC with the same key. |
 | Actions: "Set the repository variables VITE_API_URL…" | Add the two variables (8.2). |
+| Actions: backend job "exceeded the maximum execution time of 40m0s" | Jest didn't quit after the last test (open timers/connections from the specs that start the whole app). The Tests step must keep `--forceExit`. If tests really get slower, raise `timeout-minutes`. |
 | Deploy: "Health check failed" and rolled back | Read the logs it printed. Usual causes: a missing/new `.env` value, `JWT_SECRET` different between backend and AI service, MongoDB not healthy (`docker compose … ps`). |
 | The site calls `localhost` / login fails with network error | `VITE_API_URL` was missing when the frontend was built. Fix `.env`, then `docker rmi haive/frontend:<sha>` and `./deploy.sh <sha>` to rebuild it. |
 | `502 Bad Gateway` | A container is down: `./deploy.sh status`, then its logs. |
@@ -624,3 +727,4 @@ Prices are AWS list prices as published by third-party trackers at the time of w
 | `deploy/backup/mongo-backup.sh` | Nightly MongoDB backup to S3 |
 | `deploy/env/*.example` | Templates for the server's three `.env` files |
 | `.gitattributes` | Keeps scripts and configs LF so they run on Linux whatever OS commits them |
+| `frontend/dialer/` | The HaiVE Dialer's page, service worker template and the Vite plugin that builds them (Step 12) |

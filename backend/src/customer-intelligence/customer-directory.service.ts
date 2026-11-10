@@ -104,6 +104,17 @@ export interface CustomerSource {
   lastError?: string;
 }
 
+/** A customer the Dialer can call: who they are, their numbers as written, and the deal a call is for. */
+export interface CallableCustomer {
+  id: string;
+  name: string;
+  company?: string;
+  // Each number once, as the CRM has it ("+61 402 779 906"), with whose it is.
+  phones: { number: string; label?: string }[];
+  // Their most recent open deal (else most recent deal), so the call's report gets that context.
+  deal?: { id: string; name?: string };
+}
+
 export interface CustomerRow extends CustomerSummary {
   id: string;
   name: string;
@@ -1205,6 +1216,52 @@ export class CustomerDirectoryService {
       return (descending ? -order : order) || a.name.localeCompare(b.name);
     });
     return { directory, inSource, sorted, sortBy, descending };
+  }
+
+  /**
+   * The Dialer's Contacts search: customers matching by name, company, email or
+   * number (digits anywhere in any of their numbers), those with a number first.
+   * `onlyRepUserId` keeps it to the customers that person is the Customer Rep of.
+   */
+  async searchCallable(organizationId: string, search: string, onlyRepUserId?: string, limit = 20): Promise<CallableCustomer[]> {
+    const directory = await this.compute(organizationId);
+    const words = search.trim().toLowerCase();
+    const digits = search.replace(/D/g, '');
+    const digitsOf = (phone?: string) => (phone ?? '').replace(/D/g, '');
+    const phonesOf = (e: Entry) => {
+      const seen = new Set<string>();
+      const phones: CallableCustomer['phones'] = [];
+      for (const [number, label] of [[e.phone, undefined], ...e.people.map((p) => [p.phone, p.name] as const)] as const) {
+        const tidy = (number ?? '').replace(/s+/g, ' ').trim();
+        const key = digitsOf(tidy);
+        if (key.length < 6 || seen.has(key)) continue;
+        seen.add(key);
+        phones.push({ number: tidy, ...(label && label !== e.name ? { label } : {}) });
+      }
+      return phones;
+    };
+    const matches = directory.entries.filter(
+      (e) =>
+        !e.archived &&
+        (!onlyRepUserId || e.repUserId === onlyRepUserId) &&
+        ((!!words && e.haystack.includes(words)) || (digits.length >= 4 && [e.phone, ...e.people.map((p) => p.phone)].some((p) => digitsOf(p).includes(digits)))),
+    );
+    const latest = (e: Entry) => Math.max(0, ...e.activityAt);
+    return matches
+      .map((e) => ({ entry: e, phones: phonesOf(e) }))
+      .sort((a, b) => Number(b.phones.length > 0) - Number(a.phones.length > 0) || latest(b.entry) - latest(a.entry))
+      .slice(0, limit)
+      .map(({ entry, phones }) => {
+        const byDate = [...entry.deals].sort((a, b) => (b.date?.getTime() ?? 0) - (a.date?.getTime() ?? 0));
+        const deal = byDate.find((d) => d.status === 'open') ?? byDate[0];
+        return {
+          id: entry.id,
+          name: entry.name,
+          ...(entry.company ? { company: entry.company } : {}),
+          phones,
+          ...(deal ? { deal: { id: deal.id, ...(deal.name ? { name: deal.name } : {}) } } : {}),
+        };
+      });
   }
 
   async list(organizationId: string, query: CustomerQuery) {

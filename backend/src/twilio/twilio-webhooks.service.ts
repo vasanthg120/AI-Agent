@@ -5,6 +5,7 @@ import { AxiosError } from 'axios';
 import { Model, isValidObjectId } from 'mongoose';
 import { firstValueFrom } from 'rxjs';
 import { CallCopilotUploadService } from '../call-copilot/call-copilot-upload.service';
+import { CallFailure } from '../calling/call-outcome';
 import { assertPublicHttpUrl } from '../common/security/ssrf-guard';
 import { NotificationsService } from '../notifications/notifications.service';
 import { isValidTwilioSignature } from './twilio-signature';
@@ -51,6 +52,15 @@ const CALL_STATUS: Record<string, TwilioCallStatus> = {
   failed: 'failed',
   canceled: 'cancelled',
 };
+
+/** What the dialed leg's outcome means for the person who placed the call. */
+function dialFailureCode(outcome: TwilioCallStatus, direction: 'outbound' | 'inbound'): CallFailure {
+  if (outcome === 'busy') return 'busy';
+  if (outcome === 'no_answer') return direction === 'outbound' ? 'no_answer_customer' : 'no_answer_agent';
+  if (outcome === 'cancelled') return 'cancelled';
+  // Twilio: "could not be completed as dialed, most likely because the phone number was non-existent".
+  return direction === 'outbound' ? 'invalid_number' : 'provider_error';
+}
 
 const text = (value: unknown): string => (typeof value === 'string' ? value : value == null ? '' : String(value));
 const header = (value: string | string[] | undefined): string | undefined => (Array.isArray(value) ? value[0] : value);
@@ -102,7 +112,13 @@ export class TwilioWebhooksService {
       recording: `${base}/twilio/webhooks/recording?callId=${callId}`,
       dialStatus: `${base}/twilio/webhooks/dial-status?callId=${callId}`,
       announce: `${base}/twilio/webhooks/announce?callId=${callId}`,
+      answered: `${base}/twilio/webhooks/answered?callId=${callId}`,
     };
+  }
+
+  /** The far end picked up: the start of the conversation the Dialer times. */
+  private markAnswered(callId: unknown): Promise<unknown> {
+    return this.callModel.updateOne({ _id: callId, answeredAt: { $exists: false } }, { $set: { answeredAt: new Date() } }).exec();
   }
 
   // ---- Voice: a call was answered (outbound) or arrived (inbound) -------------
@@ -116,7 +132,10 @@ export class TwilioWebhooksService {
       const call = await this.findCall(callIdParam);
       if (!call) return { status: 404 };
       if (!(await this.isAuthentic(call.organizationId, req))) return { status: 403 };
-      await this.callModel.updateOne({ _id: call._id }, { $set: { status: 'in_progress', ...(callSid ? { callSid } : {}) } }).exec();
+      await this.callModel.updateOne({ _id: call._id }, { $min: { agentAnsweredAt: new Date() }, ...(callSid ? { $set: { callSid } } : {}) }).exec();
+      // A status report that overtook this request has already settled the call;
+      // it must not be reopened as "in progress".
+      await this.callModel.updateOne({ _id: call._id, status: 'initiated' }, { $set: { status: 'in_progress' } }).exec();
       const line = await this.lineModel.findOne({ twilioNumber: call.twilioNumber }).exec();
       const urls = this.urls(call._id.toString());
       return {
@@ -127,6 +146,7 @@ export class TwilioWebhooksService {
           recordingCallbackUrl: urls.recording,
           actionUrl: urls.dialStatus,
           announceUrl: line?.announceRecording === false ? undefined : urls.announce,
+          answeredUrl: urls.answered,
           greeting: AGENT_GREETING,
         }),
       };
@@ -167,10 +187,20 @@ export class TwilioWebhooksService {
         destination: `+${line.agentPhone}`,
         recordingCallbackUrl: urls.recording,
         actionUrl: urls.dialStatus,
+        answeredUrl: urls.answered,
         // The caller hears the notice before being put through to the agent.
         greeting: line.announceRecording === false ? undefined : RECORDING_NOTICE,
       }),
     };
+  }
+
+  /** The dialed number picked up (the <Number>'s "answered" status callback). */
+  async answered(req: TwilioWebhookRequest, callIdParam: string | undefined): Promise<TwilioWebhookResult> {
+    const call = await this.findCall(callIdParam);
+    if (!call) return { status: 404 };
+    if (!(await this.isAuthentic(call.organizationId, req))) return { status: 403 };
+    await this.markAnswered(call._id);
+    return { status: 200, xml: EMPTY_TWIML };
   }
 
   /** Played to the customer the moment they pick up an outbound call. */
@@ -178,6 +208,8 @@ export class TwilioWebhooksService {
     const call = await this.findCall(callIdParam);
     if (!call) return { status: 404 };
     if (!(await this.isAuthentic(call.organizationId, req))) return { status: 403 };
+    // Twilio asks for this the moment the customer picks up.
+    await this.markAnswered(call._id);
     return { status: 200, xml: sayTwiml(RECORDING_NOTICE) };
   }
 
@@ -195,6 +227,7 @@ export class TwilioWebhooksService {
     if (Number.isFinite(duration) && duration > 0) set.durationSeconds = duration;
     if (outcome && outcome !== 'completed') {
       set.failureReason = call.direction === 'outbound' ? `The customer's phone: ${outcome.replace('_', ' ')}.` : `Your phone: ${outcome.replace('_', ' ')}.`;
+      set.failureCode = dialFailureCode(outcome, call.direction);
     }
     await this.callModel.updateOne({ _id: call._id }, { $set: set }).exec();
     // Nothing more to do on the call: hang up.
@@ -220,6 +253,15 @@ export class TwilioWebhooksService {
             ? 'Your phone was not answered, so the customer was not called.'
             : `Your phone: ${outcome.replace('_', ' ')}.`
           : `Call ${outcome.replace('_', ' ')}.`;
+      if (call.direction === 'outbound') {
+        set.failureCode = outcome === 'no_answer' || outcome === 'busy' ? 'no_answer_agent' : outcome === 'cancelled' ? 'cancelled' : 'provider_error';
+      }
+    } else if (outcome === 'completed' && call.direction === 'outbound' && call.status === 'initiated') {
+      // The agent's phone answered but our voice webhook never ran, so the
+      // customer was never dialled: Twilio couldn't reach HaiVE.
+      set.status = 'failed';
+      set.failureCode = 'offline';
+      set.failureReason = 'Twilio could not reach HaiVE when your phone answered.';
     }
     const duration = Number(text(body.CallDuration));
     if (Number.isFinite(duration) && duration > 0 && !call.durationSeconds) set.durationSeconds = duration;

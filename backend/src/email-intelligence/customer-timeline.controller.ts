@@ -5,6 +5,7 @@ import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
 import { JwtPayload } from '../auth/jwt-payload.interface';
 import { EmailIntelligenceService } from './email-intelligence.service';
+import { Permission } from '../common/permissions/permission.decorator';
 
 // Phase 14c — deliberately contributes routes under the same
 // 'crm/customer-activity' prefix CustomerActivityController (in CrmModule)
@@ -15,6 +16,7 @@ import { EmailIntelligenceService } from './email-intelligence.service';
 // this module would create a cycle. Same RBAC/store-scoping pattern as the
 // sibling relationships/personal-relationships routes.
 @UseGuards(JwtAuthGuard)
+@Permission('customers')
 @Controller('crm/customer-activity')
 export class CustomerTimelineController {
   constructor(private emailIntelligenceService: EmailIntelligenceService) {}

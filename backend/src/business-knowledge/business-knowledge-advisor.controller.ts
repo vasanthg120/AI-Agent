@@ -9,6 +9,7 @@ import { UpdateRecommendationStatusDto } from './dto/update-recommendation-statu
 import { BusinessKnowledgeChatService } from './business-knowledge-chat.service';
 import { BusinessKnowledgeInsightsService } from './business-knowledge-insights.service';
 import { Feature } from '../common/app-features';
+import { Permission } from '../common/permissions/permission.decorator';
 
 // Same read tier as the rest of business-knowledge (owner/admin/manager) —
 // see business-profile.controller.ts's own comment for why. Recommendation
@@ -19,6 +20,7 @@ import { Feature } from '../common/app-features';
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Roles('owner', 'admin', 'manager')
 @Feature('business_knowledge')
+@Permission('business_knowledge')
 @Controller('business-knowledge')
 export class BusinessKnowledgeAdvisorController {
   constructor(

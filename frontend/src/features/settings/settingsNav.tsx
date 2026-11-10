@@ -29,6 +29,9 @@ export interface SettingsNavItem {
   /** Extra search terms — what someone might type when they don't know the tab's name. */
   keywords?: string[];
   requireRoles?: string[];
+  /** For someone with their own permission list: the module(s) that open this tab
+   * (any one). Tabs without one are their own settings (notifications, security). */
+  module?: string | string[];
   /** Only for a Main Account's own owner (a sub-account's owner holds the same role). */
   requireMainOwner?: boolean;
 }
@@ -65,6 +68,7 @@ export const SETTINGS_NAV: SettingsNavGroup[] = [
         label: 'General',
         icon: <FiSettings />,
         path: ROUTES.settingsGeneral,
+        module: 'settings',
         hint: 'Store hours & timezone',
         summary: 'Opening hours and timezone that HaiVE AI uses for daily to-do lists and end-of-day reports.',
         keywords: ['timezone', 'hours', 'opening', 'closing', 'store', 'timing'],
@@ -109,6 +113,7 @@ export const SETTINGS_NAV: SettingsNavGroup[] = [
         label: 'AI Roles',
         icon: <FiUsers />,
         path: ROUTES.settingsAgentRoles,
+        module: 'ai_roles',
         hint: 'AI agents & personas',
         summary: 'Create and tune the AI agents your team works with, and what each one is responsible for.',
         keywords: ['agents', 'persona', 'assistant', 'roles'],
@@ -118,6 +123,7 @@ export const SETTINGS_NAV: SettingsNavGroup[] = [
         label: 'Integrations',
         icon: <FiLink2 />,
         path: ROUTES.settingsIntegrations,
+        module: ['integrations', 'crm_integrations', 'email'],
         hint: 'Connected apps & data',
         summary: 'Connect the tools your business already runs on so the AI can work with real data.',
         keywords: ['outlook', 'crm', 'connect', 'apps', 'oauth'],
@@ -129,6 +135,7 @@ export const SETTINGS_NAV: SettingsNavGroup[] = [
         label: 'Data Sources',
         icon: <FiDatabase />,
         path: ROUTES.settingsDataSources,
+        module: 'crm_integrations',
         hint: 'CRMs, mappings & sync',
         summary:
           'Each connected CRM is kept separate: choose the default, map its fields to HaiVE’s, and see what it can and can’t provide.',
@@ -143,6 +150,7 @@ export const SETTINGS_NAV: SettingsNavGroup[] = [
         label: 'Calling',
         icon: <FiPhoneCall />,
         path: ROUTES.settingsCalling,
+        module: 'integrations',
         hint: 'Phone numbers & recording',
         summary:
           'Connect Plivo (Indian numbers) and Twilio (international), link each number to a person, and send recorded calls to Call Copilot.',
@@ -160,6 +168,7 @@ export const SETTINGS_NAV: SettingsNavGroup[] = [
         label: 'Users',
         icon: <FiUserPlus />,
         path: ROUTES.settingsUsers,
+        module: 'users',
         hint: 'Invite & manage people',
         summary: 'Add teammates, change their roles, and remove access when someone leaves.',
         keywords: ['team', 'members', 'invite', 'roles', 'staff'],
@@ -170,6 +179,7 @@ export const SETTINGS_NAV: SettingsNavGroup[] = [
         label: 'Sales Targets',
         icon: <FiTarget />,
         path: ROUTES.settingsSalesTargets,
+        module: 'settings',
         hint: 'Store & employee goals',
         summary: 'Set monthly sales goals for the store and for each employee.',
         keywords: ['goals', 'quota', 'targets', 'revenue'],
@@ -180,6 +190,7 @@ export const SETTINGS_NAV: SettingsNavGroup[] = [
         label: 'Deal Assignment',
         icon: <FiUserCheck />,
         path: ROUTES.settingsDealAssignment,
+        module: 'settings',
         hint: 'Who owns each deal',
         summary: 'Give every deal an owner so its revenue counts for the right person — one at a time, in bulk, or by linking CRM owners.',
         keywords: ['owner', 'assign', 'crm', 'leads', 'deals', 'mapping'],
@@ -199,6 +210,7 @@ export const SETTINGS_NAV: SettingsNavGroup[] = [
         label: 'Royalty Rules',
         icon: <FiPercent />,
         path: ROUTES.settingsRoyaltyRules,
+        module: 'settings',
         hint: 'Commission percentages',
         summary: 'Define royalty and commission percentages, with a full history of every change.',
         keywords: ['commission', 'royalty', 'percent', 'payout'],
@@ -212,6 +224,7 @@ export const SETTINGS_NAV: SettingsNavGroup[] = [
         label: 'Email SLA',
         icon: <FiClock />,
         path: ROUTES.settingsEmailSla,
+        module: 'settings',
         hint: 'Reply-time policies',
         summary: 'How fast each priority of email must get a reply, when the clock runs, and who is notified when a deadline is missed.',
         keywords: ['sla', 'response', 'escalation', 'reply', 'inbox'],

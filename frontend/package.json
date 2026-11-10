@@ -7,7 +7,9 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
-    "lint": "eslint ."
+    "lint": "eslint .",
+    "dialer:icons": "node scripts/build-dialer-icons.mjs",
+    "dialer:icon-set": "node scripts/build-dialer-icon-set.mjs"
   },
   "dependencies": {
     "@hello-pangea/dnd": "^18.0.1",

@@ -48,6 +48,7 @@ import { FinanceDocumentListView } from './components/FinanceDocumentListView';
 import { MonthlyExpenseTrendChart } from './components/MonthlyExpenseTrendChart';
 import { RankedBreakdownList } from './components/RankedBreakdownList';
 import styles from './finance.module.css';
+import { can } from '@/utils/access';
 
 const WIDGET_OPTIONS = [
   { value: 'summary', label: 'Summary KPIs' },
@@ -230,18 +231,20 @@ export function FinancePage() {
         actions={
           <>
             <MultiSelectDropdown label="Hidden Widgets" options={WIDGET_OPTIONS} selected={hiddenWidgets} onChange={setHiddenWidgets} />
-            <Dropdown
-              trigger={
-                <Button type="button" variant="ghost" size="sm" leftIcon={<FiDownload />}>
-                  Export
-                </Button>
-              }
-              items={[
-                { id: 'csv', label: 'Export as CSV', onSelect: () => void handleExport('csv') },
-                { id: 'xlsx', label: 'Export as Excel', onSelect: () => void handleExport('xlsx') },
-                { id: 'pdf', label: 'Export as PDF', onSelect: () => void handleExport('pdf') },
-              ]}
-            />
+            {can(useAuthStore.getState().user, 'finance', 'export') && (
+              <Dropdown
+                trigger={
+                  <Button type="button" variant="ghost" size="sm" leftIcon={<FiDownload />}>
+                    Export
+                  </Button>
+                }
+                items={[
+                  { id: 'csv', label: 'Export as CSV', onSelect: () => void handleExport('csv') },
+                  { id: 'xlsx', label: 'Export as Excel', onSelect: () => void handleExport('xlsx') },
+                  { id: 'pdf', label: 'Export as PDF', onSelect: () => void handleExport('pdf') },
+                ]}
+              />
+            )}
           </>
         }
       />
@@ -253,14 +256,16 @@ export function FinancePage() {
         onSaveNew={(name) => void handleSavePreset(name)}
       />
 
-      <SectionCard title="Upload Vendor Payment Documents" icon={FiUpload}>
-        <FinanceDocumentUpload
-          onDocumentReady={(doc) => {
-            refreshOverview();
-            setReviewDoc(doc);
-          }}
-        />
-      </SectionCard>
+      {can(useAuthStore.getState().user, 'finance', 'create') && (
+        <SectionCard title="Upload Vendor Payment Documents" icon={FiUpload}>
+          <FinanceDocumentUpload
+            onDocumentReady={(doc) => {
+              refreshOverview();
+              setReviewDoc(doc);
+            }}
+          />
+        </SectionCard>
+      )}
 
       <FinanceFilterBar filters={filters} onChange={setFilters} />
 

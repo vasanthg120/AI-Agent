@@ -21,11 +21,13 @@ import {
   SetFolderGrantsDto,
   UpdateItemDto,
 } from './dto/cloud-files.dto';
+import { Permission, PermissionExempt } from '../common/permissions/permission.decorator';
 
 // Google Drive and OneDrive for the signed-in person. Which account and which
 // folders they may open is decided per call by CloudAccessService; tokens never
 // leave the backend. Changes are also recorded by the global AuditInterceptor.
 @UseFilters(CloudErrorFilter)
+@Permission('files')
 @Controller('cloud-files')
 export class CloudFilesController {
   constructor(
@@ -43,6 +45,7 @@ export class CloudFilesController {
 
   @UseGuards(JwtAuthGuard)
   @Get(':provider/connect-url')
+  @Permission('files', 'create')
   connectUrl(@CurrentUser() user: JwtPayload, @Param('provider') provider: string, @Query() query: ConnectQueryDto) {
     return { url: this.connections.connectUrl(user, provider, query.ownership ?? 'personal') };
   }
@@ -50,6 +53,7 @@ export class CloudFilesController {
   // Google returns here. (OneDrive returns to /outlook/callback — the address already registered with Microsoft.)
   @Get('google/callback')
   @Redirect()
+  @PermissionExempt('public')
   async googleCallback(@Query('code') code?: string, @Query('state') state?: string, @Query('error') error?: string) {
     const cloud = this.connections.readState(state);
     if (!cloud || cloud.provider !== 'google_drive') return { url: this.connections.backTo('google_drive', 'error'), statusCode: 302 };
@@ -128,6 +132,7 @@ export class CloudFilesController {
   @UseGuards(JwtAuthGuard)
   @Patch('connections/:id/items/:itemId')
   @Throttle({ default: { limit: 30, ttl: 60_000 } })
+  @Permission('files', 'create')
   update(@CurrentUser() user: JwtPayload, @Param('id') id: string, @Param('itemId') itemId: string, @Body() dto: UpdateItemDto) {
     return this.files.update(user, id, itemId, dto);
   }
@@ -160,6 +165,7 @@ export class CloudFilesController {
 
   @UseGuards(JwtAuthGuard)
   @Put('connections/:id/grants')
+  @Permission('files', 'create')
   setGrants(@CurrentUser() user: JwtPayload, @Param('id') id: string, @Body() dto: SetFolderGrantsDto) {
     return this.files.setGrants(user, id, dto.grants);
   }

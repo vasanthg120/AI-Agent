@@ -11,7 +11,7 @@ import {
 } from '@nestjs/websockets';
 import { Server, Socket } from 'socket.io';
 import { JwtPayload } from '../auth/jwt-payload.interface';
-import { UsersService } from '../users/users.service';
+import { AI_ROLE_UNAVAILABLE_MESSAGE, UsersService } from '../users/users.service';
 import { ChatService } from './chat.service';
 
 interface AuthedSocket extends Socket {
@@ -108,6 +108,19 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     // threw uncaught and silently killed the whole handler before it ever
     // emitted 'typing', with no visible error anywhere.
     const agentId = body.agentId ?? (user.roles?.includes('agent_user') ? user.assignedAgentId : undefined);
+
+    // Sockets skip the HTTP checks, so the person's access is read again here, live:
+    // someone given their own permissions needs to be allowed to chat, and a team
+    // member whose AI role is gone has no agent to talk to.
+    const access = await this.usersService.socketAccess(user, 'ai_agent', 'create');
+    if (access.refusal) {
+      client.emit('error', { message: access.refusal });
+      return;
+    }
+    if (access.user && (await this.usersService.aiRoleUnavailable(access.user))) {
+      client.emit('error', { message: AI_ROLE_UNAVAILABLE_MESSAGE });
+      return;
+    }
 
     // Reassigned the instant the real id is known (see onConversationId
     // below) — a brand-new conversation has no id yet when this handler

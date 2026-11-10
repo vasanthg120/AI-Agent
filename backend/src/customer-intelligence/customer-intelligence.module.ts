@@ -72,6 +72,8 @@ import { CustomersController } from './customers.controller';
   // SalesBoard's "Job #" column / "View Linked Job" action (one-directional
   // — this module never imports CrmModule back, see crm.module.ts's own
   // comment on why that's safe).
-  exports: [CustomerJobsService],
+  // CustomerDirectoryService: the Dialer's Contacts search (calling/) reads
+  // the same directory the Customers page shows.
+  exports: [CustomerJobsService, CustomerDirectoryService],
 })
 export class CustomerIntelligenceModule {}

@@ -1,4 +1,4 @@
-import { IsBoolean, IsIn, IsOptional, IsString, MaxLength, MinLength, ValidateIf } from 'class-validator';
+import { ArrayMaxSize, IsArray, IsBoolean, IsIn, IsOptional, IsString, MaxLength, MinLength, ValidateIf } from 'class-validator';
 
 // 'owner' is registration-only (the user who created the org) — not
 // assignable via the admin panel, so it's excluded here even though User.roles
@@ -41,6 +41,14 @@ export class UpdateUserDto {
   @IsOptional()
   @IsString()
   department?: string;
+
+  // Replaces the person's page & action permissions (see create-user.dto.ts). Sent
+  // for an older AI-role account, it moves them onto their own list.
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(200)
+  @IsString({ each: true })
+  permissions?: string[];
 
   // Provider/model-availability control, not an AI on/off switch — see
   // user.schema.ts's own comment. Only ever gates the voice (Sarvam) route.

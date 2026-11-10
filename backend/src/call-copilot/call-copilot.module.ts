@@ -4,6 +4,7 @@ import { MongooseModule } from '@nestjs/mongoose';
 import { AuthModule } from '../auth/auth.module';
 import { UsersModule } from '../users/users.module';
 import { BillingModule } from '../billing/billing.module';
+import { NotificationsModule } from '../notifications/notifications.module';
 import { GridFsService } from '../common/gridfs/gridfs.service';
 import { CallCopilotController } from './call-copilot.controller';
 import { CallCopilotGateway } from './call-copilot.gateway';
@@ -28,6 +29,8 @@ import { CallSession, CallSessionSchema } from './schemas/call-session.schema';
     // own comment: exported specifically so other AI-backed features adopt
     // this contract instead of reinventing one).
     BillingModule,
+    // "Your call report is ready" on the HaiVE Dialer (NotificationsService.pushToDialer).
+    NotificationsModule,
   ],
   controllers: [CallCopilotController],
   providers: [CallCopilotService, CallCopilotUploadService, CallCopilotGateway, GridFsService],

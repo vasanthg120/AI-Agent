@@ -17,6 +17,7 @@ export declare class AgentRole {
     allowedTools: string[];
     modelTier?: 'fast' | 'standard';
     features?: string[];
+    defaultPermissions?: string[];
     avatarColor: string;
     createdBy: string;
 }

@@ -7,8 +7,10 @@ import { JwtPayload } from '../auth/jwt-payload.interface';
 import { resolveBiDateRange, scopeBiFilters } from './bi-filter.util';
 import { BiFilterQueryDto } from './dto/bi-filter-query.dto';
 import { EnquiryConversionService } from './enquiry-conversion.service';
+import { Permission } from '../common/permissions/permission.decorator';
 
 @UseGuards(JwtAuthGuard, RolesGuard)
+@Permission('analytics')
 @Controller('business-intelligence/enquiry-conversion')
 export class EnquiryConversionController {
   constructor(private enquiryConversionService: EnquiryConversionService) {}

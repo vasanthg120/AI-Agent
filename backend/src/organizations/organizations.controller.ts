@@ -7,8 +7,10 @@ import { JwtPayload } from '../auth/jwt-payload.interface';
 import { CreateStoreDto } from './dto/create-store.dto';
 import { UpdateNotificationPolicyDto } from './dto/update-notification-policy.dto';
 import { OrganizationsService } from './organizations.service';
+import { Permission, PermissionExempt } from '../common/permissions/permission.decorator';
 
 @UseGuards(JwtAuthGuard)
+@PermissionExempt('personal')
 @Controller('organizations')
 export class OrganizationsController {
   constructor(private organizationsService: OrganizationsService) {}
@@ -29,6 +31,7 @@ export class OrganizationsController {
   @Post('stores')
   @UseGuards(RolesGuard)
   @Roles('admin')
+  @Permission('settings', 'manage')
   createStore(@CurrentUser() user: JwtPayload, @Body() dto: CreateStoreDto) {
     return this.organizationsService.createStore(user.organizationId, dto);
   }
@@ -45,6 +48,7 @@ export class OrganizationsController {
   @Put('notification-policy')
   @UseGuards(RolesGuard)
   @Roles('owner', 'admin')
+  @Permission('settings', 'manage')
   updateNotificationPolicy(@CurrentUser() user: JwtPayload, @Body() dto: UpdateNotificationPolicyDto) {
     return this.organizationsService.updateNotificationPolicy(user.organizationId, dto);
   }

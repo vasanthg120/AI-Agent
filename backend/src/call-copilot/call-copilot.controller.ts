@@ -1,4 +1,18 @@
-import { Body, Controller, Get, NotFoundException, Param, Post, Query, Res, UploadedFile, UseGuards, UseInterceptors } from '@nestjs/common';
+import {
+  BadGatewayException,
+  BadRequestException,
+  Body,
+  Controller,
+  Get,
+  NotFoundException,
+  Param,
+  Post,
+  Query,
+  Res,
+  UploadedFile,
+  UseGuards,
+  UseInterceptors,
+} from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { Response } from 'express';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
@@ -13,6 +27,7 @@ import { UploadCallRecordingDto } from './dto/upload-call-recording.dto';
 import { VoiceScriptDto } from './dto/voice-script.dto';
 import { Feature } from '../common/app-features';
 import { FeatureGuard } from '../common/guards/feature.guard';
+import { Permission } from '../common/permissions/permission.decorator';
 
 // Covers exactly the formats UploadRecordingModal.tsx's file input accepts
 // ("audio/*,video/mp4,.m4a") — a small local map rather than pulling in the
@@ -46,6 +61,7 @@ function contentTypeFromFilename(filename: string | undefined): string {
 // treat "search"/"stats"/"upload" as an :id value.
 @UseGuards(JwtAuthGuard, FeatureGuard)
 @Feature('call_copilot')
+@Permission('call_copilot')
 @Controller('call-copilot')
 export class CallCopilotController {
   constructor(
@@ -107,7 +123,21 @@ export class CallCopilotController {
       .map((s) => s.text)
       .filter(Boolean)
       .join(' ');
-    return this.callCopilotService.generateCoaching(session, fullTranscript);
+    // generateCoaching is best-effort and returns the session untouched when it
+    // can't coach — fine at call-end, but here a button would seem to do nothing.
+    if (!fullTranscript.trim()) {
+      throw new BadRequestException(
+        session.status === 'error'
+          ? 'This call was never transcribed, so there’s nothing for the AI Coach to review.'
+          : 'This call has no transcript yet, so there’s nothing for the AI Coach to review.',
+      );
+    }
+    const coachedBefore = session.coachingGeneratedAt?.getTime();
+    const coached = await this.callCopilotService.generateCoaching(session, fullTranscript);
+    if (!coached.coachingGeneratedAt || coached.coachingGeneratedAt.getTime() === coachedBefore) {
+      throw new BadGatewayException('The AI Coach couldn’t review this call right now. Please try again in a minute.');
+    }
+    return coached;
   }
 
   // The AI Coach's spoken script in the language picked in the panel — the
@@ -137,6 +167,13 @@ export class CallCopilotController {
     // for the actual bytes will refuse to play it.
     const isOriginalUpload = fileId === session.originalRecordingFileId;
     res.set({ 'Content-Type': isOriginalUpload ? contentTypeFromFilename(session.originalFilename) : 'audio/webm' });
-    this.gridFs.openDownloadStream('call_recordings', fileId).pipe(res);
+    const stream = this.gridFs.openDownloadStream('call_recordings', fileId);
+    // A recording that is gone (deleted, or its upload never finished) answers
+    // 404 — an unhandled stream error would take the whole server down.
+    stream.on('error', () => {
+      if (res.headersSent) res.end();
+      else res.status(404).type('application/json').send({ statusCode: 404, message: 'Recording not found' });
+    });
+    stream.pipe(res);
   }
 }

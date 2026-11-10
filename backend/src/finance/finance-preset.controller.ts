@@ -6,9 +6,11 @@ import { RolesGuard } from '../common/guards/roles.guard';
 import { JwtPayload } from '../auth/jwt-payload.interface';
 import { UpsertFinancePresetDto } from './dto/upsert-finance-preset.dto';
 import { FinancePresetService } from './finance-preset.service';
+import { Permission } from '../common/permissions/permission.decorator';
 
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Roles('owner', 'admin')
+@Permission('finance')
 @Controller('finance/presets')
 export class FinancePresetController {
   constructor(private presetService: FinancePresetService) {}

@@ -6,7 +6,9 @@ import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { JwtPayload } from '../auth/jwt-payload.interface';
 import { CloudConnectionsService } from '../cloud-files/cloud-connections.service';
 import { isAdminConsentRequiredError, OutlookService } from './outlook.service';
+import { Permission, PermissionExempt } from '../common/permissions/permission.decorator';
 
+@Permission('email')
 @Controller('outlook')
 export class OutlookController {
   private readonly logger = new Logger(OutlookController.name);
@@ -38,6 +40,7 @@ export class OutlookController {
 
   @UseGuards(JwtAuthGuard)
   @Get('connect-url')
+  @Permission('email', 'manage')
   async getConnectUrl(@CurrentUser() user: JwtPayload) {
     // Short-lived JWT as OAuth `state` — carries the user id (and org, so
     // the callback below can attribute the connection to the right
@@ -49,6 +52,7 @@ export class OutlookController {
 
   @Get('callback')
   @Redirect()
+  @PermissionExempt('public')
   async callback(
     @Query('code') code?: string,
     @Query('state') state?: string,
@@ -85,6 +89,7 @@ export class OutlookController {
   // whether this has happened — Microsoft enforces it automatically.
   @UseGuards(JwtAuthGuard)
   @Get('admin-consent-url')
+  @Permission('integrations', 'manage')
   async getAdminConsentUrl(@CurrentUser() user: JwtPayload) {
     const state = this.jwtService.sign(
       { sub: user.sub, organizationId: user.organizationId, email: user.email },
@@ -95,6 +100,7 @@ export class OutlookController {
 
   @Get('admin-consent-callback')
   @Redirect()
+  @PermissionExempt('public')
   async adminConsentCallback(
     @Query('tenant') tenant?: string,
     @Query('admin_consent') adminConsent?: string,
@@ -137,6 +143,7 @@ export class OutlookController {
 
   @UseGuards(JwtAuthGuard)
   @Post('accounts/:email/activate')
+  @Permission('email', 'manage')
   setActive(@CurrentUser() user: JwtPayload, @Param('email') email: string) {
     return this.outlookService.setActive(user.sub, decodeURIComponent(email));
   }
@@ -145,6 +152,7 @@ export class OutlookController {
   // shared mailbox connected by one person and answered by another.
   @UseGuards(JwtAuthGuard)
   @Put('accounts/:email/handler')
+  @Permission('integrations', 'manage')
   setHandler(@CurrentUser() user: JwtPayload, @Param('email') email: string, @Body() body: { userId?: string | null }) {
     return this.outlookService.setHandler(user.sub, user.organizationId, decodeURIComponent(email), body?.userId || null);
   }
@@ -161,6 +169,7 @@ export class OutlookController {
   // stays scoped to the account's own owner via the endpoints above.
   @UseGuards(JwtAuthGuard)
   @Get('org-accounts')
+  @Permission('integrations', 'view')
   listOrgAccounts(@CurrentUser() user: JwtPayload) {
     return this.outlookService.listOrgAccounts(user.organizationId);
   }

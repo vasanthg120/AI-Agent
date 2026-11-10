@@ -49,6 +49,11 @@ export class PushSubscriptionEntry {
   @Prop({ required: true, enum: ['desktop', 'mobile'] })
   deviceType: 'desktop' | 'mobile';
 
+  // Which app subscribed: 'dialer' is the installed HaiVE Dialer, which gets only
+  // its own messages ("Your call report is ready"); absent means HaiVE itself.
+  @Prop()
+  app?: 'dialer';
+
   @Prop()
   userAgent?: string;
 
@@ -142,6 +147,14 @@ export class User {
   // roles includes 'agent_user' — see users.service.ts's createByAdmin.
   @Prop()
   assignedAgentId?: string;
+
+  // This person's own page & action permissions ("customers:edit" — see
+  // common/permissions/app-modules.ts), set when they're created or edited
+  // with an AI role. Unset (not empty) for owners, admins and every account
+  // made before this existed: those keep the rules they had. An empty list is
+  // a real answer — nothing beyond the basics.
+  @Prop({ type: [String], default: undefined })
+  permissions?: string[];
 
   // Free-text label, same convention as AgentRole.department (Phase 6) —
   // matched against a custom AgentRole's assignedDepartments to decide chat

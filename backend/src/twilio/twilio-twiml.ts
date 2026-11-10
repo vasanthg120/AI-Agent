@@ -31,11 +31,15 @@ export function recordAndDialTwiml(options: {
   recordingCallbackUrl: string;
   actionUrl: string;
   announceUrl?: string;
+  // Told the moment the dialed number picks up (the Dialer's "In call" starts there).
+  answeredUrl?: string;
   greeting?: string;
   ringTimeoutSeconds?: number;
 }): string {
   const greeting = options.greeting ? `<Say>${escapeXml(options.greeting)}</Say>` : '';
-  const numberUrl = options.announceUrl ? ` url="${escapeXml(options.announceUrl)}" method="POST"` : '';
+  const numberUrl =
+    (options.announceUrl ? ` url="${escapeXml(options.announceUrl)}" method="POST"` : '') +
+    (options.answeredUrl ? ` statusCallbackEvent="answered" statusCallback="${escapeXml(options.answeredUrl)}" statusCallbackMethod="POST"` : '');
   return (
     '<?xml version="1.0" encoding="UTF-8"?><Response>' +
     greeting +

@@ -6,8 +6,10 @@ import { RolesGuard } from '../common/guards/roles.guard';
 import { JwtPayload } from '../auth/jwt-payload.interface';
 import { UpdateStoreSettingsDto } from './dto/update-store-settings.dto';
 import { StoreSettingsService } from './store-settings.service';
+import { Permission } from '../common/permissions/permission.decorator';
 
 @UseGuards(JwtAuthGuard)
+@Permission('settings')
 @Controller('store-settings')
 export class StoreSettingsController {
   constructor(private storeSettingsService: StoreSettingsService) {}

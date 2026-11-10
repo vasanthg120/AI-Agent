@@ -8,6 +8,7 @@ import { JwtPayload } from '../auth/jwt-payload.interface';
 import { FinanceOverviewQueryDto } from './dto/finance-overview-query.dto';
 import { FinanceDashboardService } from './finance-dashboard.service';
 import { FinanceSummaryService } from './finance-summary.service';
+import { Permission } from '../common/permissions/permission.decorator';
 
 // `regenerate: true` deliberately bypasses generateSummary's own daily
 // cache to force a fresh, billed LLM call — tighter than the app-wide
@@ -17,6 +18,7 @@ const GENERATE_SUMMARY_THROTTLE = { default: { limit: 5, ttl: 60_000 } };
 
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Roles('owner', 'admin')
+@Permission('finance')
 @Controller('finance/dashboard')
 export class FinanceDashboardController {
   constructor(
@@ -38,6 +40,7 @@ export class FinanceDashboardController {
 
   @Post('generate-summary')
   @Throttle(GENERATE_SUMMARY_THROTTLE)
+  @Permission('finance', 'view')
   generateSummary(@CurrentUser() user: JwtPayload, @Body() body: { regenerate?: boolean }) {
     return this.financeSummaryService.generateSummary(user, body?.regenerate ?? false);
   }

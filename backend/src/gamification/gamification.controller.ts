@@ -4,8 +4,10 @@ import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { ACHIEVEMENTS } from './achievements';
 import { GamificationService } from './gamification.service';
+import { Permission } from '../common/permissions/permission.decorator';
 
 @UseGuards(JwtAuthGuard)
+@Permission('dashboard')
 @Controller('gamification')
 export class GamificationController {
   constructor(private gamificationService: GamificationService) {}

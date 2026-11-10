@@ -5,8 +5,10 @@ import { JwtPayload } from '../auth/jwt-payload.interface';
 import { GetOverviewQueryDto } from './dto/get-overview-query.dto';
 import { GetTrendQueryDto } from './dto/get-trend-query.dto';
 import { DashboardService } from './dashboard.service';
+import { Permission } from '../common/permissions/permission.decorator';
 
 @UseGuards(JwtAuthGuard)
+@Permission('dashboard')
 @Controller('dashboard')
 export class DashboardController {
   constructor(private dashboardService: DashboardService) {}

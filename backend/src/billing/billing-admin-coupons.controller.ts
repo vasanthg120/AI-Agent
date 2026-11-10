@@ -3,6 +3,7 @@ import { AdminJwtAuthGuard } from '../common/guards/admin-jwt-auth.guard';
 import { BillingAdminCouponsService } from './billing-admin-coupons.service';
 import { CreateCouponDto } from './dto/create-coupon.dto';
 import { UpdateCouponDto } from './dto/update-coupon.dto';
+import { PermissionExempt } from '../common/permissions/permission.decorator';
 
 // Phase 3 catalog admin surface — platform_admin only, matching every other
 // billing-admin-*.controller.ts's gate (global catalog, not one customer's
@@ -10,6 +11,7 @@ import { UpdateCouponDto } from './dto/update-coupon.dto';
 // only ever interact with a coupon by submitting its code at checkout (see
 // billing.controller.ts's credits/purchase and subscription/checkout routes).
 @UseGuards(AdminJwtAuthGuard)
+@PermissionExempt('platform')
 @Controller('billing/admin/coupons')
 export class BillingAdminCouponsController {
   constructor(private couponsService: BillingAdminCouponsService) {}

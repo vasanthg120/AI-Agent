@@ -23,6 +23,7 @@ const update_user_dto_1 = require("./dto/update-user.dto");
 const update_profile_dto_1 = require("./dto/update-profile.dto");
 const invitations_service_1 = require("./invitations.service");
 const users_service_1 = require("./users.service");
+const permission_decorator_1 = require("../common/permissions/permission.decorator");
 let UsersController = class UsersController {
     constructor(usersService, invitations) {
         this.usersService = usersService;
@@ -34,18 +35,24 @@ let UsersController = class UsersController {
     updateMe(user, dto) {
         return this.usersService.updateOwnProfile(user.sub, dto);
     }
-    async list(caller) {
-        const users = await this.usersService.findAllWithLinkedMembers(caller.organizationId);
-        return users.map((u) => this.usersService.toPublic(u));
+    permissionCatalog() {
+        return this.usersService.permissionCatalog();
+    }
+    aiRoles(caller) {
+        return this.usersService.assignableAiRoles(caller.organizationId);
+    }
+    list(caller) {
+        return this.usersService.listDescribed(caller.organizationId);
     }
     async create(caller, dto) {
-        const created = await this.usersService.createByAdmin(dto, caller.organizationId);
+        const created = await this.usersService.createByAdmin(dto, caller.organizationId, caller);
         if (!dto.sendInvite)
             return created;
         const { activationLink } = await this.invitations.inviteById(created.user.id, caller.organizationId);
         return { ...created, activationLink };
     }
     async resendInvitation(caller, id) {
+        await this.usersService.assertMayManage(caller, id, caller.organizationId);
         const { activationLink } = await this.invitations.inviteById(id, caller.organizationId);
         return { activationLink };
     }
@@ -53,18 +60,19 @@ let UsersController = class UsersController {
         if (id === caller.sub && (dto.active === false || (dto.role && dto.role !== 'admin'))) {
             throw new common_1.BadRequestException("Can't demote or disable your own account");
         }
-        return this.usersService.updateByAdmin(id, dto, caller.organizationId, caller.sub);
+        return this.usersService.updateByAdmin(id, dto, caller.organizationId, caller.sub, caller);
     }
     remove(caller, id) {
         if (id === caller.sub) {
             throw new common_1.BadRequestException("Can't delete your own account");
         }
-        return this.usersService.deleteByAdmin(id, caller.organizationId);
+        return this.usersService.deleteByAdmin(id, caller.organizationId, caller);
     }
 };
 exports.UsersController = UsersController;
 __decorate([
     (0, common_1.Get)('me'),
+    (0, permission_decorator_1.PermissionExempt)('personal'),
     __param(0, (0, current_user_decorator_1.CurrentUser)()),
     __metadata("design:type", Function),
     __metadata("design:paramtypes", [Object]),
@@ -72,6 +80,7 @@ __decorate([
 ], UsersController.prototype, "me", null);
 __decorate([
     (0, common_1.Patch)('me'),
+    (0, permission_decorator_1.PermissionExempt)('personal'),
     __param(0, (0, current_user_decorator_1.CurrentUser)()),
     __param(1, (0, common_1.Body)()),
     __metadata("design:type", Function),
@@ -79,13 +88,29 @@ __decorate([
     __metadata("design:returntype", void 0)
 ], UsersController.prototype, "updateMe", null);
 __decorate([
+    (0, common_1.Get)('permission-catalog'),
+    (0, permission_decorator_1.PermissionExempt)('personal'),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", []),
+    __metadata("design:returntype", void 0)
+], UsersController.prototype, "permissionCatalog", null);
+__decorate([
+    (0, common_1.Get)('ai-roles'),
+    (0, common_1.UseGuards)(roles_guard_1.RolesGuard),
+    (0, roles_decorator_1.Roles)('admin'),
+    __param(0, (0, current_user_decorator_1.CurrentUser)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object]),
+    __metadata("design:returntype", void 0)
+], UsersController.prototype, "aiRoles", null);
+__decorate([
     (0, common_1.Get)(),
     (0, common_1.UseGuards)(roles_guard_1.RolesGuard),
     (0, roles_decorator_1.Roles)('admin'),
     __param(0, (0, current_user_decorator_1.CurrentUser)()),
     __metadata("design:type", Function),
     __metadata("design:paramtypes", [Object]),
-    __metadata("design:returntype", Promise)
+    __metadata("design:returntype", void 0)
 ], UsersController.prototype, "list", null);
 __decorate([
     (0, common_1.Post)(),
@@ -130,6 +155,7 @@ __decorate([
 ], UsersController.prototype, "remove", null);
 exports.UsersController = UsersController = __decorate([
     (0, common_1.UseGuards)(jwt_auth_guard_1.JwtAuthGuard),
+    (0, permission_decorator_1.Permission)('users'),
     (0, common_1.Controller)('users'),
     __metadata("design:paramtypes", [users_service_1.UsersService,
         invitations_service_1.InvitationsService])

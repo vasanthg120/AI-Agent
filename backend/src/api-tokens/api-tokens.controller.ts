@@ -6,6 +6,7 @@ import { RequireSessionAuthGuard } from '../common/guards/require-session-auth.g
 import { JwtPayload } from '../auth/jwt-payload.interface';
 import { ApiTokensService } from './api-tokens.service';
 import { CreateApiTokenDto } from './dto/create-api-token.dto';
+import { PermissionExempt } from '../common/permissions/permission.decorator';
 
 const API_TOKEN_THROTTLE = { default: { limit: 10, ttl: 60_000 } };
 
@@ -15,6 +16,7 @@ const API_TOKEN_THROTTLE = { default: { limit: 10, ttl: 60_000 } };
 // as it being blocked from 2FA/session management. Outside /auth — no
 // credential appears in these request bodies, so this gets free auto-audit
 // coverage from the existing global AuditInterceptor.
+@PermissionExempt('personal')
 @Controller('api-tokens')
 @UseGuards(JwtAuthGuard, RequireSessionAuthGuard)
 export class ApiTokensController {

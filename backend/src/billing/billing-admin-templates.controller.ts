@@ -3,8 +3,10 @@ import { AdminJwtAuthGuard } from '../common/guards/admin-jwt-auth.guard';
 import { BillingAdminTemplatesService } from './billing-admin-templates.service';
 import { CreateInvoiceTemplateDto } from './dto/create-invoice-template.dto';
 import { UpdateInvoiceTemplateDto } from './dto/update-invoice-template.dto';
+import { PermissionExempt } from '../common/permissions/permission.decorator';
 
 @UseGuards(AdminJwtAuthGuard)
+@PermissionExempt('platform')
 @Controller('billing/admin/invoice-templates')
 export class BillingAdminTemplatesController {
   constructor(private templatesService: BillingAdminTemplatesService) {}

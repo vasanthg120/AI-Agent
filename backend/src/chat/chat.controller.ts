@@ -8,6 +8,8 @@ import { ChatService } from './chat.service';
 import { RenameConversationDto } from './dto/rename-conversation.dto';
 import { SendMessageDto } from './dto/send-message.dto';
 import { SetConversationFlagDto } from './dto/set-conversation-flag.dto';
+import { Permission } from '../common/permissions/permission.decorator';
+import { AI_ROLE_UNAVAILABLE_MESSAGE, UsersService } from '../users/users.service';
 
 // Tighter than the app-wide default (see ThrottlerModule.forRoot in
 // app.module.ts) — every message here is a real, billed LLM call
@@ -16,9 +18,13 @@ import { SetConversationFlagDto } from './dto/set-conversation-flag.dto';
 const CHAT_THROTTLE = { default: { limit: 20, ttl: 60_000 } };
 
 @UseGuards(JwtAuthGuard)
+@Permission('ai_agent')
 @Controller('chat')
 export class ChatController {
-  constructor(private chatService: ChatService) {}
+  constructor(
+    private chatService: ChatService,
+    private usersService: UsersService,
+  ) {}
 
   @Get('agents')
   listAgents(@CurrentUser() user: JwtPayload) {
@@ -36,12 +42,14 @@ export class ChatController {
   }
 
   @Patch('conversations/:id')
+  @Permission('ai_agent', 'view')
   async renameConversation(@CurrentUser() user: JwtPayload, @Param('id') id: string, @Body() dto: RenameConversationDto) {
     await this.chatService.renameConversation(user.sub, id, dto.title);
     return { status: 'ok' };
   }
 
   @Patch('conversations/:id/flag')
+  @Permission('ai_agent', 'view')
   async setConversationFlag(@CurrentUser() user: JwtPayload, @Param('id') id: string, @Body() dto: SetConversationFlagDto) {
     await this.chatService.setConversationFlag(user.sub, id, dto.flag, dto.value);
     return { status: 'ok' };
@@ -55,7 +63,7 @@ export class ChatController {
 
   @Post('messages')
   @Throttle(CHAT_THROTTLE)
-  sendMessage(@CurrentUser() user: JwtPayload, @Req() req: Request, @Body() dto: SendMessageDto) {
+  async sendMessage(@CurrentUser() user: JwtPayload, @Req() req: Request, @Body() dto: SendMessageDto) {
     this.assertAiAccessAllowed(user);
     const bearerToken = (req.headers.authorization ?? '').replace(/^Bearer\s+/i, '');
     // agent_user accounts exist to BE one specific persona (their
@@ -70,6 +78,8 @@ export class ChatController {
     // picking an agent outside that list is intentionally allowed for them.
     const isLockedAgentUser = user.roles.includes('agent_user') && !user.roles.includes('admin');
     const agentId = isLockedAgentUser ? user.assignedAgentId : dto.agentId;
+    // Their AI role was deleted or set back to draft: there is no agent to talk to.
+    if (isLockedAgentUser && (await this.usersService.aiRoleUnavailable(user))) throw new ForbiddenException(AI_ROLE_UNAVAILABLE_MESSAGE);
     return this.chatService.sendMessage(user.sub, user.organizationId, bearerToken, dto.message, dto.conversationId, agentId, dto.attachmentIds);
   }
 

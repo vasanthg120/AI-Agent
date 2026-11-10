@@ -5,11 +5,13 @@ import { CloudErrorFilter } from '../cloud-files/cloud-error.filter';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { CustomerCloudSyncService } from './customer-cloud-sync.service';
+import { Permission } from '../common/permissions/permission.decorator';
 
 // "Sync now" for one connected Google Drive / OneDrive account (Integrations page):
 // anyone who may open the account may ask for it; the sync itself only reads.
 @UseGuards(JwtAuthGuard)
 @UseFilters(CloudErrorFilter)
+@Permission('files', 'view')
 @Controller('cloud-files')
 export class CustomerCloudSyncController {
   constructor(private sync: CustomerCloudSyncService) {}

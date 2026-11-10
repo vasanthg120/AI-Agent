@@ -8,7 +8,9 @@ import { firstValueFrom } from 'rxjs';
 import { JwtPayload } from '../auth/jwt-payload.interface';
 import { ConnectIntegrationDto } from '../integrations/dto/connect-integration.dto';
 import { IntegrationsService } from '../integrations/integrations.service';
+import { classifyFailureText } from '../calling/call-outcome';
 import { normalizePhone } from '../plivo/plivo-phone';
+import type { StartCallExtras } from '../plivo/plivo.service';
 import { UsersService } from '../users/users.service';
 import { UpsertTwilioLineDto } from './dto/twilio.dto';
 import { TwilioCall, TwilioCallDocument } from './schemas/twilio-call.schema';
@@ -356,7 +358,7 @@ export class TwilioService {
    * "record, and dial the customer" (TwilioWebhooksService.voice).
    * `customerNumber` is already normalized (digits with country code).
    */
-  async startCall(user: JwtPayload, customerNumber: string, dealId?: string): Promise<TwilioCallDocument> {
+  async startCall(user: JwtPayload, customerNumber: string, dealId?: string, extras: StartCallExtras = {}): Promise<TwilioCallDocument> {
     const creds = await this.requireCredentials(user.organizationId);
     const base = this.publicBaseUrl;
     if (!base) throw new BadRequestException('Calling is not fully set up: the server has no public address for Twilio to call back (TWILIO_PUBLIC_BASE_URL).');
@@ -385,6 +387,8 @@ export class TwilioService {
       dealId,
       languageCode: line.languageCode,
       status: 'initiated',
+      ...(extras.clientRequestId ? { clientRequestId: extras.clientRequestId } : {}),
+      ...(extras.customerName ? { customerName: extras.customerName } : {}),
     });
 
     const callId = call._id.toString();
@@ -412,6 +416,7 @@ export class TwilioService {
       this.logger.warn(`Twilio call for user ${user.sub} failed to start: ${message}`);
       call.status = 'failed';
       call.failureReason = message;
+      call.failureCode = classifyFailureText(message) ?? 'provider_error';
       await call.save();
       throw new BadRequestException(message);
     }
@@ -419,9 +424,9 @@ export class TwilioService {
 
   // ---- call log -------------------------------------------------------------
 
-  listCalls(user: JwtPayload, orgWide: boolean): Promise<TwilioCallDocument[]> {
+  listCalls(user: JwtPayload, orgWide: boolean, before?: Date): Promise<TwilioCallDocument[]> {
     return this.callModel
-      .find({ organizationId: user.organizationId, ...(orgWide ? {} : { userId: user.sub }) })
+      .find({ organizationId: user.organizationId, ...(orgWide ? {} : { userId: user.sub }), ...(before ? { createdAt: { $lt: before } } : {}) })
       .sort({ createdAt: -1 })
       .limit(CALL_LOG_LIMIT)
       .exec();
@@ -432,6 +437,11 @@ export class TwilioService {
     const call = await this.callModel.findOne({ _id: id, organizationId: user.organizationId, ...(orgWide ? {} : { userId: user.sub }) }).exec();
     if (!call) throw new NotFoundException('Call not found.');
     return call;
+  }
+
+  /** The call this person already started with this Dialer request key, if any. */
+  findByRequestKey(user: JwtPayload, clientRequestId: string): Promise<TwilioCallDocument | null> {
+    return this.callModel.findOne({ organizationId: user.organizationId, userId: user.sub, clientRequestId }).exec();
   }
 
   hasCallInProgress(userId: string): Promise<boolean> {

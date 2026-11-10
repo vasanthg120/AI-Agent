@@ -24,6 +24,7 @@ const agent_roles_service_1 = require("./agent-roles.service");
 const create_agent_role_dto_1 = require("./dto/create-agent-role.dto");
 const generate_from_description_dto_1 = require("./dto/generate-from-description.dto");
 const update_agent_role_dto_1 = require("./dto/update-agent-role.dto");
+const permission_decorator_1 = require("../common/permissions/permission.decorator");
 let AgentRolesController = class AgentRolesController {
     constructor(agentRolesService) {
         this.agentRolesService = agentRolesService;
@@ -42,6 +43,9 @@ let AgentRolesController = class AgentRolesController {
         return this.agentRolesService.createManual(user.sub, user.organizationId, dto);
     }
     update(user, id, dto, req) {
+        if (dto.status !== undefined && (0, permission_decorator_1.isPermissionManaged)(user) && !(0, permission_decorator_1.holdsPermission)(user, 'ai_roles', 'manage')) {
+            throw new common_1.ForbiddenException('You don’t have permission to activate AI roles or set them back to draft. Ask an admin for access.');
+        }
         const bearerToken = (req.headers.authorization ?? '').replace(/^Bearer\s+/i, '');
         return this.agentRolesService.update(id, dto, bearerToken, user.organizationId);
     }
@@ -115,6 +119,7 @@ __decorate([
 ], AgentRolesController.prototype, "remove", null);
 exports.AgentRolesController = AgentRolesController = __decorate([
     (0, common_1.UseGuards)(jwt_auth_guard_1.JwtAuthGuard),
+    (0, permission_decorator_1.Permission)('ai_roles'),
     (0, common_1.Controller)('agent-roles'),
     __metadata("design:paramtypes", [agent_roles_service_1.AgentRolesService])
 ], AgentRolesController);

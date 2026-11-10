@@ -2,6 +2,7 @@ import { Body, Controller, Get, Post, Query, UseGuards } from '@nestjs/common';
 import { AdminJwtAuthGuard } from '../common/guards/admin-jwt-auth.guard';
 import { AiUsageAdminService } from './ai-usage-admin.service';
 import { SetAnthropicBudgetDto } from './dto/set-anthropic-budget.dto';
+import { PermissionExempt } from '../common/permissions/permission.decorator';
 
 function parseDays(raw?: string): number {
   const n = parseInt(raw ?? '30', 10);
@@ -16,6 +17,7 @@ function parsePage(raw: string | undefined, fallback: number, max: number): numb
 }
 
 @UseGuards(AdminJwtAuthGuard)
+@PermissionExempt('platform')
 @Controller('ai-usage/admin/anthropic')
 export class AiUsageAdminController {
   constructor(private service: AiUsageAdminService) {}

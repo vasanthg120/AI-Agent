@@ -3,7 +3,7 @@ import { Navigate, Route, Routes } from 'react-router-dom';
 import { AppLayout } from '@/layouts/AppLayout/AppLayout';
 import { AuthLayout } from '@/layouts/AuthLayout/AuthLayout';
 import { ProtectedRoute, PublicOnlyRoute } from './ProtectedRoute';
-import { RequireFeature, RequireRole } from './RequireRole';
+import { RequireFeature, RequireModule, RequireRole } from './RequireRole';
 import { BlockRole } from './BlockRole';
 import { Spinner } from '@/components/ui';
 import { ROUTES } from '@/constants/routes';
@@ -172,7 +172,9 @@ export function AppRoutes() {
           <Route element={<AppLayout />}>
             <Route index element={<Navigate to={ROUTES.chat} replace />} />
             <Route path={ROUTES.dashboard} element={<DashboardRouterPage />} />
-            <Route path={ROUTES.agentActivity} element={<AgentWorkforceDashboardPage />} />
+            <Route element={<RequireModule module="dashboard" />}>
+              <Route path={ROUTES.agentActivity} element={<AgentWorkforceDashboardPage />} />
+            </Route>
             <Route element={<RequireFeature feature="call_copilot" />}>
               <Route path={ROUTES.callCopilot} element={<CallCopilotPage />} />
             </Route>
@@ -183,27 +185,31 @@ export function AppRoutes() {
             <Route element={<RequireRole role="consultant" />}>
               <Route path={ROUTES.myCustomerActivity} element={<MyCustomerActivityPage />} />
             </Route>
-            <Route element={<RequireRole role={['owner', 'admin', 'manager']} feature="business_knowledge" />}>
+            <Route element={<RequireRole role={['owner', 'admin', 'manager']} feature="business_knowledge" module="business_knowledge" />}>
               <Route path={ROUTES.businessKnowledge} element={<BusinessKnowledgePage />} />
             </Route>
-            <Route element={<RequireRole role={['owner', 'admin', 'manager']} feature="inquiries" />}>
+            <Route element={<RequireRole role={['owner', 'admin', 'manager']} feature="inquiries" module={['customers', 'job_board']} />}>
               <Route path={ROUTES.customers} element={<CustomersPage />} />
               {/* New Inquiries became part of Customers; old links and bookmarks land there. */}
               <Route path="/inquiries" element={<Navigate to={ROUTES.customers} replace />} />
             </Route>
             {/* Everyone: their own Google Drive / OneDrive, and company folders shared with their role (checked by the API). */}
-            <Route path={ROUTES.files} element={<FilesPage />} />
-            <Route element={<RequireRole role={['owner', 'admin']} />}>
+            <Route element={<RequireModule module="files" />}>
+              <Route path={ROUTES.files} element={<FilesPage />} />
+            </Route>
+            <Route element={<RequireRole role={['owner', 'admin']} module="finance" />}>
               <Route path={ROUTES.finance} element={<FinancePage />} />
             </Route>
-            <Route element={<RequireRole role={['owner', 'admin', 'manager']} />}>
+            <Route element={<RequireRole role={['owner', 'admin', 'manager']} module="reports" />}>
               <Route path={ROUTES.reporting} element={<ReportingPage />} />
             </Route>
             <Route path={ROUTES.todoEod} element={<TodoEodPage />} />
             <Route path={ROUTES.eod} element={<EodPage />} />
-            <Route path={ROUTES.chat} element={<ChatPage />} />
-            <Route path={`${ROUTES.chat}/:conversationId`} element={<ChatPage />} />
-            <Route path={ROUTES.chatHistory} element={<ChatHistoryPage />} />
+            <Route element={<RequireModule module="ai_agent" />}>
+              <Route path={ROUTES.chat} element={<ChatPage />} />
+              <Route path={`${ROUTES.chat}/:conversationId`} element={<ChatPage />} />
+              <Route path={ROUTES.chatHistory} element={<ChatHistoryPage />} />
+            </Route>
             <Route path={ROUTES.notifications} element={<NotificationsPage />} />
             <Route path={ROUTES.profile} element={<ProfilePage />} />
             <Route path={ROUTES.help} element={<HelpSupportPage />} />
@@ -222,28 +228,47 @@ export function AppRoutes() {
               <Route path={ROUTES.integrations} element={<IntegrationsPage />} />
             </Route>
 
+            {/* Billing and subscription are never given to a team member, whatever their permissions. */}
             <Route element={<BlockRole role="agent_user" />}>
               <Route path={ROUTES.billing} element={<BillingPage />} />
               <Route path={ROUTES.pricing} element={<PricingPage />} />
               <Route path={ROUTES.addCredits} element={<AddCreditsPage />} />
+            </Route>
+            {/* Settings: closed to older team members, as before. Someone with their own
+                permission list gets their own settings plus the tabs their modules open. */}
+            <Route element={<BlockRole role="agent_user" exceptPermissionList />}>
               <Route path={ROUTES.settings} element={<SettingsLayout />}>
                 <Route index element={<Navigate to={ROUTES.settingsGeneral} replace />} />
-                <Route path="general" element={<GeneralSettings />} />
+                <Route element={<RequireModule module="settings" fallback={ROUTES.settingsNotifications} />}>
+                  <Route path="general" element={<GeneralSettings />} />
+                </Route>
                 <Route path="notifications" element={<NotificationSettings />} />
                 <Route path="voice" element={<VoiceSettings />} />
                 <Route path="security" element={<SecuritySettings />} />
-                <Route path="agent-roles" element={<AgentRolesSettings />} />
-                <Route path="integrations" element={<IntegrationsPage />} />
-                <Route path="sub-accounts" element={<SubAccountsPage />} />
-                <Route path="sub-accounts/:id" element={<SubAccountDetailPage />} />
-                <Route element={<RequireRole role="admin" />}>
+                <Route element={<RequireModule module="ai_roles" />}>
+                  <Route path="agent-roles" element={<AgentRolesSettings />} />
+                </Route>
+                <Route element={<RequireModule module={['integrations', 'crm_integrations', 'email']} />}>
+                  <Route path="integrations" element={<IntegrationsPage />} />
+                </Route>
+                <Route element={<BlockRole role="agent_user" />}>
+                  <Route path="sub-accounts" element={<SubAccountsPage />} />
+                  <Route path="sub-accounts/:id" element={<SubAccountDetailPage />} />
+                </Route>
+                <Route element={<RequireRole role="admin" module="users" />}>
                   <Route path="users" element={<UsersSettings />} />
+                </Route>
+                <Route element={<RequireRole role="admin" module="settings" />}>
                   <Route path="sales-targets" element={<SalesTargetsSettings />} />
                   <Route path="deal-assignment" element={<DealAssignmentSettings />} />
                 </Route>
-                <Route element={<RequireRole role={['owner', 'admin']} />}>
+                <Route element={<RequireRole role={['owner', 'admin']} module="integrations" />}>
                   <Route path="calling" element={<CallingSettings />} />
+                </Route>
+                <Route element={<RequireRole role={['owner', 'admin']} module="crm_integrations" />}>
                   <Route path="data-sources" element={<DataSourcesSettings />} />
+                </Route>
+                <Route element={<RequireRole role={['owner', 'admin']} module="settings" />}>
                   <Route path="royalty-rules" element={<RoyaltyRulesSettings />} />
                   <Route path="email-sla" element={<EmailSlaSettings />} />
                 </Route>
@@ -251,8 +276,8 @@ export function AppRoutes() {
               {/* Siblings of, not children under, SettingsLayout above — the
                   Agent Builder wizard needs the full viewport, not the
                   persistent Settings sidebar. Same admin-only gate as the
-                  backend's own agent-roles mutation routes. */}
-              <Route element={<RequireRole role="admin" />}>
+                  backend's own agent-roles mutation routes (or AI Roles access). */}
+              <Route element={<RequireRole role="admin" module="ai_roles" />}>
                 <Route path={ROUTES.settingsAgentRolesNew} element={<AgentBuilderPage />} />
                 <Route path={ROUTES.settingsAgentRolesEdit} element={<AgentBuilderPage />} />
               </Route>

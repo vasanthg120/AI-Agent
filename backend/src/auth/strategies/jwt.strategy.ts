@@ -91,7 +91,10 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       organizationId: user.organizationId,
       storeId: user.storeId,
       assignedAgentId: user.assignedAgentId,
-      features: await this.usersService.resolveFeatures(user),
+      // Someone with their own permission list is held to that (ModulePermissionInterceptor);
+      // older AI-role accounts to their role's features. Never both.
+      permissions: user.permissions,
+      features: user.permissions ? undefined : await this.usersService.resolveFeatures(user),
       department: user.department,
       voiceAccessEnabled: user.voiceAccessEnabled,
       aiAccessEnabled: user.aiAccessEnabled,

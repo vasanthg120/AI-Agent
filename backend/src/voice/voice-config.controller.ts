@@ -10,6 +10,7 @@ import { PreviewVoiceDto, UpdateVoiceOrganizationDto, UpdateVoicePreferenceDto }
 import { assertVoiceAllowed } from './voice-access';
 import { VoiceConfigService } from './voice-config.service';
 import { VoiceSpeechService } from './voice-speech.service';
+import { Permission, PermissionExempt } from '../common/permissions/permission.decorator';
 
 // Previews are served from cache after the first play of each voice, so this
 // can be looser than the speak limit — a person auditioning voices clicks
@@ -20,6 +21,7 @@ const PREVIEW_THROTTLE = { default: { limit: 60, ttl: 60_000 } };
 // (when the organization allows it); only an owner/admin changes the
 // organization's defaults — the same split as the notification policy.
 @UseGuards(JwtAuthGuard)
+@PermissionExempt('personal')
 @Controller('voice/config')
 export class VoiceConfigController {
   constructor(
@@ -35,6 +37,7 @@ export class VoiceConfigController {
   @Put('organization')
   @UseGuards(RolesGuard)
   @Roles('owner', 'admin')
+  @Permission('settings', 'manage')
   updateOrganization(@CurrentUser() user: JwtPayload, @Body() dto: UpdateVoiceOrganizationDto, @Req() req: Request) {
     return this.config.updateOrganization(user, dto, req.ip);
   }

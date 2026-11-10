@@ -58,8 +58,40 @@ export class PlivoCall {
   @Prop()
   failureReason?: string;
 
+  // What went wrong, as one of calling/call-outcome.ts's CallFailure codes, when
+  // the webhook that reported it could tell (the reason above is its wording).
+  @Prop()
+  failureCode?: string;
+
+  // True once the customer leg's own outcome is known (from the <Dial> action),
+  // so the agent leg's later "completed" can't overwrite "no answer"/"busy".
+  @Prop({ default: false })
+  dialOutcomeKnown: boolean;
+
+  // Plivo's HangupCauseName for the call ("Normal Hangup", "Error Reaching Answer URL"…).
+  @Prop()
+  hangupCause?: string;
+
+  // When the agent picked up (outbound: our Answer webhook ran), and when the far
+  // end picked up (the customer, outbound; the agent, inbound) — the moment the
+  // two were connected, which the Dialer's "In call" timer counts from.
+  @Prop()
+  agentAnsweredAt?: Date;
+
+  @Prop()
+  answeredAt?: Date;
+
   @Prop()
   durationSeconds?: number;
+
+  // The Dialer's key for one tap of its call button: the same key again is the
+  // same call, never a second one (unique per user, see the index below).
+  @Prop()
+  clientRequestId?: string;
+
+  // Who was called, as the caller picked them (a customer from Contacts).
+  @Prop()
+  customerName?: string;
 
   // Plivo's recording id. Unique, and claimed atomically when the recording
   // webhook arrives, so a redelivered webhook can never import a call twice.
@@ -89,3 +121,4 @@ export class PlivoCall {
 export const PlivoCallSchema = SchemaFactory.createForClass(PlivoCall);
 PlivoCallSchema.index({ organizationId: 1, createdAt: -1 });
 PlivoCallSchema.index({ userId: 1, createdAt: -1 });
+PlivoCallSchema.index({ userId: 1, clientRequestId: 1 }, { unique: true, partialFilterExpression: { clientRequestId: { $type: 'string' } } });

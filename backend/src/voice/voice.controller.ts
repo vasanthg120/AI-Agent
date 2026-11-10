@@ -11,6 +11,7 @@ import { VOICE_LANGUAGE_CODES } from './dto/voice-languages';
 import { assertVoiceAllowed } from './voice-access';
 import { VoiceSpeechService } from './voice-speech.service';
 import { VoiceService } from './voice.service';
+import { PermissionExempt } from '../common/permissions/permission.decorator';
 
 // No @Roles() gate — matches ChatController's own unrestricted-by-role
 // pattern (voice is just an alternate way to send a normal chat message,
@@ -20,6 +21,7 @@ import { VoiceService } from './voice.service';
 const VOICE_THROTTLE = { default: { limit: 20, ttl: 60_000 } };
 
 @UseGuards(JwtAuthGuard)
+@PermissionExempt('personal')
 @Controller('voice')
 export class VoiceController {
   constructor(

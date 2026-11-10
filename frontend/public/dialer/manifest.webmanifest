@@ -1,0 +1,30 @@
+{
+  "id": "/dialer/",
+  "name": "HaiVE Dialer",
+  "short_name": "Dialer",
+  "description": "Place recorded calls that Call Copilot transcribes, scores and summarises.",
+  "lang": "en",
+  "start_url": "/dialer/?source=home-screen",
+  "scope": "/dialer/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "theme_color": "#ffffff",
+  "background_color": "#ffffff",
+  "categories": ["business", "productivity"],
+  "icons": [
+    { "src": "/dialer/icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/dialer/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/dialer/icons/maskable-192.png", "sizes": "192x192", "type": "image/png", "purpose": "maskable" },
+    { "src": "/dialer/icons/maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" },
+    { "src": "/dialer/icons/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ],
+  "shortcuts": [
+    {
+      "name": "New call",
+      "short_name": "New call",
+      "description": "Open the keypad to place a call",
+      "url": "/dialer/?action=new-call",
+      "icons": [{ "src": "/dialer/icons/shortcut-call-96.png", "sizes": "96x96", "type": "image/png" }]
+    }
+  ]
+}

@@ -8,6 +8,7 @@ import { AnalyticsDashboardService } from './analytics-dashboard.service';
 import { ScopeInfo } from './analytics-dashboard.types';
 import { GetAnalyticsOverviewQueryDto } from './dto/get-analytics-overview-query.dto';
 import { GetPipelineByMonthQueryDto } from './dto/get-pipeline-by-month-query.dto';
+import { holdsPermission, isPermissionManaged, Permission } from '../common/permissions/permission.decorator';
 
 // One endpoint, internal role branching — the composite response shape is
 // identical across owner/manager/consultant (only the values narrow), a
@@ -16,6 +17,9 @@ import { GetPipelineByMonthQueryDto } from './dto/get-pipeline-by-month-query.dt
 // per role). Goes one step further than customer-activity.controller.ts's
 // owner/admin/manager-collapsed-but-consultant-separate precedent.
 @UseGuards(JwtAuthGuard, RolesGuard)
+// Both dashboards read these: the agent dashboard (their own figures) and Revenue &
+// Analytics (the business's, see scopeOf), so either page opens them.
+@Permission(['analytics', 'dashboard'])
 @Controller('analytics-dashboard')
 export class AnalyticsDashboardController {
   constructor(private analyticsDashboardService: AnalyticsDashboardService) {}
@@ -46,6 +50,9 @@ export class AnalyticsDashboardController {
       if (query.userId) return { level: 'user', userId: query.userId };
       return query.storeId ? { level: 'store', storeId: query.storeId } : { level: 'org' };
     }
+    // Someone given Revenue & Analytics sees the business's figures, as an admin does
+    // (but can't pick out one store or person).
+    if (isPermissionManaged(user) && holdsPermission(user, 'analytics', 'view')) return { level: 'org' };
     if (user.roles.includes('manager')) {
       if (!user.storeId) throw new BadRequestException('No store assigned to this account');
       return { level: 'store', storeId: user.storeId };

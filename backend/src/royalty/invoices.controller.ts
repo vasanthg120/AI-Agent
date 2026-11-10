@@ -9,6 +9,7 @@ import { UpdateInvoiceDto } from './dto/update-invoice.dto';
 import { VoidInvoiceDto } from './dto/void-invoice.dto';
 import { ListInvoicesQueryDto } from './dto/list-invoices-query.dto';
 import { InvoicesService } from './invoices.service';
+import { Permission } from '../common/permissions/permission.decorator';
 
 // Invoice management is store-operational CRUD data, like Deal/Quote — the
 // CRUD tier (owner/admin/manager, manager forced to their own store),
@@ -19,6 +20,7 @@ import { InvoicesService } from './invoices.service';
 // before ':id', or a request to /royalty/invoices/query would match :id
 // with id="query" instead — same rule deals.controller.ts documents.
 @UseGuards(JwtAuthGuard, RolesGuard)
+@Permission('finance')
 @Controller('royalty/invoices')
 export class InvoicesController {
   constructor(private invoicesService: InvoicesService) {}

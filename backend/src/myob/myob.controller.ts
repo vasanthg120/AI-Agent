@@ -7,10 +7,12 @@ import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { SaveCompanyFileCredentialsDto } from './dto/save-company-file-credentials.dto';
 import { MyobService } from './myob.service';
+import { Permission, PermissionExempt } from '../common/permissions/permission.decorator';
 
 // Same shape as xero.controller.ts, plus one route no other provider here
 // needs: company-file-credentials, for the second credential pair MYOB
 // requires beyond OAuth (see myob.service.ts).
+@Permission('integrations')
 @Controller('myob')
 export class MyobController {
   private readonly logger = new Logger(MyobController.name);
@@ -29,6 +31,7 @@ export class MyobController {
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('owner', 'admin')
   @Get('connect-url')
+  @Permission('integrations', 'manage')
   async getConnectUrl(@CurrentUser() user: JwtPayload) {
     return { url: await this.myob.buildAuthorizeUrl(user.organizationId) };
   }
@@ -37,6 +40,7 @@ export class MyobController {
   // on this redirect — confirmed from MYOB's own docs, not a guess.
   @Get('callback')
   @Redirect()
+  @PermissionExempt('public')
   async callback(
     @Query('code') code?: string,
     @Query('businessId') businessId?: string,

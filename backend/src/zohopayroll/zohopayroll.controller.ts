@@ -8,11 +8,13 @@ import { RolesGuard } from '../common/guards/roles.guard';
 import { SaveZohoAppCredentialsDto } from '../zoho/dto/save-app-credentials.dto';
 import { SelectOrganizationDto } from './dto/select-organization.dto';
 import { ZohoPayrollService } from './zohopayroll.service';
+import { Permission, PermissionExempt } from '../common/permissions/permission.decorator';
 
 // Mirrors zohobooks.controller.ts's shape exactly — own app-credentials
 // routes (per-org "bring your own app"), connect-url, callback,
 // select-organization, status/disconnect. Not a CRM, so none of this goes
 // through crm-integrations.
+@Permission('integrations')
 @Controller('zohopayroll')
 export class ZohoPayrollController {
   private readonly logger = new Logger(ZohoPayrollController.name);
@@ -39,12 +41,14 @@ export class ZohoPayrollController {
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('owner', 'admin')
   @Get('connect-url')
+  @Permission('integrations', 'manage')
   async getConnectUrl(@CurrentUser() user: JwtPayload) {
     return { url: await this.zohoPayroll.buildAuthorizeUrl(user.organizationId) };
   }
 
   @Get('callback')
   @Redirect()
+  @PermissionExempt('public')
   async callback(
     @Query('code') code?: string,
     @Query('state') state?: string,

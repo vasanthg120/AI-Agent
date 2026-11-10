@@ -2,6 +2,7 @@ import { Body, Controller, HttpCode, Post, Query, Req, Res } from '@nestjs/commo
 import { SkipThrottle } from '@nestjs/throttler';
 import { Request, Response } from 'express';
 import { PlivoWebhooksService, WebhookResult } from './plivo-webhooks.service';
+import { PermissionExempt } from '../common/permissions/permission.decorator';
 
 // Called by Plivo, not by a signed-in user, so there is deliberately no
 // JwtAuthGuard: every request is authenticated by its Plivo signature instead
@@ -9,6 +10,7 @@ import { PlivoWebhooksService, WebhookResult } from './plivo-webhooks.service';
 // busy line, and a refused webhook is a lost recording. A request that fails
 // verification gets a bare 403 and no explanation.
 @SkipThrottle()
+@PermissionExempt('public')
 @Controller('plivo/webhooks')
 export class PlivoWebhookController {
   constructor(private webhooks: PlivoWebhooksService) {}
@@ -23,6 +25,12 @@ export class PlivoWebhookController {
   @HttpCode(200)
   async recording(@Req() req: Request, @Res() res: Response, @Query('callId') callId?: string, @Body() _body?: Record<string, unknown>) {
     return this.send(res, await this.webhooks.recordingReady(req, callId));
+  }
+
+  @Post('dial-event')
+  @HttpCode(200)
+  async dialEvent(@Req() req: Request, @Res() res: Response, @Query('callId') callId?: string, @Body() _body?: Record<string, unknown>) {
+    return this.send(res, await this.webhooks.dialEvent(req, callId));
   }
 
   @Post('hangup')

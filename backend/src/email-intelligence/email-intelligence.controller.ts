@@ -13,6 +13,7 @@ import { EmailResponseStatus } from './email-response-state';
 import { AUTO_DRAFT_MAX_AGE_DAYS, EmailIntelligenceService, ListEmailsQuery } from './email-intelligence.service';
 import { Feature } from '../common/app-features';
 import { FeatureGuard } from '../common/guards/feature.guard';
+import { Permission } from '../common/permissions/permission.decorator';
 
 const APPROVAL_STATUSES = ['pending', 'approved', 'rejected'] as const;
 const RESPONSE_VIEWS: EmailResponseStatus[] = ['needs_response', 'responded', 'resolved'];
@@ -56,6 +57,7 @@ function parseListQuery(raw: Record<string, string | undefined>): ListEmailsQuer
 // Phase 14b plan notes).
 @UseGuards(JwtAuthGuard, FeatureGuard)
 @Feature('email_inbox')
+@Permission('email')
 @Controller('email-intelligence')
 export class EmailIntelligenceController {
   constructor(
@@ -84,6 +86,7 @@ export class EmailIntelligenceController {
   // syncMyMailbox but on every connected mailbox, unattended. Static
   // segment, must be declared before the ':id' GET route below.
   @Post('sync')
+  @Permission('email', 'view')
   sync(@CurrentUser() user: JwtPayload) {
     return this.emailIntelligenceSyncService.syncMyMailbox(user.sub, 'user');
   }
@@ -92,6 +95,7 @@ export class EmailIntelligenceController {
   // Reads the caller's Sent Items only — no new mail, no AI — so the inbox
   // page can call it whenever it is open. Rate-limited per mailbox server-side.
   @Post('sync/replies')
+  @Permission('email', 'view')
   refreshReplies(@CurrentUser() user: JwtPayload) {
     return this.emailIntelligenceSyncService.refreshReplies(user.sub);
   }
@@ -150,6 +154,7 @@ export class EmailIntelligenceController {
   @Get('activity-stats')
   @UseGuards(RolesGuard)
   @Roles('owner', 'admin', 'manager', 'consultant')
+  @Permission('analytics', 'view')
   activityStats(@CurrentUser() user: JwtPayload, @Query('from') from: string, @Query('to') to: string) {
     const [start, end] = this.resolveActivityRange(from, to);
     const canOverride = user.roles.includes('admin') || user.roles.includes('owner');
@@ -166,6 +171,7 @@ export class EmailIntelligenceController {
   @Get('activity-query')
   @UseGuards(RolesGuard)
   @Roles('owner', 'admin', 'manager', 'consultant')
+  @Permission('analytics', 'view')
   activityQuery(
     @CurrentUser() user: JwtPayload,
     @Query('kind') kind: 'sent' | 'missed' | 'intent',
@@ -211,6 +217,7 @@ export class EmailIntelligenceController {
   // Loads older inbox + sent mail (no AI calls). Can take a while for a large mailbox.
   @Post('history/import')
   @Throttle({ default: { limit: 4, ttl: 60_000 } })
+  @Permission('email', 'view')
   importHistory(@CurrentUser() user: JwtPayload, @Body() body: { days?: number }) {
     return this.emailHistory.importHistory(user.sub, Number(body?.days));
   }
@@ -235,6 +242,7 @@ export class EmailIntelligenceController {
   }
 
   @Put('settings')
+  @Permission('email', 'manage')
   async updateInboxSettings(@CurrentUser() user: JwtPayload, @Body() body: { autoDraft?: boolean; sendOnApprove?: boolean }) {
     if (body?.autoDraft === true && user.aiAccessEnabled === false) {
       throw new ForbiddenException('AI access has been disabled for your account by an administrator.');
@@ -289,6 +297,7 @@ export class EmailIntelligenceController {
   }
 
   @Post('follow-ups/:id/done')
+  @Permission('email', 'edit')
   markFollowUpDone(@CurrentUser() user: JwtPayload, @Param('id') id: string) {
     return this.emailIntelligenceService.markFollowUpDone(user.sub, id);
   }
@@ -317,6 +326,7 @@ export class EmailIntelligenceController {
   }
 
   @Post('follow-ups/:id/dismiss')
+  @Permission('email', 'edit')
   dismissFollowUp(@CurrentUser() user: JwtPayload, @Param('id') id: string, @Body() body: { reason?: string }) {
     return this.emailIntelligenceService.dismissFollowUp(user.sub, id, body?.reason);
   }
@@ -345,6 +355,7 @@ export class EmailIntelligenceController {
   }
 
   @Post(':id/reject')
+  @Permission('email', 'edit')
   reject(@CurrentUser() user: JwtPayload, @Param('id') id: string, @Body() body: { reason?: string }) {
     return this.emailIntelligenceService.reject(user.sub, id, body?.reason);
   }

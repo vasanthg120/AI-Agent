@@ -45,11 +45,14 @@ var __param = (this && this.__param) || function (paramIndex, decorator) {
     return function (target, key) { decorator(target, key, paramIndex); }
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.UsersService = void 0;
+exports.UsersService = exports.AI_ROLE_UNAVAILABLE_MESSAGE = void 0;
 const crypto_1 = require("crypto");
 const common_1 = require("@nestjs/common");
 const mongoose_1 = require("@nestjs/mongoose");
 const app_features_1 = require("../common/app-features");
+const account_type_1 = require("../common/permissions/account-type");
+const app_modules_1 = require("../common/permissions/app-modules");
+const permission_decorator_1 = require("../common/permissions/permission.decorator");
 const team_roster_1 = require("../common/team-roster");
 const bcrypt = __importStar(require("bcrypt"));
 const mongoose_2 = require("mongoose");
@@ -61,6 +64,12 @@ const MAX_SESSIONS = 10;
 const MAX_PUSH_SUBSCRIPTIONS = 20;
 const STORE_SCOPED_ROLES = new Set(['manager', 'consultant']);
 const LINKED_MEMBER_MESSAGE = 'This person has access through the Main Account, so it can only be changed from there.';
+exports.AI_ROLE_UNAVAILABLE_MESSAGE = 'Your AI role isn’t available any more, so there’s no agent to chat with. Ask an admin to give you a new AI role.';
+function sameList(a, b) {
+    if (!a || !b)
+        return a === b;
+    return a.length === b.length && a.every((x) => b.includes(x));
+}
 let UsersService = class UsersService {
     constructor(userModel, agentRoleModel) {
         this.userModel = userModel;
@@ -185,7 +194,7 @@ let UsersService = class UsersService {
         }
     }
     async resolveFeatures(user) {
-        if (!(0, app_features_1.isAiRoleAccount)(user.roles))
+        if (!(0, app_features_1.isAiRoleAccount)(user.roles) || Array.isArray(user.permissions))
             return undefined;
         if (!user.assignedAgentId)
             return [];
@@ -202,24 +211,173 @@ let UsersService = class UsersService {
         if (!user)
             return null;
         const features = await this.resolveFeatures(user);
-        let aiRoleName;
-        if (features !== undefined && user.assignedAgentId) {
-            const role = await this.userModel.db
-                .collection('agent_roles')
-                .findOne({ organizationId: user.organizationId, slug: user.assignedAgentId }, { projection: { name: 1 } });
-            aiRoleName = typeof role?.name === 'string' ? role.name : undefined;
+        const described = this.describeUser(user, await this.aiRolesOf(user.organizationId));
+        return {
+            ...described,
+            features,
+            aiRoleName: (0, app_features_1.isAiRoleAccount)(user.roles) && described.aiRole?.status !== 'missing' ? described.aiRole?.name : undefined,
+            avatarUrl: await this.avatarOf(user),
+        };
+    }
+    async aiRolesOf(organizationId) {
+        const rows = await this.agentRoleModel
+            .find({ organizationId })
+            .select({ slug: 1, name: 1, department: 1, status: 1, avatarColor: 1, description: 1, features: 1, defaultPermissions: 1, allowedTools: 1 })
+            .lean()
+            .exec();
+        const map = new Map();
+        for (const agent of agents_1.CHAT_AGENTS) {
+            map.set(agent.id, { slug: agent.id, name: agent.name, category: 'custom', status: 'active', allowedTools: [], builtin: true });
         }
-        return { ...this.toPublic(user), features, aiRoleName, avatarUrl: await this.avatarOf(user) };
+        for (const row of rows) {
+            map.set(row.slug, {
+                slug: row.slug,
+                name: row.name,
+                category: row.department || 'custom',
+                status: row.status === 'active' ? 'active' : 'draft',
+                avatarColor: row.avatarColor,
+                description: row.description,
+                features: row.features,
+                defaultPermissions: row.defaultPermissions,
+                allowedTools: row.allowedTools ?? [],
+                builtin: false,
+            });
+        }
+        return map;
+    }
+    describeUser(user, aiRoles) {
+        const record = (0, app_features_1.isAiRoleAccount)(user.roles) && user.assignedAgentId ? aiRoles.get(user.assignedAgentId) : undefined;
+        const aiRole = (0, app_features_1.isAiRoleAccount)(user.roles) && user.assignedAgentId
+            ? record
+                ? { slug: record.slug, name: record.name, category: record.category, status: record.status, avatarColor: record.avatarColor, description: record.description }
+                : { slug: user.assignedAgentId, name: '', category: '', status: 'missing' }
+            : null;
+        const accessMode = (0, account_type_1.accessModeOf)(user.roles, user.permissions);
+        const olderPermissions = accessMode === 'older' && (0, app_features_1.isAiRoleAccount)(user.roles)
+            ? (0, app_modules_1.permissionsFromFeatures)(record?.status === 'active' ? (record.features ?? app_features_1.DEFAULT_ROLE_FEATURES) : [])
+            : null;
+        return {
+            ...this.toPublic(user),
+            accountType: (0, account_type_1.accountTypeOf)(user.roles, aiRole),
+            accessMode,
+            aiRole,
+            permissions: accessMode === 'permissions' ? [...(user.permissions ?? [])] : null,
+            olderPermissions,
+            needsAiRole: (0, app_features_1.isAiRoleAccount)(user.roles) && aiRole?.status !== 'active',
+        };
+    }
+    async listDescribed(organizationId) {
+        const [users, aiRoles] = await Promise.all([this.findAllWithLinkedMembers(organizationId), this.aiRolesOf(organizationId)]);
+        return users.map((u) => this.describeUser(u, aiRoles));
+    }
+    async assignableAiRoles(organizationId) {
+        const [aiRoles, counts] = await Promise.all([
+            this.aiRolesOf(organizationId),
+            this.userModel.aggregate([
+                { $match: { organizationId, roles: 'agent_user', assignedAgentId: { $exists: true } } },
+                { $group: { _id: '$assignedAgentId', n: { $sum: 1 } } },
+            ]),
+        ]);
+        const people = new Map(counts.map((c) => [c._id, c.n]));
+        return [...aiRoles.values()]
+            .filter((role) => !role.builtin && role.status === 'active')
+            .map((role) => ({
+            slug: role.slug,
+            name: role.name,
+            description: role.description ?? '',
+            category: role.category,
+            avatarColor: role.avatarColor,
+            allowedTools: role.allowedTools,
+            accountType: (0, account_type_1.accountTypeOf)(['agent_user'], role),
+            defaultPermissions: (0, app_modules_1.defaultPermissionsOfRole)(role),
+            people: people.get(role.slug) ?? 0,
+        }))
+            .sort((a, b) => a.name.localeCompare(b.name));
+    }
+    permissionCatalog() {
+        return {
+            groups: app_modules_1.MODULE_GROUPS,
+            modules: app_modules_1.APP_MODULES,
+            alwaysIncluded: ['Profile & security', 'Notifications', 'To-Do & EOD', 'Timeline'],
+            notGrantable: ['Billing & subscription', 'Sub-accounts', 'Audit log', 'Creating administrators'],
+            newRoleDefaults: (0, app_modules_1.permissionsFromFeatures)(app_features_1.DEFAULT_ROLE_FEATURES),
+        };
+    }
+    assertDelegation(caller, change) {
+        if (!caller || caller.roles.includes('owner') || caller.roles.includes('admin'))
+            return;
+        if (!(0, permission_decorator_1.isPermissionManaged)(caller))
+            throw new common_1.ForbiddenException('Insufficient role');
+        const mine = new Set(caller.permissions ?? []);
+        if (change.role !== undefined && change.role !== 'agent_user') {
+            throw new common_1.ForbiddenException('Only owners and admins can create administrators or change someone’s account type.');
+        }
+        const target = change.target;
+        if (target) {
+            if (target._id.toString() === caller.sub)
+                throw new common_1.ForbiddenException('You can’t change your own access. Ask an admin.');
+            if ((0, account_type_1.accessModeOf)(target.roles, target.permissions) !== 'permissions') {
+                throw new common_1.ForbiddenException('Only owners and admins can change this person’s account.');
+            }
+            if (!(target.permissions ?? []).every((p) => mine.has(p))) {
+                throw new common_1.ForbiddenException('This person has access you don’t have yourself, so only an owner or admin can change them.');
+            }
+        }
+        if (change.permissions) {
+            const beyond = change.permissions.filter((p) => !mine.has(p));
+            if (beyond.length) {
+                const pages = [...new Set(beyond.map((p) => (0, app_modules_1.moduleById)(p.split(':')[0])?.label ?? p))];
+                throw new common_1.ForbiddenException(`You can only give access you have yourself. Not yours to give: ${pages.join(', ')}.`);
+            }
+        }
+    }
+    async assertMayManage(caller, id, organizationId) {
+        const target = (0, mongoose_2.isValidObjectId)(id) ? await this.userModel.findOne({ _id: id, organizationId }).exec() : null;
+        if (!target)
+            throw new common_1.NotFoundException('User not found');
+        this.assertDelegation(caller, { target });
+    }
+    async aiRoleUnavailable(user) {
+        if (!(0, app_features_1.isAiRoleAccount)(user.roles) || !user.assignedAgentId)
+            return false;
+        return !(await this.resolveValidAgentIds(user.organizationId)).has(user.assignedAgentId);
+    }
+    async socketAccess(payload, module, action, olderFeature) {
+        const session = await this.resolveSession(payload);
+        if (!session)
+            return { user: null, refusal: 'Unauthorized' };
+        const { user } = session;
+        if ((0, permission_decorator_1.isPermissionManaged)(user)) {
+            const label = (0, app_modules_1.moduleById)(module)?.label ?? module;
+            return { user, refusal: (0, permission_decorator_1.holdsPermission)(user, module, action) ? null : (0, permission_decorator_1.permissionDeniedMessage)({ action, label }) };
+        }
+        if (olderFeature && (0, app_features_1.isAiRoleAccount)(user.roles) && !(await this.resolveFeatures(user))?.includes(olderFeature)) {
+            return { user, refusal: 'Your AI role doesn’t include this feature. Ask an admin to enable it for the role.' };
+        }
+        return { user, refusal: null };
     }
     async avatarOf(user) {
         const row = await this.userModel.findById(user.linkedLoginUserId ?? user._id).select('avatar').lean().exec();
         return row?.avatar;
     }
-    async createByAdmin(dto, organizationId) {
+    permissionsFor(role, permissions) {
+        if (permissions === undefined)
+            return undefined;
+        if (role !== 'agent_user') {
+            throw new common_1.BadRequestException('Only people with an AI role get their own permissions. Administrators have full access.');
+        }
+        return (0, app_modules_1.normalizePermissions)(permissions);
+    }
+    async createByAdmin(dto, organizationId, caller) {
         const email = dto.email.trim().toLowerCase();
         const name = dto.name.trim();
         if (!name)
             throw new common_1.BadRequestException('Enter the person’s name.');
+        const permissions = this.permissionsFor(dto.role, dto.permissions);
+        this.assertDelegation(caller, { role: dto.role, permissions });
+        if (caller && (0, permission_decorator_1.isPermissionManaged)(caller) && permissions === undefined) {
+            throw new common_1.BadRequestException('Choose which pages and actions this person can use.');
+        }
         await this.assertRoleRequirements(organizationId, dto.role, dto.assignedAgentId, dto.storeId);
         if (await this.userModel.exists({ email })) {
             throw new common_1.ConflictException('An account with this email address already exists.');
@@ -235,8 +393,9 @@ let UsersService = class UsersService {
                 storeId: STORE_SCOPED_ROLES.has(dto.role) ? dto.storeId : undefined,
                 roles: [dto.role],
                 assignedAgentId: dto.role === 'agent_user' ? dto.assignedAgentId : undefined,
+                permissions,
                 department: dto.department?.trim() || undefined,
-                active: true,
+                active: dto.active ?? true,
                 voiceAccessEnabled: dto.voiceAccessEnabled ?? true,
                 aiAccessEnabled: dto.aiAccessEnabled ?? true,
             });
@@ -248,12 +407,20 @@ let UsersService = class UsersService {
             throw err;
         }
     }
-    async updateByAdmin(id, dto, organizationId, callerId) {
+    async updateByAdmin(id, dto, organizationId, callerId, caller) {
         const target = (0, mongoose_2.isValidObjectId)(id) ? await this.userModel.findOne({ _id: id, organizationId }).exec() : null;
         if (!target)
             throw new common_1.NotFoundException('User not found');
         if (target.linkedLoginUserId)
             throw new common_1.ForbiddenException(LINKED_MEMBER_MESSAGE);
+        if (callerId === id && !target.roles.includes('owner')) {
+            const changesAccess = (dto.role !== undefined && dto.role !== target.roles[0]) ||
+                (dto.assignedAgentId !== undefined && dto.assignedAgentId !== target.assignedAgentId) ||
+                (dto.permissions !== undefined && !sameList((0, app_modules_1.normalizePermissions)(dto.permissions), target.permissions)) ||
+                (dto.active !== undefined && dto.active !== target.active);
+            if (changesAccess)
+                throw new common_1.BadRequestException('You can’t change your own access. Ask another admin.');
+        }
         if (target.roles.includes('owner')) {
             if (callerId !== id)
                 throw new common_1.ForbiddenException("The organization owner's account can't be modified or deleted by another admin");
@@ -264,6 +431,8 @@ let UsersService = class UsersService {
         const role = dto.role ?? target.roles[0];
         const assignedAgentId = dto.assignedAgentId ?? target.assignedAgentId;
         const storeId = dto.storeId ?? target.storeId;
+        const permissions = this.permissionsFor(role, dto.permissions);
+        this.assertDelegation(caller, { role: dto.role, permissions, target });
         if (dto.role !== undefined || dto.assignedAgentId !== undefined || dto.storeId !== undefined) {
             await this.assertRoleRequirements(organizationId, role, assignedAgentId, storeId);
         }
@@ -285,6 +454,10 @@ let UsersService = class UsersService {
             set.storeId = storeId;
         else if (dto.role !== undefined && target.storeId && !target.roles.includes('owner'))
             unset.storeId = '';
+        if (permissions !== undefined)
+            set.permissions = permissions;
+        else if (role !== 'agent_user' && target.permissions !== undefined)
+            unset.permissions = '';
         if (dto.active !== undefined)
             set.active = dto.active;
         if (dto.department !== undefined)
@@ -300,10 +473,12 @@ let UsersService = class UsersService {
             .exec();
         if (!updated)
             throw new common_1.NotFoundException('User not found');
-        return this.toPublic(updated);
+        return this.describeUser(updated, await this.aiRolesOf(organizationId));
     }
-    async deleteByAdmin(id, organizationId) {
+    async deleteByAdmin(id, organizationId, caller) {
         await this.assertNotOwner(id, organizationId);
+        if (caller && !caller.roles.includes('owner') && !caller.roles.includes('admin'))
+            await this.assertMayManage(caller, id, organizationId);
         const deleted = await this.userModel.findOneAndDelete({ _id: id, organizationId }).exec();
         if (!deleted)
             throw new common_1.NotFoundException('User not found');

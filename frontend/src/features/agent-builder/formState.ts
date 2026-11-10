@@ -19,8 +19,10 @@ export interface FormState {
   assignedDepartments: string[];
   assignedUserIds: string[];
   allowedTools: string[];
-  // The app features people assigned to this role can use.
+  // The app features people assigned to this role can use (older accounts only; kept as loaded).
   features: string[];
+  // Where new people given this role start; null until set (the catalog's starting set applies).
+  defaultPermissions: string[] | null;
   modelTier: 'fast' | 'standard' | null;
   status: 'draft' | 'active';
   sourceDocumentName?: string;
@@ -36,6 +38,7 @@ export function blankFormState(): FormState {
     assignedUserIds: [],
     allowedTools: [],
     features: [...DEFAULT_ROLE_FEATURES],
+    defaultPermissions: null,
     modelTier: null,
     status: 'draft',
   };
@@ -52,6 +55,7 @@ export function roleToFormState(role: AgentRole): FormState {
     assignedUserIds: role.assignedUserIds ?? [],
     allowedTools: role.allowedTools ?? [],
     features: role.features ?? [...DEFAULT_ROLE_FEATURES],
+    defaultPermissions: role.defaultPermissions ?? null,
     modelTier: role.modelTier ?? null,
     status: role.status,
     sourceDocumentName: role.sourceDocumentName,
@@ -75,6 +79,7 @@ export function formStateToPayload(form: FormState): CreateAgentRolePayload {
     assignedUserIds: form.assignedUserIds,
     allowedTools: form.allowedTools,
     features: form.features,
+    ...(form.defaultPermissions ? { defaultPermissions: form.defaultPermissions } : {}),
     modelTier: form.modelTier,
   };
 }

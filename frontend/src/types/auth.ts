@@ -9,6 +9,13 @@ export interface User {
   // For an account tied to an AI role: that role's name and the app features it includes.
   aiRoleName?: string;
   features?: string[];
+  // Someone created with their own page & action permissions ("customers:edit");
+  // null for owners, admins and older accounts (see utils/access.ts).
+  permissions?: string[] | null;
+  // 'full' (owner/admin), 'permissions' (their own list) or 'older' (fixed role / AI role features).
+  accessMode?: 'full' | 'permissions' | 'older';
+  // Read from their AI role ("Sales Agent"), or Owner / Administrator.
+  accountType?: string;
   avatarUrl?: string;
   timezone?: string;
   language?: string;

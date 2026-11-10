@@ -11,6 +11,7 @@ import { BusinessKnowledgeDocumentListQueryDto } from './dto/business-knowledge-
 import { UpdateBusinessKnowledgeDocumentDto } from './dto/update-business-knowledge-document.dto';
 import { BusinessKnowledgeDocumentsService } from './business-knowledge-documents.service';
 import { Feature } from '../common/app-features';
+import { Permission } from '../common/permissions/permission.decorator';
 
 // Reads (list/get/file) are CRM-dashboard-tier (owner/admin/manager) —
 // mutations (upload/patch/delete/retry) are owner/admin only, matching
@@ -20,6 +21,7 @@ import { Feature } from '../common/app-features';
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Roles('owner', 'admin', 'manager')
 @Feature('business_knowledge')
+@Permission('business_knowledge')
 @Controller('business-knowledge/documents')
 export class BusinessKnowledgeDocumentsController {
   constructor(private documentsService: BusinessKnowledgeDocumentsService) {}
@@ -59,6 +61,7 @@ export class BusinessKnowledgeDocumentsController {
 
   @Post(':id/retry-extraction')
   @Roles('owner', 'admin')
+  @Permission('business_knowledge', 'edit')
   retryExtraction(@CurrentUser() user: JwtPayload, @Param('id') id: string) {
     return this.documentsService.retryExtraction(id, user.organizationId, user.sub);
   }

@@ -90,6 +90,12 @@ export class CallCopilotGateway implements OnGatewayConnection, OnGatewayDisconn
       client.emit('call:error', { message: 'Unauthorized' });
       return;
     }
+    // Sockets skip the HTTP checks: Call Copilot access is read again here, live.
+    const { refusal } = await this.usersService.socketAccess(user, 'call_copilot', 'create', 'call_copilot');
+    if (refusal) {
+      client.emit('call:error', { message: refusal });
+      return;
+    }
     try {
       const session = await this.callCopilotService.startSession(
         user.organizationId,

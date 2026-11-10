@@ -1,0 +1,263 @@
+.screen {
+  /* The keys are sized by the room the keypad really has (this box, between the
+     top bar and the tabs — "cq" units), so the call button is never pushed under
+     the tabs: big on a phone, smaller on a short one, never giant on a tablet. */
+  container-type: size;
+  height: 100%;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  padding-bottom: var(--space-3);
+}
+
+.screen > * {
+  --key: clamp(48px, min(19cqw, calc((100cqh - 290px) / 5.3)), 76px);
+  --gap: clamp(6px, 1.6cqh, 16px);
+}
+
+.line {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: var(--space-2) var(--space-5) 0;
+  text-align: center;
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+}
+
+.lineMuted {
+  color: var(--color-text-muted);
+}
+
+.display {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  flex: 1;
+  min-height: 96px;
+  padding: var(--space-2) var(--space-4) 0;
+}
+
+.linked {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  max-width: 100%;
+  padding-left: var(--space-3);
+  border-radius: var(--radius-full);
+  background: var(--color-accent-muted);
+  font-size: var(--text-sm);
+}
+
+.linked span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.unlink {
+  display: grid;
+  place-items: center;
+  width: var(--touch);
+  height: var(--touch);
+  margin: -6px 0;
+  border: 0;
+  border-radius: var(--radius-full);
+  background: transparent;
+  cursor: pointer;
+}
+
+.numberRow {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  max-width: 420px;
+}
+
+.country {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: var(--touch);
+  padding: 0 var(--space-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-full);
+  background: var(--color-bg-surface);
+  font-size: var(--text-md);
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
+  cursor: pointer;
+}
+
+.country:disabled {
+  cursor: default;
+  opacity: 0.85;
+}
+
+.number {
+  flex: 1;
+  min-width: 0;
+  height: 56px;
+  border: 0;
+  background: transparent;
+  text-align: center;
+  font-size: 34px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  font-variant-numeric: tabular-nums;
+  caret-color: var(--color-accent);
+}
+
+.number::placeholder {
+  font-size: var(--text-xl);
+  font-weight: 400;
+  color: var(--color-text-muted);
+  letter-spacing: 0;
+}
+
+.number:focus-visible {
+  outline: none;
+  box-shadow: inset 0 -3px 0 var(--color-accent);
+}
+
+.numberMedium {
+  font-size: 28px;
+}
+
+.numberSmall {
+  font-size: 23px;
+}
+
+.hint {
+  min-height: 22px;
+  margin-top: 2px;
+  font-size: var(--text-md);
+  color: var(--color-text-muted);
+  text-align: center;
+}
+
+.hintError {
+  color: var(--color-danger-ink);
+  font-weight: 600;
+}
+
+.keys {
+  display: grid;
+  grid-template-columns: repeat(3, var(--key));
+  justify-content: center;
+  column-gap: clamp(18px, 7vw, 36px);
+  row-gap: var(--gap);
+  margin-top: var(--space-3);
+}
+
+.key {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  width: var(--key);
+  height: var(--key);
+  border: 0;
+  border-radius: 50%;
+  background: var(--dialer-key);
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+  transition:
+    background-color var(--duration-fast) var(--ease-out),
+    transform var(--duration-fast) var(--ease-out);
+}
+
+.key:active {
+  background: var(--dialer-key-pressed);
+  transform: scale(0.94);
+}
+
+.digit {
+  font-size: calc(var(--key) * 0.42);
+  font-weight: 450;
+  line-height: 1;
+}
+
+.letters {
+  min-height: 12px;
+  margin-top: 2px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  color: var(--color-text-muted);
+}
+
+.actions {
+  display: grid;
+  grid-template-columns: repeat(3, var(--key));
+  justify-content: center;
+  align-items: center;
+  column-gap: clamp(18px, 7vw, 36px);
+  margin-top: var(--gap);
+}
+
+.side {
+  justify-self: center;
+  display: grid;
+  place-items: center;
+  width: 52px;
+  height: 52px;
+  border: 0;
+  border-radius: var(--radius-full);
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-size: 24px;
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+
+.side:active {
+  background: var(--color-bg-hover);
+}
+
+.call {
+  display: grid;
+  place-items: center;
+  width: var(--key);
+  height: var(--key);
+  border: 0;
+  border-radius: 50%;
+  background: var(--dialer-call);
+  color: #ffffff;
+  font-size: calc(var(--key) * 0.4);
+  box-shadow: 0 6px 18px color-mix(in srgb, var(--dialer-call) 35%, transparent);
+  cursor: pointer;
+  transition:
+    transform var(--duration-fast) var(--ease-out),
+    background-color var(--duration-fast) var(--ease-out);
+}
+
+.call:not(:disabled):active {
+  background: var(--dialer-call-pressed);
+  transform: scale(0.94);
+}
+
+.call:disabled {
+  opacity: 0.45;
+  cursor: default;
+  box-shadow: none;
+}
+
+.call[aria-busy='true'] {
+  opacity: 0.8;
+  animation: pulse 1s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  50% {
+    transform: scale(0.95);
+  }
+}

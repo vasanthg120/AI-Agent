@@ -9,6 +9,61 @@ export type CallingProvider = 'plivo' | 'twilio';
 
 export const PROVIDER_LABEL: Record<CallingProvider, string> = { plivo: 'Plivo', twilio: 'Twilio' };
 
+// Where a call stands, in plain words — worked out by the server
+// (backend/src/calling/call-outcome.ts) from what the carrier reported.
+export type CallStage = 'ringing_agent' | 'connecting_customer' | 'in_call' | 'ended' | 'failed';
+export type CallFailure =
+  | 'busy'
+  | 'no_answer_customer'
+  | 'no_answer_agent'
+  | 'invalid_number'
+  | 'offline'
+  | 'balance'
+  | 'cancelled'
+  | 'provider_error';
+
+export interface CallOutcome {
+  stage: CallStage;
+  failure?: CallFailure;
+  message: string;
+}
+
+// The call's Call Copilot report, once its recording has become a session.
+export interface CallReport {
+  sessionId: string;
+  stage: 'transcribing' | 'scoring' | 'ready' | 'failed';
+  overallScore?: number;
+  headline?: string;
+  // Ready, but the AI Coach never produced a score (it can be generated on demand).
+  unscored?: boolean;
+  error?: string;
+}
+
+// Why the server refused to start a call (the response's `code`).
+export type StartRefusal =
+  | 'invalid_number'
+  | 'own_number'
+  | 'no_line'
+  | 'not_ready'
+  | 'call_in_progress'
+  | 'balance'
+  | 'offline'
+  | 'provider_error';
+
+// Whether Plivo/Twilio can reach the server right now (the tunnel or domain is up).
+export type Reachability = 'reachable' | 'unreachable' | 'unknown' | 'not_configured';
+
+/** A customer the Dialer can call (GET /calling/contacts). */
+export interface CallableCustomer {
+  id: string;
+  name: string;
+  company?: string;
+  // Each number as the CRM has it, with whose it is when not the customer's own.
+  phones: { number: string; label?: string }[];
+  // Their most recent open deal, so the call's report gets that context.
+  deal?: { id: string; name?: string };
+}
+
 export interface CallingCall {
   id: string;
   provider: CallingProvider;
@@ -25,12 +80,20 @@ export interface CallingCall {
   userId: string;
   createdAt: string;
   updatedAt: string;
+  dealId?: string;
+  // As picked from Contacts, or the linked deal's name.
+  customerName?: string;
+  // When the two sides were connected.
+  answeredAt?: string;
+  outcome?: CallOutcome;
+  report?: CallReport;
 }
 
 export interface ProviderReadiness {
   connected: boolean;
   // Connected, reachable, and the signed-in person has an active line on it.
   ready: boolean;
+  reachability?: Reachability;
   line: { businessNumber: string; agentPhone: string } | null;
 }
 
@@ -47,25 +110,46 @@ export const callingService = {
     return data;
   },
 
+  /** The overview, asking afresh whether the phone network can reach the server. */
+  async recheckOverview(): Promise<CallingOverview> {
+    const { data } = await axiosClient.get<CallingOverview>('/calling/overview', { params: { recheck: 1 } });
+    return data;
+  },
+
   // `customerNumber` with its country code (+447700900123). Leave `provider` out
   // to route automatically.
   async startCall(
     customerNumber: string,
-    options: { dealId?: string; provider?: CallingProvider } = {},
+    // requestKey: one per tap of a call button — sent again (a retry), it returns the same call.
+    options: { dealId?: string; provider?: CallingProvider; requestKey?: string; customerName?: string } = {},
   ): Promise<CallingCall> {
     const { data } = await axiosClient.post<CallingCall>('/calling/calls', {
       customerNumber,
       ...(options.dealId ? { dealId: options.dealId } : {}),
       ...(options.provider ? { provider: options.provider } : {}),
+      ...(options.requestKey ? { requestKey: options.requestKey } : {}),
+      ...(options.customerName ? { customerName: options.customerName } : {}),
     });
     return data;
   },
 
-  async listCalls(scope: 'mine' | 'org' = 'mine'): Promise<CallingCall[]> {
+  // `before` (an ISO time) pages back through older calls.
+  async listCalls(scope: 'mine' | 'org' = 'mine', before?: string): Promise<CallingCall[]> {
     const { data } = await axiosClient.get<CallingCall[]>('/calling/calls', {
-      params: scope === 'org' ? { scope } : {},
+      params: { ...(scope === 'org' ? { scope } : {}), ...(before ? { before } : {}) },
     });
     return data;
+  },
+
+  /** One of my calls as it stands now, with the server's clock (for timing it). */
+  async getCall(provider: CallingProvider, id: string): Promise<CallingCall & { serverTime: string }> {
+    const { data } = await axiosClient.get<CallingCall & { serverTime: string }>(`/calling/calls/${provider}/${id}`);
+    return data;
+  },
+
+  async searchContacts(search: string): Promise<CallableCustomer[]> {
+    const { data } = await axiosClient.get<{ items: CallableCustomer[] }>('/calling/contacts', { params: { search } });
+    return data.items;
   },
 
   async retryImport(call: Pick<CallingCall, 'provider' | 'id'>): Promise<CallingCall> {

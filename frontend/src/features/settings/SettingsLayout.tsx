@@ -8,6 +8,7 @@ import { useAuthStore } from '@/stores/authStore';
 import { hasRole } from '@/utils/roles';
 import { SETTINGS_NAV, type SettingsNavItem } from './settingsNav';
 import styles from './SettingsLayout.module.css';
+import { canViewAny, isPermissionManaged } from '@/utils/access';
 
 const EASE = [0.16, 1, 0.3, 1] as const;
 const PILL_SPRING = { type: 'spring', stiffness: 420, damping: 36, mass: 0.7 } as const;
@@ -37,7 +38,15 @@ export function SettingsLayout() {
       SETTINGS_NAV.map((group) => ({
         ...group,
         items: group.items
-          .filter((t) => !t.requireRoles || t.requireRoles.some((r) => hasRole(user, r)))
+          // Someone with their own permission list sees the tabs their modules open, plus
+          // their own settings; everyone else, the tabs their role allows (as before).
+          .filter((t) =>
+            isPermissionManaged(user)
+              ? t.module
+                ? canViewAny(user, t.module)
+                : !t.requireRoles
+              : !t.requireRoles || t.requireRoles.some((r) => hasRole(user, r)),
+          )
           .filter((t) => !t.requireMainOwner || canManageSubAccounts),
       })).filter((group) => group.items.length > 0),
     [user, canManageSubAccounts],
@@ -148,7 +157,7 @@ export function SettingsLayout() {
                               <span className={styles.itemText}>
                                 <span className={styles.itemLabel}>
                                   {item.label}
-                                  {item.requireRoles && (
+                                  {item.requireRoles && !isPermissionManaged(user) && (
                                     <FiLock className={styles.lock} aria-label="Admin only" title="Admin only" />
                                   )}
                                 </span>
@@ -191,7 +200,7 @@ export function SettingsLayout() {
                 <div className={styles.headerText}>
                   <h1 className={styles.headerTitle}>
                     {activeItem?.label}
-                    {activeItem?.requireRoles && (
+                    {activeItem?.requireRoles && !isPermissionManaged(user) && (
                       <span className={styles.adminBadge}>
                         <FiLock aria-hidden /> Admin
                       </span>

@@ -7,6 +7,8 @@ import { CustomerMailService } from './customer-mail.service';
 import { CustomerWorkspaceService } from './customer-workspace.service';
 import { UsersModule } from '../users/users.module';
 import { UsersService } from '../users/users.service';
+import { ConfigModule } from '@nestjs/config';
+import { MailModule } from '../mail/mail.module';
 
 // Hoops-parity Tasks tab — the one cross-customer view TASKS_COLLECTION
 // never needed before: every other caller already has one customer in
@@ -26,7 +28,10 @@ describe('CustomerWorkspaceService.listAllTasks (real Mongo)', () => {
   beforeAll(async () => {
     const uri = process.env.MONGODB_URI ?? process.env.MONGO_URI;
     if (!uri) throw new Error('MONGODB_URI/MONGO_URI must be set to run these integration tests.');
-    const moduleRef = await Test.createTestingModule({ imports: [MongooseModule.forRoot(uri), UsersModule] }).compile();
+    const moduleRef = await Test.createTestingModule({
+      // UsersModule sends invitation emails (MailService), which the app provides globally.
+      imports: [ConfigModule.forRoot({ isGlobal: true, ignoreEnvFile: true }), MailModule, MongooseModule.forRoot(uri), UsersModule],
+    }).compile();
     connection = moduleRef.get(getConnectionToken());
     users = moduleRef.get(UsersService);
   });

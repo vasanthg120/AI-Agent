@@ -3,11 +3,13 @@ import { AdminJwtAuthGuard } from '../common/guards/admin-jwt-auth.guard';
 import { BillingAdminTaxesService } from './billing-admin-taxes.service';
 import { CreateTaxRateDto } from './dto/create-tax-rate.dto';
 import { UpdateTaxRateDto } from './dto/update-tax-rate.dto';
+import { PermissionExempt } from '../common/permissions/permission.decorator';
 
 // Phase 1 catalog admin surface — platform_admin only, matching every other
 // billing-admin-*.controller.ts's gate (global catalog, not one customer's
 // data). Nothing here is reachable by a customer-scoped route yet.
 @UseGuards(AdminJwtAuthGuard)
+@PermissionExempt('platform')
 @Controller('billing/admin/taxes')
 export class BillingAdminTaxesController {
   constructor(private taxesService: BillingAdminTaxesService) {}

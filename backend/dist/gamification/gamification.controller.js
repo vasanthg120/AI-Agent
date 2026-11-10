@@ -18,6 +18,7 @@ const current_user_decorator_1 = require("../common/decorators/current-user.deco
 const jwt_auth_guard_1 = require("../common/guards/jwt-auth.guard");
 const achievements_1 = require("./achievements");
 const gamification_service_1 = require("./gamification.service");
+const permission_decorator_1 = require("../common/permissions/permission.decorator");
 let GamificationController = class GamificationController {
     constructor(gamificationService) {
         this.gamificationService = gamificationService;
@@ -48,6 +49,7 @@ __decorate([
 ], GamificationController.prototype, "getAchievements", null);
 exports.GamificationController = GamificationController = __decorate([
     (0, common_1.UseGuards)(jwt_auth_guard_1.JwtAuthGuard),
+    (0, permission_decorator_1.Permission)('dashboard'),
     (0, common_1.Controller)('gamification'),
     __metadata("design:paramtypes", [gamification_service_1.GamificationService])
 ], GamificationController);
