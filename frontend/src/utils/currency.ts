@@ -27,6 +27,20 @@ export function formatINR(value: number | null): string {
   return salesAmount(value, { maximumFractionDigits: 0 });
 }
 
+// An amount in a currency named explicitly (e.g. a quote's own currency,
+// which need not be the dashboard's), written the way that country writes
+// it; the fraction only when there is one.
+export function formatAmountIn(value: number | null, currency: string): string {
+  if (value === null) return '—';
+  const whole = Math.abs(value - Math.round(value)) < 0.005;
+  const number = Math.abs(value).toLocaleString(SALES_LOCALE[currency] ?? 'en-US', {
+    minimumFractionDigits: whole ? 0 : 2,
+    maximumFractionDigits: 2,
+  });
+  const sign = value < 0 ? '−' : '';
+  return SALES_SYMBOL[currency] ? `${sign}${SALES_SYMBOL[currency]}${number}` : `${sign}${currency} ${number}`;
+}
+
 // For reports, where figures are added up in front of the reader (sales
 // excluding tax + tax = sales including tax; a royalty owed to the paisa/cent):
 // the fraction is shown whenever an amount has one, never rounded away.

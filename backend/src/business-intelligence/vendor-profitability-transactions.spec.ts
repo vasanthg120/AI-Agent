@@ -114,6 +114,7 @@ describe('Vendor Profitability — per-transaction view (real Mongo)', () => {
       fileSizeBytes: 100,
       gridFsFileId: 'fake-file-tx-1',
       documentFormat: 'pdf',
+      extractionStatus: 'completed',
       vendorName: 'XYZ Supplier',
       invoiceNumber: 'INV011',
       invoiceDate: '2026-09-01',
@@ -128,7 +129,9 @@ describe('Vendor Profitability — per-transaction view (real Mongo)', () => {
     expect(result.rows).toHaveLength(1);
     const row = result.rows[0];
 
-    expect(row.transactionId).toBe(doc._id.toString());
+    // One row per customer quote: the row is the quote, its invoice is listed inside it.
+    expect(row.transactionId).toBe(quote._id.toString());
+    expect(row.invoices).toEqual([expect.objectContaining({ documentId: doc._id.toString(), vendorInvoiceAmount: 70000, included: true })]);
     expect(row.dealId).toBeUndefined();
     expect(row.customerName).toBe('ABC Company');
     expect(row.customerQuoteNo).toBe('IN001');
@@ -167,6 +170,7 @@ describe('Vendor Profitability — per-transaction view (real Mongo)', () => {
       fileSizeBytes: 100,
       gridFsFileId: 'fake-file-tx-2',
       documentFormat: 'pdf',
+      extractionStatus: 'completed',
       vendorName: 'xyz supplier (raw ocr text)',
       vendorRef: vendor._id.toString(),
       invoiceNumber: 'INV012',
@@ -199,6 +203,7 @@ describe('Vendor Profitability — per-transaction view (real Mongo)', () => {
       fileSizeBytes: 100,
       gridFsFileId: 'fake-file-tx-3',
       documentFormat: 'pdf',
+      extractionStatus: 'completed',
       invoiceNumber: 'INV013',
       paymentAmount: 500,
       currency: 'INR',
@@ -243,6 +248,7 @@ describe('Vendor Profitability — per-transaction view (real Mongo)', () => {
       fileSizeBytes: 100,
       gridFsFileId: 'fake-file-tx-4',
       documentFormat: 'pdf',
+      extractionStatus: 'completed',
       invoiceNumber: 'INV014',
       paymentAmount: 4000,
       currency: 'INR',
@@ -284,6 +290,7 @@ describe('Vendor Profitability — per-transaction view (real Mongo)', () => {
       fileSizeBytes: 100,
       gridFsFileId: 'fake-file-tx-5',
       documentFormat: 'pdf',
+      extractionStatus: 'completed',
       invoiceNumber: 'INV015',
       paymentAmount: 1000,
       currency: 'INR',
@@ -293,5 +300,139 @@ describe('Vendor Profitability — per-transaction view (real Mongo)', () => {
 
     const result = await service.getTransactions(organizationId, start, end, {});
     expect(result.rows).toHaveLength(0);
+  });
+
+  // Mirrors a real quote (no. 118): two vendors' invoices for one customer
+  // quote, one of them uploaded twice. Before 2026-11-06 this showed three
+  // rows, each "quote − one invoice", and counted the quote three times.
+  it('adds up every vendor invoice linked to one quote, counts the quote once, and skips a re-uploaded bill', async () => {
+    const organizationId = `${TEST_PREFIX}-multi`;
+    const quote = await quoteModel.create({
+      organizationId,
+      quoteNumber: '118',
+      quoteAmount: 237707,
+      currency: 'INR',
+      quoteStatus: 'sent',
+      clientApprovalStatus: 'approved',
+      clientDetails: { companyName: 'Multi Co' },
+    });
+    const other = await quoteModel.create({
+      organizationId,
+      quoteNumber: '98',
+      quoteAmount: 20000,
+      currency: 'INR',
+      quoteStatus: 'sent',
+      clientApprovalStatus: 'approved',
+      clientDetails: { companyName: 'Other Co' },
+    });
+    const base = {
+      organizationId,
+      uploadedBy: 'user-1',
+      mimeType: 'application/pdf',
+      fileSizeBytes: 100,
+      documentFormat: 'pdf',
+      extractionStatus: 'completed',
+      currency: 'INR',
+    };
+    const hashtag = await financeModel.create({
+      ...base,
+      originalFilename: 'hashtag.pdf',
+      gridFsFileId: 'fake-file-multi-1',
+      vendorName: 'Hashtag Brands',
+      invoiceNumber: 'PICHN2627013',
+      invoiceDate: '2026-10-01',
+      paymentAmount: 45006,
+      taxAmount: 5635.8,
+      paymentStatus: 'paid',
+      quoteId: quote._id.toString(),
+    });
+    const brandwagon = await financeModel.create({
+      ...base,
+      originalFilename: 'brandwagon.pdf',
+      gridFsFileId: 'fake-file-multi-2',
+      vendorName: 'BRANDWAGON',
+      invoiceNumber: 'PIBW2627305',
+      invoiceDate: '2026-10-05',
+      paymentAmount: 34751,
+      taxAmount: 5301,
+      paymentStatus: 'pending',
+      quoteId: quote._id.toString(),
+    });
+    const reupload = await financeModel.create({
+      ...base,
+      originalFilename: 'brandwagon (1).pdf',
+      gridFsFileId: 'fake-file-multi-3',
+      vendorName: 'Brandwagon',
+      invoiceNumber: 'PIBW-2627305',
+      invoiceDate: '2026-10-05',
+      paymentAmount: 34751,
+      paymentStatus: 'pending',
+      quoteId: quote._id.toString(),
+    });
+    await financeModel.create({
+      ...base,
+      originalFilename: 'other.pdf',
+      gridFsFileId: 'fake-file-multi-4',
+      vendorName: 'Young Creations',
+      invoiceNumber: 'YC16127',
+      paymentAmount: 11378,
+      paymentStatus: 'paid',
+      quoteId: other._id.toString(),
+    });
+
+    const result = await service.getTransactions(organizationId, start, end, {});
+    expect(result.rows).toHaveLength(2);
+
+    const row = result.rows.find((r) => r.transactionId === quote._id.toString())!;
+    expect(row.invoices.map((i) => i.documentId)).toEqual([hashtag._id.toString(), brandwagon._id.toString(), reupload._id.toString()]);
+    expect(row.invoices.map((i) => i.included)).toEqual([true, true, false]);
+    expect(row.invoices[2].excludedReason).toBe('duplicate');
+    expect(row.vendorInvoiceAmount).toBe(79757);
+    expect(row.profitAmount).toBe(157950);
+    expect(row.profitMarginPct).toBe(66.4);
+    expect(row.vendorName).toBe('Hashtag Brands, BRANDWAGON');
+    expect(row.invoiceDate).toBe('2026-10-05');
+    expect(row.status).toBe('mixed');
+
+    // Each quote once: 237,707 + 20,000; costs 79,757 + 11,378.
+    expect(result.totals.customerQuoteAmount).toBe(257707);
+    expect(result.totals.vendorInvoiceAmount).toBe(91135);
+    expect(result.totals.profitAmount).toBe(166572);
+    expect(result.totals.profitMarginPct).toBe(64.6);
+  });
+
+  it('lists a quote by any of its documents uploaded in the period, with the cost of all of them', async () => {
+    const organizationId = `${TEST_PREFIX}-period`;
+    const quote = await quoteModel.create({
+      organizationId,
+      quoteNumber: 'P-1',
+      quoteAmount: 10000,
+      currency: 'INR',
+      quoteStatus: 'sent',
+      clientApprovalStatus: 'approved',
+      clientDetails: { companyName: 'Period Co' },
+    });
+    const base = {
+      organizationId,
+      uploadedBy: 'user-1',
+      mimeType: 'application/pdf',
+      fileSizeBytes: 100,
+      documentFormat: 'pdf',
+      extractionStatus: 'completed',
+      currency: 'INR',
+      paymentStatus: 'paid',
+      quoteId: quote._id.toString(),
+    };
+    const old = await financeModel.create({ ...base, originalFilename: 'old.pdf', gridFsFileId: 'fake-file-period-1', invoiceNumber: 'A1', paymentAmount: 3000 });
+    await financeModel.collection.updateOne({ _id: old._id }, { $set: { createdAt: new Date('2025-01-15') } });
+    await financeModel.create({ ...base, originalFilename: 'new.pdf', gridFsFileId: 'fake-file-period-2', invoiceNumber: 'A2', paymentAmount: 2000 });
+
+    const thisYear = await service.getTransactions(organizationId, new Date('2026-01-01'), end, {});
+    expect(thisYear.rows).toHaveLength(1);
+    expect(thisYear.rows[0].vendorInvoiceAmount).toBe(5000);
+    expect(thisYear.rows[0].profitAmount).toBe(5000);
+
+    const beforeAnyUpload = await service.getTransactions(organizationId, new Date('2024-01-01'), new Date('2024-12-31'), {});
+    expect(beforeAnyUpload.rows).toHaveLength(0);
   });
 });

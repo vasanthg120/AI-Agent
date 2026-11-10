@@ -93,6 +93,36 @@ export interface FinanceFilters {
   reviewStatus?: 'needs_review' | 'reviewed';
   amountMin?: number;
   amountMax?: number;
+  quoteLink?: 'linked' | 'unlinked';
+}
+
+// Finance AI quote costing (backend finance/quote-costing.ts): every vendor
+// document linked to one customer quote, and what the quote earns once they
+// are paid. Amounts as written on the documents, GST included.
+export type CostingExclusion = 'processing' | 'extraction_failed' | 'cancelled' | 'currency_mismatch' | 'duplicate';
+
+export interface QuoteCostingLine {
+  document: FinanceDocument;
+  documentId: string;
+  included: boolean;
+  excludedReason?: CostingExclusion;
+  duplicateOfDocumentId?: string;
+}
+
+export interface QuoteCosting {
+  quote: CustomerQuoteMatch;
+  documents: QuoteCostingLine[];
+  totals: {
+    quoteAmount: number;
+    currency: string;
+    vendorCost: number;
+    vendorTax: number;
+    profit: number;
+    marginPct: number | null;
+    markupPct: number | null;
+    includedCount: number;
+    excludedCount: number;
+  };
 }
 
 export interface UpdateFinanceDocumentPayload {
@@ -139,9 +169,11 @@ export function toFinanceFilterParams(filters: FinanceFilters, extra?: Record<st
 }
 
 export const financeDocumentsService = {
-  async upload(file: File): Promise<FinanceDocument> {
+  // quoteId: store the document already linked to that customer quote (quote costing).
+  async upload(file: File, quoteId?: string): Promise<FinanceDocument> {
     const form = new FormData();
     form.append('file', file);
+    if (quoteId) form.append('quoteId', quoteId);
     const { data } = await axiosClient.post<FinanceDocument>('/finance/documents', form);
     return data;
   },
@@ -178,6 +210,16 @@ export const financeDocumentsService = {
   // Step 2 — persist the link the user confirmed from a searchCustomerQuote result.
   async linkCustomerQuote(id: string, quoteId: string): Promise<{ document: FinanceDocument; linkedQuote: CustomerQuoteMatch }> {
     const { data } = await axiosClient.post<{ document: FinanceDocument; linkedQuote: CustomerQuoteMatch }>(`/finance/documents/${id}/link-quote`, { quoteId });
+    return data;
+  },
+
+  async unlinkCustomerQuote(id: string): Promise<FinanceDocument> {
+    const { data } = await axiosClient.delete<FinanceDocument>(`/finance/documents/${id}/link-quote`);
+    return data;
+  },
+
+  async getQuoteCosting(quoteId: string): Promise<QuoteCosting> {
+    const { data } = await axiosClient.get<QuoteCosting>(`/finance/documents/quote-costing/${quoteId}`);
     return data;
   },
 

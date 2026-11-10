@@ -26,6 +26,9 @@ export function buildFinanceMatchStage(
   if (filters.paymentMethod?.length) match.paymentMethod = { $in: filters.paymentMethod };
   if (filters.expenseCategory?.length) match.expenseCategory = { $in: filters.expenseCategory };
   if (filters.reviewStatus) match.reviewStatus = filters.reviewStatus;
+  if (filters.quoteLink === 'linked') match.quoteId = { $exists: true, $nin: [null, ''] };
+  // { $in: [null] } also matches documents that have no quoteId at all.
+  if (filters.quoteLink === 'unlinked') match.quoteId = { $in: [null, ''] };
 
   if (includeDateRange && (filters.dateFrom || filters.dateTo)) {
     match.invoiceDate = {

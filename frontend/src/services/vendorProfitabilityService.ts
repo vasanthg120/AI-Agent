@@ -1,5 +1,6 @@
 import { axiosClient } from '@/api/axiosClient';
 import type { BiFilters } from './emailAnalyticsService';
+import type { CostingExclusion } from './financeDocumentsService';
 
 export type VendorProfitabilityPaymentStatus = 'paid' | 'partially_paid' | 'pending';
 
@@ -92,7 +93,23 @@ export interface VendorCustomerCompareResult {
 // VendorProfitabilityRow above, which aggregates by dealId and misses any
 // invoice linked to a quote that has no Deal (see
 // vendor-profitability.service.ts's getTransactions for why).
+// One vendor document inside a quote's row (backend: VendorProfitabilityInvoice).
+export interface VendorProfitabilityInvoice {
+  documentId: string;
+  vendorName?: string;
+  vendorInvoiceNumber?: string;
+  vendorInvoiceAmount: number;
+  vendorCurrency: string;
+  invoiceDate?: string;
+  status: string;
+  included: boolean;
+  excludedReason?: CostingExclusion;
+}
+
+// One row per customer quote: its vendor invoices are in `invoices`, and
+// vendorInvoiceAmount is the sum of the counted ones.
 export interface VendorProfitabilityTransactionRow {
+  // The customer quote's id.
   transactionId: string;
   dealId?: string;
   customerName?: string;
@@ -110,6 +127,7 @@ export interface VendorProfitabilityTransactionRow {
   currencyMismatch: boolean;
   profitAmount: number | null;
   profitMarginPct: number | null;
+  invoices: VendorProfitabilityInvoice[];
 }
 
 export interface VendorProfitabilityTransactions {

@@ -16,7 +16,7 @@ import {
   type VendorCustomerCompareResult,
   type VendorProfitabilityTransactionRow,
 } from '@/services/vendorProfitabilityService';
-import { financeDocumentsService } from '@/services/financeDocumentsService';
+import { financeDocumentsService, type CostingExclusion } from '@/services/financeDocumentsService';
 import { ROUTES } from '@/constants/routes';
 import biStyles from '@/features/business-intelligence/business-intelligence.module.css';
 import styles from '../analytics-dashboard.module.css';
@@ -28,6 +28,16 @@ const STATUS_LABEL: Record<string, string> = {
   partially_paid: 'Partially paid',
   pending: 'Pending',
   overdue: 'Overdue',
+  mixed: 'Mixed',
+};
+
+// Why a vendor invoice is left out of its quote's cost (backend finance/quote-costing.ts).
+const EXCLUDED_LABEL: Record<CostingExclusion, string> = {
+  processing: 'Still being read — not counted yet',
+  extraction_failed: 'Could not be read — not counted',
+  cancelled: 'Cancelled — not counted',
+  currency_mismatch: 'Different currency from the quote — not counted',
+  duplicate: 'Same bill uploaded twice — counted once',
 };
 
 function statusVariant(status: string): 'success' | 'warning' | 'danger' | 'neutral' {
@@ -180,7 +190,7 @@ export function VendorProfitabilitySection({ dateFrom, dateTo }: { dateFrom: str
             icon={FiArrowUpRight}
             label="Profit"
             value={<AnimatedNumber value={data.totals.profitAmount} format={money} />}
-            note={hasRows ? 'quote minus invoice' : 'awaiting linked invoices'}
+            note={hasRows ? 'quotes minus vendor invoices' : 'awaiting linked invoices'}
           />
           <StatCard
             icon={FiTarget}
@@ -202,7 +212,7 @@ export function VendorProfitabilitySection({ dateFrom, dateTo }: { dateFrom: str
           <div className={panelStyles.headerText}>
             <div className={panelStyles.label}>Cost Intelligence</div>
             <div className={panelStyles.title}>Vendor profitability</div>
-            <p className={panelStyles.subtitle}>How much we quoted the customer, how much we paid the vendor, and the resulting profit — per transaction.</p>
+            <p className={panelStyles.subtitle}>How much we quoted the customer, what every linked vendor invoice cost, and the resulting profit — per customer quote.</p>
           </div>
           {hasRows && (
             <div className={panelStyles.headerActions}>
@@ -266,15 +276,12 @@ export function VendorProfitabilitySection({ dateFrom, dateTo }: { dateFrom: str
                       <th>Customer Name</th>
                       <th>Customer Quote No</th>
                       <th>Customer Quote Amount</th>
-                      <th>Vendor Name</th>
-                      <th>Vendor Invoice No</th>
-                      <th>Vendor Invoice Amount</th>
+                      <th>Vendor Invoices</th>
+                      <th>Vendor Cost</th>
                       <th>Profit</th>
                       <th>Profit Margin</th>
                       <th>Quote Date</th>
-                      <th>Invoice Date</th>
                       <th>Status</th>
-                      <th></th>
                     </tr>
                   </thead>
                   <tbody>
@@ -290,10 +297,41 @@ export function VendorProfitabilitySection({ dateFrom, dateTo }: { dateFrom: str
                         <td>
                           {money(r.customerQuoteAmount)} {r.quoteCurrency !== 'INR' ? r.quoteCurrency : ''}
                         </td>
-                        <td>{r.vendorName ?? '—'}</td>
-                        <td>{r.vendorInvoiceNumber ?? '—'}</td>
+                        <td>
+                          <ul className={panelStyles.invoiceList}>
+                            {r.invoices.map((inv) => (
+                              <li key={inv.documentId} className={panelStyles.invoiceLine}>
+                                <span className={panelStyles.invoiceText}>
+                                  <span>{inv.vendorName ?? 'Unknown vendor'}</span>
+                                  <span className={panelStyles.invoiceMeta}>
+                                    {[inv.vendorInvoiceNumber, inv.invoiceDate].filter(Boolean).join(' · ') || '—'}
+                                  </span>
+                                </span>
+                                <span
+                                  className={clsx(panelStyles.invoiceAmount, !inv.included && panelStyles.invoiceExcluded)}
+                                  title={inv.excludedReason ? EXCLUDED_LABEL[inv.excludedReason] : undefined}
+                                >
+                                  {money(inv.vendorInvoiceAmount)} {inv.vendorCurrency !== 'INR' ? inv.vendorCurrency : ''}
+                                </span>
+                                <button
+                                  type="button"
+                                  className={panelStyles.invoiceView}
+                                  disabled={viewingId === inv.documentId}
+                                  onClick={() => void handleViewInvoice(inv.documentId)}
+                                  aria-label={`View invoice ${inv.vendorInvoiceNumber ?? ''} from ${inv.vendorName ?? 'vendor'}`}
+                                  title="View invoice"
+                                >
+                                  <FiDownload size={13} />
+                                </button>
+                              </li>
+                            ))}
+                          </ul>
+                        </td>
                         <td>
                           {money(r.vendorInvoiceAmount)} {r.vendorCurrency !== 'INR' ? r.vendorCurrency : ''}
+                          {r.invoices.some((inv) => !inv.included) && (
+                            <div className={panelStyles.invoiceMeta}>{r.invoices.filter((inv) => !inv.included).length} not counted</div>
+                          )}
                         </td>
                         <td className={r.profitAmount !== null && r.profitAmount < 0 ? panelStyles.loss : undefined}>
                           {r.currencyMismatch ? <Badge variant="warning">Currency mismatch</Badge> : money(r.profitAmount ?? 0)}
@@ -306,20 +344,8 @@ export function VendorProfitabilitySection({ dateFrom, dateTo }: { dateFrom: str
                           )}
                         </td>
                         <td>{r.quoteDate ? dayjs(r.quoteDate).format('YYYY-MM-DD') : '—'}</td>
-                        <td>{r.invoiceDate ?? '—'}</td>
                         <td>
                           <Badge variant={statusVariant(r.status)}>{STATUS_LABEL[r.status] ?? r.status}</Badge>
-                        </td>
-                        <td>
-                          <button
-                            type="button"
-                            className={panelStyles.learnBtn}
-                            disabled={viewingId === r.transactionId}
-                            onClick={() => void handleViewInvoice(r.transactionId)}
-                          >
-                            <FiDownload size={13} />
-                            {viewingId === r.transactionId ? 'Opening…' : 'View Invoice'}
-                          </button>
                         </td>
                       </motion.tr>
                     ))}

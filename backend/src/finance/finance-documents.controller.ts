@@ -26,6 +26,7 @@ import { FinanceExportQueryDto } from './dto/finance-export-query.dto';
 import { FinanceListQueryDto } from './dto/finance-list-query.dto';
 import { LinkCustomerQuoteDto } from './dto/link-customer-quote.dto';
 import { UpdateFinanceDocumentDto } from './dto/update-finance-document.dto';
+import { UploadFinanceDocumentDto } from './dto/upload-finance-document.dto';
 import { FinanceDocumentsService } from './finance-documents.service';
 import { FinanceExportService } from './finance-export.service';
 import { Permission } from '../common/permissions/permission.decorator';
@@ -52,8 +53,9 @@ export class FinanceDocumentsController {
 
   @Post()
   @UseInterceptors(FileInterceptor('file', UPLOAD_FILE_INTERCEPTOR_OPTIONS))
-  upload(@CurrentUser() user: JwtPayload, @UploadedFile() file: Express.Multer.File) {
-    return this.financeDocumentsService.upload(user.organizationId, user.sub, file);
+  upload(@CurrentUser() user: JwtPayload, @UploadedFile() file: Express.Multer.File, @Body() body: UploadFinanceDocumentDto) {
+    if (!file) throw new BadRequestException('file is required');
+    return this.financeDocumentsService.upload(user.organizationId, user.sub, file, body.quoteId);
   }
 
   @Get('query')
@@ -106,6 +108,12 @@ export class FinanceDocumentsController {
     return this.financeDocumentsService.searchCustomerQuotes(user.organizationId, quoteNumber);
   }
 
+  // Static first segment: registered before ':id' like the routes above.
+  @Get('quote-costing/:quoteId')
+  getQuoteCosting(@CurrentUser() user: JwtPayload, @Param('quoteId') quoteId: string) {
+    return this.financeDocumentsService.getQuoteCosting(user.organizationId, quoteId);
+  }
+
   @Get(':id')
   getOne(@CurrentUser() user: JwtPayload, @Param('id') id: string) {
     return this.financeDocumentsService.findOne(id, user.organizationId);
@@ -136,6 +144,12 @@ export class FinanceDocumentsController {
   @Permission('finance', 'edit')
   linkCustomerQuote(@CurrentUser() user: JwtPayload, @Param('id') id: string, @Body() dto: LinkCustomerQuoteDto) {
     return this.financeDocumentsService.linkCustomerQuote(id, user.organizationId, dto.quoteId);
+  }
+
+  @Delete(':id/link-quote')
+  @Permission('finance', 'edit')
+  unlinkCustomerQuote(@CurrentUser() user: JwtPayload, @Param('id') id: string) {
+    return this.financeDocumentsService.unlinkCustomerQuote(id, user.organizationId);
   }
 
   @Delete(':id')

@@ -3,7 +3,7 @@ import { BadRequestException, Injectable, Logger, NotFoundException } from '@nes
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { InjectModel } from '@nestjs/mongoose';
-import { Model } from 'mongoose';
+import { isValidObjectId, Model } from 'mongoose';
 import FormData from 'form-data';
 import { firstValueFrom } from 'rxjs';
 import { NotificationsService } from '../notifications/notifications.service';
@@ -16,6 +16,7 @@ import { FinanceFilterQueryDto } from './dto/finance-filter-query.dto';
 import { FinanceListQueryDto } from './dto/finance-list-query.dto';
 import { UpdateFinanceDocumentDto } from './dto/update-finance-document.dto';
 import { buildFinanceMatchStage } from './finance-filter.util';
+import { computeQuoteCosting, costingInputFrom } from './quote-costing';
 
 // Preview shape shown before/after linking — the same fields whether the
 // caller is browsing search results or just confirmed a link, so the
@@ -71,12 +72,17 @@ export class FinanceDocumentsService {
     this.pythonAgentUrl = this.config.get<string>('pythonAgentUrl') ?? 'http://localhost:8000';
   }
 
-  async upload(organizationId: string, userId: string, file: Express.Multer.File): Promise<FinanceDocumentDocument> {
+  // quoteId (optional): Finance AI's quote costing uploads every file for one
+  // customer quote. The quote is checked before anything is stored, and the
+  // link is saved with the document, so a file whose extraction fails still
+  // shows up under its quote (flagged), never silently missing from it.
+  async upload(organizationId: string, userId: string, file: Express.Multer.File, quoteId?: string): Promise<FinanceDocumentDocument> {
     const ext = (file.originalname.split('.').pop() ?? '').toLowerCase();
     const documentFormat = DOCUMENT_FORMAT_BY_EXT[ext];
     if (!documentFormat) {
       throw new BadRequestException(`Unsupported file type '.${ext}'`);
     }
+    const quote = quoteId ? await this.quotesService.getOne(organizationId, quoteId) : undefined;
 
     // File stored first, durably — never lost even if extraction below fails.
     const gridFsFileId = await this.gridFs.upload(file.originalname, file.buffer, { organizationId, uploadedBy: userId });
@@ -90,6 +96,7 @@ export class FinanceDocumentsService {
       gridFsFileId,
       documentFormat,
       extractionStatus: 'processing',
+      ...(quote ? this.quoteLinkFields(quote) : {}),
     });
 
     return this.runExtraction(created, organizationId, userId, file);
@@ -259,13 +266,51 @@ export class FinanceDocumentsService {
   // Vendor Profitability, which is an existing, pre-dating limitation of
   // that dealId-keyed join, not something this method introduces.
   async linkCustomerQuote(id: string, organizationId: string, quoteId: string): Promise<{ document: FinanceDocumentDocument; linkedQuote: CustomerQuoteMatch }> {
-    await this.findOne(id, organizationId);
+    const existing = await this.findOne(id, organizationId);
     const quote = await this.quotesService.getOne(organizationId, quoteId);
 
-    const setFields: Record<string, unknown> = { quoteId: quote._id.toString(), customerQuoteNo: quote.quoteNumber };
-    if (quote.dealId) setFields.dealId = quote.dealId;
-
-    const updated = await this.documentModel.findByIdAndUpdate(id, { $set: setFields }, { new: true }).exec();
+    // A relink must not carry the previous quote's deal along when the new quote has none.
+    const update = existing.dealId && !quote.dealId
+      ? { $set: this.quoteLinkFields(quote), $unset: { dealId: '' } }
+      : { $set: this.quoteLinkFields(quote) };
+    const updated = await this.documentModel.findByIdAndUpdate(id, update, { new: true }).exec();
     return { document: updated!, linkedQuote: this.toQuoteMatch(quote) };
   }
+
+  // dealId is only ever set from a linked quote (here and in upload), so it
+  // goes with the link.
+  async unlinkCustomerQuote(id: string, organizationId: string): Promise<FinanceDocumentDocument> {
+    await this.findOne(id, organizationId);
+    const updated = await this.documentModel
+      .findOneAndUpdate({ _id: id, organizationId }, { $unset: { quoteId: '', customerQuoteNo: '', dealId: '' } }, { new: true })
+      .exec();
+    return updated!;
+  }
+
+  // Finance AI quote costing: the quote, every document linked to it (oldest
+  // first, cancelled ones included so they can be seen and unlinked), and
+  // what the quote earns after paying for them (quote-costing.ts).
+  async getQuoteCosting(organizationId: string, quoteId: string) {
+    if (!isValidObjectId(quoteId)) throw new NotFoundException('Quote not found');
+    const quote = await this.quotesService.getOne(organizationId, quoteId);
+    const docs = await this.documentModel.find({ organizationId, quoteId: quote._id.toString() }).sort({ createdAt: 1 }).exec();
+    const { lines, totals } = computeQuoteCosting(
+      { quoteAmount: quote.quoteAmount, currency: quote.currency },
+      docs.map((d) => costingInputFrom(d)),
+    );
+    return {
+      quote: this.toQuoteMatch(quote),
+      documents: docs.map((document, i) => ({ document, ...lines[i] })),
+      totals,
+    };
+  }
+
+  private quoteLinkFields(quote: QuoteDocument): Record<string, unknown> {
+    return {
+      quoteId: quote._id.toString(),
+      customerQuoteNo: quote.quoteNumber,
+      ...(quote.dealId ? { dealId: quote.dealId } : {}),
+    };
+  }
 }
+
