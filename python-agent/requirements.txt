@@ -22,16 +22,17 @@ anthropic>=0.40.0
 # dependencies (its built-in memory backend), not something this app uses directly.
 crewai==0.130.0
 
-qdrant-client==1.12.1
+qdrant-client==1.19.1
 sentence-transformers==3.3.1
 jsonschema>=4.20.0
 rank_bm25==0.2.2
+pydantic==2.13.5
 
 # Long-term User Memory (app/memory/mem0_client.py) — automatic extraction/
 # dedup/update/retrieval, configured to reuse this app's own Anthropic LLM,
 # sentence-transformers embedder, and Qdrant deployment (a separate
 # collection) rather than Mem0's OpenAI-first defaults. Verified compatible
-# with the pinned qdrant-client==1.12.1 above (requires >=1.12.0) and doesn't
+# with the pinned qdrant-client==1.19.1 above (requires >=1.12.0) and doesn't
 # touch starlette/fastapi at all, unlike crewai/mcp below — the one adjacent
 # effect is pip resolving protobuf down to <7.0.0 (mem0ai's own constraint)
 # if something else in this tree ever pulls in a newer one; `pip check`
