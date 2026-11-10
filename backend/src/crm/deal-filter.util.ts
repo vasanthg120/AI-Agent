@@ -71,20 +71,13 @@ export function buildDealMatchStage(
   // later in the month than today. Ranging against the capped dateTo would
   // silently exclude those deals from the drill-down while getAchievement's
   // own regex still counts them — so this matches getAchievement exactly:
-  // the whole calendar month of dateFrom, via the same YYYY-MM prefix regex,
-  // ignoring dateTo entirely. dateFrom is always the 1st of that month here
-  // (every caller of dateField:'expectedClosingDate' sources it from
-  // MonthYearFilterPopup/defaultRange, both always whole-month-start).
+  // every whole month the dates touch, from dateFrom's month to dateTo's
+  // (countedMonths below — one month from the month picker, several from the
+  // dashboard's Advanced start/end dates).
   if (includeDateRange && (filters.dateFrom || filters.dateTo)) {
     if (filters.dateField === 'expectedClosingDate') {
-      const period = (filters.dateFrom ?? filters.dateTo)!.slice(0, 7);
-      const lastPeriod = (filters.dateTo ?? filters.dateFrom)!.slice(0, 7);
-      // A range inside one month is that whole month (as described above). A
-      // range across several months — "last 90 days", a quarter — is every
-      // whole month it touches; it used to count the first month only, so a
-      // longer range could show FEWER deals than a shorter one. The dates are
-      // "YYYY-MM-DD" strings, which compare correctly as text.
-      match.expectedClosingDate = lastPeriod > period ? { $gte: `${period}-01`, $lte: `${lastPeriod}-31` } : { $regex: `^${period}` };
+      const { first, last } = countedMonths((filters.dateFrom ?? filters.dateTo)!, (filters.dateTo ?? filters.dateFrom)!);
+      match.expectedClosingDate = expectedClosingMonthsMatch(first, last);
     } else {
       // Explicit 'Z' (UTC) end-of-day, not `.setHours(23,59,59,999)` — that
       // mutates in the server process's LOCAL timezone, so on any server not
@@ -101,6 +94,14 @@ export function buildDealMatchStage(
     }
   }
 
+  // Past their expected closing day (the past-due list). Added to any
+  // expectedClosingDate condition above — MongoDB takes several operators on
+  // one field — and "YYYY-MM-DD" strings compare correctly as text.
+  if (filters.closingBefore) {
+    const existing = match.expectedClosingDate as Record<string, unknown> | undefined;
+    match.expectedClosingDate = { ...(existing ?? {}), $lt: filters.closingBefore };
+  }
+
   if (filters.valueMin !== undefined || filters.valueMax !== undefined) {
     match.monetaryValue = {
       ...(filters.valueMin !== undefined ? { $gte: filters.valueMin } : {}),
@@ -109,4 +110,36 @@ export function buildDealMatchStage(
   }
 
   return match;
+}
+
+
+// The months a dashboard date range counts, by expected closing date: every
+// whole month it touches, from the start date's month to the end date's month
+// (a range inside one month is that whole month). Whole months, not exact
+// days, because the current month's range ends "today" while its expected
+// closing dates run to the month's end, and because sales targets are set per
+// month. One definition for the dashboard overview (revenue, target, deals,
+// conversion), SalesAnalyticsService.getAchievement and every deal list, so a
+// figure and the list behind it always cover the same deals. An end before
+// the start counts the start month only.
+export function countedMonths(dateFrom: string, dateTo: string): { first: string; last: string; months: string[] } {
+  const first = dateFrom.slice(0, 7);
+  const last = dateTo.slice(0, 7) > first ? dateTo.slice(0, 7) : first;
+  const months: string[] = [];
+  let [year, month] = first.split('-').map(Number);
+  for (let period = first; period <= last; ) {
+    months.push(period);
+    month += 1;
+    if (month > 12) {
+      month = 1;
+      year += 1;
+    }
+    period = `${year}-${String(month).padStart(2, '0')}`;
+  }
+  return { first, last, months };
+}
+
+// "YYYY-MM-DD" expectedClosingDate strings compare correctly as text.
+export function expectedClosingMonthsMatch(first: string, last: string): Record<string, string> {
+  return last > first ? { $gte: `${first}-01`, $lte: `${last}-31` } : { $regex: `^${first}` };
 }

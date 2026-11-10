@@ -33,7 +33,8 @@ export interface AnalyticsDashboardOverview {
   deals: { wonCount: number; lostCount: number; openCount: number; wonValue: number; lostValue: number; openValue: number };
   revenue: Achievement & { businessHealthScore: number | null };
   // Shown beside `revenue`, never added to it or to the target, forecast or run rate.
-  previousMonthClosures: PreviousMonthClosures;
+  // Null when the period is more than one month (the band compares two single months).
+  previousMonthClosures: PreviousMonthClosures | null;
   // Outstanding customer receivables (quoteAmount - paidAmount, summed) —
   // "dues" in Agent Activity's team-wide view. Not date-range scoped, unlike
   // the rest of this response (see QuotesService.getOutstandingByOwner) —
@@ -100,6 +101,26 @@ export interface PipelineMonth {
   period: string;
   count: number;
   value: number;
+}
+
+// Pipeline Health (Pipeline & Quotes tab, and the Overview's Pipeline box):
+// the deals expected to close in the period's months (countedMonths), by
+// status, with the open ones split by whether their closing date has passed.
+// One aggregate — before 2026-11-10 the card read the first 100 open deals in
+// the browser (so a bigger pipeline under-counted what was past due) and
+// headlined "total outstanding": every quote in the period minus payments,
+// which, with no payments recorded, was simply everything ever quoted.
+export interface PipelineHealth {
+  period: { first: string; last: string };
+  /** "YYYY-MM-DD": open deals expected to close before this day are past due. */
+  today: string;
+  open: { count: number; value: number };
+  onTime: { count: number; value: number };
+  pastDue: { count: number; value: number };
+  won: { count: number; value: number };
+  lost: { count: number; value: number };
+  /** won ÷ (won + lost), one decimal; null with nothing closed. */
+  winRatePct: number | null;
 }
 
 // The open pipeline of every month at once. The rest of the dashboard follows

@@ -1,22 +1,15 @@
-import { useMemo, useState } from 'react';
+import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import dayjs from 'dayjs';
 import { AreaChart, Area, ResponsiveContainer } from 'recharts';
 import { AnimatedNumber, Card } from '@/components/ui';
 import { formatINR as money } from '@/utils/currency';
 import { dealsService } from '@/services/dealsService';
 import { DrillDownModal, type DrillDownRow } from './DrillDownModal';
+import { countedMonths } from '../countedMonths';
+import { usePipelineHealth } from '../usePipelineHealth';
 import styles from './KeyStatsGrid.module.css';
 
 type OpenDrilldown = 'conversion' | 'pipeline' | 'health' | null;
-
-// The chosen dates as the Pipeline box names them: one month ("Oct 2026"),
-// or the dates themselves when they run over more than one.
-function periodName(dateFrom: string, dateTo: string): string {
-  const from = dayjs(dateFrom);
-  const to = dayjs(dateTo);
-  return from.isSame(to, 'month') ? from.format('MMM YYYY') : `${from.format('D MMM')} – ${to.format('D MMM YYYY')}`;
-}
 
 export interface KeyStatsGridProps {
   deals: { wonCount: number; lostCount: number; openCount: number; openValue: number };
@@ -63,36 +56,23 @@ export function KeyStatsGrid({ deals, businessHealthScore, revenueTrend, dateFro
         1,
         100,
       ),
+    enabled: openDrilldown === 'pipeline',
   });
 
-  const { overdueCount, pendingCount, overdueValue } = useMemo(() => {
-    if (!openDeals) return { overdueCount: 0, pendingCount: 0, overdueValue: 0 };
-    const today = dayjs().format('YYYY-MM-DD');
-    let overdue = 0;
-    let value = 0;
-    for (const d of openDeals.items) {
-      if (d.expectedClosingDate && d.expectedClosingDate < today) {
-        overdue += 1;
-        value += d.monetaryValue ?? 0;
-      }
-    }
-    return { overdueCount: overdue, pendingCount: openDeals.items.length - overdue, overdueValue: value };
-  }, [openDeals]);
+  // Counted in the database for every open deal (usePipelineHealth) — it used
+  // to be counted here from the first 100 only.
+  const { data: health } = usePipelineHealth(dateFrom, dateTo, storeId);
+  const overdueCount = health?.pastDue.count ?? 0;
+  const pendingCount = health?.onTime.count ?? 0;
+  const overdueValue = health?.pastDue.value ?? 0;
 
   const totalDeals = deals.wonCount + deals.lostCount + deals.openCount;
   const closedDeals = deals.wonCount + deals.lostCount;
   const conversionPct = closedDeals > 0 ? Math.round((deals.wonCount / closedDeals) * 100) : null;
 
-  const period = periodName(dateFrom, dateTo);
+  const period = countedMonths(dateFrom, dateTo).label;
   const hasPipeline = deals.openCount > 0;
-  // The deals come a page at a time: what is past its date is only said when every one of them was read.
-  const pipelineFooter = !openDeals
-    ? 'Loading…'
-    : openDeals.items.length < openDeals.total
-      ? 'Open the list to see which are past due'
-      : overdueCount > 0
-        ? `${money(overdueValue)} past due`
-        : 'Nothing past due';
+  const pipelineFooter = !health ? 'Loading…' : overdueCount > 0 ? `${money(overdueValue)} past due` : 'Nothing past due';
 
   const closedDealRows: DrillDownRow[] = (closedDealsResult?.items ?? []).map((d) => ({
     id: d._id,
@@ -133,7 +113,9 @@ export function KeyStatsGrid({ deals, businessHealthScore, revenueTrend, dateFro
         </div>
         <div className={styles.caption}>won / closed deals</div>
         <div className={styles.divider} />
-        <div className={styles.footer}>{deals.lostCount} deals lost this month</div>
+        <div className={styles.footer}>
+          {deals.lostCount} {deals.lostCount === 1 ? 'deal' : 'deals'} lost in {period}
+        </div>
       </Card>
 
       <Card className={styles.cell} interactive={revenueTrend.length > 1} onClick={revenueTrend.length > 1 ? () => setOpenDrilldown('health') : undefined}>
@@ -160,7 +142,7 @@ export function KeyStatsGrid({ deals, businessHealthScore, revenueTrend, dateFro
           {hasPipeline ? `${deals.openCount} open ${deals.openCount === 1 ? 'deal' : 'deals'} expected to close` : 'No open deals expected to close'}
         </div>
         <div className={styles.divider} />
-        <div className={openDeals && overdueCount > 0 ? styles.footerWarn : styles.footerOk}>{pipelineFooter}</div>
+        <div className={health && overdueCount > 0 ? styles.footerWarn : styles.footerOk}>{pipelineFooter}</div>
       </Card>
 
       <DrillDownModal
@@ -176,6 +158,7 @@ export function KeyStatsGrid({ deals, businessHealthScore, revenueTrend, dateFro
         title={`Open Pipeline — ${period}`}
         isLoading={!openDeals}
         rows={pipelineRows}
+        totalCount={openDeals?.total}
       />
       <DrillDownModal
         open={openDrilldown === 'health'}

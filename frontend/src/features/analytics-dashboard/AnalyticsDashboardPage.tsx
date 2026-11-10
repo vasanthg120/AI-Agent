@@ -35,6 +35,7 @@ import { TeamPerformanceSummaryCards } from './components/TeamPerformanceSummary
 import { EmailResponseSlaTable } from './components/EmailResponseSlaTable';
 import { SlaDashboardSection } from './components/SlaDashboardSection';
 import styles from './analytics-dashboard.module.css';
+import { countedMonths } from './countedMonths';
 import { can, isPermissionManaged } from '@/utils/access';
 
 // Local-calendar-date formatter — deliberately NOT `.toISOString().slice(0,10)`,
@@ -111,7 +112,7 @@ type DrillDownTarget =
   // Rows already in the overview response (last month's deals closed this month) — shown as they are, nothing fetched.
   | { kind: 'rows'; title: string; rows: DrillDownRow[] };
 
-type PreviousMonthClosures = AnalyticsDashboardOverview['previousMonthClosures'];
+type PreviousMonthClosures = NonNullable<AnalyticsDashboardOverview['previousMonthClosures']>;
 
 const monthName = (period: string) => dayjs(`${period}-01`).format('MMMM');
 
@@ -147,6 +148,7 @@ export function AnalyticsDashboardPage() {
   const [storeId, setStoreId] = useState<string | undefined>(undefined);
   const dateFrom = range.dateFrom ?? defaultRange().dateFrom!;
   const dateTo = range.dateTo ?? defaultRange().dateTo!;
+  const counted = countedMonths(dateFrom, dateTo);
   const [activeTab, setActiveTab] = useState('overview');
   const [stores, setStores] = useState<{ id: string; name: string }[]>([]);
   const [drillDown, setDrillDown] = useState<DrillDownTarget | null>(null);
@@ -290,7 +292,11 @@ export function AnalyticsDashboardPage() {
             {activeTab === 'overview' && (
               <div className={styles.tabContent}>
                 <SectionCard title="Key Business Overview" icon={FiTarget} glass>
-                  <p className={styles.sectionNote}>Sales targets are set per calendar month — this section reflects the month selected above.</p>
+                  <p className={styles.sectionNote}>
+                    {counted.count === 1
+                      ? 'Sales targets are set per calendar month — this section reflects the month selected above.'
+                      : `Revenue, targets and deals cover every whole month in the dates above, by expected closing date: ${counted.label}.`}
+                  </p>
                   <div className={styles.statsGrid}>
                     <MonthlySalesPerformanceCard
                       achieved={data.revenue.achieved}
@@ -314,14 +320,12 @@ export function AnalyticsDashboardPage() {
                           dateField: 'expectedClosingDate',
                         })
                       }
-                      previousMonthClosures={data.previousMonthClosures}
-                      onOpenPreviousMonthClosures={() =>
-                        setDrillDown({
-                          kind: 'rows',
-                          title: previousMonthClosuresTitle(data.previousMonthClosures),
-                          rows: previousMonthClosureRows(data.previousMonthClosures),
-                        })
-                      }
+                      previousMonthClosures={data.previousMonthClosures ?? undefined}
+                      onOpenPreviousMonthClosures={() => {
+                        const closures = data.previousMonthClosures;
+                        if (!closures) return;
+                        setDrillDown({ kind: 'rows', title: previousMonthClosuresTitle(closures), rows: previousMonthClosureRows(closures) });
+                      }}
                     />
                     <KeyStatsGrid
                       deals={data.deals}
@@ -374,7 +378,7 @@ export function AnalyticsDashboardPage() {
 
             {activeTab === 'pipeline' && (
               <div className={styles.tabContent}>
-                <PipelineHealthCard deals={data.deals} dateFrom={dateFrom} dateTo={dateTo} storeId={canOverrideStore ? storeId : undefined} />
+                <PipelineHealthCard dateFrom={dateFrom} dateTo={dateTo} storeId={canOverrideStore ? storeId : undefined} />
 
                 <div className={styles.twoColumn}>
                   <DealFunnelCard deals={data.deals} dateFrom={dateFrom} dateTo={dateTo} storeId={canOverrideStore ? storeId : undefined} />

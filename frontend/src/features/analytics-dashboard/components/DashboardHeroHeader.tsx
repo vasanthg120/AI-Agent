@@ -184,7 +184,7 @@ export function DashboardHeroHeader({
                   </div>
                   {!isFullMonthRange(dateFrom, dateTo) && (
                     <span className={styles.advancedNote}>
-                      Revenue-against-target figures reflect the target for the start date's month.
+                      Revenue, targets and deals count every whole month these dates touch, by expected closing date.
                     </span>
                   )}
                 </>

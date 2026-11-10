@@ -5,9 +5,12 @@ import { scopeCurrency } from '../data-sources/scope-currency';
 import { Deal, DealDocument } from './schemas/deal.schema';
 import { SalesTarget, SalesTargetDocument } from './schemas/sales-target.schema';
 import { UpsertSalesTargetDto } from './dto/upsert-sales-target.dto';
+import { countedMonths, expectedClosingMonthsMatch } from './deal-filter.util';
 
 export interface Achievement {
   period: string;
+  // The last month counted — the same as period for a single month.
+  lastPeriod: string;
   targetAmount: number | null;
   currency: string;
   achieved: number;
@@ -92,16 +95,23 @@ export class SalesAnalyticsService implements OnModuleInit {
    * coarse days-elapsed-ratio confidence score. Won deals are attributed to
    * the period via `expectedClosingDate`'s "YYYY-MM" prefix, a pragmatic
    * proxy in the absence of a separate "closed at" timestamp. */
+  //
+  // lastPeriod (optional): several months at once (a dashboard date range,
+  // countedMonths in deal-filter.util.ts) — revenue across all of them,
+  // the sum of their monthly targets, and the projection stretched over every
+  // day of those months. Leaving it out is exactly the single-month figure.
   async getAchievement(
     organizationId: string,
     scope: 'org' | 'store' | 'user',
     scopeId: string | undefined,
     period: string,
+    lastPeriod: string = period,
   ): Promise<Achievement> {
+    const { months } = countedMonths(`${period}-01`, `${lastPeriod}-01`);
     const dealFilter: Record<string, unknown> = {
       organizationId,
       dealStatus: 'won',
-      expectedClosingDate: { $regex: `^${period}` },
+      expectedClosingDate: expectedClosingMonthsMatch(months[0], months[months.length - 1]),
     };
     if (scope === 'store') dealFilter.storeId = scopeId;
     if (scope === 'user') dealFilter.ownerId = scopeId;
@@ -114,16 +124,17 @@ export class SalesAnalyticsService implements OnModuleInit {
         ])
         .exec()
         .then((rows) => rows[0]),
-      this.resolveTarget(organizationId, scope, scopeId, period),
+      this.resolveTargetForMonths(organizationId, scope, scopeId, months),
     ]);
 
-    const totalDays = daysInMonth(period);
-    const elapsed = daysElapsed(period);
+    const totalDays = months.reduce((sum, m) => sum + daysInMonth(m), 0);
+    const elapsed = months.reduce((sum, m) => sum + daysElapsed(m), 0);
     const remainingDays = Math.max(totalDays - elapsed, 0);
 
     const remaining = targetAmount !== null ? Math.max(targetAmount - achieved, 0) : null;
     return {
-      period,
+      period: months[0],
+      lastPeriod: months[months.length - 1],
       targetAmount,
       currency,
       achieved,
@@ -143,6 +154,23 @@ export class SalesAnalyticsService implements OnModuleInit {
   // whichever store target happens to be first; every target in this app
   // is created with a fixed 'INR' default (UpsertSalesTargetDto), so this
   // never actually varies in practice.
+  // Several months: the sum of the months that have a target (null when none
+  // of them has one).
+  private async resolveTargetForMonths(
+    organizationId: string,
+    scope: 'org' | 'store' | 'user',
+    scopeId: string | undefined,
+    months: string[],
+  ): Promise<{ targetAmount: number | null; currency: string }> {
+    if (months.length === 1) return this.resolveTarget(organizationId, scope, scopeId, months[0]);
+    const targets = await Promise.all(months.map((m) => this.resolveTarget(organizationId, scope, scopeId, m)));
+    const set = targets.filter((t) => t.targetAmount !== null);
+    return {
+      targetAmount: set.length ? set.reduce((sum, t) => sum + (t.targetAmount ?? 0), 0) : null,
+      currency: (set[0] ?? targets[0]).currency,
+    };
+  }
+
   private async resolveTarget(
     organizationId: string,
     scope: 'org' | 'store' | 'user',
