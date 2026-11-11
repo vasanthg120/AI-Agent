@@ -197,6 +197,12 @@ export class CallSession {
   @Prop()
   originalFilename?: string;
 
+  // The language the recording was transcribed in (short code, e.g. 'en') —
+  // kept so a failed recording can be processed again in the same language.
+  // Absent on sessions created before 2026-11-11.
+  @Prop()
+  languageCode?: string;
+
   // Fetched once at call start (business_search_tool.run() — CRM + shared
   // documents + business knowledge + Mem0), never re-fetched mid-call.
   @Prop()
@@ -312,8 +318,14 @@ export class CallSession {
   @Prop()
   endedAt?: Date;
 
+  // Shown to the user as-is (see processing-failure.ts), never a raw HTTP error.
   @Prop()
   errorMessage?: string;
+
+  // The recording is safely stored, so processing can be run again
+  // (POST call-copilot/sessions/:id/retry, or the call log's "Try again").
+  @Prop()
+  retryable?: boolean;
 }
 
 export const CallSessionSchema = SchemaFactory.createForClass(CallSession);

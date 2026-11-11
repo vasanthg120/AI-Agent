@@ -1,6 +1,7 @@
 import {
   CallFacts,
   NO_REPORT_AFTER_MS,
+  PROCESSING_GIVES_UP_AFTER_MS,
   SCORING_GIVES_UP_AFTER_MS,
   STALE_AFTER_MS,
   classifyFailureText,
@@ -113,7 +114,9 @@ describe('describeReport — a call report\'s progress', () => {
 
   it('never waits for a score forever', () => {
     expect(describeReport({ ...base, status: 'ended', endedAt: ago(SCORING_GIVES_UP_AFTER_MS + 1) }, NOW)).toMatchObject({ stage: 'ready', unscored: true });
-    expect(describeReport({ ...base, status: 'processing', updatedAt: ago(60 * 60_000) }, NOW).stage).toBe('failed');
+    // Not before a live pipeline would itself have given up (so "Try again" is accepted the moment it shows).
+    expect(describeReport({ ...base, status: 'processing', updatedAt: ago(60 * 60_000) }, NOW).stage).toBe('transcribing');
+    expect(describeReport({ ...base, status: 'processing', updatedAt: ago(PROCESSING_GIVES_UP_AFTER_MS + 1) }, NOW).stage).toBe('failed');
     expect(describeReport({ ...base, status: 'error', errorMessage: 'Insufficient credits to process this recording.' }, NOW)).toMatchObject({
       stage: 'failed',
       error: 'Insufficient credits to process this recording.',

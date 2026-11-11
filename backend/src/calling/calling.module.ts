@@ -2,6 +2,7 @@ import { HttpModule } from '@nestjs/axios';
 import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { AuthModule } from '../auth/auth.module';
+import { CallCopilotModule } from '../call-copilot/call-copilot.module';
 import { CallSession, CallSessionSchema } from '../call-copilot/schemas/call-session.schema';
 import { Deal, DealSchema } from '../crm/schemas/deal.schema';
 import { CustomerIntelligenceModule } from '../customer-intelligence/customer-intelligence.module';
@@ -26,6 +27,8 @@ import { CallingService } from './calling.service';
     PlivoModule,
     TwilioModule,
     CustomerIntelligenceModule,
+    // "Try again" on a call whose transcription failed reprocesses the saved recording.
+    CallCopilotModule,
   ],
   controllers: [CallingController],
   providers: [CallingService],

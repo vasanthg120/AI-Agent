@@ -2,7 +2,7 @@ import { motion } from 'framer-motion';
 import clsx from 'clsx';
 import { FiAlertCircle, FiCheck, FiX } from 'react-icons/fi';
 import { formatInternational, countryOfNumber, PROVIDER_LABEL, type CallingCall } from '@/services/callingService';
-import { isCallStale, isImportStuck } from '@/services/plivoService';
+import { isCallStale, isImportStuck, isReportFailed } from '@/services/plivoService';
 import styles from './CallProgress.module.css';
 import { Flag } from './Flag';
 
@@ -10,7 +10,12 @@ const STEPS = ['Ringing your phone', 'Talking with the customer', 'Writing the s
 
 // Which step a call has reached, or -1 when it stopped before the end.
 function stepOf(call: CallingCall): number {
-  if (call.importStatus === 'imported') return 3;
+  if (call.importStatus === 'imported') {
+    // Saved, but the transcript is still being made — or failed to be.
+    if (isReportFailed(call)) return -1;
+    if (call.report?.stage === 'transcribing') return 2;
+    return 3;
+  }
   if (call.importStatus === 'failed' || isImportStuck(call)) return -1;
   if (call.status === 'initiated') return 0;
   if (call.status === 'in_progress') return 1;
@@ -24,13 +29,20 @@ export function CallProgress({
   call,
   onOpenLibrary,
   onDismiss,
+  onRetry,
+  retrying,
 }: {
   call: CallingCall;
   onOpenLibrary?: () => void;
   onDismiss: () => void;
+  onRetry?: (call: CallingCall) => void;
+  retrying?: boolean;
 }) {
   const step = stepOf(call);
   const stopped = step === -1 || isCallStale(call);
+  const reportFailed = isReportFailed(call);
+  // Something after the call went wrong, and the server can have another go.
+  const canRetry = !!onRetry && (reportFailed || call.importStatus === 'failed' || isImportStuck(call));
   const country = countryOfNumber(call.customerNumber);
   // Where it stopped: the last step it reached before the failure.
   const reached = stopped ? (call.status === 'completed' ? 2 : call.status === 'in_progress' ? 1 : 0) : step;
@@ -90,10 +102,23 @@ export function CallProgress({
 
       {stopped && (
         <p className={styles.reason}>
-          {call.importStatus === 'failed'
-            ? (call.importError ?? 'The recording could not be processed.')
-            : (call.failureReason ?? 'The call ended before it connected.')}
+          {reportFailed
+            ? `${call.report?.error ?? 'The recording could not be transcribed.'} Your recording is saved.`
+            : call.importStatus === 'failed'
+              ? (call.importError ?? 'The recording could not be processed.')
+              : (call.failureReason ?? 'The call ended before it connected.')}
         </p>
+      )}
+      {stopped && canRetry && (
+        <button
+          type="button"
+          className={styles.open}
+          onClick={() => onRetry?.(call)}
+          disabled={retrying}
+          aria-busy={retrying}
+        >
+          {retrying ? 'Trying again…' : 'Try again →'}
+        </button>
       )}
       {step === 3 && onOpenLibrary && (
         <button type="button" className={styles.open} onClick={onOpenLibrary}>

@@ -1,13 +1,12 @@
 import { promises as fs } from 'fs';
 import { randomUUID } from 'crypto';
 import { HttpService } from '@nestjs/axios';
-import { Injectable, Logger } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { InjectModel } from '@nestjs/mongoose';
-import { Model } from 'mongoose';
+import { Model, isValidObjectId } from 'mongoose';
 import { firstValueFrom } from 'rxjs';
-import { AxiosError } from 'axios';
 import FormData from 'form-data';
 import { GridFsService } from '../common/gridfs/gridfs.service';
 import { ReservationService } from '../billing/reservation.service';
@@ -16,14 +15,28 @@ import { NotificationsService } from '../notifications/notifications.service';
 import { CallCopilotService } from './call-copilot.service';
 import { CallSession, CallSessionDocument } from './schemas/call-session.schema';
 import { UploadCallRecordingDto } from './dto/upload-call-recording.dto';
+import {
+  NoSpeechFoundError,
+  PROCESSING_ABANDONED_AFTER_MS,
+  SarvamJobFailedError,
+  TRANSCRIPTION_MAX_WAIT_MS,
+  TranscriptionTimedOutError,
+  describeProcessingFailure,
+  isTransientAgentError,
+} from './processing-failure';
 
 const AUDIO_BUCKET = 'call_recordings';
 const POLL_INTERVAL_MS = 8_000;
-// A generous ceiling on the WHOLE background pipeline (job creation through
-// summary), not just Sarvam's own job — well above Sarvam's documented 2h
-// file-length cap plus room for several analysis passes, so a wedged Sarvam
-// job fails the upload outright instead of polling forever.
-const MAX_POLL_MS = 60 * 60_000;
+// A wedged Sarvam job fails the recording (retryable) instead of polling forever.
+const MAX_POLL_MS = TRANSCRIPTION_MAX_WAIT_MS;
+// python-agent takes ~1.5 min to come back after a restart, and the Sarvam job
+// keeps running on Sarvam's side meanwhile — so a run of failed status checks
+// is waited out (≈2.5 min) before the recording is given up on.
+const MAX_POLL_ERRORS_IN_A_ROW = 20;
+// Handing a recording to python-agent includes python-agent uploading it to
+// Sarvam — minutes, not seconds, for a long call on a slow uplink. Past the
+// module's 60s default the backend would give up while Sarvam still bills the job.
+const CREATE_JOB_TIMEOUT_MS = 10 * 60_000;
 // Mirrors python-agent's settings.call_copilot_transcript_window_words
 // (default 500) — NestJS has no access to that Python-side config object, so
 // this is kept as its own constant, deliberately the same value. Unlike the
@@ -95,10 +108,10 @@ export class CallCopilotUploadService {
     return this.startSessionFromRecording(organizationId, userId, buffer, file.originalname, dto);
   }
 
-  /** The same pipeline for a recording that arrives as bytes rather than a
-   * browser upload — e.g. a phone call recorded by Plivo and fetched by the
-   * Plivo webhook. Everything past reading the file is identical: GridFS copy,
-   * strict credit reservation, background transcription, summary, AI Coach. */
+  /** A recording that arrives as bytes rather than a browser upload. Stores
+   * it, then processes it: GridFS copy, strict credit reservation, background
+   * transcription, summary, AI Coach. A refused credit hold is thrown (the
+   * uploader sees it); the stored recording stays retryable either way. */
   async startSessionFromRecording(
     organizationId: string,
     userId: string,
@@ -106,13 +119,19 @@ export class CallCopilotUploadService {
     filename: string,
     dto: UploadCallRecordingDto,
   ): Promise<CallSessionDocument> {
+    const session = await this.storeRecording(organizationId, userId, buffer, filename, dto);
+    await this.startProcessing(session, buffer);
+    return session;
+  }
+
+  /** Step one for every recording: the original file is saved, and its session
+   * created, before anything is sent to Sarvam — so no later failure can lose it. */
+  async storeRecording(organizationId: string, userId: string, buffer: Buffer, filename: string, dto: UploadCallRecordingDto): Promise<CallSessionDocument> {
     const audioFileId = await this.gridFs.upload(AUDIO_BUCKET, filename, buffer, {
       organizationId,
       uploadedBy: userId,
     });
-
-    const creditRequestId = randomUUID();
-    const session = await this.sessionModel.create({
+    return this.sessionModel.create({
       organizationId,
       userId,
       dealId: dto.dealId,
@@ -121,9 +140,15 @@ export class CallCopilotUploadService {
       source: 'upload',
       originalRecordingFileId: audioFileId,
       originalFilename: filename,
-      creditRequestId,
+      languageCode: dto.languageCode,
+      creditRequestId: randomUUID(),
     });
+  }
 
+  /** Step two: holds credits, then transcribes and summarises in the
+   * background. Throws only when credits can't be held — the session is then
+   * already marked failed (retryable), so it is never left 'processing'. */
+  async startProcessing(session: CallSessionDocument, audio: Buffer): Promise<void> {
     try {
       // resolveTenantKey(), not organizationId directly — billing is scoped
       // per-user by default (see ReservationService.resolveTenantKey's own
@@ -131,45 +156,105 @@ export class CallCopilotUploadService {
       // userId, not organizationId, so reserving against organizationId
       // directly always misses a real balance and throws Insufficient
       // Balance regardless of what was actually purchased.
-      await this.reservations.reserve(this.reservations.resolveTenantKey(organizationId, userId), userId, creditRequestId, session._id.toString());
+      await this.reservations.reserve(
+        this.reservations.resolveTenantKey(session.organizationId, session.userId),
+        session.userId,
+        session.creditRequestId,
+        session._id.toString(),
+      );
     } catch (err) {
-      // The session was already created (and its audio already safely in
-      // GridFS) above — a failed reservation must still mark it 'error'
-      // before this method's caller sees the thrown 402, or the session is
-      // left stuck in 'processing' forever with no way to resolve (the
-      // exact class of bug already hit once for a mic-permission-denied
-      // live call — see useSegmentedRecording.ts's own history on this).
-      // errorSession's own release() call is a safe no-op here since
-      // reserve() never actually created a reservation to release.
-      await this.callCopilotService.errorSession(session, 'Insufficient credits to process this recording.');
+      // errorSession's release() is a safe no-op: nothing was reserved.
+      await this.failSession(session, err, 'credits', false);
       throw err;
     }
 
-    void this.processUpload(session, buffer, dto).catch(async (err) => {
-      // python-agent's own reason (e.g. "Sarvam AI … is out of credits") is
-      // safe to show; Axios's "Request failed with status code 502" says nothing.
-      const detail = agentDetail(err);
-      const message = detail ?? 'Processing this recording failed. The original file was saved.';
-      this.logger.error(`Call copilot upload processing failed for session ${session._id}: ${detail ?? (err as Error).message}`);
-      await this.callCopilotService.errorSession(session, detail ?? (err as Error).message);
-      this.gateway.emitToUser(userId, 'call:error', { sessionId: session._id.toString(), message });
-    });
-
-    return session;
+    void this.processUpload(session, audio).catch((err) =>
+      this.failSession(session, err, 'processing', true).catch((saveErr) =>
+        this.logger.error(`call.processing.fail_save_failed session=${session._id} reason=${(saveErr as Error).message}`),
+      ),
+    );
   }
 
-  private async processUpload(session: CallSessionDocument, audioBuffer: Buffer, dto: UploadCallRecordingDto): Promise<void> {
+  /** Runs a failed (or abandoned) recording through transcription again, from
+   * the copy saved in GridFS — never re-downloaded from the phone provider.
+   * `userId` limits it to that person's own calls; `languageCode` fills in a
+   * session saved before the language was kept on it. */
+  async retryProcessing(organizationId: string, sessionId: string, options: { userId?: string; languageCode?: string } = {}): Promise<CallSessionDocument> {
+    if (!isValidObjectId(sessionId)) throw new NotFoundException('Call not found.');
+    const session = await this.sessionModel.findOne({ _id: sessionId, organizationId, ...(options.userId ? { userId: options.userId } : {}) }).exec();
+    if (!session) throw new NotFoundException('Call not found.');
+    if (session.source !== 'upload' || !session.originalRecordingFileId) {
+      throw new BadRequestException('This call has no saved recording to process again.');
+    }
+    const updatedAt = (session as { updatedAt?: Date }).updatedAt;
+    const abandoned = session.status === 'processing' && !!updatedAt && Date.now() - updatedAt.getTime() > PROCESSING_ABANDONED_AFTER_MS;
+    if (session.status !== 'error' && !abandoned) {
+      throw new ConflictException(session.status === 'processing' ? 'This call is still being processed.' : 'This call has already been processed.');
+    }
+    const languageCode = session.languageCode ?? options.languageCode;
+    if (!languageCode) {
+      throw new BadRequestException('Choose the language spoken in this recording, then try again.');
+    }
+
+    let audio: Buffer;
+    try {
+      audio = await this.gridFs.download(AUDIO_BUCKET, session.originalRecordingFileId);
+    } catch {
+      throw new BadRequestException('The saved recording for this call is missing, so it can’t be processed again.');
+    }
+
+    // Claimed atomically on the state just read, so a double click can't start two runs.
+    const claimed = await this.sessionModel
+      .findOneAndUpdate(
+        { _id: session._id, status: session.status, creditRequestId: session.creditRequestId },
+        {
+          $set: {
+            status: 'processing',
+            languageCode,
+            creditRequestId: randomUUID(),
+            transcript: [],
+            events: [],
+            recommendations: [],
+            lastAnalyzedSequence: 0,
+            summaryPoints: [],
+            customerNeeds: [],
+            concernsRaised: [],
+            keyTakeaways: [],
+            followUpActions: [],
+          },
+          $unset: { errorMessage: '', retryable: '', endedAt: '', sentiment: '', headline: '', outcome: '' },
+        },
+        { new: true },
+      )
+      .exec();
+    if (!claimed) throw new ConflictException('This call is already being processed again.');
+    this.logger.log(`call.processing.retry org=${organizationId} session=${sessionId} previous=${session.status}`);
+    await this.startProcessing(claimed, audio);
+    return claimed;
+  }
+
+  /** Marks the session failed with words the user can act on; the technical
+   * reason goes to the log only. */
+  private async failSession(session: CallSessionDocument, err: unknown, stage: 'credits' | 'processing', notifyLiveView: boolean): Promise<void> {
+    const failure = describeProcessingFailure(err);
+    const sessionId = session._id.toString();
+    this.logger.error(`call.processing.failed org=${session.organizationId} session=${sessionId} stage=${stage} reason=${failure.technical}`);
+    await this.callCopilotService.errorSession(session, failure.message, { retryable: !!session.originalRecordingFileId });
+    if (notifyLiveView) this.gateway.emitToUser(session.userId, 'call:error', { sessionId, message: failure.message });
+  }
+
+  private async processUpload(session: CallSessionDocument, audioBuffer: Buffer): Promise<void> {
     const userId = session.userId;
     const sessionId = session._id.toString();
     const emit = (event: string, payload: object) => this.gateway.emitToUser(userId, event, { sessionId, ...payload });
 
-    if (dto.dealId || dto.contactId) {
+    if (session.dealId || session.contactId) {
       try {
         const token = this.bridgeToken(userId, session.organizationId);
         const { data } = await firstValueFrom(
           this.http.post<{ contextBlob: string }>(
             `${this.pythonAgentUrl}/call-copilot/context`,
-            { sessionId, query: 'uploaded sales call', dealId: dto.dealId, contactId: dto.contactId },
+            { sessionId, query: 'uploaded sales call', dealId: session.dealId, contactId: session.contactId },
             { headers: { Authorization: `Bearer ${token}` } },
           ),
         );
@@ -183,8 +268,13 @@ export class CallCopilotUploadService {
     }
     emit('call:contextReady', { contextBlob: session.contextBlob ?? '' });
 
-    const jobId = await this.createTranscribeJob(session, audioBuffer, dto.languageCode);
+    // Always set by storeRecording/retryProcessing; never guessed (python-agent refuses to).
+    if (!session.languageCode) throw new Error(`session ${sessionId} has no languageCode`);
+    const jobId = await this.createTranscribeJob(session, audioBuffer, session.languageCode);
     const segments = await this.pollUntilTranscribed(session, jobId);
+    // An empty transcript would otherwise "succeed" as a call with no summary.
+    if (!segments.some((s) => s.text?.trim())) throw new NoSpeechFoundError();
+    this.logger.log(`call.processing.transcribed session=${sessionId} segments=${segments.length}`);
 
     for (const seg of segments) {
       await this.callCopilotService.appendTranscriptSegment(session, seg.sequence, seg.text, seg.speaker, session.originalRecordingFileId!);
@@ -258,45 +348,52 @@ export class CallCopilotUploadService {
         headers: { ...form.getHeaders(), Authorization: `Bearer ${token}` },
         maxContentLength: Infinity,
         maxBodyLength: Infinity,
+        timeout: CREATE_JOB_TIMEOUT_MS,
       }),
     );
+    this.logger.log(`call.processing.job_started session=${session._id} bytes=${audioBuffer.length} language=${languageCode}`);
     return data.jobId;
   }
 
   /** Polls every ~8s, touch()-ing the credit reservation each cycle so a
    * long-running job (Sarvam batch STT + queueing) doesn't get force-released
    * by ReservationService's 5-minute sweep before this pipeline ever gets to
-   * settle() — see reservation.service.ts's own comment on touch(). */
+   * settle() — see reservation.service.ts's own comment on touch(). A failed
+   * status check (python-agent restarting, a network blip) is retried: the
+   * job itself keeps running on Sarvam's side. */
   private async pollUntilTranscribed(session: CallSessionDocument, jobId: string): Promise<UploadTranscribeSegment[]> {
     const deadline = Date.now() + MAX_POLL_MS;
+    let errorsInARow = 0;
     while (Date.now() < deadline) {
       await sleep(POLL_INTERVAL_MS);
       await this.reservations.touch(session.creditRequestId);
 
       const token = this.bridgeToken(session.userId, session.organizationId);
-      const { data } = await firstValueFrom(
-        this.http.get<{ status: 'processing' | 'completed' | 'failed'; segments: UploadTranscribeSegment[]; error?: string }>(
-          `${this.pythonAgentUrl}/call-copilot/upload/transcribe-job/${jobId}`,
-          { headers: { Authorization: `Bearer ${token}` } },
-        ),
-      );
+      let data: { status: 'processing' | 'completed' | 'failed'; segments: UploadTranscribeSegment[]; error?: string };
+      try {
+        ({ data } = await firstValueFrom(
+          this.http.get<typeof data>(`${this.pythonAgentUrl}/call-copilot/upload/transcribe-job/${jobId}`, {
+            headers: { Authorization: `Bearer ${token}` },
+          }),
+        ));
+        errorsInARow = 0;
+      } catch (err) {
+        errorsInARow += 1;
+        if (!isTransientAgentError(err) || errorsInARow >= MAX_POLL_ERRORS_IN_A_ROW) throw err;
+        this.logger.warn(`call.processing.poll_retry session=${session._id} attempt=${errorsInARow} reason=${describeProcessingFailure(err).technical}`);
+        continue;
+      }
 
       if (data.status === 'processing') continue;
-      if (data.status === 'failed') throw new Error(data.error || 'Transcription failed.');
+      if (data.status === 'failed') throw new SarvamJobFailedError(data.error || 'no reason given');
       return data.segments;
     }
-    throw new Error('Transcription timed out.');
+    throw new TranscriptionTimedOutError();
   }
 }
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-/** The `detail` of an HTTPException python-agent raised, if that's what failed. */
-function agentDetail(err: unknown): string | null {
-  const detail = (err as AxiosError<{ detail?: unknown }>).response?.data?.detail;
-  return typeof detail === 'string' && detail ? detail : null;
 }
 
 // Splits an already-complete transcript into fixed-size word windows for

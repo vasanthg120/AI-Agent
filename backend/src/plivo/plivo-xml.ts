@@ -11,6 +11,11 @@ function escapeXml(value: string): string {
     .replace(/'/g, '&apos;');
 }
 
+// Plivo stops a <Record> after `maxLength` seconds and defaults it to 60 — which
+// recorded only the first minute of every call. Two hours is the longest file
+// Sarvam's batch speech-to-text accepts, so everything recorded can be transcribed.
+export const RECORDING_MAX_SECONDS = 2 * 60 * 60;
+
 export interface RecordAndDialOptions {
   // Where Plivo POSTs the finished recording (RecordUrl, RecordingID, ...).
   recordingCallbackUrl: string;
@@ -34,14 +39,17 @@ export interface RecordAndDialOptions {
  * `startOnDialAnswer` (Plivo's documented way to record a bridged call) starts
  * recording when the dialed party picks up, so ringing and the agent's own
  * "hello?" before a connection are not recorded. Both sides are captured, on
- * separate stereo channels, which keeps "who said what" recoverable.
+ * separate stereo channels, which keeps "who said what" recoverable. Recording
+ * runs until the call ends (up to RECORDING_MAX_SECONDS); `redirect="false"`
+ * keeps the call on the Dial when recording finishes, as in Plivo's own
+ * "record a complete outbound call" example.
  */
 export function recordAndDialXml(options: RecordAndDialOptions): string {
   const { recordingCallbackUrl, dialActionUrl, dialEventsUrl, callerId, destination, ringTimeoutSeconds = 40 } = options;
   const events = dialEventsUrl ? ` callbackUrl="${escapeXml(dialEventsUrl)}" callbackMethod="POST"` : '';
   return [
     '<Response>',
-    `  <Record startOnDialAnswer="true" fileFormat="mp3" recordChannelType="stereo" callbackUrl="${escapeXml(recordingCallbackUrl)}" callbackMethod="POST"/>`,
+    `  <Record startOnDialAnswer="true" maxLength="${RECORDING_MAX_SECONDS}" redirect="false" fileFormat="mp3" recordChannelType="stereo" callbackUrl="${escapeXml(recordingCallbackUrl)}" callbackMethod="POST"/>`,
     `  <Dial callerId="${escapeXml(callerId)}" timeout="${Math.max(5, Math.floor(ringTimeoutSeconds))}" action="${escapeXml(dialActionUrl)}" method="POST"${events}>`,
     `    <Number>${escapeXml(destination)}</Number>`,
     '  </Dial>',

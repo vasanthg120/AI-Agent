@@ -61,8 +61,21 @@ def _batch_error(exc: Exception, fallback: str) -> SarvamApiError:
     """A batch-API failure from the SDK, as a user-facing error. An empty Sarvam
     wallet (402 insufficient_quota_error) is named outright: retrying won't fix
     it, and the generic message made it look like a HaiVE bug."""
-    if isinstance(exc, ApiError) and exc.status_code == 402:
+    status = exc.status_code if isinstance(exc, ApiError) else None
+    if status == 402:
         return SarvamApiError("Sarvam AI (speech-to-text) is out of credits. Top up the Sarvam account, then try again.", status_code=502)
+    if status in (401, 403):
+        return SarvamApiError(
+            "Sarvam AI didn't accept HaiVE's API key. Update it in Platform Admin Settings → AI Provider → Sarvam, then try again.",
+            status_code=502,
+        )
+    if status == 429:
+        return SarvamApiError("Sarvam AI is busy (too many requests right now). Try again in a few minutes.", status_code=503)
+    if status in (400, 413, 415, 422):
+        return SarvamApiError(
+            "Sarvam AI couldn't read this recording — the audio may be damaged, too long (over 2 hours) or in an unsupported format.",
+            status_code=422,
+        )
     return SarvamApiError(fallback, status_code=502)
 
 

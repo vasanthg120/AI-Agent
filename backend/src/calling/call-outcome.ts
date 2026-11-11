@@ -3,6 +3,7 @@
 // Plivo/Twilio have reported so far. Pure (time is passed in), so the Dialer's
 // live screen, its call log and the tests all read the same rules.
 
+import { PROCESSING_ABANDONED_AFTER_MS } from '../call-copilot/processing-failure';
 import type { CallingProvider } from './calling-routing';
 
 export type CallStage = 'ringing_agent' | 'connecting_customer' | 'in_call' | 'ended' | 'failed';
@@ -158,8 +159,9 @@ export interface ReportFacts {
 
 // Coaching runs a minute or so after the summary; past this it isn't coming.
 export const SCORING_GIVES_UP_AFTER_MS = 5 * 60_000;
-// Transcribing a long call takes minutes, not this long.
-export const PROCESSING_GIVES_UP_AFTER_MS = 45 * 60_000;
+// Transcribing a long call takes minutes, not this long — past it the pipeline is
+// gone (e.g. a restart), and "Try again" is accepted from the same moment.
+export const PROCESSING_GIVES_UP_AFTER_MS = PROCESSING_ABANDONED_AFTER_MS;
 
 export function describeReport(facts: ReportFacts, now: Date): ReportSummary {
   const base = { sessionId: facts.sessionId, overallScore: facts.overallScore, headline: facts.headline };
@@ -171,7 +173,7 @@ export function describeReport(facts: ReportFacts, now: Date): ReportSummary {
     return { ...base, stage: 'scoring' };
   }
   if (facts.updatedAt && now.getTime() - facts.updatedAt.getTime() > PROCESSING_GIVES_UP_AFTER_MS) {
-    return { ...base, stage: 'failed', error: 'Processing stopped before the report was finished.' };
+    return { ...base, stage: 'failed', error: 'Processing stopped before the report was finished (the server may have restarted).' };
   }
   return { ...base, stage: 'transcribing' };
 }

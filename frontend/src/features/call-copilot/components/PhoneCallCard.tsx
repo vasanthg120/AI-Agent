@@ -298,6 +298,8 @@ export function PhoneCallCard({ onOpenLibrary }: { onOpenLibrary: () => void }) 
               call={tracked}
               onOpenLibrary={onOpenLibrary}
               onDismiss={() => setTrackedId('')}
+              onRetry={(c) => void handleRetry(c)}
+              retrying={retrying === tracked.id}
             />
           )}
         </AnimatePresence>

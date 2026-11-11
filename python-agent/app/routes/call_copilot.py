@@ -10,6 +10,7 @@ from typing import Literal
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel
+from starlette.concurrency import run_in_threadpool
 
 from app.agent.call_copilot_analysis import (
     analyze_call_segment,
@@ -350,10 +351,14 @@ async def create_upload_transcribe_job(
         raise HTTPException(422, "The uploaded recording is empty.")
 
     try:
-        job_id = start_batch_transcription(content, audio.filename or "recording", languageCode)
+        # The SDK uploads the whole recording to Sarvam synchronously — up to
+        # two hours of audio for a long phone call. Run it on a worker thread
+        # so it never blocks the event loop (and every other AI request) meanwhile.
+        job_id = await run_in_threadpool(start_batch_transcription, content, audio.filename or "recording", languageCode)
     except SarvamApiError as err:
         raise HTTPException(err.status_code or 502, err.user_message) from None
 
+    logger.info("call-copilot transcribe-job started: job=%s bytes=%d language=%s", job_id, len(content), languageCode)
     return UploadTranscribeJobResponse(jobId=job_id)
 
 

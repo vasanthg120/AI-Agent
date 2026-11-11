@@ -53,7 +53,8 @@ describe('Twilio webhooks (real Mongo)', () => {
   let service: TwilioWebhooksService;
 
   let httpGet: jest.Mock;
-  let startSession: jest.Mock;
+  let storeRecording: jest.Mock;
+  let startProcessing: jest.Mock;
 
   let seq = 0;
   let orgId: string;
@@ -108,7 +109,8 @@ describe('Twilio webhooks (real Mongo)', () => {
       }),
     );
 
-    startSession = jest.fn(async () => ({
+    startProcessing = jest.fn(async () => undefined);
+    storeRecording = jest.fn(async () => ({
       _id: {
         toString: () => 'session-123',
       },
@@ -136,7 +138,7 @@ describe('Twilio webhooks (real Mongo)', () => {
       lines,
       twilio,
       { get: httpGet } as never,
-      { startSessionFromRecording: startSession } as never,
+      { storeRecording: storeRecording, startProcessing } as never,
       {
         create: jest.fn(async () => undefined),
       } as never,
@@ -547,13 +549,13 @@ describe('Twilio webhooks (real Mongo)', () => {
       expect(fresh?.sessionId).toBe('session-123');
       expect(fresh?.recordingDurationSeconds).toBe(61);
 
-      expect(startSession).toHaveBeenCalledTimes(1);
+      expect(storeRecording).toHaveBeenCalledTimes(1);
 
-      expect(startSession.mock.calls[0][3]).toBe(
+      expect(storeRecording.mock.calls[0][3]).toBe(
         `twilio-${sid}.mp3`,
       );
 
-      expect(startSession.mock.calls[0][4]).toEqual({
+      expect(storeRecording.mock.calls[0][4]).toEqual({
         dealId: 'deal-9',
         languageCode: 'en',
       });

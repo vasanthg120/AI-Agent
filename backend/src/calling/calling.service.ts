@@ -5,6 +5,7 @@ import { AxiosError } from 'axios';
 import { Model, isValidObjectId } from 'mongoose';
 import { firstValueFrom } from 'rxjs';
 import { JwtPayload } from '../auth/jwt-payload.interface';
+import { CallCopilotUploadService } from '../call-copilot/call-copilot-upload.service';
 import { CallSession, CallSessionDocument } from '../call-copilot/schemas/call-session.schema';
 import { isPermissionManaged } from '../common/permissions/permission.decorator';
 import { Deal, DealDocument } from '../crm/schemas/deal.schema';
@@ -149,6 +150,7 @@ export class CallingService implements OnModuleInit {
     private twilioWebhooks: TwilioWebhooksService,
     private http: HttpService,
     private directory: CustomerDirectoryService,
+    private uploads: CallCopilotUploadService,
     @InjectModel(CallSession.name) private sessionModel: Model<CallSessionDocument>,
     @InjectModel(Deal.name) private dealModel: Model<DealDocument>,
   ) {}
@@ -422,12 +424,18 @@ export class CallingService implements OnModuleInit {
     });
   }
 
+  /** "Try again" for a call's report. A recording that never got saved is
+   * fetched from the provider again; one that was saved but whose transcription
+   * failed (or was cut off by a restart) is reprocessed from the saved copy. */
   async retryImport(user: JwtPayload, provider: CallingProvider, id: string, orgWide: boolean): Promise<CallView> {
     const call = provider === 'plivo' ? await this.plivo.getCallForUser(user, id, orgWide) : await this.twilio.getCallForUser(user, id, orgWide);
     const stuck = call.importStatus === 'pending' && Date.now() - call.updatedAt.getTime() > IMPORT_STUCK_AFTER_MS;
     if (call.importStatus === 'failed' || stuck) {
       if (provider === 'plivo') await this.plivoWebhooks.importRecording(call as PlivoCallDocument);
       else await this.twilioWebhooks.importRecording(call as TwilioCallDocument);
+    } else if (call.importStatus === 'imported' && call.sessionId) {
+      // Throws a readable 4xx when there's nothing to retry (still running, already done).
+      await this.uploads.retryProcessing(user.organizationId, call.sessionId, { languageCode: call.languageCode });
     }
     const fresh = provider === 'plivo' ? await this.plivo.getCallForUser(user, id, orgWide) : await this.twilio.getCallForUser(user, id, orgWide);
     const now = new Date();
