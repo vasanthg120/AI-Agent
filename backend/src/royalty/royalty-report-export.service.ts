@@ -2,7 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { Parser } from 'json2csv';
 import ExcelJS from 'exceljs';
 import { BRAND, drawHeader, drawTable, sectionHeading } from '../common/pdf/branded-pdf';
-import { RoyaltyReportQuotationLine, RoyaltyReportSummary } from './royalty-report.service';
+import { RoyaltyReportSaleLine, RoyaltyReportSummary } from './royalty-report.service';
 
 export interface RoyaltyReportExportRow {
   item: string;
@@ -19,8 +19,6 @@ function money(value: number, currency = 'INR'): string {
   return `${SYMBOL[code] ?? `${code} `}${amount}`;
 }
 
-const statusOf = (q: RoyaltyReportQuotationLine) => (q.accepted ? 'Accepted' : 'Not accepted yet');
-
 // Mirrors crm/deals-export.service.ts's / finance/finance-export.service.ts's
 // exact 4-method shape (json2csv for CSV, pdfkit via the shared branded-pdf
 // helpers for PDF, exceljs for Excel) — the same proven export pattern.
@@ -30,9 +28,7 @@ export class RoyaltyReportExportService {
   // (frontend RoyaltyReportSection's buildReportLines — kept in step deliberately).
   buildRows(report: RoyaltyReportSummary): RoyaltyReportExportRow[] {
     const rows: RoyaltyReportExportRow[] = [
-      { item: 'Quotations Sent', value: String(report.totalQuotes) },
-      { item: 'Accepted Quotations', value: String(report.totalAcceptedQuotes) },
-      { item: 'Not Accepted Yet', value: String(report.totalNotAcceptedQuotes) },
+      { item: 'Deals Won', value: String(report.wonDeals) },
       { item: 'Sales (Ex Tax)', value: money(report.salesExTax, report.currency) },
       { item: 'Tax', value: money(report.tax, report.currency) },
       { item: 'Sales (Including Tax)', value: money(report.salesIncTax, report.currency) },
@@ -55,7 +51,7 @@ export class RoyaltyReportExportService {
     return parser.parse(rows);
   }
 
-  // The Executive Summary, then every quotation it is added up from.
+  // The Executive Summary, then every won deal it is added up from.
   writePdf(doc: PDFKit.PDFDocument, rows: RoyaltyReportExportRow[], meta: { dateFrom: string; dateTo: string }, report: RoyaltyReportSummary): void {
     drawHeader(doc, {
       title: 'Royalty Report',
@@ -71,27 +67,27 @@ export class RoyaltyReportExportService {
       rows,
     });
 
-    if (report.quotations.length === 0) {
-      doc.moveDown(0.5).fontSize(10).fillColor(BRAND.muted).text('No quotation was sent in this period.');
+    if (report.sales.length === 0) {
+      doc.moveDown(0.5).fontSize(10).fillColor(BRAND.muted).text('No deal was won in this period.');
       return;
     }
-    sectionHeading(doc, `Quotations (${report.quotationsSummary.totalRecords}) — ${money(report.quotationsSummary.totalSalesExTax, report.currency)} ex tax`);
+    sectionHeading(doc, `Deals won (${report.salesSummary.totalRecords}) — ${money(report.salesSummary.totalSalesExTax, report.currency)} ex tax`);
     drawTable(doc, {
       columns: [
-        { label: 'Quote #', width: 55, align: 'left', value: (q: RoyaltyReportQuotationLine) => q.quoteNumber ?? '—' },
-        { label: 'Customer', width: 'auto', align: 'left', value: (q: RoyaltyReportQuotationLine) => q.customerName },
-        { label: 'Date', width: 58, align: 'left', value: (q: RoyaltyReportQuotationLine) => q.date },
-        { label: 'Ex Tax', width: 70, align: 'right', value: (q: RoyaltyReportQuotationLine) => money(q.salesExTax, report.currency) },
-        { label: 'Tax', width: 60, align: 'right', value: (q: RoyaltyReportQuotationLine) => money(q.tax, report.currency) },
-        { label: 'Inc Tax', width: 72, align: 'right', value: (q: RoyaltyReportQuotationLine) => money(q.salesIncTax, report.currency) },
-        { label: 'Royalty', width: 60, align: 'right', value: (q: RoyaltyReportQuotationLine) => money(q.royalty, report.currency) },
+        { label: 'Customer', width: 'auto', align: 'left', value: (l: RoyaltyReportSaleLine) => l.customerName },
+        { label: 'Closed', width: 58, align: 'left', value: (l: RoyaltyReportSaleLine) => l.date },
+        { label: 'Quote #', width: 50, align: 'left', value: (l: RoyaltyReportSaleLine) => l.quoteNumbers ?? '—' },
+        { label: 'Ex Tax', width: 70, align: 'right', value: (l: RoyaltyReportSaleLine) => money(l.salesExTax, report.currency) },
+        { label: 'Tax', width: 60, align: 'right', value: (l: RoyaltyReportSaleLine) => money(l.tax, report.currency) },
+        { label: 'Inc Tax', width: 72, align: 'right', value: (l: RoyaltyReportSaleLine) => money(l.salesIncTax, report.currency) },
+        { label: 'Royalty', width: 60, align: 'right', value: (l: RoyaltyReportSaleLine) => money(l.royalty, report.currency) },
       ],
-      rows: report.quotations,
+      rows: report.sales,
     });
   }
 
   // Two sheets: the Executive Summary (as the CSV and the PDF show it), and the
-  // quotations it is added up from, ending in their own totals.
+  // won deals it is added up from, ending in their own totals.
   async toExcel(rows: RoyaltyReportExportRow[], report: RoyaltyReportSummary): Promise<Buffer> {
     const workbook = new ExcelJS.Workbook();
 
@@ -106,18 +102,18 @@ export class RoyaltyReportExportService {
     summarySheet.getColumn(1).width = 32;
     summarySheet.getColumn(2).width = 24;
 
-    const sheet = workbook.addWorksheet('Quotations');
-    sheet.addRow(['Quote #', 'Customer', 'Date', 'Status', 'Sales (Ex Tax)', 'Tax', 'Sales (Including Tax)', 'Royalty']);
-    for (const q of report.quotations) {
-      sheet.addRow([q.quoteNumber ?? '—', q.customerName, q.date, statusOf(q), q.salesExTax, q.tax, q.salesIncTax, q.royalty]);
+    const sheet = workbook.addWorksheet('Deals Won');
+    sheet.addRow(['Deal', 'Customer', 'Closed', 'Quote #', 'Sales (Ex Tax)', 'Tax', 'Sales (Including Tax)', 'Royalty']);
+    for (const l of report.sales) {
+      sheet.addRow([l.dealName, l.customerName, l.date, l.quoteNumbers ?? '—', l.salesExTax, l.tax, l.salesIncTax, l.royalty]);
     }
     sheet.addRow([]);
     sheet.addRow(['Summary']);
-    sheet.addRow(['Total Records', report.quotationsSummary.totalRecords]);
-    sheet.addRow(['Sales (Ex Tax)', report.quotationsSummary.totalSalesExTax]);
-    sheet.addRow(['Tax', report.quotationsSummary.totalTax]);
-    sheet.addRow(['Sales (Including Tax)', report.quotationsSummary.totalSalesIncTax]);
-    sheet.addRow(['Royalty (before cap)', report.quotationsSummary.totalRoyalty]);
+    sheet.addRow(['Deals Won', report.salesSummary.totalRecords]);
+    sheet.addRow(['Sales (Ex Tax)', report.salesSummary.totalSalesExTax]);
+    sheet.addRow(['Tax', report.salesSummary.totalTax]);
+    sheet.addRow(['Sales (Including Tax)', report.salesSummary.totalSalesIncTax]);
+    sheet.addRow(['Royalty (before cap)', report.salesSummary.totalRoyalty]);
     for (let i = 1; i <= 8; i++) sheet.getColumn(i).width = i === 2 ? 34 : 20;
 
     const buffer = await workbook.xlsx.writeBuffer();

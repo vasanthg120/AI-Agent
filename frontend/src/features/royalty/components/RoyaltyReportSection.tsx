@@ -2,7 +2,6 @@ import { useMemo, useState } from 'react';
 import clsx from 'clsx';
 import { FiDownload, FiFileText, FiGrid, FiList, FiPercent, FiZap } from 'react-icons/fi';
 import {
-  Badge,
   Button,
   DateRangeControl,
   Dropdown,
@@ -16,18 +15,18 @@ import { dayjs } from '@/utils/date';
 import { extractErrorMessage } from '@/utils/errors';
 import {
   royaltyReportService,
-  type RoyaltyReportQuotationsSummary,
+  type RoyaltyReportSalesSummary,
   type RoyaltyReportSummary,
 } from '@/services/royaltyReportService';
 import styles from '../royalty.module.css';
 
-// Under the quotations: how many, and what they add up to — excluding tax, tax, including tax, royalty.
-function TableSummaryFooter({ summary }: { summary: RoyaltyReportQuotationsSummary }) {
+// Under the won deals: how many, and what they add up to — excluding tax, tax, including tax, royalty.
+function TableSummaryFooter({ summary }: { summary: RoyaltyReportSalesSummary }) {
   return (
     <div className={styles.tableSummaryFooter}>
       <span className={styles.tableSummaryLabel}>Summary:</span>
       <span>
-        {summary.totalRecords} quotation{summary.totalRecords === 1 ? '' : 's'}
+        {summary.totalRecords} deal{summary.totalRecords === 1 ? '' : 's'} won
       </span>
       <span className={styles.tableSummaryValue}>Sales (Ex Tax): {money(summary.totalSalesExTax)}</span>
       <span>Tax: {money(summary.totalTax)}</span>
@@ -49,9 +48,7 @@ interface ReportLine {
 // downloaded export show the exact same Executive Summary line items.
 function buildReportLines(report: RoyaltyReportSummary): ReportLine[] {
   const lines: ReportLine[] = [
-    { label: 'Quotations Sent', value: String(report.totalQuotes) },
-    { label: 'Accepted Quotations', value: String(report.totalAcceptedQuotes) },
-    { label: 'Not Accepted Yet', value: String(report.totalNotAcceptedQuotes) },
+    { label: 'Deals Won', value: String(report.wonDeals) },
     { label: 'Sales (Ex Tax)', value: money(report.salesExTax) },
     { label: 'Tax', value: money(report.tax) },
     { label: 'Sales (Including Tax)', value: money(report.salesIncTax) },
@@ -78,8 +75,8 @@ function buildReportLines(report: RoyaltyReportSummary): ReportLine[] {
 // computed on a real click, matching the on-demand "Generate" idiom already
 // established for Customer Activity's/Finance's own AI summaries (never
 // fired automatically on mount or on every filter change). Worked out from
-// the quotations sent in the period — the value and the tax each quotation
-// carries — the same ones the Sales and Gross Margin reports count.
+// the deals won in the period — each at its value, tax split as on its
+// quotations — the same ones the Sales and Gross Margin reports count.
 // DateRangeControl (not MonthPicker) — a real "start date through end
 // date" range, not locked to a calendar month; its own "This Month" preset
 // still covers the whole-month case.
@@ -221,19 +218,19 @@ export function RoyaltyReportSection() {
             </SectionCard>
           )}
 
-          <SectionCard title={`Quotations (${report.quotations.length})`} icon={FiFileText}>
-            {report.quotations.length === 0 ? (
-              <div className={styles.emptyState}>No quotation was sent in this date range.</div>
+          <SectionCard title={`Deals won (${report.sales.length})`} icon={FiFileText}>
+            {report.sales.length === 0 ? (
+              <div className={styles.emptyState}>No deal was won in this date range.</div>
             ) : (
               <>
                 <div className={styles.tableScroll}>
                   <table className={clsx(styles.reportTable, styles.linesTable)}>
                     <thead>
                       <tr>
-                        <th>Quote #</th>
                         <th>Customer</th>
-                        <th>Date</th>
-                        <th>Status</th>
+                        <th>Deal</th>
+                        <th>Closed</th>
+                        <th>Quote #</th>
                         <th className={styles.num}>Sales (Ex Tax)</th>
                         <th className={styles.num}>Tax</th>
                         <th className={styles.num}>Sales (Inc Tax)</th>
@@ -241,16 +238,12 @@ export function RoyaltyReportSection() {
                       </tr>
                     </thead>
                     <tbody>
-                      {report.quotations.map((q) => (
-                        <tr key={q.quoteId}>
-                          <td data-label="Quote #">{q.quoteNumber ?? '—'}</td>
+                      {report.sales.map((q) => (
+                        <tr key={q.dealId}>
                           <td data-label="Customer">{q.customerName}</td>
-                          <td data-label="Date">{dayjs(q.date).format('D MMM YYYY')}</td>
-                          <td data-label="Status">
-                            <Badge variant={q.accepted ? 'success' : 'neutral'}>
-                              {q.accepted ? 'Accepted' : 'Not accepted yet'}
-                            </Badge>
-                          </td>
+                          <td data-label="Deal">{q.dealName || '—'}</td>
+                          <td data-label="Closed">{dayjs(q.date).format('D MMM YYYY')}</td>
+                          <td data-label="Quote #">{q.quoteNumbers ?? '—'}</td>
                           <td data-label="Sales (Ex Tax)" className={styles.num}>
                             {money(q.salesExTax)}
                           </td>
@@ -268,7 +261,7 @@ export function RoyaltyReportSection() {
                     </tbody>
                   </table>
                 </div>
-                <TableSummaryFooter summary={report.quotationsSummary} />
+                <TableSummaryFooter summary={report.salesSummary} />
               </>
             )}
           </SectionCard>

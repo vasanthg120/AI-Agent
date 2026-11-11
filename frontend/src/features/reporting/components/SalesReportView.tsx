@@ -1,4 +1,4 @@
-import { FiCalendar, FiDollarSign, FiFileText, FiInfo, FiPercent, FiTrendingUp } from 'react-icons/fi';
+import { FiAward, FiCalendar, FiDollarSign, FiInfo, FiPercent, FiTrendingUp } from 'react-icons/fi';
 import { EmptyState } from '@/components/ui';
 import { dayjs } from '@/utils/date';
 import { formatINRExact as money } from '@/utils/currency';
@@ -8,8 +8,8 @@ import styles from '../reporting.module.css';
 
 const GROUP_LABEL: Record<string, string> = { customer: 'Customer', user: 'User', quoteOwner: 'Quote Owner' };
 
-// Sales for a period: every quotation sent in it, with the value and the tax the
-// quotation itself carries — shown excluding tax, its tax, and including tax.
+// Sales for a period: the deals won in it, at their value (the Dashboard's
+// revenue) — shown excluding tax, the tax, and including tax.
 export function SalesReportView({ report }: { report: SalesReportSummary }) {
   const groupLabel = GROUP_LABEL[report.groupBy];
   const range = `${dayjs(report.dateFrom).format('D MMM YYYY')} – ${dayjs(report.dateTo).format('D MMM YYYY')}`;
@@ -21,7 +21,7 @@ export function SalesReportView({ report }: { report: SalesReportSummary }) {
       value: (r) => r.groupLabel,
       render: (r) => <span className={styles.rowLabel}>{r.groupLabel}</span>,
     },
-    { key: 'quotations', label: 'Quotations', numeric: true, value: (r) => r.quotations, render: (r) => r.quotations },
+    { key: 'deals', label: 'Deals won', numeric: true, value: (r) => r.deals, render: (r) => r.deals },
     {
       key: 'exTax',
       label: 'Sales (ex tax)',
@@ -52,14 +52,14 @@ export function SalesReportView({ report }: { report: SalesReportSummary }) {
       <div className={styles.reportIntro}>
         <div className={styles.reportTitle}>Sales per {groupLabel.toLowerCase()}</div>
         <div className={styles.reportDescription}>
-          <FiCalendar aria-hidden /> {range} · Quotations sent, grouped by {groupLabel.toLowerCase()}.
+          <FiCalendar aria-hidden /> {range} · Deals won, grouped by {groupLabel.toLowerCase()}.
         </div>
       </div>
 
       <KpiRow
         items={[
           { label: 'Sales (ex tax)', value: money(report.totalSalesExTax), icon: FiDollarSign, hint: 'Excluding tax' },
-          { label: 'Tax', value: money(report.totalTax), icon: FiPercent, hint: 'On those quotations' },
+          { label: 'Tax', value: money(report.totalTax), icon: FiPercent, hint: 'Split as on their quotations' },
           {
             label: 'Sales (inc tax)',
             value: money(report.totalSalesIncTax),
@@ -68,16 +68,17 @@ export function SalesReportView({ report }: { report: SalesReportSummary }) {
             hint: 'Including tax',
           },
           {
-            label: 'Quotations sent',
-            value: report.quotations,
-            icon: FiFileText,
+            label: 'Deals won',
+            value: report.deals,
+            icon: FiAward,
             tone: 'warning',
-            hint: `${report.accepted} accepted · ${report.quotations - report.accepted} not accepted yet`,
+            hint: 'Same as the Dashboard revenue',
           },
         ]}
       />
 
-      {report.dataSourceNote && (
+      {/* With nothing won, the empty state below says so; the note would only repeat it. */}
+      {report.dataSourceNote && report.deals > 0 && (
         <div className={styles.note}>
           <FiInfo aria-hidden />
           <span>{report.dataSourceNote}</span>
@@ -87,7 +88,7 @@ export function SalesReportView({ report }: { report: SalesReportSummary }) {
       {report.groups.length === 0 ? (
         <EmptyState
           icon={FiTrendingUp}
-          title="No quotations sent in this period"
+          title="No deal won in this period"
           description="Try a wider date range."
         />
       ) : (

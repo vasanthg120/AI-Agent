@@ -28,6 +28,8 @@ export interface AnalyticsDashboardOverview {
   deals: { wonCount: number; lostCount: number; openCount: number; wonValue: number; lostValue: number; openValue: number };
   revenue: {
     period: string;
+    // The last month counted — the same as period for a single month.
+    lastPeriod: string;
     targetAmount: number | null;
     currency: string;
     achieved: number;
@@ -41,7 +43,8 @@ export interface AnalyticsDashboardOverview {
   // Won deals that started in the month before the selected one and were closed
   // in the selected one — shown beside `revenue`, never added to it (see the
   // backend's previous-month-closures.service.ts for the three dates).
-  previousMonthClosures: PreviousMonthClosures;
+  // Null when the period is more than one month (the band compares two single months).
+  previousMonthClosures: PreviousMonthClosures | null;
   // Outstanding customer receivables (quoteAmount - paidAmount, summed) —
   // "dues" in Agent Activity's team-wide view. Not date-range scoped, unlike
   // the rest of this response — a current balance, not a per-period figure.
@@ -102,7 +105,29 @@ export interface PipelineByMonth {
   undated: { count: number; value: number };
 }
 
+// Pipeline Health for the period (backend PipelineHealth): the deals expected
+// to close in its months, the open ones split by whether their closing date
+// has passed. One aggregate, shared by the Pipeline & Quotes card and the
+// Overview's Pipeline box.
+export interface PipelineHealth {
+  period: { first: string; last: string };
+  today: string;
+  open: { count: number; value: number };
+  onTime: { count: number; value: number };
+  pastDue: { count: number; value: number };
+  won: { count: number; value: number };
+  lost: { count: number; value: number };
+  winRatePct: number | null;
+}
+
 export const analyticsDashboardService = {
+  async getPipelineHealth(dateFrom: string, dateTo: string, today: string, storeId?: string): Promise<PipelineHealth> {
+    const { data } = await axiosClient.get<PipelineHealth>('/analytics-dashboard/pipeline-health', {
+      params: { dateFrom, dateTo, today, ...(storeId ? { storeId } : {}) },
+    });
+    return data;
+  },
+
   async getPipelineByMonth(storeId?: string): Promise<PipelineByMonth> {
     const { data } = await axiosClient.get<PipelineByMonth>('/analytics-dashboard/pipeline-by-month', {
       params: storeId ? { storeId } : undefined,

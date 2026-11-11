@@ -27,22 +27,23 @@ type ReportType = 'sales' | 'grossMargin' | 'royalty';
 
 // Each report explains itself on its picker card, so someone who has never
 // opened this page knows which one answers their question.
-// All three count the same thing — the quotations sent in the period, with the
-// value and the tax each quotation carries — so their totals always agree.
+// All three count the same thing — the deals won in the period, at their value
+// (the Dashboard's revenue), tax split as on their quotations — so their totals
+// always agree with each other and with the Dashboard.
 const REPORT_TYPES: { id: ReportType; label: string; description: string; icon: typeof FiTrendingUp }[] = [
   {
     id: 'sales',
     label: 'Sales',
-    description: 'Quotations sent — excluding tax, tax and including tax',
+    description: 'Deals won — excluding tax, tax and including tax',
     icon: FiTrendingUp,
   },
   {
     id: 'grossMargin',
     label: 'Gross Margin',
-    description: 'Your margin % applied to sales excluding tax',
+    description: 'Your margin % applied to won sales excluding tax',
     icon: FiPercent,
   },
-  { id: 'royalty', label: 'Royalty', description: 'Royalty owed on sales excluding tax', icon: FiAward },
+  { id: 'royalty', label: 'Royalty', description: 'Royalty owed on won sales excluding tax', icon: FiAward },
 ];
 
 const GROUP_OPTIONS: Record<'sales' | 'grossMargin', { value: string; label: string }[]> = {

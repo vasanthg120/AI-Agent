@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { countedNote, QuotationSalesService, round2, totalsOf } from './quotation-sales.service';
+import { countedNote, round2, totalsOf, WonSalesService } from './won-sales.service';
 import { ReportingSettingsService } from './reporting-settings.service';
 import { groupRows, SalesReportService } from './sales-report.service';
 
@@ -8,7 +8,8 @@ export type GrossMarginGroupBy = 'customer' | 'user';
 export interface GrossMarginReportGroupRow {
   groupKey: string;
   groupLabel: string;
-  quotations: number;
+  /** Won deals in this group. */
+  deals: number;
   salesExTax: number;
   tax: number;
   salesIncTax: number;
@@ -22,8 +23,8 @@ export interface GrossMarginReportSummary {
   groupBy: GrossMarginGroupBy;
   /** The percentage the organization set (Settings → Royalty Rules). Null = none set yet. */
   marginPct: number | null;
-  quotations: number;
-  accepted: number;
+  /** Deals won in the period. */
+  deals: number;
   totalSalesExTax: number;
   totalTax: number;
   totalSalesIncTax: number;
@@ -40,13 +41,13 @@ export const marginOn = (salesExTax: number, marginPct: number | null): number |
 // (the CRM's own "margin" field on a product is its catalogue price), and
 // costs are not entered by hand — so the margin shown is the organization's
 // own percentage, set once, applied to sales excluding tax. It is always
-// labelled an estimate. Sales are the same quotations the Sales and Royalty
-// reports count; until a percentage is set the sales are shown and the
-// margin is left blank rather than guessed.
+// labelled an estimate. Sales are the same won deals the Sales and Royalty
+// reports count (won-sales.service.ts); until a percentage is set the sales
+// are shown and the margin is left blank rather than guessed.
 @Injectable()
 export class GrossMarginReportService {
   constructor(
-    private quotationSales: QuotationSalesService,
+    private wonSales: WonSalesService,
     private salesReport: SalesReportService,
     private settings: ReportingSettingsService,
   ) {}
@@ -59,7 +60,7 @@ export class GrossMarginReportService {
     storeConstraint?: string,
   ): Promise<GrossMarginReportSummary> {
     const [sales, { grossMarginPct: marginPct }] = await Promise.all([
-      this.quotationSales.sent(organizationId, dateFrom, dateTo, storeConstraint),
+      this.wonSales.won(organizationId, dateFrom, dateTo, storeConstraint),
       this.settings.get(organizationId),
     ]);
     const totals = totalsOf(sales);
@@ -69,8 +70,7 @@ export class GrossMarginReportService {
       dateTo,
       groupBy: groupingBy,
       marginPct,
-      quotations: totals.quotations,
-      accepted: totals.accepted,
+      deals: totals.deals,
       totalSalesExTax: totals.salesExTax,
       totalTax: totals.tax,
       totalSalesIncTax: totals.salesIncTax,

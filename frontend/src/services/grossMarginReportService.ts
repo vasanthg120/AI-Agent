@@ -5,7 +5,8 @@ export type GrossMarginGroupBy = 'customer' | 'user';
 export interface GrossMarginReportGroupRow {
   groupKey: string;
   groupLabel: string;
-  quotations: number;
+  // Won deals in this group.
+  deals: number;
   salesExTax: number;
   tax: number;
   salesIncTax: number;
@@ -19,8 +20,8 @@ export interface GrossMarginReportSummary {
   groupBy: GrossMarginGroupBy;
   // The percentage the organization set (Settings → Royalty Rules). Null = none set yet.
   marginPct: number | null;
-  quotations: number;
-  accepted: number;
+  // Deals won in the period.
+  deals: number;
   totalSalesExTax: number;
   totalTax: number;
   totalSalesIncTax: number;

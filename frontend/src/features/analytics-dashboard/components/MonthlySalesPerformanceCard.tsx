@@ -4,6 +4,7 @@ import { FiArrowDown, FiArrowUp, FiChevronRight } from 'react-icons/fi';
 import { AnimatedNumber, Card, Badge, InfoPopover } from '@/components/ui';
 import { formatINR as money } from '@/utils/currency';
 import type { PreviousMonthClosures } from '@/services/analyticsDashboardService';
+import { countedMonths } from '../countedMonths';
 import styles from './MonthlySalesPerformanceCard.module.css';
 
 export interface MonthlySalesPerformanceCardProps {
@@ -136,17 +137,28 @@ export function MonthlySalesPerformanceCard({
   previousMonthClosures,
   onOpenPreviousMonthClosures,
 }: MonthlySalesPerformanceCardProps) {
-  const current = revenueTrend[revenueTrend.length - 1];
-  const previous = revenueTrend[revenueTrend.length - 2];
+  // The months counted (whole months the dates touch, as the backend counts
+  // them). One month compares with last month; several with the same number
+  // of months just before them (revenueTrend reaches back far enough).
+  const counted = countedMonths(dateFrom, dateTo);
+  const months = counted.count;
+  const sumOf = (rows: { achieved: number }[]) => rows.reduce((sum, r) => sum + r.achieved, 0);
+  const currentRows = revenueTrend.slice(-months);
+  const previousRows = revenueTrend.slice(-2 * months, -months);
+  const currentSum = sumOf(currentRows);
+  const previousSum = previousRows.length === months ? sumOf(previousRows) : 0;
   const trend =
-    previous && previous.achieved > 0
-      ? { direction: current.achieved >= previous.achieved ? ('up' as const) : ('down' as const), pct: Math.abs(((current.achieved - previous.achieved) / previous.achieved) * 100) }
+    currentRows.length === months && previousSum > 0
+      ? { direction: currentSum >= previousSum ? ('up' as const) : ('down' as const), pct: Math.abs(((currentSum - previousSum) / previousSum) * 100) }
       : null;
+  const trendLabel = months === 1 ? 'vs last month' : `vs previous ${months} months`;
 
-  const start = dayjs(dateFrom);
-  const end = dayjs(dateTo);
-  const totalDaysInMonth = start.daysInMonth();
-  const daysElapsed = Math.min(Math.max(end.date(), 1), totalDaysInMonth);
+  // Days of the counted months, and how many have passed as of today (all of
+  // them for months already over) — the same basis as the backend's projection.
+  const firstDay = dayjs(`${counted.first}-01`);
+  const lastDay = dayjs(`${counted.last}-01`).endOf('month');
+  const totalDaysInMonth = lastDay.diff(firstDay, 'day') + 1;
+  const daysElapsed = Math.min(Math.max(dayjs().diff(firstDay, 'day') + 1, 1), totalDaysInMonth);
   const daysRemaining = Math.max(0, totalDaysInMonth - daysElapsed);
   const runRatePerDay = achieved / daysElapsed;
   const neededPerDay = remaining !== null && daysRemaining > 0 ? remaining / daysRemaining : null;
@@ -167,7 +179,13 @@ export function MonthlySalesPerformanceCard({
       <div className={styles.topRow}>
         <div>
           <div className={styles.title}>Revenue against target</div>
-          <div className={styles.subtitle}>Sales targets are set per calendar month.</div>
+          <div className={styles.subtitle}>
+            {months === 1
+              ? 'Sales targets are set per calendar month.'
+              : targetAmount !== null
+                ? `${counted.label} · the target is the monthly targets added up`
+                : counted.label}
+          </div>
         </div>
         {onTrack !== null && <Badge variant={onTrack ? 'success' : 'danger'}>{onTrack ? 'On track' : 'Off track'}</Badge>}
       </div>
@@ -181,7 +199,7 @@ export function MonthlySalesPerformanceCard({
             {trend && (
               <span className={clsx(styles.trend, trend.direction === 'up' ? styles.trendUp : styles.trendDown)}>
                 {trend.direction === 'up' ? <FiArrowUp size={12} /> : <FiArrowDown size={12} />}
-                {trend.pct.toFixed(1)}% vs last month
+                {trend.pct.toFixed(1)}% {trendLabel}
               </span>
             )}
             {achievementPct !== null && targetAmount !== null && (
@@ -201,7 +219,7 @@ export function MonthlySalesPerformanceCard({
       </div>
 
       <div className={styles.predictedRow}>
-        <span className={styles.miniLabel}>Predicted month-end</span>
+        <span className={styles.miniLabel}>{months === 1 ? 'Predicted month-end' : `Predicted by end of ${lastDay.format('MMM')}`}</span>
         <span className={styles.miniValue}>{money(predictedMonthEnd)}</span>
       </div>
 

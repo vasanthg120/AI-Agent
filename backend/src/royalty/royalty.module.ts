@@ -14,7 +14,7 @@ import { RoyaltyRulesService } from './royalty-rules.service';
 import { RoyaltyReportController } from './royalty-report.controller';
 import { RoyaltyReportService } from './royalty-report.service';
 import { RoyaltyReportExportService } from './royalty-report-export.service';
-import { QuotationSalesService } from '../reporting/quotation-sales.service';
+import { WonSalesService } from '../reporting/won-sales.service';
 import { SalesReportService } from '../reporting/sales-report.service';
 
 // Top-level module, not folded into CrmModule — mirrors FinanceModule's own
@@ -32,9 +32,9 @@ import { SalesReportService } from '../reporting/sales-report.service';
 // EmailIntelligenceModule already established for OutlookConnection in
 // Phase 14b.
 //
-// The Royalty report counts the quotations sent in a period — the same ones
-// the Sales and Gross Margin reports count — so the two small stateless
-// services that define and group them (reporting/quotation-sales.service.ts,
+// The Royalty report counts the deals won in a period — the same ones the
+// Sales and Gross Margin reports count — so the two small stateless
+// services that define and group them (reporting/won-sales.service.ts,
 // reporting/sales-report.service.ts) are listed in this module's providers
 // too, rather than importing ReportingModule for them.
 @Module({
@@ -50,7 +50,7 @@ import { SalesReportService } from '../reporting/sales-report.service';
     UsersModule,
   ],
   controllers: [InvoicesController, RoyaltyRulesController, RoyaltyReportController],
-  providers: [InvoicesService, RoyaltyRulesService, RoyaltyReportService, RoyaltyReportExportService, QuotationSalesService, SalesReportService],
+  providers: [InvoicesService, RoyaltyRulesService, RoyaltyReportService, RoyaltyReportExportService, WonSalesService, SalesReportService],
   exports: [InvoicesService, RoyaltyRulesService],
 })
 export class RoyaltyModule {}

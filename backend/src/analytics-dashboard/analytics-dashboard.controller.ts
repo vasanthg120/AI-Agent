@@ -8,6 +8,13 @@ import { AnalyticsDashboardService } from './analytics-dashboard.service';
 import { ScopeInfo } from './analytics-dashboard.types';
 import { GetAnalyticsOverviewQueryDto } from './dto/get-analytics-overview-query.dto';
 import { GetPipelineByMonthQueryDto } from './dto/get-pipeline-by-month-query.dto';
+import { GetPipelineHealthQueryDto } from './dto/get-pipeline-health-query.dto';
+
+/** The server's own calendar date, "YYYY-MM-DD". */
+function localToday(): string {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+}
 import { holdsPermission, isPermissionManaged, Permission } from '../common/permissions/permission.decorator';
 
 // One endpoint, internal role branching — the composite response shape is
@@ -38,6 +45,14 @@ export class AnalyticsDashboardController {
   @Roles('owner', 'admin', 'manager', 'consultant', 'agent_user')
   pipelineByMonth(@CurrentUser() user: JwtPayload, @Query() query: GetPipelineByMonthQueryDto) {
     return this.analyticsDashboardService.getPipelineByMonth(user, this.scopeOf(user, query));
+  }
+
+  // Pipeline Health for the period: open (on time / past due), won, lost — whose deals is decided exactly as for the overview.
+  @Get('pipeline-health')
+  @Roles('owner', 'admin', 'manager', 'consultant', 'agent_user')
+  pipelineHealth(@CurrentUser() user: JwtPayload, @Query() query: GetPipelineHealthQueryDto) {
+    const today = query.today ?? localToday();
+    return this.analyticsDashboardService.getPipelineHealth(user, this.scopeOf(user, query), query.dateFrom, query.dateTo, today);
   }
 
   /** Whose data the caller sees: the whole organization or a chosen store/user for an owner or admin, their own store for a manager, themselves for anyone else. */

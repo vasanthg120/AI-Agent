@@ -9,10 +9,11 @@ import { QuotesService } from '../crm/quotes.service';
 import { Deal, DealDocument } from '../crm/schemas/deal.schema';
 import { Quote, QuoteDocument } from '../crm/schemas/quote.schema';
 import { SalesAnalyticsService } from '../crm/sales-analytics.service';
+import { countedMonths, expectedClosingMonthsMatch } from '../crm/deal-filter.util';
 import { DashboardService } from '../dashboard/dashboard.service';
 import { EmailIntelligenceService } from '../email-intelligence/email-intelligence.service';
 import { OrganizationsService } from '../organizations/organizations.service';
-import { AiInsightItem, AnalyticsDashboardOverview, PipelineByMonth, PipelineMonth, ScopeInfo } from './analytics-dashboard.types';
+import { AiInsightItem, AnalyticsDashboardOverview, PipelineByMonth, PipelineHealth, PipelineMonth, ScopeInfo } from './analytics-dashboard.types';
 import { PreviousMonthClosuresService } from './previous-month-closures.service';
 
 // Unified view (two or more CRMs at once, only when explicitly chosen): the
@@ -28,6 +29,19 @@ function unifiedDealDedupe(): PipelineStage[] {
       },
     },
   ];
+}
+
+// The deals a dashboard period is about: expected to close in the months the
+// dates touch (countedMonths), within the caller's scope (a store, or one
+// person's own deals).
+function periodDealMatch(organizationId: string, scope: ScopeInfo, dateFrom: string, dateTo: string): Record<string, unknown> {
+  const { first, last } = countedMonths(dateFrom, dateTo);
+  return {
+    organizationId,
+    expectedClosingDate: expectedClosingMonthsMatch(first, last),
+    ...(scope.level === 'store' && scope.storeId ? { storeId: scope.storeId } : {}),
+    ...(scope.level === 'user' && scope.userId ? { ownerId: scope.userId } : {}),
+  };
 }
 
 function round1(n: number): number {
@@ -72,19 +86,14 @@ export class AnalyticsDashboardService {
     private previousMonthClosuresService: PreviousMonthClosuresService,
   ) {}
 
-  // Phase 24 — the frontend's date filter was, at the time, always a single
-  // whole calendar month (MonthYearFilterPopup), so every widget could
-  // honestly follow dateFrom's own month instead of being locked to "now".
-  // DashboardHeroHeader later added an "Advanced" start/end picker (an
-  // arbitrary span, not necessarily one calendar month) — achievement
-  // (widget 3) and revenueTrend (widget 8) deliberately stayed month-scoped
-  // (a sales target only exists per calendar month, can't be pro-rated
-  // across an arbitrary span), and the frontend discloses that one caveat
-  // next to the Advanced picker ("Revenue-against-target figures reflect
-  // the target for the start date's month"). Deal counts (wonCount/
-  // lostCount/openCount below) carry no such caveat anywhere in the UI, so
-  // they must honestly follow the real [dateFrom, dateTo] span, not just
-  // dateFrom's month — see dealMatch below.
+  // The period is the whole months the chosen dates touch (countedMonths in
+  // deal-filter.util.ts): one month from the month picker, several from the
+  // header's Advanced start/end dates. Revenue, target and projection
+  // (achievement), deals won/lost/open, conversion and the team figures all
+  // cover those months — before 2026-11-10 they used the start date's month
+  // only, so "1 May – 10 Nov" showed May alone while the lists behind the
+  // figures showed May–Nov. revenueTrend ends on the last month and is long
+  // enough to compare the period with the same number of months before it.
   async getOverview(
     caller: JwtPayload,
     scope: ScopeInfo,
@@ -119,22 +128,12 @@ export class AnalyticsDashboardService {
     // that actually reflects real business timing, not sync-ingestion time.
     // A deal with no expectedClosingDate set is honestly excluded from every
     // period rather than guessed into one — same accepted tradeoff
-    // getAchievement itself already has. expectedClosingDate is stored as a
-    // "YYYY-MM-DD" string (deal.schema.ts), the same format dateFrom/dateTo
-    // are validated to (get-analytics-overview-query.dto.ts), so a plain
-    // string $gte/$lte range compares correctly without parsing — and,
-    // unlike a dateFrom-month-prefix regex, correctly spans an Advanced
-    // picker's arbitrary multi-month range instead of silently collapsing it
-    // to just dateFrom's own month.
+    // getAchievement itself already has. The months counted are the whole
+    // months the dates touch (see this method's own leading comment).
     const start = new Date(`${dateFrom}T00:00:00.000Z`);
     const end = new Date(`${dateTo}T23:59:59.999Z`);
-    const period = dateFrom.slice(0, 7);
-    const dealMatch: Record<string, unknown> = {
-      organizationId,
-      expectedClosingDate: { $gte: dateFrom, $lte: dateTo },
-      ...(scope.level === 'store' && scope.storeId ? { storeId: scope.storeId } : {}),
-      ...(scope.level === 'user' && scope.userId ? { ownerId: scope.userId } : {}),
-    };
+    const { first: period, last: lastPeriod, months } = countedMonths(dateFrom, dateTo);
+    const dealMatch = periodDealMatch(organizationId, scope, dateFrom, dateTo);
     // Scope only, no date range — used below to resolve which deals are in
     // scope (store/owner) before joining quotes through them; a quote's
     // linked deal can legitimately belong to this store/owner even if that
@@ -183,11 +182,8 @@ export class AnalyticsDashboardService {
           { $group: { _id: { $eq: ['$clientApprovalStatus', 'approved'] }, count: { $sum: 1 }, value: { $sum: '$quoteAmount' } } },
         ])
         .exec(),
-      // dateFrom is always the 1st of a single selected month (see this
-      // method's own leading comment) — its own "YYYY-MM" prefix IS that
-      // month's period, so achievement/target now honestly tracks whichever
-      // month is selected instead of always "now".
-      this.salesAnalyticsService.getAchievement(organizationId, scope.level, scopeId, dateFrom.slice(0, 7)),
+      // Every month counted: revenue, the sum of their targets, the projection.
+      this.salesAnalyticsService.getAchievement(organizationId, scope.level, scopeId, period, lastPeriod),
       this.dashboardService.getOverview(caller),
       this.dealPerformanceDashboardService.getConsultantPerformance(
         organizationId,
@@ -197,9 +193,15 @@ export class AnalyticsDashboardService {
         includeAllUsers,
       ),
       this.quotesService.getOutstandingByOwner(organizationId),
-      // Trailing 6 months ending on the selected month (dateFrom's own
-      // "YYYY-MM"), same reasoning as achievement above.
-      this.dealPerformanceDashboardService.getRevenueProgress(organizationId, scope.level, scopeId, 6, dateFrom.slice(0, 7)),
+      // Ends on the last month counted; at least 6 months, and twice the
+      // period (up to 24) so the card can compare it with the months before.
+      this.dealPerformanceDashboardService.getRevenueProgress(
+        organizationId,
+        scope.level,
+        scopeId,
+        Math.min(24, Math.max(6, months.length * 2)),
+        lastPeriod,
+      ),
       this.emailIntelligenceService.getActivityStats(
         organizationId,
         start,
@@ -216,7 +218,8 @@ export class AnalyticsDashboardService {
       ),
       scope.level === 'store' && scope.storeId ? this.resolveStoreName(organizationId, scope.storeId) : Promise.resolve(undefined),
       // Beside achievement, never added to it — see previous-month-closures.service.ts.
-      this.previousMonthClosuresService.get(organizationId, scope, period),
+      // About one month and its previous one, so only for a single month.
+      months.length === 1 ? this.previousMonthClosuresService.get(organizationId, scope, period) : Promise.resolve(null),
     ]);
 
     const byStatus = new Map(dealRows.map((r) => [r._id, r]));
@@ -304,6 +307,58 @@ export class AnalyticsDashboardService {
   // expected to close in an earlier month and is still open belongs to the
   // pipeline all the same. A deal with no expected closing date is counted in
   // the total and reported on its own, never guessed into a month.
+  // See PipelineHealth (analytics-dashboard.types.ts). The same deals as the
+  // overview's won/lost/open figures (periodDealMatch, and one count for a
+  // deal kept in two CRMs shown together), in a single aggregate.
+  async getPipelineHealth(caller: JwtPayload, scope: ScopeInfo, dateFrom: string, dateTo: string, today: string): Promise<PipelineHealth> {
+    const { first, last } = countedMonths(dateFrom, dateTo);
+    const dedupe: PipelineStage[] =
+      (currentDataSourceScope()?.sourceIds.length ?? 0) < 2
+        ? []
+        : [
+            {
+              $group: {
+                _id: { name: { $toLower: { $trim: { input: '$name' } } }, value: '$monetaryValue', closing: '$expectedClosingDate' },
+                dealStatus: { $first: '$dealStatus' },
+                monetaryValue: { $first: '$monetaryValue' },
+                expectedClosingDate: { $first: '$expectedClosingDate' },
+              },
+            },
+          ];
+    const rows = await this.dealModel
+      .aggregate<{ _id: { status: string; pastDue: boolean }; count: number; value: number }>([
+        { $match: periodDealMatch(caller.organizationId, scope, dateFrom, dateTo) },
+        ...dedupe,
+        {
+          $group: {
+            _id: {
+              status: '$dealStatus',
+              pastDue: { $and: [{ $eq: ['$dealStatus', 'open'] }, { $lt: [{ $substrBytes: [{ $ifNull: ['$expectedClosingDate', ''] }, 0, 10] }, today] }] },
+            },
+            count: { $sum: 1 },
+            value: { $sum: { $ifNull: ['$monetaryValue', 0] } },
+          },
+        },
+      ])
+      .exec();
+
+    const sum = (pick: (r: (typeof rows)[number]) => boolean) =>
+      rows.filter(pick).reduce((acc, r) => ({ count: acc.count + r.count, value: acc.value + r.value }), { count: 0, value: 0 });
+    const won = sum((r) => r._id.status === 'won');
+    const lost = sum((r) => r._id.status === 'lost');
+    const closed = won.count + lost.count;
+    return {
+      period: { first, last },
+      today,
+      open: sum((r) => r._id.status === 'open'),
+      onTime: sum((r) => r._id.status === 'open' && !r._id.pastDue),
+      pastDue: sum((r) => r._id.status === 'open' && r._id.pastDue),
+      won,
+      lost,
+      winRatePct: closed > 0 ? round1((won.count / closed) * 100) : null,
+    };
+  }
+
   async getPipelineByMonth(caller: JwtPayload, scope: ScopeInfo): Promise<PipelineByMonth> {
     const organizationId = caller.organizationId;
     const match: Record<string, unknown> = {

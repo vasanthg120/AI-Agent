@@ -52,6 +52,12 @@ export class DealFilterQueryDto {
   @IsIn(['createdAt', 'expectedClosingDate'])
   dateField?: 'createdAt' | 'expectedClosingDate';
 
+  // Only deals expected to close before this day ("YYYY-MM-DD") — with
+  // dealStatus open, the past-due list behind the dashboard's Pipeline Health.
+  @IsOptional()
+  @Matches(DATE, { message: 'closingBefore must be YYYY-MM-DD' })
+  closingBefore?: string;
+
   @IsOptional()
   @Transform(splitCsv)
   @IsArray()

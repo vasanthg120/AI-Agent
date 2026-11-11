@@ -30,6 +30,7 @@ export function DrillDownModal({
   rows,
   formatValue,
   onRowClick,
+  totalCount,
 }: {
   open: boolean;
   onClose: () => void;
@@ -46,6 +47,9 @@ export function DrillDownModal({
   // the full email). Omitted (the default) keeps every existing call site's
   // static, non-clickable rows unchanged.
   onRowClick?: (row: DrillDownRow) => void;
+  // How many records there are in all, when `rows` may be only the first
+  // page of them: the summary then says "First 100 of 129", never "100".
+  totalCount?: number;
 }) {
   const renderValue = formatValue ?? money;
   const [query, setQuery] = useState('');
@@ -60,6 +64,7 @@ export function DrillDownModal({
     }
   }, [open, title]);
 
+  const partial = totalCount !== undefined && totalCount > rows.length;
   const hasValues = rows.some((r) => r.value !== undefined);
   // Summing is only meaningful for money — a custom formatter means counts/percentages.
   const total = hasValues && !formatValue ? rows.reduce((s, r) => s + (r.value ?? 0), 0) : null;
@@ -81,11 +86,19 @@ export function DrillDownModal({
       {!isLoading && rows.length > 0 && (
         <div className={styles.summary}>
           <span className={styles.summaryStat}>
-            <strong>{rows.length}</strong> record{rows.length === 1 ? '' : 's'}
+            {partial ? (
+              <>
+                First <strong>{rows.length}</strong> of <strong>{totalCount}</strong> records
+              </>
+            ) : (
+              <>
+                <strong>{rows.length}</strong> record{rows.length === 1 ? '' : 's'}
+              </>
+            )}
           </span>
           {total !== null && (
             <span className={styles.summaryStat}>
-              <strong>{money(total)}</strong> total
+              <strong>{money(total)}</strong> {partial ? 'total of these' : 'total'}
             </span>
           )}
           {hasValues && (

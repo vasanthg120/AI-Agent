@@ -37,6 +37,7 @@
 }
 
 .progressTrack {
+  display: flex;
   margin-top: var(--space-3);
   height: 8px;
   border-radius: var(--radius-full);
@@ -44,11 +45,22 @@
   overflow: hidden;
 }
 
+/* The open pipeline: on time (accent), then past due (red). */
 .progressFill {
   height: 100%;
-  border-radius: var(--radius-full);
   background: var(--brand-accent-primary);
   transition: width var(--duration-slow) var(--ease-out);
+}
+
+.progressPastDue {
+  height: 100%;
+  background: var(--color-danger);
+  transition: width var(--duration-slow) var(--ease-out);
+}
+
+.pastDueText {
+  color: var(--color-danger-ink, var(--color-danger));
+  font-weight: 600;
 }
 
 .progressLabels {
@@ -82,6 +94,11 @@
 
 .stat:hover {
   background: var(--color-bg-hover);
+}
+
+/* Win rate: a figure, not a list to open. */
+.statStatic {
+  text-align: center;
 }
 
 .statValue {

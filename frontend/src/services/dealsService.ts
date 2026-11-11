@@ -57,6 +57,8 @@ export interface DealFilters {
   // computed from expectedClosingDate (e.g. the achievement/"Total Revenue"
   // number), so the drill-down list matches what was actually summed.
   dateField?: 'createdAt' | 'expectedClosingDate';
+  // Only deals expected to close before this day ("YYYY-MM-DD") — the past-due list.
+  closingBefore?: string;
   ownerId?: string[];
   storeId?: string[];
   dealStatus?: ('open' | 'won' | 'lost')[];
