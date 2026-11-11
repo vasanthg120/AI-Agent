@@ -140,6 +140,9 @@ export class DealsController {
     // ownerIds (new, multi-user) takes precedence when both are somehow
     // sent; ownerId alone (the original, still-accepted shape) behaves
     // identically to a one-element ownerIds array.
+    if (dto.shared) {
+      return this.dealOwnerMappingService.markShared(user.organizationId, dto.provider, dto.externalOwnerRef, dto.externalOwnerLabel, user.sub);
+    }
     const ownerIds = dto.ownerIds?.length ? dto.ownerIds : dto.ownerId ? [dto.ownerId] : [];
     if (ownerIds.length === 0) throw new BadRequestException('Provide ownerId or ownerIds.');
     return this.dealOwnerMappingService.upsertMapping(
@@ -190,7 +193,7 @@ export class DealsController {
   create(@CurrentUser() user: JwtPayload, @Body() dto: CreateDealDto) {
     const canOverride = user.roles.includes('admin') || user.roles.includes('owner');
     const storeConstraint = canOverride ? undefined : user.storeId;
-    return this.dealsService.create(user.organizationId, dto, storeConstraint);
+    return this.dealsService.create(user.organizationId, dto, storeConstraint, user.sub);
   }
 
   @Patch(':id')
@@ -199,7 +202,7 @@ export class DealsController {
   update(@CurrentUser() user: JwtPayload, @Param('id') id: string, @Body() dto: UpdateDealDto) {
     const canOverride = user.roles.includes('admin') || user.roles.includes('owner');
     const storeConstraint = canOverride ? undefined : user.storeId;
-    return this.dealsService.update(id, user.organizationId, dto, storeConstraint);
+    return this.dealsService.update(id, user.organizationId, dto, storeConstraint, user.sub);
   }
 
   // A deal can only be given to an active person of this organization — never

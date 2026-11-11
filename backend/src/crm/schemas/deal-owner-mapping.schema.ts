@@ -52,6 +52,12 @@ export class DealOwnerMapping {
   @Prop({ type: [String], default: [] })
   linkedUserIds: string[];
 
+  // A shared company login in the CRM ("Enquiry T.nagar", "Fully Promoted
+  // Surryhills"), not one person: its work is shown as that shared account's
+  // (Team Performance), never credited to anyone. Linked to nobody.
+  @Prop({ default: false })
+  shared: boolean;
+
   @Prop({ required: true })
   mappedBy: string;
 

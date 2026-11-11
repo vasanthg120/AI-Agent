@@ -61,7 +61,7 @@ export class QuotesController {
   update(@CurrentUser() user: JwtPayload, @Param('id') id: string, @Body() dto: UpdateQuoteDto) {
     const canOverride = user.roles.includes('admin') || user.roles.includes('owner');
     const storeConstraint = canOverride ? undefined : user.storeId;
-    return this.quotesService.updateQuote(user.organizationId, id, dto, storeConstraint);
+    return this.quotesService.updateQuote(user.organizationId, id, dto, storeConstraint, user.sub);
   }
 
   @Get(':id')

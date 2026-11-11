@@ -1,6 +1,6 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
-import { Model } from 'mongoose';
+import { Model, Types } from 'mongoose';
 import { Deal, DealDocument } from './schemas/deal.schema';
 import { DealOwnerMapping, DealOwnerMappingDocument } from './schemas/deal-owner-mapping.schema';
 import { Account, AccountDocument } from './schemas/account.schema';
@@ -16,6 +16,8 @@ export interface ExternalOwnerRow {
   externalOwnerRef: string;
   externalOwnerLabel?: string;
   dealCount: number;
+  // Quotations the CRM lists under this salesperson (deals from most CRMs carry no owner at all).
+  quoteCount: number;
   mapping: {
     id: string;
     // Set only when linkedUserIds has exactly one entry — the auto-
@@ -25,6 +27,8 @@ export interface ExternalOwnerRow {
     // The full set of linked users — always [ownerId] when ownerId is set.
     linkedUserIds: string[];
     linkedUsers: { id: string; name?: string }[];
+    // A shared company login, linked to nobody.
+    shared: boolean;
   } | null;
   // Best-effort match between this CRM's raw owner label and a current
   // employee's name/email — purely a hint the admin still has to click to
@@ -177,7 +181,7 @@ export class DealOwnerMappingService {
   // full picture an admin needs to finish mapping every real salesperson at
   // once, not just react to one deal at a time.
   async listExternalOwners(organizationId: string): Promise<ExternalOwnerRow[]> {
-    const [grouped, mappings, users] = await Promise.all([
+    const [dealOwners, quoteOwners, mappings, users] = await Promise.all([
       this.dealModel
         .aggregate<{ _id: { provider: string; ref: string }; label?: string; count: number }>([
           { $match: { organizationId, externalOwnerRef: { $exists: true, $ne: null } } },
@@ -190,19 +194,40 @@ export class DealOwnerMappingService {
           },
         ])
         .exec(),
+      // The CRMs' quotation salespeople: most CRMs name an owner on quotations only.
+      this.dealModel.db
+        .collection('crm_quotes')
+        .aggregate<{ _id: { provider: string; ref: string }; label?: string; count: number }>([
+          { $match: { organizationId, quoteOwner: { $nin: [null, ''] } } },
+          { $sort: { createdAt: 1 } },
+          { $group: { _id: { provider: '$sourceProvider', ref: '$quoteOwner' }, label: { $last: '$quoteOwnerLabel' }, count: { $sum: 1 } } },
+        ])
+        .toArray(),
       this.mappingModel.find({ organizationId }).exec(),
       this.usersService.findAll(organizationId),
     ]);
 
     const userNameById = new Map(users.map((u) => [u._id.toString(), u.name]));
     const mappingByKey = new Map(mappings.map((m) => [`${m.provider}::${m.externalOwnerRef}`, m]));
+    const owners = new Map<string, { provider: string; ref: string; label?: string; dealCount: number; quoteCount: number }>();
+    for (const g of dealOwners) {
+      const provider = g._id.provider ?? 'unknown';
+      owners.set(`${provider}::${g._id.ref}`, { provider, ref: g._id.ref, label: g.label, dealCount: g.count, quoteCount: 0 });
+    }
+    for (const g of quoteOwners) {
+      const provider = g._id.provider ?? 'unknown';
+      const key = `${provider}::${g._id.ref}`;
+      const known = owners.get(key);
+      if (known) {
+        known.quoteCount = g.count;
+        known.label = known.label ?? g.label;
+      } else owners.set(key, { provider, ref: g._id.ref, label: g.label, dealCount: 0, quoteCount: g.count });
+    }
 
-    return grouped
-      .map((g) => {
-        const provider = g._id.provider ?? 'unknown';
-        const ref = g._id.ref;
+    return [...owners.values()]
+      .map(({ provider, ref, label, dealCount, quoteCount }) => {
         const mapping = mappingByKey.get(`${provider}::${ref}`);
-        const suggested = mapping ? undefined : findSuggestedOwner(g.label, users);
+        const suggested = mapping ? undefined : findSuggestedOwner(label, users);
         // Backward compatibility: every mapping written before linkedUserIds
         // existed has it absent/empty but ownerId set — treat that exactly
         // as a one-element list, never as "no linked users" for a row that
@@ -211,8 +236,9 @@ export class DealOwnerMappingService {
         return {
           provider,
           externalOwnerRef: ref,
-          externalOwnerLabel: g.label,
-          dealCount: g.count,
+          externalOwnerLabel: label,
+          dealCount,
+          quoteCount,
           mapping: mapping
             ? {
                 id: mapping._id.toString(),
@@ -220,13 +246,15 @@ export class DealOwnerMappingService {
                 ownerName: mapping.ownerId ? userNameById.get(mapping.ownerId) : undefined,
                 linkedUserIds,
                 linkedUsers: linkedUserIds.map((id) => ({ id, name: userNameById.get(id) })),
+                shared: !!mapping.shared,
               }
             : null,
           suggestedOwnerId: suggested?.id,
           suggestedOwnerName: suggested?.name,
         };
       })
-      .sort((a, b) => b.dealCount - a.dealCount);
+      // Busiest first; equal ones by name, so the list never reshuffles between visits.
+      .sort((a, b) => b.dealCount + b.quoteCount - (a.dealCount + a.quoteCount) || (a.externalOwnerLabel ?? a.externalOwnerRef).localeCompare(b.externalOwnerLabel ?? b.externalOwnerRef));
   }
 
   // Every user id must belong to this organization and be active — the
@@ -275,19 +303,21 @@ export class DealOwnerMappingService {
       .findOneAndUpdate(
         { organizationId, provider, externalOwnerRef },
         resolvedOwnerId
-          ? { $set: { externalOwnerLabel, ownerId: resolvedOwnerId, linkedUserIds: uniqueOwnerIds, mappedBy } }
-          : { $set: { externalOwnerLabel, linkedUserIds: uniqueOwnerIds, mappedBy }, $unset: { ownerId: '' } },
+          ? { $set: { externalOwnerLabel, ownerId: resolvedOwnerId, linkedUserIds: uniqueOwnerIds, mappedBy, shared: false } }
+          : { $set: { externalOwnerLabel, linkedUserIds: uniqueOwnerIds, mappedBy, shared: false }, $unset: { ownerId: '' } },
         { upsert: true, new: true },
       )
       .exec();
 
     let dealCount = 0;
     if (resolvedOwnerId) {
+      // The deals of this salesperson's quotations too: no CRM sends an owner on its deals.
+      dealCount += await this.applyQuoteOwnerToDeals(organizationId, provider, externalOwnerRef, resolvedOwnerId);
       const result = await this.dealModel.updateMany(
         { organizationId, externalOwnerProvider: provider, externalOwnerRef },
         { $set: { ownerId: resolvedOwnerId } },
       );
-      dealCount = result.matchedCount;
+      dealCount += result.matchedCount;
       // The same person owns the quotations the CRM lists under that owner — a
       // link made for deals used to leave every synced quotation without a
       // HaiVE owner, so quote work showed as nobody's.
@@ -303,14 +333,82 @@ export class DealOwnerMappingService {
       externalOwnerRef,
       externalOwnerLabel: mapping.externalOwnerLabel,
       dealCount,
+      quoteCount: await this.quoteCountOf(organizationId, provider, externalOwnerRef),
       mapping: {
         id: mapping._id.toString(),
         ownerId: resolvedOwnerId,
         ownerName: resolvedOwnerId ? userNameById.get(resolvedOwnerId) : undefined,
         linkedUserIds: uniqueOwnerIds,
         linkedUsers: uniqueOwnerIds.map((id) => ({ id, name: userNameById.get(id) })),
+        shared: false,
       },
     };
+  }
+
+  // A shared company login in the CRM ("Enquiry T.nagar"), not one person:
+  // linked to nobody, its work shown as the shared account's. Whatever an
+  // earlier link to a person gave its quotations, and the deals that got
+  // their owner from them, is taken back off; a deal assigned by hand, or
+  // owned through the CRM's own deal owner, is left alone.
+  async markShared(organizationId: string, provider: string, externalOwnerRef: string, externalOwnerLabel: string | undefined, mappedBy: string): Promise<ExternalOwnerRow> {
+    const mapping = await this.mappingModel
+      .findOneAndUpdate(
+        { organizationId, provider, externalOwnerRef },
+        { $set: { externalOwnerLabel, linkedUserIds: [], mappedBy, shared: true }, $unset: { ownerId: '' } },
+        { upsert: true, new: true },
+      )
+      .exec();
+    await this.dealModel.db
+      .collection('crm_quotes')
+      .updateMany({ organizationId, sourceProvider: provider, quoteOwner: externalOwnerRef }, { $unset: { ownerUserId: '' } });
+    await this.dealModel.updateMany(
+      { organizationId, ownerFromQuoteOwnerRef: externalOwnerRef, ownerAssignedManually: { $ne: true } },
+      { $unset: { ownerId: '', ownerFromQuoteOwnerRef: '' } },
+    );
+    return {
+      provider,
+      externalOwnerRef,
+      externalOwnerLabel: mapping.externalOwnerLabel,
+      dealCount: 0,
+      quoteCount: await this.quoteCountOf(organizationId, provider, externalOwnerRef),
+      mapping: { id: mapping._id.toString(), linkedUserIds: [], linkedUsers: [], shared: true },
+    };
+  }
+
+  /**
+   * Gives a salesperson's deals their owner through their quotations: a deal
+   * whose latest quotation (voided ones aside) is under this CRM salesperson,
+   * with no owner of its own from the CRM, not assigned by hand, and no owner
+   * yet — or one that came the same way — is owned by that person. Marked
+   * (ownerFromQuoteOwnerRef) so it can be taken back off. Returns how many.
+   */
+  async applyQuoteOwnerToDeals(organizationId: string, provider: string, externalOwnerRef: string, ownerId: string): Promise<number> {
+    const latest = await this.dealModel.db
+      .collection('crm_quotes')
+      .aggregate<{ _id: string; owner?: string }>([
+        { $match: { organizationId, sourceProvider: provider, dealId: { $nin: [null, ''] }, quoteStatus: { $ne: 'voided' } } },
+        { $sort: { createdAt: -1 } },
+        { $group: { _id: '$dealId', owner: { $first: '$quoteOwner' } } },
+        { $match: { owner: externalOwnerRef } },
+      ])
+      .toArray();
+    const dealIds = latest.map((r) => r._id).filter((id) => Types.ObjectId.isValid(id));
+    if (dealIds.length === 0) return 0;
+    const result = await this.dealModel.updateMany(
+      {
+        _id: { $in: dealIds },
+        organizationId,
+        ownerAssignedManually: { $ne: true },
+        externalOwnerRef: { $in: [null, ''] },
+        $or: [{ ownerId: { $in: [null, ''] } }, { ownerFromQuoteOwnerRef: { $exists: true } }],
+      },
+      { $set: { ownerId, ownerFromQuoteOwnerRef: externalOwnerRef } },
+    );
+    return result.matchedCount;
+  }
+
+  private quoteCountOf(organizationId: string, provider: string, externalOwnerRef: string): Promise<number> {
+    return this.dealModel.db.collection('crm_quotes').countDocuments({ organizationId, sourceProvider: provider, quoteOwner: externalOwnerRef });
   }
 
   // Removes the mapping only — deliberately never retroactively unassigns

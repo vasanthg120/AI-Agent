@@ -109,6 +109,232 @@ def _source_filter(source: dict) -> dict:
     return {"organizationId": source["organizationId"], "dataSourceId": str(source["_id"])}
 
 
+# ---- CRM activity log ----------------------------------------------------------
+#
+# One row per real change to a deal or a quotation (crm_activities, see the
+# backend's crm/schemas/crm-activity.schema.ts): created, won, lost, reopened,
+# sent, accepted, rejected — from which status to which, its value, the CRM
+# salesperson it was under, and when. Worked out by comparing what the CRM
+# sends with the copy stored before this sync, so a sync running again finds
+# nothing new; dedupeKey (the same keys the backend's backfill uses) makes even
+# two syncs at once harmless. Never allowed to fail the sync itself.
+#
+# Times: the CRM's own creation date when it sends one ("crm"); otherwise the
+# moment this sync saw the change ("detected"). A source's very first import
+# logs no "detected" creations — everything would look created today.
+
+
+def _first_import(source: dict) -> bool:
+    """True until this source has finished one sync."""
+    return get_db().crm_sync_runs.count_documents({"dataSourceId": str(source["_id"]), "status": "ok"}, limit=1) == 0
+
+
+def _org_timezone(organization_id: str) -> str:
+    try:
+        org = get_db().organizations.find_one({"_id": ObjectId(organization_id)}, {"timezone": 1}) or {}
+    except Exception:  # noqa: BLE001 - a malformed id just means the default zone
+        org = {}
+    return org.get("timezone") or "Asia/Kolkata"
+
+
+def _midday(tz_name: str, ymd: str) -> datetime:
+    """Noon, business time, on a date-only day (so it never slides into the next or previous day)."""
+    try:
+        from zoneinfo import ZoneInfo
+
+        zone = ZoneInfo(tz_name)
+    except Exception:  # noqa: BLE001 - unknown zone or no tz data: India, then UTC
+        try:
+            from zoneinfo import ZoneInfo
+
+            zone = ZoneInfo("Asia/Kolkata")
+        except Exception:  # noqa: BLE001
+            zone = timezone.utc
+    year, month, day = (int(p) for p in ymd.split("-"))
+    return datetime(year, month, day, 12, tzinfo=zone).astimezone(timezone.utc)
+
+
+def _utc_day(at: datetime) -> str:
+    return at.astimezone(timezone.utc).strftime("%Y-%m-%d")
+
+
+def _is_sent_quote_status(status) -> bool:
+    """A quotation is sent once it leaves draft (Hoops sent/viewed/accepted/lost, Pantheras published); voided never counts."""
+    return isinstance(status, str) and status not in ("draft", "voided")
+
+
+def _activity_base(source: dict, entity: str, external_id: str) -> dict:
+    return {
+        "organizationId": source["organizationId"],
+        "dataSourceId": str(source["_id"]),
+        "provider": source["provider"],
+        "entity": entity,
+        "externalId": external_id,
+        "origin": "crm_sync",
+        "byAi": False,
+    }
+
+
+def _deal_activity(source: dict, raw: dict, existing: dict | None, first_import: bool, tz_name: str, now: datetime | None = None) -> list[dict]:
+    """What changed on one deal since the stored copy, as activity log rows (no entityId yet)."""
+    now = now or _now()
+    c = to_canonical(raw, (source.get("fieldMappings") or {}).get("deals"))
+    if not c.get("externalId"):
+        return []
+    external_id = str(c["externalId"])
+    status = map_status(c.get("status"), source.get("statusMapping"))
+    closing = _day(c.get("closeDate"))
+    owner = c.get("owner")
+    base = {
+        **_activity_base(source, "deal", external_id),
+        "ref": str(c.get("name") or "Untitled deal"),
+        "value": _number(c.get("amount")),
+        **({"crmOwnerRef": str(owner)} if owner else {}),
+    }
+    prefix = f"{source['_id']}:deal:{external_id}"
+    rows: list[dict] = []
+    if existing is None:
+        created = _parse_date(c.get("createdAt"))
+        if created:
+            rows.append({**base, "kind": "created", "toStatus": status, "occurredAt": created, "occurredAtBasis": "crm", "dedupeKey": f"{prefix}:created"})
+        elif not first_import:
+            rows.append({**base, "kind": "created", "toStatus": status, "occurredAt": now, "occurredAtBasis": "detected", "dedupeKey": f"{prefix}:created"})
+        if status in ("won", "lost"):
+            # Arrived already closed: on its closing date when there is one (the Dashboard's basis).
+            if closing:
+                at, basis = _midday(tz_name, closing), "closing_date"
+            elif not first_import:
+                at, basis = now, "detected"
+            else:
+                at = None
+            if at is not None:
+                rows.append({**base, "kind": status, "toStatus": status, "occurredAt": at, "occurredAtBasis": basis, "dedupeKey": f"{prefix}:{status}:{_utc_day(at)}"})
+        return rows
+    previous = existing.get("dealStatus")
+    kind = {"won": "won", "lost": "lost", "open": "reopened"}.get(status)
+    if previous != status and kind:
+        rows.append(
+            {**base, "kind": kind, "fromStatus": previous, "toStatus": status, "occurredAt": now, "occurredAtBasis": "detected", "dedupeKey": f"{prefix}:{kind}:{_utc_day(now)}"}
+        )
+    return rows
+
+
+def _quote_activity(source: dict, raw: dict, existing: dict | None, first_import: bool, deal_id: str | None = None, now: datetime | None = None) -> list[dict]:
+    """What changed on one quotation since the stored copy, as activity log rows (no entityId yet)."""
+    now = now or _now()
+    c = to_canonical(raw, (source.get("fieldMappings") or {}).get("quotes"))
+    if not c.get("externalId"):
+        return []
+    external_id = str(c["externalId"])
+    status = str(c.get("status") or "draft")
+    approval = str(c.get("approvalStatus") or "pending")
+    owner = c.get("owner")
+    if isinstance(owner, dict):
+        owner = owner.get("id") or owner.get("_id")
+    customer = c.get("customerCompany") or c.get("customerName")
+    base = {
+        **_activity_base(source, "quote", external_id),
+        "ref": str(c.get("number") or c.get("name") or "Untitled quote"),
+        "value": _number(c.get("amount")),
+        "currency": str(c.get("currency") or "USD"),
+        **({"customerName": str(customer)} if customer else {}),
+        **({"dealId": deal_id} if deal_id else {}),
+        **({"crmOwnerRef": str(owner)} if owner else {}),
+        **({"crmOwnerLabel": str(c["ownerName"])} if c.get("ownerName") else {}),
+    }
+    prefix = f"{source['_id']}:quote:{external_id}"
+    rows: list[dict] = []
+    if existing is None:
+        created = _parse_date(c.get("createdAt"))
+        if created:
+            at, basis = created, "crm"
+        elif not first_import:
+            at, basis = now, "detected"
+        else:
+            return rows
+        rows.append({**base, "kind": "created", "toStatus": status, "occurredAt": at, "occurredAtBasis": basis, "dedupeKey": f"{prefix}:created"})
+        if _is_sent_quote_status(status):
+            # Arrived already sent: when exactly is unknown, so counted as sent when it was created.
+            rows.append({**base, "kind": "sent", "toStatus": status, "occurredAt": at, "occurredAtBasis": "assumed", "dedupeKey": f"{prefix}:sent"})
+        # Arrived already accepted or rejected: when is unknown, and is not invented.
+        return rows
+    if not _is_sent_quote_status(existing.get("quoteStatus")) and _is_sent_quote_status(status):
+        rows.append(
+            {**base, "kind": "sent", "fromStatus": existing.get("quoteStatus"), "toStatus": status, "occurredAt": now, "occurredAtBasis": "detected", "dedupeKey": f"{prefix}:sent"}
+        )
+    kind = {"approved": "accepted", "rejected": "rejected"}.get(approval)
+    if kind and existing.get("clientApprovalStatus") != approval:
+        rows.append(
+            {
+                **base,
+                "kind": kind,
+                "fromStatus": existing.get("clientApprovalStatus"),
+                "toStatus": approval,
+                "occurredAt": now,
+                "occurredAtBasis": "detected",
+                "dedupeKey": f"{prefix}:{kind}:{_utc_day(now)}",
+            }
+        )
+    return rows
+
+
+def _record_activity(db, pairs: list, upserted_ids: dict, existing_by_external_id: dict) -> None:
+    """Writes the rows of one bulk write, each tied to its HaiVE record; a key already logged is left as it is."""
+    try:
+        now = _now()
+        writes = []
+        for index, (_op, rows) in enumerate(pairs):
+            if not rows:
+                continue
+            entity_id = upserted_ids.get(index) or (existing_by_external_id.get(rows[0]["externalId"]) or {}).get("_id")
+            for row in rows:
+                doc = {**row, "createdAt": now}
+                if entity_id is not None:
+                    doc["entityId"] = str(entity_id)
+                writes.append(UpdateOne({"dedupeKey": doc["dedupeKey"]}, {"$setOnInsert": doc}, upsert=True))
+        if writes:
+            db.crm_activities.bulk_write(writes, ordered=False)
+    except Exception as exc:  # noqa: BLE001 - the log must never fail a sync (a duplicate key from two syncs at once lands here too)
+        logger.warning("CRM activity log not fully written: %s", exc)
+
+
+def _apply_quote_owners_to_deals(source: dict, owner_mapping_by_ref: dict) -> int:
+    """No CRM sends an owner on its deals: a deal is owned by its latest quotation's salesperson once that
+    salesperson is linked to a HaiVE user (Settings -> Deal Assignment). Never over a deal assigned by hand,
+    one whose CRM did send an owner, or one owned some other way; marked so a later "shared account" can undo it."""
+    if not owner_mapping_by_ref:
+        return 0
+    db = get_db()
+    latest = db.crm_quotes.aggregate(
+        [
+            {"$match": {**_source_filter(source), "dealId": {"$nin": [None, ""]}, "quoteStatus": {"$ne": "voided"}}},
+            {"$sort": {"createdAt": -1}},
+            {"$group": {"_id": "$dealId", "owner": {"$first": "$quoteOwner"}}},
+        ]
+    )
+    writes = []
+    for row in latest:
+        owner_ref = row.get("owner")
+        owner_id = owner_mapping_by_ref.get(str(owner_ref)) if owner_ref else None
+        if not owner_id or not ObjectId.is_valid(str(row["_id"])):
+            continue
+        writes.append(
+            UpdateOne(
+                {
+                    "_id": ObjectId(str(row["_id"])),
+                    "organizationId": source["organizationId"],
+                    "ownerAssignedManually": {"$ne": True},
+                    "externalOwnerRef": {"$in": [None, ""]},
+                    "$or": [{"ownerId": {"$in": [None, ""]}}, {"ownerFromQuoteOwnerRef": {"$exists": True}}],
+                },
+                {"$set": {"ownerId": owner_id, "ownerFromQuoteOwnerRef": str(owner_ref)}},
+            )
+        )
+    if not writes:
+        return 0
+    return db.crm_deals.bulk_write(writes, ordered=False).modified_count
+
+
 # ---- deals -------------------------------------------------------------------
 
 
@@ -212,30 +438,33 @@ def _sync_deals(source: dict, adapter, seen_fields: set) -> int:
             {"quoteOwner": 1, "quoteOwnerLabel": 1},
         )
     }
+    first_import = _first_import(source)
+    tz_name = _org_timezone(organization_id)
     synced = 0
     for rows in adapter.pages("deals"):
         for raw in rows[:_MAX_FIELD_SAMPLES]:
             seen_fields |= field_paths(raw)
-        operations = [
-            op
-            for op in (
-                _deal_update(
-                    source,
-                    store_id,
-                    d,
-                    existing_by_external_id,
-                    owner_mapping_by_ref,
-                    owner_label_by_ref,
-                    adapter.details("deals", d),
-                    adapter.products(d),
-                )
-                for d in rows
+        pairs = []
+        for d in rows:
+            op = _deal_update(
+                source,
+                store_id,
+                d,
+                existing_by_external_id,
+                owner_mapping_by_ref,
+                owner_label_by_ref,
+                adapter.details("deals", d),
+                adapter.products(d),
             )
-            if op
-        ]
+            if not op:
+                continue
+            external_id = str(to_canonical(d, (source.get("fieldMappings") or {}).get("deals")).get("externalId"))
+            pairs.append((op, _deal_activity(source, d, existing_by_external_id.get(external_id), first_import, tz_name)))
+        operations = [op for op, _rows in pairs]
         if operations:
             result = db.crm_deals.bulk_write(operations, ordered=False)
             synced += result.upserted_count + result.modified_count
+            _record_activity(db, pairs, result.upserted_ids, existing_by_external_id)
     return synced
 
 
@@ -335,11 +564,13 @@ def _sync_quotes(source: dict, adapter, seen_fields: set) -> int:
         )
     }
     newly_approved: list[str] = []
+    first_import = _first_import(source)
     synced = 0
     for rows in adapter.pages("quotes"):
         for raw in rows[:_MAX_FIELD_SAMPLES]:
             seen_fields |= field_paths(raw)
         operations = []
+        pairs = []
         for raw in rows:
             op = _quote_update(
                 source, raw, deal_native_id_by_external_id, existing_by_external_id, quote_owner_mapping_by_ref, adapter.charges(raw)
@@ -348,6 +579,11 @@ def _sync_quotes(source: dict, adapter, seen_fields: set) -> int:
                 continue
             operations.append(op)
             c = to_canonical(raw, mapping)
+            deal_ref = c.get("dealRef")
+            if isinstance(deal_ref, dict):
+                deal_ref = deal_ref.get("id") or deal_ref.get("_id")
+            deal_id = deal_native_id_by_external_id.get(str(deal_ref)) if deal_ref else None
+            pairs.append((op, _quote_activity(source, raw, existing_by_external_id.get(str(c.get("externalId"))), first_import, deal_id)))
             if str(c.get("approvalStatus") or "pending") != "approved":
                 continue
             existing = existing_by_external_id.get(str(c.get("externalId")))
@@ -356,8 +592,13 @@ def _sync_quotes(source: dict, adapter, seen_fields: set) -> int:
         if operations:
             result = db.crm_quotes.bulk_write(operations, ordered=False)
             synced += result.upserted_count + result.modified_count
+            _record_activity(db, pairs, result.upserted_ids, existing_by_external_id)
     if newly_approved:
         _draft_invoices_for_newly_approved(db, source, newly_approved)
+    try:
+        _apply_quote_owners_to_deals(source, quote_owner_mapping_by_ref)
+    except Exception as exc:  # noqa: BLE001 - owners are best-effort; the quotations are already stored
+        logger.warning("Deal owners from quotations not applied: %s", exc)
     return synced
 
 

@@ -107,8 +107,13 @@ export interface ExternalOwnerRow {
   externalOwnerRef: string;
   externalOwnerLabel?: string;
   dealCount: number;
+  // Quotations the CRM lists under this salesperson (most CRMs name an owner on quotations only).
+  quoteCount: number;
   mapping: {
     id: string;
+    // A shared company login ("Enquiry T.nagar"), not one person: linked to nobody,
+    // its work shown under its own name in Team Performance.
+    shared: boolean;
     // Set only when linkedUserIds has exactly one entry — the one user
     // whose deals get auto-assigned (now and on future syncs). Undefined
     // when more than one user is linked — linking is an association, not
@@ -165,6 +170,8 @@ export interface UpsertOwnerMappingPayload {
   // Every HaiVE user to link to this external salesperson — a single-
   // element array behaves identically to the previous single-owner shape.
   ownerIds: string[];
+  // A shared company login instead: linked to nobody (ownerIds ignored).
+  shared?: boolean;
 }
 
 // Arrays are sent as a single comma-separated query param (matches

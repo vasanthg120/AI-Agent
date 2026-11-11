@@ -1,4 +1,4 @@
-import { ArrayMinSize, ArrayUnique, IsArray, IsOptional, IsString, MinLength } from 'class-validator';
+import { ArrayMinSize, ArrayUnique, IsArray, IsBoolean, IsOptional, IsString, MinLength } from 'class-validator';
 
 export class UpsertDealOwnerMappingDto {
   @IsString()
@@ -33,4 +33,9 @@ export class UpsertDealOwnerMappingDto {
   @ArrayUnique()
   @IsString({ each: true })
   ownerIds?: string[];
+
+  // A shared company login, not a person: linked to nobody (ownerId/ownerIds ignored).
+  @IsOptional()
+  @IsBoolean()
+  shared?: boolean;
 }

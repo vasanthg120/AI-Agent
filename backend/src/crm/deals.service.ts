@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, Optional } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { FilterQuery, Model } from 'mongoose';
 import { Deal, DealDocument } from './schemas/deal.schema';
@@ -7,10 +7,22 @@ import { UpdateDealDto } from './dto/update-deal.dto';
 import { DealFilterQueryDto } from './dto/deal-filter-query.dto';
 import { ListDealsQueryDto } from './dto/list-deals-query.dto';
 import { buildDealMatchStage } from './deal-filter.util';
+import { CrmActivityService } from './crm-activity.service';
 
 @Injectable()
 export class DealsService {
-  constructor(@InjectModel(Deal.name) private dealModel: Model<DealDocument>) {}
+  private readonly logger = new Logger(DealsService.name);
+
+  // Optional: specs build this service with the deal model alone. The CRM
+  // activity log is written after the change and never fails or slows it.
+  constructor(
+    @InjectModel(Deal.name) private dealModel: Model<DealDocument>,
+    @Optional() private activity?: CrmActivityService,
+  ) {}
+
+  private logActivity(work: Promise<void> | undefined): void {
+    work?.catch((err: Error) => this.logger.warn(`CRM activity log: ${err.message}`));
+  }
 
   list(organizationId: string, storeId?: string) {
     return this.dealModel
@@ -46,12 +58,15 @@ export class DealsService {
     return { requested: unique.length, assigned: result.matchedCount };
   }
 
-  create(organizationId: string, dto: CreateDealDto, storeConstraint?: string) {
+  // actorUserId: the person signed in — the CRM activity log credits the deal to them.
+  async create(organizationId: string, dto: CreateDealDto, storeConstraint?: string, actorUserId?: string) {
     const closed = dto.dealStatus === 'won' || dto.dealStatus === 'lost';
-    return this.dealModel.create({ organizationId, ...dto, storeId: storeConstraint ?? dto.storeId, ...(closed ? { closedAt: new Date() } : {}) });
+    const deal = await this.dealModel.create({ organizationId, ...dto, storeId: storeConstraint ?? dto.storeId, ...(closed ? { closedAt: new Date() } : {}) });
+    this.logActivity(this.activity?.dealCreated(deal.toObject(), actorUserId));
+    return deal;
   }
 
-  async update(id: string, organizationId: string, dto: UpdateDealDto, storeConstraint?: string) {
+  async update(id: string, organizationId: string, dto: UpdateDealDto, storeConstraint?: string, actorUserId?: string) {
     const filter = { _id: id, organizationId, ...(storeConstraint ? { storeId: storeConstraint } : {}) };
     // lostReasonSource is never client-settable (see UpdateDealDto's
     // comment) — server-stamped 'rep_reported' the moment a real reason
@@ -73,8 +88,10 @@ export class DealsService {
     // closedAt (see deal.schema.ts) moves only when the status really changes:
     // re-saving a won deal must not make it look closed again today.
     let unset: Record<string, ''> | undefined;
+    let statusBefore: string | undefined;
     if (dto.dealStatus !== undefined) {
       const before = await this.dealModel.findOne(filter).select({ dealStatus: 1 }).lean().exec();
+      statusBefore = before?.dealStatus;
       if (before && before.dealStatus !== dto.dealStatus) {
         if (dto.dealStatus === 'open') unset = { closedAt: '' };
         else update = { ...update, closedAt: new Date() };
@@ -83,6 +100,9 @@ export class DealsService {
 
     const updated = await this.dealModel.findOneAndUpdate(filter, { $set: update, ...(unset ? { $unset: unset } : {}) }, { new: true }).exec();
     if (!updated) throw new NotFoundException('Deal not found');
+    if (dto.dealStatus !== undefined && statusBefore !== undefined && statusBefore !== updated.dealStatus) {
+      this.logActivity(this.activity?.dealStatusChanged(updated.toObject(), statusBefore, actorUserId));
+    }
     return updated;
   }
 
