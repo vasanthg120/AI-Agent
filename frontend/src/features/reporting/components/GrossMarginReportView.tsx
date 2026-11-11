@@ -32,7 +32,7 @@ export function GrossMarginReportView({
       value: (r) => r.groupLabel,
       render: (r) => <span className={styles.rowLabel}>{r.groupLabel}</span>,
     },
-    { key: 'quotations', label: 'Quotations', numeric: true, value: (r) => r.quotations, render: (r) => r.quotations },
+    { key: 'deals', label: 'Deals won', numeric: true, value: (r) => r.deals, render: (r) => r.deals },
     {
       key: 'exTax',
       label: 'Sales (ex tax)',
@@ -75,9 +75,9 @@ export function GrossMarginReportView({
             label: 'Sales (ex tax)',
             value: formatINR(report.totalSalesExTax),
             icon: FiDollarSign,
-            hint: `${report.quotations} quotation${report.quotations === 1 ? '' : 's'} sent`,
+            hint: `${report.deals} deal${report.deals === 1 ? '' : 's'} won`,
           },
-          { label: 'Tax', value: formatINR(report.totalTax), icon: FiPercent, hint: 'On those quotations' },
+          { label: 'Tax', value: formatINR(report.totalTax), icon: FiPercent, hint: 'Split as on their quotations' },
           {
             label: 'Sales (inc tax)',
             value: formatINR(report.totalSalesIncTax),
@@ -107,7 +107,7 @@ export function GrossMarginReportView({
       )}
 
       {report.groups.length === 0 ? (
-        <EmptyState icon={FiPercent} title="No quotations sent in this period" description="Try a wider date range." />
+        <EmptyState icon={FiPercent} title="No deal won in this period" description="Try a wider date range." />
       ) : (
         <ReportTable
           columns={columns}

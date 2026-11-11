@@ -1,23 +1,24 @@
 import { axiosClient } from '@/api/axiosClient';
 
-// One quotation of the period, with what royalty falls on it.
-export interface RoyaltyReportQuotationLine {
-  quoteId: string;
-  quoteNumber?: string;
+// One deal won in the period, with what royalty falls on it.
+export interface RoyaltyReportSaleLine {
+  dealId: string;
+  dealName: string;
+  // The quotations behind it, e.g. "113, 108".
+  quoteNumbers?: string;
   customerName: string;
-  // The quotation's own date, YYYY-MM-DD.
+  // The day the deal closed, YYYY-MM-DD.
   date: string;
-  accepted: boolean;
   salesExTax: number;
   tax: number;
   salesIncTax: number;
-  // What the royalty is charged on for this quotation.
+  // What the royalty is charged on for this deal.
   eligibleValue: number;
   // At the period's rate, before any cap.
   royalty: number;
 }
 
-export interface RoyaltyReportQuotationsSummary {
+export interface RoyaltyReportSalesSummary {
   totalRecords: number;
   totalSalesExTax: number;
   totalTax: number;
@@ -44,10 +45,8 @@ export interface RoyaltyReportSummary {
     effectiveDate: string;
     excludeTax: boolean;
   } | null;
-  // Quotations sent in the period; of them, accepted by the customer and not accepted yet.
-  totalQuotes: number;
-  totalAcceptedQuotes: number;
-  totalNotAcceptedQuotes: number;
+  // Deals won in the period.
+  wonDeals: number;
   salesExTax: number;
   tax: number;
   salesIncTax: number;
@@ -60,15 +59,15 @@ export interface RoyaltyReportSummary {
   marketingFeeAmount: number | null;
   otherFeeAmount: number | null;
   dataSourceNote: string;
-  quotations: RoyaltyReportQuotationLine[];
-  quotationsSummary: RoyaltyReportQuotationsSummary;
+  sales: RoyaltyReportSaleLine[];
+  salesSummary: RoyaltyReportSalesSummary;
   groupBy: 'salesperson' | 'customer' | null;
   groupedBreakdown: RoyaltyReportGroupRow[];
 }
 
-// Worked out on the backend from the quotations sent in the period — the same
-// ones the Sales and Gross Margin reports count — each with the value and the
-// tax the quotation itself carries. Nothing is read from invoices. Takes an
+// Worked out on the backend from the deals won in the period — the same ones
+// the Sales and Gross Margin reports count — each at the deal's value, its tax
+// split as on its quotations. Nothing is read from invoices. Takes an
 // arbitrary [dateFrom, dateTo] range, not just a calendar month.
 export const royaltyReportService = {
   async generate(

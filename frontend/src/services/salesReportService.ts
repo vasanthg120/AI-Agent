@@ -5,7 +5,8 @@ export type SalesGroupBy = 'customer' | 'user' | 'quoteOwner';
 export interface SalesReportGroupRow {
   groupKey: string;
   groupLabel: string;
-  quotations: number;
+  // Won deals in this group.
+  deals: number;
   salesExTax: number;
   tax: number;
   salesIncTax: number;
@@ -17,9 +18,8 @@ export interface SalesReportSummary {
   dateFrom: string;
   dateTo: string;
   groupBy: SalesGroupBy;
-  // Quotations sent in the period, and how many of them the customer has accepted.
-  quotations: number;
-  accepted: number;
+  // Deals won in the period.
+  deals: number;
   totalSalesExTax: number;
   totalTax: number;
   totalSalesIncTax: number;
@@ -27,9 +27,10 @@ export interface SalesReportSummary {
   dataSourceNote: string;
 }
 
-// Sales = every quotation sent in the period, with the value and the tax the
-// quotation itself carries (backend/src/reporting/quotation-sales.service.ts).
-// The Gross Margin and Royalty reports count the same quotations.
+// Sales = the deals won in the period, by the day each closed, at the deal's
+// value — the Dashboard's revenue — with the tax split as on their quotations
+// (backend/src/reporting/won-sales.service.ts). Gross Margin and Royalty count
+// the same deals.
 export const salesReportService = {
   async generate(dateFrom: string, dateTo: string, groupBy: SalesGroupBy): Promise<SalesReportSummary> {
     const { data } = await axiosClient.get<SalesReportSummary>('/reporting/sales', {

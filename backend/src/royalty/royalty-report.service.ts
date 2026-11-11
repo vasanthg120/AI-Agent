@@ -1,27 +1,28 @@
 import { Injectable } from '@nestjs/common';
-import { countedNote, QuotationSale, QuotationSalesService, round2, totalsOf } from '../reporting/quotation-sales.service';
+import { countedNote, round2, totalsOf, WonSale, WonSalesService } from '../reporting/won-sales.service';
 import { SalesReportService } from '../reporting/sales-report.service';
 import { RoyaltyRule } from './schemas/royalty-rule.schema';
 import { RoyaltyRulesService } from './royalty-rules.service';
 
-/** One quotation of the period, with what royalty falls on it. */
-export interface RoyaltyReportQuotationLine {
-  quoteId: string;
-  quoteNumber?: string;
+/** One deal won in the period, with what royalty falls on it. */
+export interface RoyaltyReportSaleLine {
+  dealId: string;
+  dealName: string;
+  /** The quotations behind it, e.g. "113, 108". */
+  quoteNumbers?: string;
   customerName: string;
-  /** The quotation's own date, YYYY-MM-DD. */
+  /** The day the deal closed, YYYY-MM-DD. */
   date: string;
-  accepted: boolean;
   salesExTax: number;
   tax: number;
   salesIncTax: number;
-  /** What the royalty is charged on for this quotation. */
+  /** What the royalty is charged on for this deal. */
   eligibleValue: number;
   /** At the period's rate, before any cap. */
   royalty: number;
 }
 
-export interface RoyaltyReportQuotationsSummary {
+export interface RoyaltyReportSalesSummary {
   totalRecords: number;
   totalSalesExTax: number;
   totalTax: number;
@@ -29,7 +30,7 @@ export interface RoyaltyReportQuotationsSummary {
   totalRoyalty: number;
 }
 
-// "Group By" breakdown — the same quotations, by salesperson or customer,
+// "Group By" breakdown — the same won deals, by salesperson or customer,
 // with the royalty each group carries at the period's rate (before any cap).
 export interface RoyaltyReportGroupRow {
   groupKey: string;
@@ -52,10 +53,8 @@ export interface RoyaltyReportSummary {
     effectiveDate: Date;
     excludeTax: boolean;
   } | null;
-  /** Quotations sent in the period; of them, accepted by the customer and not accepted yet. */
-  totalQuotes: number;
-  totalAcceptedQuotes: number;
-  totalNotAcceptedQuotes: number;
+  /** Deals won in the period. */
+  wonDeals: number;
   salesExTax: number;
   tax: number;
   salesIncTax: number;
@@ -68,8 +67,8 @@ export interface RoyaltyReportSummary {
   marketingFeeAmount: number | null;
   otherFeeAmount: number | null;
   dataSourceNote: string;
-  quotations: RoyaltyReportQuotationLine[];
-  quotationsSummary: RoyaltyReportQuotationsSummary;
+  sales: RoyaltyReportSaleLine[];
+  salesSummary: RoyaltyReportSalesSummary;
   // Present only when a groupBy was requested.
   groupBy: 'salesperson' | 'customer' | null;
   groupedBreakdown: RoyaltyReportGroupRow[];
@@ -99,20 +98,19 @@ export function royaltyOn(eligibleRevenue: number, rule: RuleTerms | null): { ra
 }
 
 // The Royalty report: what is owed to the franchisor on a period's sales.
-// Sales are the quotations sent in the period — the same ones the Sales and
-// Gross Margin reports count (reporting/quotation-sales.service.ts) — each
-// with the value and the tax the quotation itself carries. Nothing is read
-// from invoices.
+// Sales are the deals won in the period — the same ones the Sales and Gross
+// Margin reports count (reporting/won-sales.service.ts) — each at the deal's
+// value, its tax split as on its quotations. Nothing is read from invoices.
 //
 // The royalty is charged on sales excluding tax (the rule's "Exclude tax"
 // switch, on unless somebody turns it off), at the rule in force at the end
 // of the period — never the merely-latest rule, so a past period keeps the
-// rate it had. A quotation's fees (setup, delivery) are part of its value:
+// rate it had. A deal's fees (setup, delivery) are part of its value:
 // the CRM does not say which part of a fee is delivery, so none is taken off.
 @Injectable()
 export class RoyaltyReportService {
   constructor(
-    private quotationSales: QuotationSalesService,
+    private wonSales: WonSalesService,
     private salesReport: SalesReportService,
     private royaltyRulesService: RoyaltyRulesService,
   ) {}
@@ -126,21 +124,21 @@ export class RoyaltyReportService {
   ): Promise<RoyaltyReportSummary> {
     const [rule, sales, currency] = await Promise.all([
       this.royaltyRulesService.getEffectiveRule(organizationId, new Date(`${dateTo}T23:59:59.999Z`)),
-      this.quotationSales.sent(organizationId, dateFrom, dateTo, storeConstraint),
-      this.quotationSales.currency(organizationId),
+      this.wonSales.won(organizationId, dateFrom, dateTo, storeConstraint),
+      this.wonSales.currency(organizationId),
     ]);
     const totals = totalsOf(sales);
     const royaltyBase: 'exTax' | 'incTax' = rule && rule.excludeTax === false ? 'incTax' : 'exTax';
-    const eligibleOf = (sale: QuotationSale) => (royaltyBase === 'exTax' ? sale.salesExTax : sale.salesIncTax);
+    const eligibleOf = (sale: WonSale) => (royaltyBase === 'exTax' ? sale.salesExTax : sale.salesIncTax);
     const eligibleRevenue = royaltyBase === 'exTax' ? totals.salesExTax : totals.salesIncTax;
     const { ratePct, feeBeforeCap, totalDue } = royaltyOn(eligibleRevenue, rule);
 
-    const quotations: RoyaltyReportQuotationLine[] = sales.map((sale) => ({
-      quoteId: sale.id,
-      quoteNumber: sale.number,
+    const lines: RoyaltyReportSaleLine[] = sales.map((sale) => ({
+      dealId: sale.id,
+      dealName: sale.dealName,
+      quoteNumbers: sale.quoteNumbers,
       customerName: sale.customer,
-      date: sale.date.toISOString().slice(0, 10),
-      accepted: sale.accepted,
+      date: sale.date,
       salesExTax: sale.salesExTax,
       tax: sale.tax,
       salesIncTax: sale.salesIncTax,
@@ -180,9 +178,7 @@ export class RoyaltyReportService {
             excludeTax: rule.excludeTax !== false,
           }
         : null,
-      totalQuotes: totals.quotations,
-      totalAcceptedQuotes: totals.accepted,
-      totalNotAcceptedQuotes: totals.quotations - totals.accepted,
+      wonDeals: totals.deals,
       salesExTax: totals.salesExTax,
       tax: totals.tax,
       salesIncTax: totals.salesIncTax,
@@ -195,13 +191,13 @@ export class RoyaltyReportService {
       marketingFeeAmount: rule?.marketingFeeAmount ?? null,
       otherFeeAmount: rule?.otherFeeAmount ?? null,
       dataSourceNote: `${countedNote(totals)} Royalty is charged on sales ${royaltyBase === 'exTax' ? 'excluding' : 'including'} tax.`,
-      quotations,
-      quotationsSummary: {
-        totalRecords: quotations.length,
+      sales: lines,
+      salesSummary: {
+        totalRecords: lines.length,
         totalSalesExTax: totals.salesExTax,
         totalTax: totals.tax,
         totalSalesIncTax: totals.salesIncTax,
-        totalRoyalty: round2(quotations.reduce((sum, q) => sum + q.royalty, 0)),
+        totalRoyalty: round2(lines.reduce((sum, l) => sum + l.royalty, 0)),
       },
       groupBy: groupBy ?? null,
       groupedBreakdown,
