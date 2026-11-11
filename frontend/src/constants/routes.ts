@@ -100,6 +100,7 @@ export const ADMIN_ROUTES = {
   aiUsageUserDetail: (organizationId: string, userId: string) => `/Admin-haive/ai-usage/organizations/${organizationId}/users/${userId}`,
   aiUsageRequestDetail: (organizationId: string, userId: string, requestId: string) =>
     `/Admin-haive/ai-usage/organizations/${organizationId}/users/${userId}/requests/${requestId}`,
+  aiUsageProviderFinance: '/Admin-haive/ai-usage/finance',
   adminUsers: '/Admin-haive/admin-users',
   auditLogs: '/Admin-haive/audit-logs',
   settings: '/Admin-haive/settings',

@@ -51,6 +51,22 @@ export class AiUsageHierarchyService {
     return new Date(Date.now() - days * 86_400_000);
   }
 
+  // Single source of truth for "how much has this provider genuinely cost
+  // since a given moment" — used by provider-finance.service.ts's estimated-
+  // balance math (confirmedBalance minus cost since the last reconciliation)
+  // so that figure can never diverge from what this dashboard itself
+  // reports for the same provider/window. kind:'llm' only, same reasoning
+  // as every other cost sum in this file — a tool span carries no cost.
+  async getProviderCostSince(provider: string, since: Date): Promise<number> {
+    const rows = await this.executionModel
+      .aggregate<{ cost: number }>([
+        { $match: { kind: 'llm', provider, occurredAt: { $gte: since } } },
+        { $group: { _id: null, cost: { $sum: { $ifNull: ['$costUsd', 0] } } } },
+      ])
+      .exec();
+    return round2(rows[0]?.cost ?? 0);
+  }
+
   // Provider-agnostic — no `provider` filter, unlike
   // ai-usage-admin.service.ts's Anthropic-only baseMatch.
   private llmMatch(days: number, extra: Record<string, unknown> = {}): Record<string, unknown> {

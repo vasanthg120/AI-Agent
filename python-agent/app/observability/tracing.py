@@ -34,7 +34,7 @@ from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor, ConsoleSpanExporter, SimpleSpanProcessor
 
-from app.core import langfuse_config
+from app.core import langfuse_config, provider_account_status
 from app.observability import execution_store
 from app.observability.cost import estimate_cost
 
@@ -50,6 +50,42 @@ else:
 
 trace.set_tracer_provider(_provider)
 tracer = trace.get_tracer("python-agent")
+
+# Confirmed-only provider-exhaustion detection (Phase C of the LLM Provider
+# Finance feature) — verified against the installed anthropic==0.120.2 SDK's
+# own _exceptions.py/error_type.py, not guessed: BadRequestError (HTTP 400)
+# carries a structured `.type` field straight from the API's own JSON error
+# body, and "billing_error"/"invalid_request_error" are real, documented
+# values of that field (the latter is what community reports describe
+# "credit_balance_too_low" surfacing as on some API versions; "billing_error"
+# is the newer, more specific literal the current SDK's ErrorType already
+# lists). Deliberately NOT a loose string-match on the human-readable message
+# text, which could change wording or be localized.
+#
+# Groq has no equivalent structured error-type field on its own SDK
+# (groq._exceptions.APIStatusError exposes only a raw status_code/body, no
+# `.type`) and no confirmed documentation of what its own billing-exhaustion
+# response looks like — rather than guess at a shape that might not exist,
+# Groq is NOT auto-detected here; its ProviderAccount.status can still be
+# set manually by an admin, or automatically by the NestJS alert cron from
+# an estimated-balance crossing (a different, already-honest mechanism —
+# see provider-alert.service.ts).
+try:
+    import anthropic as _anthropic_sdk
+except Exception:  # pragma: no cover - the SDK is always installed in practice
+    _anthropic_sdk = None
+
+_ANTHROPIC_EXHAUSTED_ERROR_TYPES = {"billing_error", "invalid_request_error"}
+
+
+def _mark_provider_exhausted_if_confirmed(provider: str, exc: Exception) -> None:
+    if (
+        provider == "anthropic"
+        and _anthropic_sdk is not None
+        and isinstance(exc, _anthropic_sdk.BadRequestError)
+        and getattr(exc, "type", None) in _ANTHROPIC_EXHAUSTED_ERROR_TYPES
+    ):
+        provider_account_status.mark_exhausted(provider)
 
 
 @contextmanager
@@ -94,6 +130,10 @@ def traced_llm_call(
         except Exception as exc:
             success = False
             error = str(exc)[:500]
+            try:
+                _mark_provider_exhausted_if_confirmed(provider, exc)
+            except Exception:
+                pass  # observability must never mask the real exception below
             raise
         finally:
             latency_ms = (time.monotonic() - start) * 1000

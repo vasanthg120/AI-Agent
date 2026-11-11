@@ -26,6 +26,7 @@ from app.agent import anthropic_client, cancellation, groq_client, trivial_route
 from app.agent.graph import final_text, get_graph
 from app.agent.llm_client import SYSTEM_PROMPT
 from app.agent.specialists import SPECIALISTS
+from app.core import provider_account_status
 
 MAX_ASSIGNMENTS = len(SPECIALISTS)
 
@@ -225,20 +226,31 @@ def run(state_input: dict) -> dict:
             # meaningfully catch. Any Groq failure (no key, outage, quota)
             # falls through to the unchanged Claude 'simple' path below
             # rather than surfacing an error.
-            try:
-                output_items = groq_client.call(
-                    state_input["messages"],
-                    on_event=on_event,
-                    system_prompt=state_input.get("system_prompt"),
-                    cancel_event=cancel_event,
-                    organization_id=state_input.get("organization_id"),
-                    user_id=state_input.get("user_id", ""),
-                    conversation_id=state_input.get("conversation_id", ""),
-                    request_id=state_input.get("request_id", ""),
-                )
-                return {"messages": output_items, "tools_used": []}
-            except Exception:
-                pass
+            #
+            # provider_account_status.is_exhausted('groq') skips straight to
+            # that same fallthrough when Groq is already known-unavailable
+            # (admin-marked, or the NestJS alert cron's own estimated-balance
+            # check — see provider-alert.service.ts) rather than spending a
+            # real network call certain to fail the same way the last one
+            # did. Never the reverse (Anthropic has no fallback provider of
+            # its own in this app today, so there is nothing to skip to if
+            # IT is exhausted) — see tracing.py's own confirmed-exhaustion
+            # detection for what marks it that way in the first place.
+            if not provider_account_status.is_exhausted("groq"):
+                try:
+                    output_items = groq_client.call(
+                        state_input["messages"],
+                        on_event=on_event,
+                        system_prompt=state_input.get("system_prompt"),
+                        cancel_event=cancel_event,
+                        organization_id=state_input.get("organization_id"),
+                        user_id=state_input.get("user_id", ""),
+                        conversation_id=state_input.get("conversation_id", ""),
+                        request_id=state_input.get("request_id", ""),
+                    )
+                    return {"messages": output_items, "tools_used": []}
+                except Exception:
+                    pass
 
         assignments = [a for a in plan.get("assignments", []) if a.get("agent") in SPECIALISTS][:MAX_ASSIGNMENTS]
         if plan.get("mode") != "delegate" or not assignments:
