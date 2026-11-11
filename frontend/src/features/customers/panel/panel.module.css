@@ -28,6 +28,14 @@
   gap: var(--space-2);
 }
 
+/* The Jobs tab's own status chips under each row — wraps, unlike stageRow's fixed grid. */
+.chipWrap {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-top: var(--space-1);
+}
+
 /* Each status is a menu. The row never clips: a menu must be free to open below it. */
 .stageMenu {
   display: block;

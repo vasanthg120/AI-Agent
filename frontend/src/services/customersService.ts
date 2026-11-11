@@ -174,6 +174,35 @@ export interface Customer {
   // Set by hand; falls back to `owner` (the derived quote/deal owner) when unset.
   repUserId?: string;
   repName?: string;
+  // Hoops-parity Add/Edit Customer fields — all set by hand, saved in HaiVE
+  // only. Named CustomerRecordType (not CustomerType) to avoid colliding
+  // with the existing new/existing/returning CustomerType above.
+  customerType: CustomerRecordType;
+  website?: string;
+  industryType?: string;
+  minimumMarkupPct?: number;
+  salesDiscountPct?: number;
+  profileNote?: string;
+  addresses: CustomerAddress[];
+}
+
+export type CustomerRecordType = 'business' | 'individual';
+export const ADDRESS_TYPES = ['billing', 'shipping', 'other'] as const;
+export type AddressType = (typeof ADDRESS_TYPES)[number];
+export interface CustomerAddress {
+  id: string;
+  type: AddressType;
+  address: string;
+  addressLine2?: string;
+  city?: string;
+  state?: string;
+}
+export interface CreateCustomerAddressPayload {
+  type: AddressType;
+  address: string;
+  addressLine2?: string;
+  city?: string;
+  state?: string;
 }
 
 export interface OrderComparison {
@@ -499,6 +528,14 @@ export interface CreateCustomerPayload {
   phone?: string;
   repUserId?: string;
   confirmDuplicate?: boolean;
+  customerType?: CustomerRecordType;
+  website?: string;
+  industryType?: string;
+  minimumMarkupPct?: number;
+  salesDiscountPct?: number;
+  profileNote?: string;
+  addresses?: CreateCustomerAddressPayload[];
+  contacts?: AddCustomerContactPayload[];
 }
 
 export interface UpdateCustomerPayload {
@@ -508,6 +545,13 @@ export interface UpdateCustomerPayload {
   phone?: string;
   // '' clears the assignment back to the derived owner.
   repUserId?: string;
+  customerType?: CustomerRecordType;
+  // '' clears each of these four back to "not recorded".
+  website?: string;
+  industryType?: string;
+  minimumMarkupPct?: number;
+  salesDiscountPct?: number;
+  profileNote?: string;
 }
 
 export interface AddCustomerContactPayload {
@@ -522,6 +566,24 @@ export interface CreateCustomerResult {
   // Set instead of `created` when the email/phone/company looked like an existing
   // customer — resend with confirmDuplicate:true to create anyway.
   duplicate?: Customer;
+}
+
+export interface ImportRowError {
+  row: number;
+  message: string;
+}
+export interface ImportCustomerDraft {
+  row: number;
+  summary: string;
+}
+export interface ImportPreviewResult {
+  customers: ImportCustomerDraft[];
+  errors: ImportRowError[];
+}
+export interface ImportCommitResult {
+  created: number;
+  skippedDuplicates: { row: number; name: string; existingId: string }[];
+  errors: ImportRowError[];
 }
 
 // What goes on the URL: empty values left out, each filter as one comma-separated list.
@@ -676,6 +738,16 @@ export const customersService = {
     return data;
   },
 
+  async addAddress(id: string, payload: CreateCustomerAddressPayload): Promise<Customer> {
+    const { data } = await axiosClient.post<Customer>(`/customers/${id}/addresses`, payload);
+    return data;
+  },
+
+  async removeAddress(id: string, addressId: string): Promise<Customer> {
+    const { data } = await axiosClient.delete<Customer>(`/customers/${id}/addresses/${addressId}`);
+    return data;
+  },
+
   // Just enough to populate the "Customer Rep" picker — GET /users itself is admin-only,
   // stricter than this page's own owner/admin/manager tier.
   async listReps(): Promise<{ id: string; name: string }[]> {
@@ -687,6 +759,25 @@ export const customersService = {
   // narrowed to one.
   async listAllTasks(filters: { status?: 'open' | 'done'; mine?: boolean } = {}): Promise<CrossCustomerTask[]> {
     const { data } = await axiosClient.get<CrossCustomerTask[]>('/customers/tasks', { params: filters });
+    return data;
+  },
+
+  async downloadImportTemplate(): Promise<Blob> {
+    const { data } = await axiosClient.get<Blob>('/customers/import-template', { responseType: 'blob' });
+    return data;
+  },
+
+  async previewImport(file: File): Promise<ImportPreviewResult> {
+    const form = new FormData();
+    form.append('file', file);
+    const { data } = await axiosClient.post<ImportPreviewResult>('/customers/import/preview', form);
+    return data;
+  },
+
+  async commitImport(file: File): Promise<ImportCommitResult> {
+    const form = new FormData();
+    form.append('file', file);
+    const { data } = await axiosClient.post<ImportCommitResult>('/customers/import/commit', form);
     return data;
   },
 };

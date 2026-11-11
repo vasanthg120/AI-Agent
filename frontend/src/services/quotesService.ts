@@ -1,4 +1,5 @@
 import { axiosClient } from '@/api/axiosClient';
+import { ROUTES } from '@/constants/routes';
 
 export interface QuoteClientDetails {
   companyName?: string;
@@ -49,6 +50,10 @@ export interface Quote {
   // records created before these fields existed.
   sourceEmailIntelligenceItemId?: string;
   ownerUserId?: string;
+  // The synced CRM's own free-text user label — distinct from ownerUserId
+  // (a real HaiVE userId, reassignable). SalesBoard's "User" column reads
+  // this; "Sales Rep" reads ownerUserId resolved to a name.
+  quoteOwnerLabel?: string;
   dueDate?: string;
   paidAmount: number;
   // Native quote line items (empty for synced/legacy quotes, which keep
@@ -57,7 +62,50 @@ export interface Quote {
   subtotal: number;
   discountAmount: number;
   taxAmount: number;
+
+  // --- Hoops-parity SalesBoard additions (see backend quote.schema.ts) ---
+  salesStatus?: string;
+  classification?: string;
+  paymentInvoiceStatus?: string;
+  orderStatus?: string;
+  paymentStatus?: string;
+  deliveryStatus?: string;
+  artworkStatus?: string;
+  productionReadyStatus?: string;
+  completedStatus?: string;
+  productionHouseVendorId?: string;
+  vendorIds: string[];
+  decorationId?: string;
+  customerType?: string;
+  deliveryDate?: string;
+  referenceFileId?: string;
+  referenceFileName?: string;
+  referenceFileMimeType?: string;
+  createdByUserId?: string;
+  archived: boolean;
+  guestViewToken?: string;
+  viewedAt?: string;
+  viewCount: number;
 }
+
+export const QUOTE_CUSTOMER_TYPES = ['new', 'bau'] as const;
+export type QuoteCustomerType = (typeof QUOTE_CUSTOMER_TYPES)[number];
+
+// Field keys status-definitions.service.ts seeds for categories A-I — the
+// exact strings every StatusDropdown/StatusBadge instance below passes as
+// `field`.
+export const QUOTE_STATUS_FIELDS = [
+  'salesStatus',
+  'classification',
+  'paymentInvoiceStatus',
+  'orderStatus',
+  'paymentStatus',
+  'deliveryStatus',
+  'artworkStatus',
+  'productionReadyStatus',
+  'completedStatus',
+] as const;
+export type QuoteStatusField = (typeof QUOTE_STATUS_FIELDS)[number];
 
 export interface CreateQuotePayload {
   clientDetails?: QuoteClientDetails;
@@ -82,6 +130,22 @@ export interface UpdateQuotePayload {
   dealId?: string;
   clientDetails?: QuoteClientDetails;
   items?: QuoteLineItemInput[];
+  salesStatus?: string;
+  classification?: string;
+  paymentInvoiceStatus?: string;
+  orderStatus?: string;
+  paymentStatus?: string;
+  deliveryStatus?: string;
+  artworkStatus?: string;
+  productionReadyStatus?: string;
+  completedStatus?: string;
+  productionHouseVendorId?: string;
+  vendorIds?: string[];
+  decorationId?: string;
+  customerType?: string;
+  deliveryDate?: string;
+  ownerUserId?: string;
+  archived?: boolean;
 }
 
 export interface QuotePayment {
@@ -106,6 +170,35 @@ export interface ListQuotesFilters {
   // 'draft' | 'published' | 'sent' — mirrors backend quotes.service.ts's
   // ListQuotesFilter exactly; added for the SalesBoard's status tabs.
   quoteStatus?: string;
+  search?: string;
+  salesStatus?: string;
+  classification?: string;
+  paymentInvoiceStatus?: string;
+  orderStatus?: string;
+  paymentStatus?: string;
+  deliveryStatus?: string;
+  artworkStatus?: string;
+  productionReadyStatus?: string;
+  completedStatus?: string;
+  productionHouseVendorId?: string;
+  vendorId?: string;
+  decorationId?: string;
+  customerType?: string;
+  ownerUserId?: string;
+  createdByUserId?: string;
+  sort?: string;
+  direction?: 'asc' | 'desc';
+  archived?: 'only' | 'include';
+  deadlineFrom?: string;
+  deadlineTo?: string;
+  deliveryDateFrom?: string;
+  deliveryDateTo?: string;
+  paymentDeadlineFrom?: string;
+  paymentDeadlineTo?: string;
+  totalMin?: number;
+  totalMax?: number;
+  hasReference?: 'only' | 'missing';
+  viewed?: 'only' | 'unviewed';
 }
 
 export interface ListQuotesResult {
@@ -155,5 +248,63 @@ export const quotesService = {
   async listPayments(quoteId: string): Promise<QuotePayment[]> {
     const { data } = await axiosClient.get<QuotePayment[]>(`/crm/quotes/${quoteId}/payments`);
     return data;
+  },
+
+  // --- Hoops-parity SalesBoard record actions ---
+
+  async duplicate(id: string): Promise<Quote> {
+    const { data } = await axiosClient.post<Quote>(`/crm/quotes/${id}/duplicate`);
+    return data;
+  },
+
+  async setArchived(id: string, archived: boolean): Promise<Quote> {
+    const { data } = await axiosClient.post<Quote>(`/crm/quotes/${id}/archive`, { archived });
+    return data;
+  },
+
+  async remove(id: string): Promise<void> {
+    await axiosClient.delete(`/crm/quotes/${id}`);
+  },
+
+  async send(id: string): Promise<{ sent: boolean; to: string }> {
+    const { data } = await axiosClient.post<{ sent: boolean; to: string }>(`/crm/quotes/${id}/send`);
+    return data;
+  },
+
+  async getGuestLink(id: string): Promise<string> {
+    const { data } = await axiosClient.post<{ token: string }>(`/crm/quotes/${id}/guest-link`);
+    const path = ROUTES.quoteGuestView.replace(':token', data.token);
+    return `${window.location.origin}${path}`;
+  },
+
+  async setReferenceFile(id: string, file: File): Promise<Quote> {
+    const form = new FormData();
+    form.append('file', file);
+    const { data } = await axiosClient.post<Quote>(`/crm/quotes/${id}/reference`, form, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+    return data;
+  },
+
+  referenceFileUrl(id: string): string {
+    return `/crm/quotes/${id}/reference`;
+  },
+
+  async downloadBlob(url: string, suggestedFilename: string): Promise<void> {
+    const { data } = await axiosClient.get(url, { responseType: 'blob' });
+    const href = URL.createObjectURL(data as Blob);
+    const link = document.createElement('a');
+    link.href = href;
+    link.download = suggestedFilename;
+    link.click();
+    URL.revokeObjectURL(href);
+  },
+
+  downloadPdf(id: string, quoteNumber?: string): Promise<void> {
+    return this.downloadBlob(`/crm/quotes/${id}/pdf`, `${quoteNumber ?? id}.pdf`);
+  },
+
+  downloadInvoicePdf(id: string, quoteNumber?: string): Promise<void> {
+    return this.downloadBlob(`/crm/quotes/${id}/invoice-pdf`, `${quoteNumber ?? id}-payments.pdf`);
   },
 };

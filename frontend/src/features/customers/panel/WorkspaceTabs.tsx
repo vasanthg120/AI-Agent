@@ -151,6 +151,107 @@ export function CommentsTab({ api, workspace, onChanged, of = 'customer', onOpen
   );
 }
 
+// Hoops-parity Tasks — the same WorkspaceApi.addTask/updateTask/removeTask
+// every customer/job already has (CustomerPanel's own Follow-up menu
+// already calls addTask for its quick "Follow up in N days" shortcuts);
+// this is the first tab that lets the team manage tasks directly, on
+// either a customer or one of their jobs. Saved in HaiVE only.
+export function TasksTab({ api, workspace, onChanged, of = 'customer' }: WorkspaceTabProps) {
+  const [title, setTitle] = useState('');
+  const [dueDate, setDueDate] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  const add = async (event?: FormEvent) => {
+    event?.preventDefault();
+    if (!title.trim() || saving) return;
+    setSaving(true);
+    try {
+      await api.addTask({ title: title.trim(), dueDate: dueDate ? new Date(dueDate).toISOString() : undefined });
+      setTitle('');
+      setDueDate('');
+      onChanged();
+    } catch (err) {
+      failed(err);
+    } finally {
+      setSaving(false);
+    }
+  };
+  const toggle = async (taskId: string, status: 'open' | 'done') => {
+    try {
+      await api.updateTask(taskId, { status });
+      onChanged();
+    } catch (err) {
+      failed(err);
+    }
+  };
+  const remove = async (taskId: string) => {
+    if (!window.confirm('Delete this task?')) return;
+    try {
+      await api.removeTask(taskId);
+      onChanged();
+    } catch (err) {
+      failed(err);
+    }
+  };
+
+  return (
+    <>
+      <form className={styles.composer} onSubmit={(e) => void add(e)}>
+        <input
+          type="text"
+          aria-label="Task title"
+          placeholder={of === 'job' ? 'Add a task for this job…' : 'Add a task for this customer…'}
+          value={title}
+          maxLength={200}
+          onChange={(e) => setTitle(e.target.value)}
+        />
+        <div className={styles.composerFoot}>
+          <input type="date" aria-label="Due date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} />
+          <Button type="submit" size="sm" loading={saving} disabled={!title.trim()}>
+            Add task
+          </Button>
+        </div>
+      </form>
+      <Loaded workspace={workspace}>
+        {({ tasks, canManage }) =>
+          tasks.length === 0 ? (
+            <p className={detailStyles.muted}>No tasks yet.</p>
+          ) : (
+            <ul className={styles.notes}>
+              {tasks.map((task) => (
+                <li key={task.id} className={styles.note}>
+                  <div className={styles.noteHead}>
+                    <input
+                      type="checkbox"
+                      checked={task.status === 'done'}
+                      aria-label={task.status === 'done' ? 'Mark not done' : 'Mark done'}
+                      onChange={() => void toggle(task.id, task.status === 'done' ? 'open' : 'done')}
+                    />
+                    <strong className={task.status === 'done' ? detailStyles.muted : undefined}>{task.title}</strong>
+                    {task.dueDate && <time dateTime={task.dueDate}>{formatDate(task.dueDate)}</time>}
+                    {task.assignee && <Badge variant={task.overdue ? 'danger' : 'neutral'}>{task.assignee}</Badge>}
+                    {(task.mine || canManage) && (
+                      <button
+                        type="button"
+                        className={styles.iconLink}
+                        aria-label="Delete task"
+                        title="Delete task"
+                        onClick={() => void remove(task.id)}
+                      >
+                        <FiTrash2 aria-hidden />
+                      </button>
+                    )}
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )
+        }
+      </Loaded>
+    </>
+  );
+}
+
 export const fileSize = (bytes: number) =>
   bytes >= 1024 * 1024 ? `${(bytes / (1024 * 1024)).toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`;
 

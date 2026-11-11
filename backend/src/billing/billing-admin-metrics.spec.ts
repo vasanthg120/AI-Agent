@@ -234,4 +234,61 @@ describe('BillingAdminService — Phase 7 metrics (real Mongo)', () => {
       expect(after.totalCustomers).toBeGreaterThanOrEqual(before.totalCustomers); // never shrinks
     });
   });
+
+  describe('getAnalyticsTimeSeries', () => {
+    // Real production incident: two leftover BillingSubscription rows from
+    // other e2e specs' own fixtures (calling.e2e.spec.ts,
+    // tenant-isolation.e2e.spec.ts both insert { planId: 'none',
+    // planPriceId: 'none' } as a stub "has an active subscription" row) were
+    // never cleaned up and sat in the shared dev database as genuinely
+    // active subscriptions. planId is a plain string field with no ref/
+    // ObjectId validation at the schema level, so Mongoose's
+    // `planModel.find({ _id: { $in: planIds } })` threw a CastError the
+    // instant one "active" row's planId wasn't a real ObjectId —
+    // confirmed live, 500ing the whole /billing/admin/analytics page for
+    // every admin, not just a missing-plan-name degradation.
+    it('a malformed planId on one active subscription never crashes the whole call', async () => {
+      await subscriptionModel.create({
+        organizationId: `${TEST_PREFIX}-org-malformed-plan`,
+        planId: 'none',
+        planPriceId: 'none',
+        status: 'active',
+        currentPeriodStart: new Date(),
+        currentPeriodEnd: new Date(Date.now() + 30 * 86_400_000),
+        createdBy: 'jest',
+      });
+
+      const result = await adminService.getAnalyticsTimeSeries(3650);
+
+      expect(result.planDistribution.some((p) => p.planName === 'Unknown plan')).toBe(true);
+    });
+
+    it('a well-formed active subscription is still correctly attributed to its real plan name', async () => {
+      const plan = await planModel.create({ key: `${TEST_PREFIX}-series-plan`, name: 'Series Plan', active: true, isPublic: true, sortOrder: 0 });
+      createdPlanIds.push(plan._id.toString());
+      const price = await priceModel.create({
+        planId: plan._id.toString(),
+        currencyCode: 'INR',
+        billingCycle: 'monthly',
+        amount: 830,
+        creditsGranted: 1000,
+        effectiveFrom: new Date(),
+        effectiveTo: null,
+        active: true,
+      });
+      await subscriptionModel.create({
+        organizationId: `${TEST_PREFIX}-org-series`,
+        planId: plan._id.toString(),
+        planPriceId: price._id.toString(),
+        status: 'active',
+        currentPeriodStart: new Date(),
+        currentPeriodEnd: new Date(Date.now() + 30 * 86_400_000),
+        createdBy: 'jest',
+      });
+
+      const result = await adminService.getAnalyticsTimeSeries(3650);
+
+      expect(result.planDistribution.find((p) => p.planName === 'Series Plan')?.count).toBeGreaterThanOrEqual(1);
+    });
+  });
 });

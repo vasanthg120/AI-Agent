@@ -20,6 +20,22 @@ export class VendorsService {
     return this.vendorModel.find({ organizationId }).sort({ name: 1 }).exec();
   }
 
+  // Name-only projection for pickers outside Vendors' own owner/admin-only
+  // screens (Hoops-parity Catalog's Vendor fields) — deliberately excludes
+  // bankDetails/taxId/contactName/etc, the data this module exists to keep
+  // more sensitive than Products' own manager/consultant-reachable tier.
+  listPicker(organizationId: string) {
+    return this.vendorModel.find({ organizationId }, 'name').sort({ name: 1 }).exec();
+  }
+
+  // Cross-module existence check (CrmModule's Product/Decoration vendorId
+  // validation) — exposed through VendorsService rather than exporting the
+  // Vendor Mongoose model itself, so VendorsModule's own
+  // MongooseModule.forFeature registration stays its sole owner.
+  async existsInOrg(organizationId: string, vendorId: string): Promise<boolean> {
+    return (await this.vendorModel.exists({ _id: vendorId, organizationId })) !== null;
+  }
+
   async getVendor(organizationId: string, id: string) {
     const vendor = await this.vendorModel.findOne({ _id: id, organizationId }).exec();
     if (!vendor) throw new NotFoundException('Vendor not found');

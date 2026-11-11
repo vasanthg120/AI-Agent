@@ -16,12 +16,16 @@ const dashboard_module_1 = require("../dashboard/dashboard.module");
 const organizations_module_1 = require("../organizations/organizations.module");
 const timeline_module_1 = require("../timeline/timeline.module");
 const users_module_1 = require("../users/users.module");
+const vendors_module_1 = require("../vendors/vendors.module");
+const customer_intelligence_module_1 = require("../customer-intelligence/customer-intelligence.module");
+const gridfs_service_1 = require("../common/gridfs/gridfs.service");
 const account_schema_1 = require("./schemas/account.schema");
 const contact_schema_1 = require("./schemas/contact.schema");
 const customer_activity_summary_schema_1 = require("./schemas/customer-activity-summary.schema");
 const customer_activity_personal_summary_schema_1 = require("./schemas/customer-activity-personal-summary.schema");
 const deal_schema_1 = require("./schemas/deal.schema");
 const deal_owner_mapping_schema_1 = require("./schemas/deal-owner-mapping.schema");
+const decoration_schema_1 = require("./schemas/decoration.schema");
 const email_intelligence_item_schema_1 = require("../email-intelligence/schemas/email-intelligence-item.schema");
 const note_schema_1 = require("./schemas/note.schema");
 const product_schema_1 = require("./schemas/product.schema");
@@ -38,8 +42,14 @@ const crm_service_1 = require("./crm.service");
 const customer_activity_controller_1 = require("./customer-activity.controller");
 const customer_activity_service_1 = require("./customer-activity.service");
 const quotes_controller_1 = require("./quotes.controller");
+const quote_guest_controller_1 = require("./quote-guest.controller");
+const quote_documents_service_1 = require("./quote-documents.service");
 const products_controller_1 = require("./products.controller");
 const products_service_1 = require("./products.service");
+const decorations_controller_1 = require("./decorations.controller");
+const decorations_service_1 = require("./decorations.service");
+const catalog_gridfs_service_1 = require("./catalog-gridfs.service");
+const quote_gridfs_service_1 = require("./quote-gridfs.service");
 const deal_performance_dashboard_service_1 = require("./deal-performance-dashboard.service");
 const deals_controller_1 = require("./deals.controller");
 const deals_export_service_1 = require("./deals-export.service");
@@ -66,6 +76,7 @@ exports.CrmModule = CrmModule = __decorate([
                 { name: quote_payment_schema_1.QuotePayment.name, schema: quote_payment_schema_1.QuotePaymentSchema },
                 { name: note_schema_1.Note.name, schema: note_schema_1.NoteSchema },
                 { name: product_schema_1.Product.name, schema: product_schema_1.ProductSchema },
+                { name: decoration_schema_1.Decoration.name, schema: decoration_schema_1.DecorationSchema },
                 { name: tag_schema_1.Tag.name, schema: tag_schema_1.TagSchema },
                 { name: sales_target_schema_1.SalesTarget.name, schema: sales_target_schema_1.SalesTargetSchema },
                 { name: quote_counter_schema_1.QuoteCounter.name, schema: quote_counter_schema_1.QuoteCounterSchema },
@@ -77,6 +88,8 @@ exports.CrmModule = CrmModule = __decorate([
             organizations_module_1.OrganizationsModule,
             users_module_1.UsersModule,
             auth_module_1.AuthModule,
+            vendors_module_1.VendorsModule,
+            customer_intelligence_module_1.CustomerIntelligenceModule,
             billing_module_1.BillingModule,
             timeline_module_1.TimelineModule,
             axios_1.HttpModule.register({ timeout: 60_000 }),
@@ -88,7 +101,9 @@ exports.CrmModule = CrmModule = __decorate([
             deals_controller_1.DealsController,
             customer_activity_controller_1.CustomerActivityController,
             quotes_controller_1.QuotesController,
+            quote_guest_controller_1.QuoteGuestController,
             products_controller_1.ProductsController,
+            decorations_controller_1.DecorationsController,
         ],
         providers: [
             crm_activity_service_1.CrmActivityService,
@@ -102,7 +117,12 @@ exports.CrmModule = CrmModule = __decorate([
             customer_activity_service_1.CustomerActivityService,
             quotes_service_1.QuotesService,
             quote_payments_service_1.QuotePaymentsService,
+            quote_documents_service_1.QuoteDocumentsService,
             products_service_1.ProductsService,
+            decorations_service_1.DecorationsService,
+            gridfs_service_1.GridFsService,
+            catalog_gridfs_service_1.CatalogGridFsService,
+            quote_gridfs_service_1.QuoteGridFsService,
         ],
         exports: [
             crm_activity_service_1.CrmActivityService,

@@ -1,7 +1,18 @@
-import { BadRequestException, Injectable, Logger, NotFoundException, Optional } from '@nestjs/common';
-import { InjectModel } from '@nestjs/mongoose';
-import { FilterQuery, Model } from 'mongoose';
+import { randomBytes } from 'crypto';
+import {
+  BadRequestException,
+  Injectable,
+  Logger,
+  NotFoundException,
+  Optional,
+} from '@nestjs/common';
+import { InjectConnection, InjectModel } from '@nestjs/mongoose';
+import { Connection, FilterQuery, Model } from 'mongoose';
+import { JOBS_COLLECTION } from '../customer-intelligence/customer-directory.service';
+import { VendorsService } from '../vendors/vendors.service';
+import { QuoteGridFsService } from './quote-gridfs.service';
 import { Deal, DealDocument } from './schemas/deal.schema';
+import { Decoration, DecorationDocument } from './schemas/decoration.schema';
 import { Product, ProductDocument } from './schemas/product.schema';
 import { Quote, QuoteDocument } from './schemas/quote.schema';
 import { QuoteCounter, QuoteCounterDocument } from './schemas/quote-counter.schema';
@@ -9,7 +20,6 @@ import { CreateQuoteDto } from './dto/create-quote.dto';
 import { UpdateQuoteDto } from './dto/update-quote.dto';
 import { calculateQuoteTotals, validateQuoteItems } from './quote-pricing.util';
 import { CrmActivityService } from './crm-activity.service';
-
 // Fields the external CRM sync owns exclusively (see crm_mongo_sync.py) —
 // rejected outright (400) on any quote with externalId set, never a silent
 // no-op, so a human edit can never be quietly clobbered by the next sync
@@ -50,7 +60,59 @@ export interface ListQuotesFilter {
   quoteStatus?: string;
   page?: number;
   pageSize?: number;
+
+  // --- Hoops-parity SalesBoard filtering (Phase 6, additive) ---
+
+  // Matches quoteNumber (prefix) or clientDetails.companyName/contactName/
+  // quoteName (substring, case-insensitive) — the same fields the table
+  // itself displays, so "search" never surfaces a hit the user can't see
+  // why it matched.
+  search?: string;
+  salesStatus?: string;
+  classification?: string;
+  paymentInvoiceStatus?: string;
+  orderStatus?: string;
+  paymentStatus?: string;
+  deliveryStatus?: string;
+  artworkStatus?: string;
+  productionReadyStatus?: string;
+  completedStatus?: string;
+  productionHouseVendorId?: string;
+  // Any one of these vendorIds appearing anywhere in the quote's own
+  // vendorIds array — not an exact-array match.
+  vendorId?: string;
+  decorationId?: string;
+  customerType?: string;
+  ownerUserId?: string;
+  createdByUserId?: string;
+  sort?: string;
+  direction?: 'asc' | 'desc';
+  // Three-way, not boolean: omitted means "exclude archived" (every
+  // existing SalesBoard view's expectation, unchanged), 'only' means the
+  // dedicated Archived view, 'include' means both.
+  archived?: 'only' | 'include';
+  // Phase 6's remaining filters — all additive, all plain Mongo range/
+  // presence matches against fields this same phase already added.
+  deadlineFrom?: string;
+  deadlineTo?: string;
+  deliveryDateFrom?: string;
+  deliveryDateTo?: string;
+  paymentDeadlineFrom?: string;
+  paymentDeadlineTo?: string;
+  totalMin?: number;
+  totalMax?: number;
+  hasReference?: 'only' | 'missing';
+  viewed?: 'only' | 'unviewed';
 }
+
+const QUOTE_SORTS: Record<string, keyof Quote | 'createdAt'> = {
+  quoteNumber: 'quoteNumber',
+  quoteAmount: 'quoteAmount',
+  createdAt: 'createdAt',
+  expirationDate: 'expirationDate',
+  dueDate: 'dueDate',
+  deliveryDate: 'deliveryDate',
+};
 
 // Phase 14e — the first real writer for QuoteCounter (landed dormant in
 // Phase 11, never given logic). Only ever creates an honest, unpriced draft
@@ -68,6 +130,10 @@ export class QuotesService {
     @InjectModel(QuoteCounter.name) private counterModel: Model<QuoteCounterDocument>,
     @InjectModel(Deal.name) private dealModel: Model<DealDocument>,
     @InjectModel(Product.name) private productModel: Model<ProductDocument>,
+    @InjectModel(Decoration.name) private decorationModel: Model<DecorationDocument>,
+    @InjectConnection() private connection: Connection,
+    private vendorsService: VendorsService,
+    private quoteGridFs: QuoteGridFsService,
     @Optional() private activity?: CrmActivityService,
   ) {}
 
@@ -119,6 +185,8 @@ export class QuotesService {
       requestNotes: dto.requestNotes,
       quoteNumber,
       ownerUserId: createdBy,
+      // Set once, here, and never again — see quote.schema.ts's comment.
+      createdByUserId: createdBy,
       items: totals.items,
       subtotal: totals.subtotal,
       discountAmount: totals.discountAmount,
@@ -162,6 +230,63 @@ export class QuotesService {
 
     if (query.quoteStatus) match.quoteStatus = query.quoteStatus;
 
+    // --- Hoops-parity SalesBoard filtering (Phase 6, additive) --- every
+    // field below is a plain equality match against a HaiVE-native string
+    // field nothing else writes to, so there's no ambiguity to resolve.
+    if (query.salesStatus) match.salesStatus = query.salesStatus;
+    if (query.classification) match.classification = query.classification;
+    if (query.paymentInvoiceStatus) match.paymentInvoiceStatus = query.paymentInvoiceStatus;
+    if (query.orderStatus) match.orderStatus = query.orderStatus;
+    if (query.paymentStatus) match.paymentStatus = query.paymentStatus;
+    if (query.deliveryStatus) match.deliveryStatus = query.deliveryStatus;
+    if (query.artworkStatus) match.artworkStatus = query.artworkStatus;
+    if (query.productionReadyStatus) match.productionReadyStatus = query.productionReadyStatus;
+    if (query.completedStatus) match.completedStatus = query.completedStatus;
+    if (query.productionHouseVendorId) match.productionHouseVendorId = query.productionHouseVendorId;
+    if (query.vendorId) match.vendorIds = query.vendorId;
+    if (query.decorationId) match.decorationId = query.decorationId;
+    if (query.customerType) match.customerType = query.customerType;
+    if (query.ownerUserId) match.ownerUserId = query.ownerUserId;
+    if (query.createdByUserId) match.createdByUserId = query.createdByUserId;
+
+    if (query.archived === 'only') match.archived = true;
+    else if (query.archived !== 'include') match.archived = { $ne: true };
+
+    // Deadline Date (expirationDate) / Delivery Date / Payment Deadline
+    // (dueDate) ranges — three distinct date fields, see quote.schema.ts's
+    // own comments on why each is kept separate. Stored as YYYY-MM-DD
+    // strings, so a plain lexical $gte/$lte range is exact (no timezone
+    // conversion needed, unlike createdAt's real Date above).
+    if (query.deadlineFrom || query.deadlineTo) {
+      match.expirationDate = { ...(query.deadlineFrom ? { $gte: query.deadlineFrom } : {}), ...(query.deadlineTo ? { $lte: query.deadlineTo } : {}) };
+    }
+    if (query.deliveryDateFrom || query.deliveryDateTo) {
+      match.deliveryDate = { ...(query.deliveryDateFrom ? { $gte: query.deliveryDateFrom } : {}), ...(query.deliveryDateTo ? { $lte: query.deliveryDateTo } : {}) };
+    }
+    if (query.paymentDeadlineFrom || query.paymentDeadlineTo) {
+      match.dueDate = { ...(query.paymentDeadlineFrom ? { $gte: query.paymentDeadlineFrom } : {}), ...(query.paymentDeadlineTo ? { $lte: query.paymentDeadlineTo } : {}) };
+    }
+    if (query.totalMin !== undefined || query.totalMax !== undefined) {
+      match.quoteAmount = { ...(query.totalMin !== undefined ? { $gte: query.totalMin } : {}), ...(query.totalMax !== undefined ? { $lte: query.totalMax } : {}) };
+    }
+    if (query.hasReference === 'only') match.referenceFileId = { $exists: true };
+    else if (query.hasReference === 'missing') match.referenceFileId = { $exists: false };
+    if (query.viewed === 'only') match.viewedAt = { $exists: true };
+    else if (query.viewed === 'unviewed') match.viewedAt = { $exists: false };
+
+    if (query.search) {
+      const words = query.search.trim().toLowerCase().split(/\s+/).filter(Boolean).slice(0, 8);
+      if (words.length > 0) {
+        match.$and = words.map((word) => {
+          const escaped = word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+          const re = { $regex: escaped, $options: 'i' };
+          return {
+            $or: [{ quoteNumber: re }, { quoteName: re }, { 'clientDetails.companyName': re }, { 'clientDetails.contactName': re }],
+          };
+        });
+      }
+    }
+
     if (storeConstraint || ownerConstraint) {
       const dealMatch: FilterQuery<Deal> = {
         organizationId,
@@ -174,10 +299,12 @@ export class QuotesService {
 
     const page = query.page ?? 1;
     const pageSize = Math.min(query.pageSize ?? 25, 100);
+    const sortKey = (query.sort && QUOTE_SORTS[query.sort]) || 'createdAt';
+    const sortDir = query.direction === 'asc' ? 1 : -1;
     const [items, total] = await Promise.all([
       this.quoteModel
         .find(match)
-        .sort({ createdAt: -1 })
+        .sort({ [sortKey]: sortDir })
         .skip((page - 1) * pageSize)
         .limit(pageSize)
         .exec(),
@@ -345,6 +472,20 @@ export class QuotesService {
       if (!deal) throw new BadRequestException('Deal not found in this organization.');
     }
 
+    // --- Hoops-parity SalesBoard soft-reference checks (additive) — same
+    // "a cross-org reference is a 400, never a silent cross-tenant read"
+    // principle as dealId/productId above.
+    const vendorIdsToCheck = [...(dto.productionHouseVendorId ? [dto.productionHouseVendorId] : []), ...(dto.vendorIds ?? [])];
+    if (vendorIdsToCheck.length > 0) {
+      const checks = await Promise.all(vendorIdsToCheck.map((id) => this.vendorsService.existsInOrg(organizationId, id)));
+      const missing = vendorIdsToCheck.filter((_, i) => !checks[i]);
+      if (missing.length > 0) throw new BadRequestException(`Vendor(s) not found in this organization: ${missing.join(', ')}`);
+    }
+    if (dto.decorationId) {
+      const decoration = await this.decorationModel.findOne({ _id: dto.decorationId, organizationId }).exec();
+      if (!decoration) throw new BadRequestException('Decoration not found in this organization.');
+    }
+
     const { items, ...rest } = dto;
     Object.assign(quote, rest);
 
@@ -379,6 +520,130 @@ export class QuotesService {
     await quote.save();
     this.logActivity(this.activity?.quoteChanged(before, quote.toObject(), actorUserId));
     return quote;
+  }
+
+  // --- Hoops-parity SalesBoard record actions (Phase 5, additive) ---
+
+  // "Duplicate" — a fresh quote+number, always a draft, never carrying
+  // payments or view/guest-link state forward (those belong to the specific
+  // document that was sent, not to its copy). Owner is preserved (the same
+  // person keeps responsibility for the new copy); createdByUserId is the
+  // person who actually clicked Duplicate, honestly — not the original
+  // quote's creator.
+  async duplicateQuote(organizationId: string, id: string, duplicatedBy: string, storeConstraint?: string): Promise<QuoteDocument> {
+    const source = await this.getOne(organizationId, id, storeConstraint);
+    const quoteNumber = await this.nextQuoteNumber(organizationId);
+    return this.quoteModel.create({
+      organizationId,
+      dealId: source.dealId,
+      quoteName: source.quoteName ? `${source.quoteName} (copy)` : undefined,
+      quoteStatus: 'draft',
+      clientApprovalStatus: 'pending',
+      quoteAmount: source.quoteAmount,
+      currency: source.currency,
+      expirationDate: source.expirationDate,
+      dueDate: source.dueDate,
+      clientDetails: source.clientDetails,
+      requestNotes: source.requestNotes,
+      quoteNumber,
+      ownerUserId: source.ownerUserId,
+      createdByUserId: duplicatedBy,
+      items: source.items,
+      subtotal: source.subtotal,
+      discountAmount: source.discountAmount,
+      taxAmount: source.taxAmount,
+      salesStatus: source.salesStatus,
+      classification: source.classification,
+      productionHouseVendorId: source.productionHouseVendorId,
+      vendorIds: source.vendorIds,
+      decorationId: source.decorationId,
+      customerType: source.customerType,
+      // Every other status/date/view/guest-link field is deliberately left
+      // at its schema default — a copy starts its own lifecycle from zero,
+      // it doesn't inherit the original's progress.
+    });
+  }
+
+  // "Archive Quotation" — soft-delete-equivalent (see quote.schema.ts's own
+  // comment): hides it from every default SalesBoard view without losing
+  // the record. Reversible by the same call with archived=false.
+  async setArchived(organizationId: string, id: string, archived: boolean, storeConstraint?: string): Promise<QuoteDocument> {
+    const quote = await this.getOne(organizationId, id, storeConstraint);
+    quote.archived = archived;
+    await quote.save();
+    return quote;
+  }
+
+  // "Delete Quotation" — a real delete, distinct from Archive above.
+  // Refused (not silently archived instead) once a quote has become a real
+  // Job (see customer-jobs.service.ts's convert) — deleting it would orphan
+  // that job's own quotationId reference, and a converted quotation is no
+  // longer just a sales document. Caller-restricted to owner/admin in the
+  // controller, same tier as every other destructive action in this app.
+  async deleteQuote(organizationId: string, id: string, storeConstraint?: string): Promise<void> {
+    const quote = await this.getOne(organizationId, id, storeConstraint);
+    const linkedJob = await this.connection.collection(JOBS_COLLECTION).findOne({ organizationId, quotationId: id });
+    if (linkedJob) {
+      throw new BadRequestException('This quotation has been converted to a job and can no longer be deleted — archive it instead.');
+    }
+    await this.quoteModel.deleteOne({ _id: quote._id, organizationId }).exec();
+  }
+
+  // "Copy Guest View Link" — generates (or rotates, if one already exists)
+  // an opaque, unguessable token a public, unauthenticated route can look
+  // the quote up by (see quote-guest.controller.ts). Deliberately never
+  // derived from the quote's own id/number — a guest view link must stay
+  // valid even if someone has already guessed or seen the quote id itself.
+  async ensureGuestViewToken(organizationId: string, id: string, storeConstraint?: string): Promise<string> {
+    const quote = await this.getOne(organizationId, id, storeConstraint);
+    if (!quote.guestViewToken) {
+      quote.guestViewToken = randomBytes(24).toString('base64url');
+      await quote.save();
+    }
+    return quote.guestViewToken;
+  }
+
+  // The public guest-view read path — token-only, no organizationId/auth on
+  // the caller's side at all (that's the point of a guest link). Never
+  // exposes anything beyond what this one method returns; the guest
+  // controller must not fall back to the authenticated getOne for any
+  // reason.
+  async getByGuestToken(token: string): Promise<QuoteDocument> {
+    const quote = await this.quoteModel.findOne({ guestViewToken: token }).exec();
+    if (!quote) throw new NotFoundException('This link is invalid or has expired.');
+    quote.viewedAt = new Date();
+    quote.viewCount = (quote.viewCount ?? 0) + 1;
+    await quote.save();
+    return quote;
+  }
+
+  // "Reference" file (Phase 4, additive) — one attachment per quote, same
+  // replace-and-delete-the-old-one convention as ProductsService.setImage.
+  async setReferenceFile(organizationId: string, id: string, file: Express.Multer.File, storeConstraint?: string): Promise<QuoteDocument> {
+    const quote = await this.getOne(organizationId, id, storeConstraint);
+    const previousFileId = quote.referenceFileId;
+    const fileId = await this.quoteGridFs.upload(file.originalname, file.buffer, { organizationId, quoteId: id });
+    quote.referenceFileId = fileId;
+    quote.referenceFileName = file.originalname;
+    quote.referenceFileMimeType = file.mimetype;
+    await quote.save();
+    if (previousFileId) await this.quoteGridFs.delete(previousFileId).catch(() => undefined);
+    return quote;
+  }
+
+  async getReferenceFileStream(
+    organizationId: string,
+    id: string,
+    storeConstraint?: string,
+    ownerConstraint?: string,
+  ): Promise<{ stream: NodeJS.ReadableStream; filename: string; mimeType: string }> {
+    const quote = await this.getOne(organizationId, id, storeConstraint, ownerConstraint);
+    if (!quote.referenceFileId) throw new NotFoundException('This quote has no reference file.');
+    return {
+      stream: this.quoteGridFs.openDownloadStream(quote.referenceFileId),
+      filename: quote.referenceFileName ?? 'reference',
+      mimeType: quote.referenceFileMimeType ?? 'application/octet-stream',
+    };
   }
 
   // Business Intelligence's Customer Quote & Payment Tracking (section 7).

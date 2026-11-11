@@ -23,14 +23,15 @@ import { ActivityTab } from './panel/ActivityTab';
 import { EditCustomerModal } from './EditCustomerModal';
 import { DetailsTab } from './panel/DetailsTab';
 import { DocumentsTab } from './panel/DocumentsTab';
+import { JobsTab } from './panel/JobsTab';
 import { MailTab } from './panel/MailTab';
 import { StageMenu } from './panel/StageMenu';
 import { customerCloudService } from '@/services/customerCloudService';
 import { CustomerDocuments } from './panel/CustomerDocuments';
-import { CommentsTab } from './panel/WorkspaceTabs';
+import { CommentsTab, TasksTab } from './panel/WorkspaceTabs';
 import styles from './panel/panel.module.css';
 
-export type PanelTab = 'details' | 'documents' | 'mail' | 'activity' | 'comments' | 'files';
+export type PanelTab = 'details' | 'documents' | 'jobs' | 'mail' | 'activity' | 'comments' | 'tasks' | 'files';
 
 // What whoever opens the panel already knows about the customer: shown at once, until the rest has loaded.
 export interface CustomerPreview {
@@ -205,10 +206,12 @@ export function CustomerPanel({
   const count = (n: number | undefined) => (n ? ` (${n})` : '');
   const tabs = [
     { id: 'details', label: 'Details' },
-    { id: 'documents', label: `Quotes & orders${count(data?.documents.length)}` },
+    { id: 'documents', label: `SalesDocs${count(data?.documents.length)}` },
+    { id: 'jobs', label: `Jobs${count(data?.jobs.length)}` },
     { id: 'mail', label: `Emails${count(data?.emails.length)}` },
     { id: 'activity', label: 'Activity' },
     { id: 'comments', label: `Comments${count(counts?.notes.length)}` },
+    { id: 'tasks', label: `Tasks${count(counts?.tasks.length)}` },
     { id: 'files', label: `Files & documents${count((counts?.files.length ?? 0) + (cloudDocs.data?.links.length ?? 0) + (cloudDocs.data?.folders.length ?? 0))}` },
   ];
 
@@ -417,11 +420,13 @@ export function CustomerPanel({
               onOpenJob={onOpenJob}
             />
           )}
+          {tab === 'jobs' && <JobsTab customerId={customerId} onOpenJob={onOpenJob} />}
           {tab === 'mail' && <MailTab detail={data} />}
           {tab === 'activity' && <ActivityTab detail={data} />}
           {tab === 'comments' && (
             <CommentsTab api={api} workspace={workspace} onChanged={changed} onOpenJob={onOpenJob} />
           )}
+          {tab === 'tasks' && <TasksTab api={api} workspace={workspace} onChanged={changed} />}
           {tab === 'files' && (
             <CustomerDocuments
               customerId={customerId}

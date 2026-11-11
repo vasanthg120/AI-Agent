@@ -290,6 +290,10 @@ export class AiUsageAdminService {
         totalTokens: r.totalTokens ?? 0,
         cost: r.costUsd ?? null,
         status: r.success ? 'success' : 'failed',
+        // Only ever set by python-agent from a real created trace (see
+        // agent-execution.schema.ts's own comment) — absent means no trace
+        // exists for this row, never a guessed/reconstructed link.
+        langfuseTraceUrl: r.langfuseTraceUrl ?? null,
       })),
       total,
       page: filters.page,

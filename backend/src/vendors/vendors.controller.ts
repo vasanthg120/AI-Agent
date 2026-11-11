@@ -28,6 +28,17 @@ export class VendorsController {
     return this.vendorsService.listVendors(user.organizationId);
   }
 
+  // Static segment, must be registered before 'vendors/:id' — same rule
+  // products.controller.ts documents. Broader than this controller's own
+  // owner/admin gate (method-level @Roles overrides the class-level one,
+  // same pattern crm's controllers use per-route) — see listPicker's own
+  // comment for why a name-only projection is safe at Catalog's wider tier.
+  @Get('vendors/picker')
+  @Roles('owner', 'admin', 'manager')
+  listPicker(@CurrentUser() user: JwtPayload) {
+    return this.vendorsService.listPicker(user.organizationId);
+  }
+
   @Get('vendors/:id')
   getVendor(@CurrentUser() user: JwtPayload, @Param('id') id: string) {
     return this.vendorsService.getVendor(user.organizationId, id);

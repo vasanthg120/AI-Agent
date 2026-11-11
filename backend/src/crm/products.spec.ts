@@ -3,8 +3,16 @@ import { Test } from '@nestjs/testing';
 import { Connection, Model } from 'mongoose';
 import { Product, ProductDocument, ProductSchema } from './schemas/product.schema';
 import { ProductsService } from './products.service';
+import { VendorsService } from '../vendors/vendors.service';
+import { CatalogGridFsService } from './catalog-gridfs.service';
 
 const TEST_PREFIX = `jest-products-${Date.now()}`;
+
+// No test here exercises vendorId/image — those get their own coverage in
+// products-catalog.spec.ts. existsInOrg always true, unused by name here,
+// keeps this pre-existing suite's DI satisfied without a real VendorsModule.
+const vendorsServiceStub = { existsInOrg: async () => true } as unknown as VendorsService;
+const catalogGridFsStub = {} as unknown as CatalogGridFsService;
 
 describe('Products (real Mongo)', () => {
   let connection: Connection;
@@ -17,7 +25,11 @@ describe('Products (real Mongo)', () => {
 
     const moduleRef = await Test.createTestingModule({
       imports: [MongooseModule.forRoot(uri), MongooseModule.forFeature([{ name: Product.name, schema: ProductSchema }])],
-      providers: [ProductsService],
+      providers: [
+        ProductsService,
+        { provide: VendorsService, useValue: vendorsServiceStub },
+        { provide: CatalogGridFsService, useValue: catalogGridFsStub },
+      ],
     }).compile();
 
     connection = moduleRef.get(getModelToken(Product.name)).db;

@@ -13,7 +13,9 @@ import type {
 // quotation by "Convert to job", numbered J-0001 onwards — and its seven
 // statuses are set by hand. Nothing here is written to a CRM.
 
-export type JobStatusKey = 'production' | 'payment' | 'purchasing' | 'orderType' | 'artwork' | 'progress' | 'prodReady';
+export type JobStatusKey = 'production' | 'payment' | 'purchasing' | 'orderType' | 'artwork' | 'orderStatus' | 'progress' | 'prodReady';
+
+export type JobDocumentKind = 'job-sheet' | 'proof-sheet' | 'packing-slip' | 'decorator-spec-sheet' | 'shipping-label';
 
 export interface JobStatusOption {
   status: string;
@@ -47,6 +49,7 @@ export interface JobOptions {
   purchaseOrders: JobStatusOption[];
   proofs: JobStatusOption[];
   shipments: JobStatusOption[];
+  credits: JobStatusOption[];
 }
 
 export interface Job {
@@ -66,6 +69,20 @@ export interface Job {
   amount: number;
   currency: string;
   statuses: JobStatusChip[];
+  // JobBoard spec additions — all additive, all optional.
+  createdBy?: string;
+  productionHouseVendorId?: string;
+  productionHouseVendorName?: string;
+  inHandsDate?: string;
+  referenceFileId?: string;
+  referenceFileName?: string;
+  voided: boolean;
+  voidReason?: string;
+  decorationId?: string;
+  decorationName?: string;
+  vendorIds: string[];
+  vendorNames: string[];
+  xeroInvoiceNumber?: string;
 }
 
 export interface JobItem {
@@ -85,14 +102,47 @@ export interface JobPurchaseOrder {
   description?: string;
   amount?: number;
   reference?: string;
+  accountingPoNumber?: string;
   status: string;
   label: string;
   tone: StageTone;
   orderedAt?: string;
   expectedAt?: string;
   receivedAt?: string;
+  deadline?: string;
+  backorderDueDate?: string;
   addedBy: string;
   at: string;
+}
+
+export interface JobCredit {
+  id: string;
+  creditNumber?: string;
+  description: string;
+  amount?: number;
+  status: string;
+  label: string;
+  tone: StageTone;
+  createdByName: string;
+  createdAt: string;
+  deletedAt?: string;
+}
+
+export interface XeroInvoiceStatus {
+  linked: boolean;
+  invoiceNumber?: string;
+  connected: boolean;
+  configured?: boolean;
+  error?: string;
+  status?: string;
+  total?: number;
+  amountDue?: number;
+  totalTax?: number;
+  currencyCode?: string;
+  dueDate?: string;
+  transactionDate?: string;
+  contactName?: string;
+  overdue?: boolean;
 }
 
 export interface JobShipment {
@@ -125,6 +175,7 @@ export interface JobDetail extends Job {
   charges: { kind: 'tax' | 'fee'; name: string; amount: number }[];
   purchaseOrders: JobPurchaseOrder[];
   shipments: JobShipment[];
+  credits: JobCredit[];
   // What happened on the job, newest first.
   history: JobEvent[];
   createdBy: string;
@@ -155,8 +206,18 @@ export interface JobQuery {
   page?: number;
   pageSize?: number;
   owner?: string;
+  // The Customer Profile's own Jobs tab — every job of this one customer.
+  customerId?: string;
+  // SalesBoard's "View Linked Job" action.
+  quotationId?: string;
   // One value per column: an option's value, or 'unset'.
   statuses?: Partial<Record<JobStatusKey, string>>;
+  productionHouseVendorId?: string;
+  voided?: 'only' | 'include';
+  decorationId?: string;
+  vendorId?: string;
+  xeroLinked?: 'only' | 'unlinked';
+  hasReference?: 'only' | 'missing';
 }
 
 // A purchase order or a shipment as its form sends it. null clears a field.
@@ -178,6 +239,14 @@ export const customerJobsService = {
     return data;
   },
 
+  // Hoops-parity Job actions — Job Sheet / Proof Sheet / Packing Slip /
+  // Decorator Spec Sheet / Shipping Label, each a real PDF built from the
+  // job's own data (backend/src/customer-intelligence/customer-job-documents.service.ts).
+  async downloadDocument(jobId: string, kind: JobDocumentKind): Promise<Blob> {
+    const { data } = await axiosClient.get<Blob>(`${base(jobId)}/documents/${kind}`, { responseType: 'blob' });
+    return data;
+  },
+
   // "Convert to job" on one of a customer's quotations. Asking twice gives the same job.
   async convert(customerId: string, quotationId: string): Promise<{ job: JobDetail; created: boolean }> {
     const { data } = await axiosClient.post<{ job: JobDetail; created: boolean }>(`/customers/${customerId}/jobs`, {
@@ -186,15 +255,52 @@ export const customerJobsService = {
     return data;
   },
 
-  // `dueDate` set to null removes it.
-  async update(jobId: string, change: { title?: string; dueDate?: string | null }): Promise<JobDetail> {
+  // `dueDate`/`productionHouseVendorId`/`inHandsDate`/`decorationId`/`xeroInvoiceNumber`
+  // set to null removes that field.
+  async update(
+    jobId: string,
+    change: {
+      title?: string;
+      dueDate?: string | null;
+      productionHouseVendorId?: string | null;
+      inHandsDate?: string | null;
+      decorationId?: string | null;
+      vendorIds?: string[];
+      xeroInvoiceNumber?: string | null;
+    },
+  ): Promise<JobDetail> {
     const { data } = await axiosClient.patch<JobDetail>(base(jobId), change);
     return data;
   },
 
-  // One of the seven statuses — or (null) back to not set.
-  async setStatus(jobId: string, key: JobStatusKey, status: string | null): Promise<JobDetail> {
-    const { data } = await axiosClient.patch<JobDetail>(`${base(jobId)}/status`, { key, status });
+  // One of the eight statuses — or (null) back to not set. `proofFileId`
+  // is required when moving Overall Status to a value that asserts
+  // remittance was received (see customer-jobs.service.ts's
+  // REMITTANCE_PROOF_REQUIRED) — must be a file already attached to this job.
+  async setStatus(jobId: string, key: JobStatusKey, status: string | null, proofFileId?: string): Promise<JobDetail> {
+    const { data } = await axiosClient.patch<JobDetail>(`${base(jobId)}/status`, { key, status, proofFileId });
+    return data;
+  },
+
+  async setVoided(jobId: string, voided: boolean, reason?: string | null): Promise<JobDetail> {
+    const { data } = await axiosClient.patch<JobDetail>(`${base(jobId)}/void`, { voided, reason });
+    return data;
+  },
+
+  async setReferenceFile(jobId: string, file: File): Promise<JobDetail> {
+    const form = new FormData();
+    form.append('file', file);
+    const { data } = await axiosClient.post<JobDetail>(`${base(jobId)}/reference`, form);
+    return data;
+  },
+
+  async downloadReferenceFile(jobId: string): Promise<Blob> {
+    const { data } = await axiosClient.get<Blob>(`${base(jobId)}/reference`, { responseType: 'blob' });
+    return data;
+  },
+
+  async getXeroInvoiceStatus(jobId: string): Promise<XeroInvoiceStatus> {
+    const { data } = await axiosClient.get<XeroInvoiceStatus>(`${base(jobId)}/xero-invoice`);
     return data;
   },
 
@@ -207,15 +313,16 @@ export const customerJobsService = {
     await axiosClient.delete(base(jobId));
   },
 
-  // Purchase orders ('purchase-orders') and shipments ('shipments') are kept the same way.
-  async addEntry(jobId: string, list: 'purchase-orders' | 'shipments', entry: JobEntryInput): Promise<JobDetail> {
+  // Purchase orders ('purchase-orders'), shipments ('shipments') and
+  // credits ('credits') are all kept the same way.
+  async addEntry(jobId: string, list: 'purchase-orders' | 'shipments' | 'credits', entry: JobEntryInput): Promise<JobDetail> {
     const { data } = await axiosClient.post<JobDetail>(`${base(jobId)}/${list}`, entry);
     return data;
   },
 
   async updateEntry(
     jobId: string,
-    list: 'purchase-orders' | 'shipments',
+    list: 'purchase-orders' | 'shipments' | 'credits',
     entryId: string,
     change: JobEntryInput,
   ): Promise<JobDetail> {
@@ -223,7 +330,7 @@ export const customerJobsService = {
     return data;
   },
 
-  async removeEntry(jobId: string, list: 'purchase-orders' | 'shipments', entryId: string): Promise<JobDetail> {
+  async removeEntry(jobId: string, list: 'purchase-orders' | 'shipments' | 'credits', entryId: string): Promise<JobDetail> {
     const { data } = await axiosClient.delete<JobDetail>(`${base(jobId)}/${list}/${entryId}`);
     return data;
   },
@@ -247,6 +354,11 @@ export const customerJobsService = {
       status,
       ...(note ? { note } : {}),
     });
+    return data;
+  },
+
+  async sendProof(jobId: string, fileId: string): Promise<{ sent: boolean; to: string }> {
+    const { data } = await axiosClient.post<{ sent: boolean; to: string }>(`${base(jobId)}/proofs/${fileId}/send`);
     return data;
   },
 

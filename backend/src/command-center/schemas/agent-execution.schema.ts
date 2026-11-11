@@ -97,7 +97,35 @@ export class AgentExecution {
 
   @Prop({ index: true })
   occurredAt: Date;
+
+  // Set only when python-agent actually created a Langfuse trace for this
+  // call (Langfuse enabled, sampled in, SDK call succeeded) — never
+  // fabricated, absent means no trace exists for this row. langfuseTraceUrl
+  // is the exact string the Langfuse SDK's own get_trace_url(trace_id=...)
+  // returns at write time (langfuse_config.py) — includes the project id,
+  // which only the SDK/API can resolve, so this is never reconstructed from
+  // parts in NestJS or the frontend. The AI Usage dashboard's "View Trace"
+  // button just opens langfuseTraceUrl directly when present.
+  @Prop()
+  langfuseTraceId?: string;
+
+  @Prop()
+  langfuseTraceUrl?: string;
+
+  // Groq's CompletionUsage.completion_tokens_details.reasoning_tokens — a
+  // real, typed field on the installed groq==1.6.0 SDK that groq_client.py
+  // now reads (see tracing.py). Anthropic rows never set this (no
+  // equivalent field exists on that provider's response in this codebase
+  // today) — absent there, never guessed.
+  @Prop()
+  reasoningTokens?: number;
 }
 
 export const AgentExecutionSchema = SchemaFactory.createForClass(AgentExecution);
 AgentExecutionSchema.index({ organizationId: 1, occurredAt: -1 });
+// Hierarchical AI usage analytics (Platform -> Organisation -> User ->
+// Request -> Generation, ai-usage-hierarchy.controller.ts) drills by
+// organizationId+userId — additive, alongside the existing index above.
+// (requestId already gets its own single-field index from its own
+// @Prop({ index: true }) above — no second explicit index needed for that.)
+AgentExecutionSchema.index({ organizationId: 1, userId: 1, occurredAt: -1 });

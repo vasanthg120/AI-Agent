@@ -13,6 +13,7 @@ import {
   type ProviderPricingRow,
 } from '@/services/billingProviderPricingAdminService';
 import { aiUsageAdminService, type AnthropicUsageSummary } from '@/services/aiUsageAdminService';
+import { langfuseService, type LangfuseConfigStatus } from '@/services/langfuseService';
 import { extractErrorMessage } from '@/utils/errors';
 import { formatFullDate } from '@/utils/date';
 import { formatNumber } from '@/utils/format';
@@ -24,7 +25,17 @@ import { ADMIN_ROUTES } from '@/constants/routes';
 import integrationsStyles from '../integrations/IntegrationsPage.module.css';
 import shared from './adminShared.module.css';
 
-type TabId = 'company' | 'taxes' | 'migration' | 'aiProvider' | 'providerPricing' | 'gmailOAuth' | 'outlookOAuth' | 'xeroOAuth' | 'myobOAuth';
+type TabId =
+  | 'company'
+  | 'taxes'
+  | 'migration'
+  | 'aiProvider'
+  | 'providerPricing'
+  | 'gmailOAuth'
+  | 'outlookOAuth'
+  | 'xeroOAuth'
+  | 'myobOAuth'
+  | 'langfuse';
 const TABS: { id: TabId; label: string }[] = [
   { id: 'company', label: 'Company & Invoicing' },
   { id: 'taxes', label: 'Tax Rates' },
@@ -35,6 +46,7 @@ const TABS: { id: TabId; label: string }[] = [
   { id: 'outlookOAuth', label: 'Outlook OAuth' },
   { id: 'xeroOAuth', label: 'Xero OAuth' },
   { id: 'myobOAuth', label: 'MYOB OAuth' },
+  { id: 'langfuse', label: 'Langfuse' },
 ];
 
 function CompanySettingsTab() {
@@ -1348,6 +1360,233 @@ function ProviderPricingTab() {
   );
 }
 
+// Langfuse observability — modeled on GmailOAuthTab's Card/Modal structure
+// (same integrationsStyles chrome) plus AiProviderCard's Test Connection/
+// verified-state interaction, but with Langfuse's own richer field set (two
+// credential fields, base URL, environment, sampling rate, capture-
+// input-output), which neither existing tab shape has alone.
+function LangfuseConfigTab() {
+  const [config, setConfig] = useState<LangfuseConfigStatus | 'loading' | 'error'>('loading');
+  const [modalOpen, setModalOpen] = useState(false);
+  const [publicKey, setPublicKey] = useState('');
+  const [secretKey, setSecretKey] = useState('');
+  const [baseUrl, setBaseUrl] = useState('https://cloud.langfuse.com');
+  const [environment, setEnvironment] = useState<'development' | 'staging' | 'production'>('production');
+  const [samplingRate, setSamplingRate] = useState(100);
+  const [captureInputOutput, setCaptureInputOutput] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [testing, setTesting] = useState(false);
+  const [togglingEnabled, setTogglingEnabled] = useState(false);
+
+  const load = () => {
+    langfuseService
+      .getConfig()
+      .then((status) => {
+        setConfig(status);
+        setBaseUrl(status.baseUrl);
+        setEnvironment(status.environment);
+        setSamplingRate(status.samplingRate);
+        setCaptureInputOutput(status.captureInputOutput);
+      })
+      .catch((error) => {
+        setConfig('error');
+        toast.error(extractErrorMessage(error));
+      });
+  };
+
+  useEffect(load, []);
+
+  const configured = config !== 'loading' && config !== 'error';
+
+  const openModal = () => {
+    setPublicKey('');
+    setSecretKey('');
+    if (configured) {
+      setBaseUrl(config.baseUrl);
+      setEnvironment(config.environment);
+      setSamplingRate(config.samplingRate);
+      setCaptureInputOutput(config.captureInputOutput);
+    }
+    setModalOpen(true);
+  };
+
+  const save = async () => {
+    // First-time setup needs both keys; a later edit (rotating only the
+    // secret, or just changing sampling rate) can omit either — saveConfig
+    // keeps whatever isn't sent, same "don't accidentally clear" rule
+    // GmailOAuthTab's own backend counterpart follows for client secrets.
+    if (!configured && (publicKey.trim().length < 1 || secretKey.trim().length < 1)) {
+      toast.error('Enter both the Public Key and Secret Key.');
+      return;
+    }
+    setSaving(true);
+    try {
+      await langfuseService.saveConfig({
+        ...(publicKey.trim() ? { publicKey: publicKey.trim() } : {}),
+        ...(secretKey.trim() ? { secretKey: secretKey.trim() } : {}),
+        baseUrl: baseUrl.trim(),
+        environment,
+        samplingRate,
+        captureInputOutput,
+      });
+      toast.success('Langfuse configuration saved.');
+      setModalOpen(false);
+      setPublicKey('');
+      setSecretKey('');
+      load();
+    } catch (error) {
+      toast.error(extractErrorMessage(error));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const test = async () => {
+    setTesting(true);
+    try {
+      const result = await langfuseService.testConnection();
+      if (result.ok) toast.success(result.message);
+      else toast.error(result.message);
+      load();
+    } catch (error) {
+      toast.error(extractErrorMessage(error));
+    } finally {
+      setTesting(false);
+    }
+  };
+
+  const toggleEnabled = async (next: boolean) => {
+    setTogglingEnabled(true);
+    try {
+      await langfuseService.setEnabled(next);
+      toast.success(next ? 'Langfuse enabled.' : 'Langfuse disabled.');
+      load();
+    } catch (error) {
+      toast.error(extractErrorMessage(error));
+    } finally {
+      setTogglingEnabled(false);
+    }
+  };
+
+  const badge = () => {
+    if (config === 'loading') return <Badge variant="neutral">Checking...</Badge>;
+    if (config === 'error') return <Badge variant="danger" dot>Error</Badge>;
+    if (config.connectionStatus === 'connected') return <Badge variant="success" dot>Connected</Badge>;
+    if (config.connectionStatus === 'error') return <Badge variant="danger" dot>Connection error</Badge>;
+    return <Badge variant="neutral" dot>{config.secretConfigured ? 'Not tested' : 'Not configured'}</Badge>;
+  };
+
+  return (
+    <div style={{ maxWidth: 440 }}>
+      <Card className={integrationsStyles.card}>
+        <div className={integrationsStyles.cardHeader}>
+          <div className={integrationsStyles.cardTitleRow}>
+            <div className={integrationsStyles.cardName}>Langfuse — AI Observability &amp; Monitoring</div>
+            <div className={integrationsStyles.cardCategory}>Observability</div>
+          </div>
+          {badge()}
+        </div>
+        <p className={integrationsStyles.cardDescription}>
+          Monitor AI model executions, agent workflows, LLM token usage, latency, errors, tool calls and AI execution costs
+          across Haive.
+        </p>
+        {configured && (
+          <>
+            <div className={integrationsStyles.keyPreview}>
+              Public Key: {config.publicKeyMasked ?? '—'}
+              <br />
+              Secret Key: {config.secretConfigured ? '••••••••••••' : 'Not set'}
+              <br />
+              Base URL: {config.baseUrl}
+              <br />
+              Last tested: {config.lastTestedAt ? formatFullDate(config.lastTestedAt) : 'Never'}
+              <br />
+              Last successful trace: {config.lastSuccessfulTraceAt ? formatFullDate(config.lastSuccessfulTraceAt) : 'None yet'}
+              {config.errorMessage && (
+                <>
+                  <br />
+                  <span style={{ color: 'var(--color-danger)' }}>Error: {config.errorMessage}</span>
+                </>
+              )}
+            </div>
+            <Switch
+              checked={config.enabled}
+              onChange={toggleEnabled}
+              disabled={togglingEnabled || !config.secretConfigured}
+              label="Enable Langfuse"
+              description={!config.secretConfigured ? 'Save a key pair before enabling.' : undefined}
+            />
+          </>
+        )}
+        <div className={integrationsStyles.cardFooter}>
+          {configured && config.secretConfigured && (
+            <Button size="sm" variant="outline" loading={testing} onClick={test}>
+              Test Connection
+            </Button>
+          )}
+          <Button size="sm" leftIcon={<FiKey />} onClick={openModal}>
+            {configured && config.secretConfigured ? 'Edit Configuration' : 'Save Configuration'}
+          </Button>
+        </div>
+      </Card>
+
+      <Modal
+        open={modalOpen}
+        onClose={() => setModalOpen(false)}
+        title="Langfuse Configuration"
+        description="From your Langfuse project's Settings → API Keys. The Secret Key is encrypted at rest and never shown again after saving — leave it blank to keep the one already on file."
+      >
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
+          <Input label="Public Key" value={publicKey} onChange={(e) => setPublicKey(e.target.value)} autoFocus />
+          <Input
+            label="Secret Key"
+            type="password"
+            placeholder={configured && config.secretConfigured ? 'Leave blank to keep the current key' : ''}
+            value={secretKey}
+            onChange={(e) => setSecretKey(e.target.value)}
+            leftIcon={<FiKey />}
+          />
+          <Input label="Base URL" value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} />
+          <label className={shared.mono} style={{ fontSize: 'var(--text-sm)', fontFamily: 'inherit', display: 'flex', flexDirection: 'column', gap: 4 }}>
+            Environment
+            <select
+              value={environment}
+              onChange={(e) => setEnvironment(e.target.value as 'development' | 'staging' | 'production')}
+              style={{ padding: 'var(--space-2)', borderRadius: 'var(--radius-md)', border: '1px solid var(--color-border)' }}
+            >
+              <option value="development">Development</option>
+              <option value="staging">Staging</option>
+              <option value="production">Production</option>
+            </select>
+          </label>
+          <Input
+            label="Sampling Rate (%)"
+            type="number"
+            min={0}
+            max={100}
+            value={samplingRate}
+            onChange={(e) => setSamplingRate(Math.min(100, Math.max(0, Number.parseInt(e.target.value, 10) || 0)))}
+          />
+          <Switch
+            checked={captureInputOutput}
+            onChange={setCaptureInputOutput}
+            label="Trace Input/Output"
+            description="Record prompt/response content on each trace, with sensitive-data masking applied before recording."
+          />
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 'var(--space-2)' }}>
+            <Button variant="ghost" onClick={() => setModalOpen(false)}>
+              Cancel
+            </Button>
+            <Button loading={saving} onClick={save}>
+              Save
+            </Button>
+          </div>
+        </div>
+      </Modal>
+    </div>
+  );
+}
+
 export function AdminSettingsPage() {
   const [tab, setTab] = useState<TabId>('company');
 
@@ -1375,6 +1614,7 @@ export function AdminSettingsPage() {
       {tab === 'outlookOAuth' && <OutlookOAuthTab />}
       {tab === 'xeroOAuth' && <XeroOAuthTab />}
       {tab === 'myobOAuth' && <MyobOAuthTab />}
+      {tab === 'langfuse' && <LangfuseConfigTab />}
     </div>
   );
 }

@@ -14,15 +14,61 @@ const DAY = 24 * 60 * 60 * 1000;
 const daysAgo = (n: number) => new Date(Date.now() - n * DAY);
 
 describe('a job’s statuses', () => {
-  it('seven columns, each with its own short list, every option fitting a chip', () => {
+  it('eight columns, each with its own short list, every option fitting a chip', () => {
     expect(JOB_STATUS_COLUMNS.map((column) => [column.title, column.options.map((o) => o.label)])).toEqual([
       ['Production', ['In house', 'Outsourced', 'Not started']],
-      ['Payment', ['Waiting for payment', 'Waiting for remittance', 'Payment received']],
-      ['Purchasing', ['Need to order', 'Ready to order', 'Ordered', 'Received', 'BYO']],
-      ['Order type', ['Normal', 'Priority', 'Rush']],
+      [
+        'Overall Status',
+        [
+          'Payment Received',
+          'Waiting Stock',
+          'Waiting Payment',
+          'In Production',
+          'Complete',
+          'Ready for Pickup',
+          'Ready for Pickup — Follow-up 2',
+          'C&C',
+          'Review Request',
+          'Partially Paid',
+          'Credit',
+          'TBC Remittance Received',
+          'Square Payment',
+          '50 Percent',
+          'Waiting for Remittance',
+        ],
+      ],
+      [
+        'Purchasing',
+        [
+          'Need to Order',
+          'Ready to order',
+          'Created',
+          'Ordered',
+          'Partially Ordered',
+          'Received',
+          'Partially Received',
+          'Some Backordered',
+          'On Hold',
+          'BYO',
+          'Delivery Charges',
+        ],
+      ],
+      ['Order type', ['Normal', 'Priority', 'Rush', 'N/A']],
       ['Artwork', ['Awaiting artwork approval', 'Artwork approved', 'Order completed']],
-      ['Progress', ['In progress', 'Done']],
-      ['Prod ready', ['Not ready yet', 'Production ready']],
+      [
+        'Order Status',
+        [
+          'Awaiting Art Approval',
+          'Artwork Approval',
+          'In Progress',
+          'Order Completed',
+          'Partially Completed',
+          'Artwork / Mockup Required',
+          'Personalize Requirement',
+        ],
+      ],
+      ['Active Clients', ['Active', 'In progress', 'Hold', 'Not Active', 'Done']],
+      ['Prod ready', ['Not Yet Ready', 'Production Ready']],
     ]);
     const lists = [...JOB_STATUS_COLUMNS.map((column) => column.options), ITEM_STATUSES, PURCHASE_ORDER_STATUSES, PROOF_STATUSES, SHIPMENT_STATUSES];
     for (const options of lists) {
@@ -38,7 +84,7 @@ describe('a job’s statuses', () => {
       JOB_STATUS_COLUMNS.map((column) => [column.key, '', 'Not set', 'none']),
     );
     const chips = jobStatusChips({ payment: 'waiting_payment', progress: 'done', artwork: 'something the list no longer has' });
-    expect(chips.find((chip) => chip.key === 'payment')).toMatchObject({ label: 'Awaiting pay', full: 'Waiting for payment', tone: 'waiting' });
+    expect(chips.find((chip) => chip.key === 'payment')).toMatchObject({ label: 'Awaiting pay', full: 'Waiting Payment', tone: 'waiting' });
     expect(chips.find((chip) => chip.key === 'progress')).toMatchObject({ label: 'Done', tone: 'done' });
     expect(chips.find((chip) => chip.key === 'artwork')).toMatchObject({ status: '', label: 'Not set' });
   });
@@ -89,7 +135,27 @@ describe('Jobs (real Mongo)', () => {
       { get: () => 'http://agent' } as never,
     );
     const w = new CustomerWorkspaceService(connection, d, new GridFsService(connection));
-    return { directory: d, workspace: w, jobs: new CustomerJobsService(connection, d, w) };
+    const vendorsStub = { getVendor: async () => ({ name: 'Test Vendor' }), existsInOrg: async () => true } as never;
+    const jobGridFsStub = { upload: async () => 'file-id', openDownloadStream: () => undefined, delete: async () => undefined } as never;
+    const decorationModelStub = { findOne: () => ({ exec: async () => null }) } as never;
+    const xeroServiceStub = { getStatus: async () => ({ connected: false, needsSelection: false }) } as never;
+    const dynamicExecutorStub = { execute: async () => ({ success: false, message: 'not configured' }) } as never;
+    const mailServiceStub = { sendDocumentEmail: async () => false } as never;
+    return {
+      directory: d,
+      workspace: w,
+      jobs: new CustomerJobsService(
+        connection,
+        d,
+        w,
+        vendorsStub,
+        jobGridFsStub,
+        decorationModelStub,
+        xeroServiceStub,
+        dynamicExecutorStub,
+        mailServiceStub,
+      ),
+    };
   };
 
   beforeEach(async () => {
@@ -211,8 +277,8 @@ describe('Jobs (real Mongo)', () => {
       canManage: false,
     });
     // Every status starts empty: nobody has said anything yet.
-    expect(job.statuses.map((chip) => chip.label)).toEqual(Array(7).fill('Not set'));
-    expect(job.options.columns).toHaveLength(7);
+    expect(job.statuses.map((chip) => chip.label)).toEqual(Array(8).fill('Not set'));
+    expect(job.options.columns).toHaveLength(8);
 
     // Asking again — by anyone — gives the job it already is, and uses up no number.
     const again = await jobs.convert(await person(org, 'Vasanth G', ['owner']), priya, q2);
@@ -244,7 +310,7 @@ describe('Jobs (real Mongo)', () => {
     ).toBe(0);
   });
 
-  it('the board: seven statuses set by hand, due dates, quick views, search, filters and sorting', async () => {
+  it('the board: eight statuses set by hand, due dates, quick views, search, filters and sorting', async () => {
     const { priya, arun, q1, q2, q9 } = await seed();
     const manager = await person(org, 'Sanjay', ['manager']);
     const first = (await jobs.convert(manager, priya, q1)).job.id;
@@ -263,10 +329,10 @@ describe('Jobs (real Mongo)', () => {
     expect(set.statuses.find((chip) => chip.key === 'payment')).toMatchObject({
       status: 'waiting_payment',
       label: 'Awaiting pay',
-      full: 'Waiting for payment',
+      full: 'Waiting Payment',
       tone: 'waiting',
     });
-    expect(set.history[0]).toMatchObject({ by: 'Sanjay', text: 'Payment set to Waiting for payment' });
+    expect(set.history[0]).toMatchObject({ by: 'Sanjay', text: 'Overall Status set to Waiting Payment' });
     await expect(jobs.setStatus(manager, first, 'payment', 'in_house')).rejects.toBeInstanceOf(BadRequestException);
     await expect(jobs.setStatus(manager, first, 'nonsense' as never, 'x')).rejects.toBeInstanceOf(BadRequestException);
     await expect(jobs.setStatus(manager, '000000000000000000000000', 'payment', 'received')).rejects.toBeInstanceOf(NotFoundException);
@@ -315,14 +381,47 @@ describe('Jobs (real Mongo)', () => {
     // Back to not set.
     const cleared = await jobs.setStatus(manager, first, 'payment', null);
     expect(cleared.statuses.find((chip) => chip.key === 'payment')).toMatchObject({ status: '', label: 'Not set' });
-    expect(cleared.history[0].text).toBe('Payment cleared');
+    expect(cleared.history[0].text).toBe('Overall Status cleared');
     expect(cleared.history.map((event) => event.text)).toEqual(
       expect.arrayContaining([
-        'Purchasing set to Need to order',
+        'Purchasing set to Need to Order',
         'Job created from quotation Q-1',
         expect.stringMatching(/^Due date set to \d{1,2} \w{3} \d{4}$/),
       ]),
     );
+  });
+
+  // Section 16 (JobBoard spec) — a critical, backend-enforced requirement:
+  // moving Overall Status to a value that asserts remittance was received
+  // must carry proof already attached to this exact job.
+  it('remittance-received statuses require proof already attached to this job', async () => {
+    const { priya, arun, q1, q9 } = await seed();
+    const manager = await person(org, 'Sanjay', ['manager']);
+    const id = (await jobs.convert(manager, priya, q1)).job.id;
+    const otherJob = (await jobs.convert(manager, arun, q9)).job.id;
+    const upload = (name: string) => ({ originalname: name, mimetype: 'application/pdf', buffer: Buffer.from('remit bytes') }) as Express.Multer.File;
+
+    // No proof at all: rejected, and the status stays exactly as it was.
+    await expect(jobs.setStatus(manager, id, 'payment', 'received')).rejects.toBeInstanceOf(BadRequestException);
+    await expect(jobs.setStatus(manager, id, 'payment', 'tbc_remittance_received')).rejects.toBeInstanceOf(BadRequestException);
+    expect((await jobs.detail(manager, id)).statuses.find((c) => c.key === 'payment')).toMatchObject({ status: '' });
+
+    // A real file, but attached to a DIFFERENT job: still rejected — never satisfied by someone else's proof.
+    const foreignProof = await jobs.addFile(manager, otherJob, upload('bank-transfer.pdf'));
+    await expect(jobs.setStatus(manager, id, 'payment', 'received', foreignProof.id)).rejects.toBeInstanceOf(NotFoundException);
+
+    // An outright made-up id: also rejected.
+    await expect(jobs.setStatus(manager, id, 'payment', 'received', '000000000000000000000000')).rejects.toBeInstanceOf(NotFoundException);
+
+    // A real proof attached to THIS job: the transition succeeds, and the proof's own id is kept on the job.
+    const proof = await jobs.addFile(manager, id, upload('bank-transfer.pdf'));
+    const done = await jobs.setStatus(manager, id, 'payment', 'received', proof.id);
+    expect(done.statuses.find((c) => c.key === 'payment')).toMatchObject({ status: 'received', full: 'Payment Received' });
+    expect(done.history[0].text).toContain('proof: bank-transfer.pdf');
+
+    // A status that does NOT assert receipt (still waiting) never needs proof.
+    const stillWaiting = await jobs.setStatus(manager, otherJob, 'payment', 'waiting_remittance');
+    expect(stillWaiting.statuses.find((c) => c.key === 'payment')).toMatchObject({ status: 'waiting_remittance' });
   });
 
   it('items, purchase orders and shipping', async () => {
@@ -393,6 +492,35 @@ describe('Jobs (real Mongo)', () => {
     expect(job.shipments[0]).toMatchObject({ status: 'delivered', tone: 'done', trackingNumber: undefined });
     expect(job.shipments[0].deliveredAt).toBeInstanceOf(Date);
     expect((await jobs.removeShipment(manager, id, shipment.id)).shipments).toEqual([]);
+  });
+
+  it('credits: issued by default, voiding stamps a deleted date instead of removing the record', async () => {
+    const { priya, q1 } = await seed();
+    const manager = await person(org, 'Sanjay', ['manager']);
+    const id = (await jobs.convert(manager, priya, q1)).job.id;
+
+    await expect(jobs.addCredit(manager, id, { description: '   ' })).rejects.toBeInstanceOf(BadRequestException);
+    let job = await jobs.addCredit(manager, id, { creditNumber: 'CR-1', description: 'Damaged goods refund', amount: 1500 });
+    const credit = job.credits[0];
+    expect(credit).toMatchObject({
+      creditNumber: 'CR-1',
+      description: 'Damaged goods refund',
+      amount: 1500,
+      status: 'issued',
+      label: 'Issued',
+      createdByName: 'Sanjay',
+    });
+    expect(credit.deletedAt).toBeUndefined();
+    expect(job.history[0].text).toBe('Credit added — Damaged goods refund');
+
+    // Voiding keeps the record and stamps when — never a hard delete.
+    job = await jobs.updateCredit(manager, id, credit.id, { status: 'voided' });
+    expect(job.credits[0]).toMatchObject({ status: 'voided', label: 'Voided' });
+    expect(job.credits[0].deletedAt).toBeInstanceOf(Date);
+
+    // A genuine mistake can still be removed outright.
+    expect((await jobs.removeCredit(manager, id, credit.id)).credits).toEqual([]);
+    await expect(jobs.removeCredit(manager, id, credit.id)).rejects.toBeInstanceOf(NotFoundException);
   });
 
   it('comments, tasks, files and proofs of a job are its customer’s own, tagged with the job', async () => {

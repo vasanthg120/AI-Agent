@@ -63,9 +63,22 @@ export interface CreateVendorQuotePayload {
   status?: 'pending' | 'accepted' | 'rejected' | 'expired';
 }
 
+export interface VendorOption {
+  _id: string;
+  name: string;
+}
+
 export const vendorsService = {
   async list(): Promise<Vendor[]> {
     const { data } = await axiosClient.get<Vendor[]>('/vendors');
+    return data;
+  },
+
+  // Name-only projection, reachable by manager/consultant (unlike the rest
+  // of this service, gated owner/admin-only server-side) — backs the Vendor
+  // picker in the Catalog forms without exposing bank/tax/contact data.
+  async listPicker(): Promise<VendorOption[]> {
+    const { data } = await axiosClient.get<VendorOption[]>('/vendors/picker');
     return data;
   },
 

@@ -5,6 +5,8 @@ export const ROUTES = {
   oauthCallback: '/oauth/callback',
   // Where an invitation email's link lands (sub-account owners, invited employees).
   activate: '/activate',
+  // SalesBoard's "Copy Guest View Link" — public, token-only, no session.
+  quoteGuestView: '/quotes/guest/:token',
 
   dashboard: '/dashboard',
   agentActivity: '/agent-activity',
@@ -91,6 +93,13 @@ export const ADMIN_ROUTES = {
   invoices: '/Admin-haive/invoices',
   analytics: '/Admin-haive/analytics',
   aiUsage: '/Admin-haive/ai-usage',
+  // Hierarchical AI usage drill-down (Platform -> Organisation -> User ->
+  // Request) — nested under the existing aiUsage page, same pattern
+  // organizationDetail already uses, not a new top-level page.
+  aiUsageOrganizationDetail: (organizationId: string) => `/Admin-haive/ai-usage/organizations/${organizationId}`,
+  aiUsageUserDetail: (organizationId: string, userId: string) => `/Admin-haive/ai-usage/organizations/${organizationId}/users/${userId}`,
+  aiUsageRequestDetail: (organizationId: string, userId: string, requestId: string) =>
+    `/Admin-haive/ai-usage/organizations/${organizationId}/users/${userId}/requests/${requestId}`,
   adminUsers: '/Admin-haive/admin-users',
   auditLogs: '/Admin-haive/audit-logs',
   settings: '/Admin-haive/settings',

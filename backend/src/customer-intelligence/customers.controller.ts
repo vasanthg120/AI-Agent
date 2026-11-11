@@ -1,4 +1,20 @@
-import { Body, Controller, Delete, ForbiddenException, Get, Param, Patch, Post, Query, Res, UseGuards } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
+import {
+  BadRequestException,
+  Body,
+  Controller,
+  Delete,
+  ForbiddenException,
+  Get,
+  Param,
+  Patch,
+  Post,
+  Query,
+  Res,
+  UploadedFile,
+  UseGuards,
+  UseInterceptors,
+} from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import { Response } from 'express';
 import { JwtPayload } from '../auth/jwt-payload.interface';
@@ -7,9 +23,11 @@ import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
+import { UPLOAD_FILE_INTERCEPTOR_OPTIONS } from '../common/upload-limits';
 import { CustomerDirectoryService } from './customer-directory.service';
 import { CustomerWorkspaceService } from './customer-workspace.service';
-import { AddCustomerContactDto, CreateCustomerDto, UpdateCustomerDto } from './dto/customer-profile.dto';
+import { buildCustomerImportTemplateCsv, CustomerImportService } from './customer-import.service';
+import { AddCustomerContactDto, CreateCustomerAddressDto, CreateCustomerDto, UpdateCustomerDto } from './dto/customer-profile.dto';
 import { Permission } from '../common/permissions/permission.decorator';
 
 // Customers: one row per customer, built from every connected CRM and the
@@ -24,6 +42,7 @@ export class CustomersController {
   constructor(
     private directory: CustomerDirectoryService,
     private workspace: CustomerWorkspaceService,
+    private importService: CustomerImportService,
   ) {}
 
   @Get()
@@ -131,6 +150,35 @@ export class CustomersController {
     return this.directory.sync(user.organizationId, source);
   }
 
+  // Hoops-parity CSV import — declared before ':id', same static-segment
+  // rule as 'export'/'sync' above.
+  @Get('import-template')
+  importTemplate(@Res() res: Response) {
+    res.set({
+      'Content-Type': 'text/csv; charset=utf-8',
+      'Content-Disposition': 'attachment; filename="customer-import-template.csv"',
+    });
+    res.send(buildCustomerImportTemplateCsv());
+  }
+
+  @Post('import/preview')
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
+  @UseInterceptors(FileInterceptor('file', UPLOAD_FILE_INTERCEPTOR_OPTIONS))
+  async previewImport(@CurrentUser() user: JwtPayload, @UploadedFile() file: Express.Multer.File) {
+    if (!file) throw new BadRequestException('A CSV file is required.');
+    return this.importService.parseImportFile(user.organizationId, file.buffer);
+  }
+
+  @Post('import/commit')
+  @Throttle({ default: { limit: 5, ttl: 60_000 } })
+  @UseInterceptors(FileInterceptor('file', UPLOAD_FILE_INTERCEPTOR_OPTIONS))
+  async commitImport(@CurrentUser() user: JwtPayload, @UploadedFile() file: Express.Multer.File) {
+    if (!file) throw new BadRequestException('A CSV file is required.');
+    const { customers, errors } = await this.importService.parseImportFile(user.organizationId, file.buffer);
+    const result = await this.importService.importRows(user, customers);
+    return { ...result, errors: [...errors, ...result.errors] };
+  }
+
   @Get(':id')
   detail(@CurrentUser() user: JwtPayload, @Param('id') id: string) {
     return this.directory.detail(user.organizationId, id);
@@ -168,6 +216,18 @@ export class CustomersController {
   @Delete(':id/contacts/:contactId')
   removeContact(@CurrentUser() user: JwtPayload, @Param('id') id: string, @Param('contactId') contactId: string) {
     return this.directory.removeContact(user.organizationId, id, contactId);
+  }
+
+  // Hoops-parity Add/Edit Customer — multiple typed addresses (billing/
+  // shipping/other), same additive/HaiVE-only shape as contacts above.
+  @Post(':id/addresses')
+  addAddress(@CurrentUser() user: JwtPayload, @Param('id') id: string, @Body() dto: CreateCustomerAddressDto) {
+    return this.directory.addAddress(user.organizationId, id, dto);
+  }
+
+  @Delete(':id/addresses/:addressId')
+  removeAddress(@CurrentUser() user: JwtPayload, @Param('id') id: string, @Param('addressId') addressId: string) {
+    return this.directory.removeAddress(user.organizationId, id, addressId);
   }
 
   // A real, billed AI call — same per-employee switch as the chat.

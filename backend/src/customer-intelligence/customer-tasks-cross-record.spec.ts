@@ -83,7 +83,7 @@ describe('CustomerWorkspaceService.listAllTasks (real Mongo)', () => {
 
     const openOnly = await workspace.listAllTasks(asUser(org), { status: 'open' });
     expect(openOnly.map((t) => t.id)).toEqual([open.id]);
-
+  
     const doneOnly = await workspace.listAllTasks(asUser(org), { status: 'done' });
     expect(doneOnly.map((t) => t.id)).toEqual([toClose.id]);
   });

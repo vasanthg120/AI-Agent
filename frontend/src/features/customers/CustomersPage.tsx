@@ -27,6 +27,7 @@ import {
   FiFilter,
   FiInbox,
   FiLayers,
+  FiUpload,
   FiLink2,
   FiMail,
   FiMaximize2,
@@ -77,6 +78,7 @@ import {
 import { formatRelativeTime } from '@/utils/date';
 import { extractErrorMessage } from '@/utils/errors';
 import { AddCustomerModal } from './AddCustomerModal';
+import { ImportCustomersModal } from './ImportCustomersModal';
 import { CustomerPanel, type CustomerPreview, type PanelTab } from './CustomerPanel';
 import { QuoteDetailDrawer } from './QuoteDetailDrawer';
 import type { Job } from '@/services/customerJobsService';
@@ -512,6 +514,7 @@ const CustomersBoard = memo(function CustomersBoard({
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [includeArchived, setIncludeArchived] = useState(false);
   const [addingCustomer, setAddingCustomer] = useState(false);
+  const [importing, setImporting] = useState(false);
   const [hidden, setHidden] = useState<ColumnId[]>(() =>
     remembered<ColumnId[]>(HIDDEN_KEY, []).filter((id) => COLUMNS.some((c) => c.id === id)),
   );
@@ -908,6 +911,11 @@ const CustomersBoard = memo(function CustomersBoard({
               <FiDownload aria-hidden /> {exporting ? 'Exporting…' : 'Export'}
             </button>
           )}
+          {can(useAuthStore.getState().user, 'customers', 'create') && (
+            <button type="button" className={styles.tool} title="Add customers in bulk from a CSV file" onClick={() => setImporting(true)}>
+              <FiUpload aria-hidden /> Import
+            </button>
+          )}
           {filtered && (
             <Button type="button" variant="ghost" size="sm" onClick={clearFilters}>
               Clear
@@ -1073,6 +1081,16 @@ const CustomersBoard = memo(function CustomersBoard({
             Next
           </Button>
         </div>
+      )}
+
+      {importing && (
+        <ImportCustomersModal
+          onClose={() => setImporting(false)}
+          onImported={() => {
+            setImporting(false);
+            void queryClient.invalidateQueries({ queryKey: ['customers'] });
+          }}
+        />
       )}
     </div>
   );

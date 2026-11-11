@@ -1,11 +1,14 @@
 import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { AgentExecution, AgentExecutionSchema } from '../command-center/schemas/agent-execution.schema';
+import { WalletTransaction, WalletTransactionSchema } from '../billing/schemas/wallet-transaction.schema';
 import { IntegrationCredential, IntegrationCredentialSchema } from '../integrations/schemas/integration-credential.schema';
 import { Organization, OrganizationSchema } from '../organizations/schemas/organization.schema';
 import { User, UserSchema } from '../users/schemas/user.schema';
 import { AiUsageAdminController } from './ai-usage-admin.controller';
 import { AiUsageAdminService } from './ai-usage-admin.service';
+import { AiUsageHierarchyController } from './ai-usage-hierarchy.controller';
+import { AiUsageHierarchyService } from './ai-usage-hierarchy.service';
 
 // Read-only reporting over agent_executions/integration_credentials — same
 // collections CommandCenterModule/IntegrationsModule already own, registered
@@ -20,9 +23,10 @@ import { AiUsageAdminService } from './ai-usage-admin.service';
       { name: IntegrationCredential.name, schema: IntegrationCredentialSchema },
       { name: Organization.name, schema: OrganizationSchema },
       { name: User.name, schema: UserSchema },
+      { name: WalletTransaction.name, schema: WalletTransactionSchema },
     ]),
   ],
-  controllers: [AiUsageAdminController],
-  providers: [AiUsageAdminService],
+  controllers: [AiUsageAdminController, AiUsageHierarchyController],
+  providers: [AiUsageAdminService, AiUsageHierarchyService],
 })
 export class AiUsageModule {}

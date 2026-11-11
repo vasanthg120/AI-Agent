@@ -2,14 +2,18 @@ import { useRef, useState } from 'react';
 import type { FormEvent } from 'react';
 import dayjs from 'dayjs';
 import toast from 'react-hot-toast';
+import { useQuery } from '@tanstack/react-query';
 import type { UseQueryResult } from '@tanstack/react-query';
 import {
+  FiAlertCircle,
   FiCheckSquare,
   FiDownload,
   FiEdit2,
   FiEdit3,
+  FiExternalLink,
   FiImage,
   FiLayers,
+  FiMail,
   FiMessageSquare,
   FiPaperclip,
   FiPlus,
@@ -22,13 +26,15 @@ import {
 import type { IconType } from 'react-icons';
 import clsx from 'clsx';
 import { CloudPickButton } from '@/components/cloud-files';
-import { Button } from '@/components/ui';
+import { Button, MultiSelectDropdown } from '@/components/ui';
 import {
   customerJobsService,
   type JobDetail,
   type JobEntryInput,
   type JobStatusOption,
 } from '@/services/customerJobsService';
+import { decorationsService } from '@/services/decorationsService';
+import { vendorsService } from '@/services/vendorsService';
 import type { CustomerFile, CustomerWorkspace } from '@/services/customersService';
 import { formatRelativeTime } from '@/utils/date';
 import { extractErrorMessage } from '@/utils/errors';
@@ -49,11 +55,13 @@ const noonOf = (day: string) => dayjs(day).hour(12).minute(0).second(0).millisec
 export function JobDetailTab({
   job,
   busy,
+  run,
   onItemStatus,
   onOpenCustomer,
 }: {
   job: JobDetail;
   busy: boolean;
+  run: RunJobChange;
   onItemStatus: (index: number, status: string) => void;
   onOpenCustomer: (customerId: string, quotationId?: string) => void;
 }) {
@@ -61,6 +69,17 @@ export function JobDetailTab({
   const { contact } = job;
   const customerId = job.customer.id;
   const done = job.items.filter((item) => item.status === 'done').length;
+
+  const decorationOptions = useQuery({
+    queryKey: ['decorations', 'picker'],
+    queryFn: () => decorationsService.listFiltered({}, 1, 100).then((r) => r.items),
+    staleTime: 60_000,
+  });
+  const vendorOptions = useQuery({ queryKey: ['vendors', 'picker'], queryFn: () => vendorsService.listPicker(), staleTime: 60_000 });
+  const setDecoration = (decorationId: string) =>
+    void run(() => customerJobsService.update(job.id, { decorationId: decorationId || null }));
+  const setVendors = (vendorIds: string[]) => void run(() => customerJobsService.update(job.id, { vendorIds }));
+
   return (
     <>
       <section className={detailStyles.section}>
@@ -144,6 +163,37 @@ export function JobDetailTab({
               Open customer
             </Button>
           )}
+        </div>
+      </section>
+
+      <section className={detailStyles.section}>
+        <h3>Decoration &amp; Vendors</h3>
+        <div className={panelStyles.infoGrid} style={{ gridTemplateColumns: '1fr 1fr' }}>
+          <label className={panelStyles.fieldLabel}>
+            <span>Decoration</span>
+            <select
+              className={panelStyles.field}
+              value={job.decorationId ?? ''}
+              disabled={busy}
+              onChange={(e) => setDecoration(e.target.value)}
+            >
+              <option value="">Not set</option>
+              {decorationOptions.data?.map((d) => (
+                <option key={d._id} value={d._id}>
+                  {d.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <div>
+            <span className={panelStyles.fieldLabel}>Vendors</span>
+            <MultiSelectDropdown
+              label={job.vendorNames.length > 0 ? job.vendorNames.join(', ') : 'None selected'}
+              options={(vendorOptions.data ?? []).map((v) => ({ value: v._id, label: v.name }))}
+              selected={job.vendorIds}
+              onChange={setVendors}
+            />
+          </div>
         </div>
       </section>
 
@@ -300,9 +350,12 @@ const ENTRIES = {
       { key: 'description', label: 'What', type: 'text', placeholder: 'e.g. 250 navy polos, blank', maxLength: 500 },
       { key: 'amount', label: 'Amount', type: 'number', placeholder: '0' },
       { key: 'reference', label: 'Reference', type: 'text', placeholder: 'PO number', maxLength: 80 },
+      { key: 'accountingPoNumber', label: 'Accounting PO #', type: 'text', placeholder: 'e.g. Xero PO number', maxLength: 80 },
       { key: 'orderedAt', label: 'Ordered on', type: 'date' },
       { key: 'expectedAt', label: 'Expected on', type: 'date' },
       { key: 'receivedAt', label: 'Received on', type: 'date' },
+      { key: 'deadline', label: 'Deadline', type: 'date' },
+      { key: 'backorderDueDate', label: 'Backorder due', type: 'date' },
     ] as EntryField[],
   },
   shipping: {
@@ -320,6 +373,25 @@ const ENTRIES = {
       { key: 'shippedAt', label: 'Shipped on', type: 'date' },
       { key: 'deliveredAt', label: 'Delivered on', type: 'date' },
       { key: 'note', label: 'Note', type: 'text', placeholder: 'e.g. Two cartons', maxLength: 500, wide: true },
+    ] as EntryField[],
+  },
+  credits: {
+    list: 'credits' as const,
+    source: 'credits' as const,
+    options: 'credits' as const,
+    title: 'Credits',
+    one: 'credit',
+    intro: 'A credit issued against this job — HaiVE’s own record, not an accounting-provider credit note. Voiding keeps the record and stamps when, rather than deleting it.',
+    empty: 'No credit has been issued on this job yet.',
+    add: 'Add credit',
+    // 'description' is first — EntriesTab below treats the first field as
+    // the required, main one (matches the backend's own `main: 'description'`
+    // in customer-jobs.service.ts's ENTRIES.credits; creditNumber is
+    // optional there, so it can't be the main field here either).
+    fields: [
+      { key: 'description', label: 'Description', type: 'text', placeholder: 'e.g. Damaged goods refund', maxLength: 500, wide: true },
+      { key: 'creditNumber', label: 'Credit number', type: 'text', placeholder: 'e.g. CR-1', maxLength: 80 },
+      { key: 'amount', label: 'Amount', type: 'number', placeholder: '0' },
     ] as EntryField[],
   },
 };
@@ -687,6 +759,13 @@ export function ProofsTab({
                   }
                   onDownload={() => void download(proof)}
                   onRemove={() => remove(proof)}
+                  onSend={() =>
+                    void act(proof.id, async () => {
+                      const result = await customerJobsService.sendProof(jobId, proof.id);
+                      if (!result.sent) throw new Error(`Email wasn’t sent — the server has no mail configured. Would have gone to ${result.to}.`);
+                      return result;
+                    }, 'Proof sent')
+                  }
                 />
               ))}
             </ul>
@@ -705,6 +784,7 @@ function ProofRow({
   onSet,
   onDownload,
   onRemove,
+  onSend,
 }: {
   proof: CustomerFile;
   options: JobStatusOption[];
@@ -713,6 +793,7 @@ function ProofRow({
   onSet: (status: string, note?: string) => void;
   onDownload: () => void;
   onRemove: () => void;
+  onSend: () => void;
 }) {
   const status = proof.proofStatus ?? 'awaiting';
   const [note, setNote] = useState(proof.proofNote ?? '');
@@ -736,6 +817,16 @@ function ProofRow({
           // Moving away from "Changes needed" drops what had to change; moving to it keeps what is written.
           onChange={(next) => onSet(next, next === 'changes' ? note.trim() : undefined)}
         />
+        <button
+          type="button"
+          className={panelStyles.iconLink}
+          aria-label={`Send ${proof.name} to the customer`}
+          title="Send proof"
+          disabled={busy}
+          onClick={onSend}
+        >
+          <FiMail aria-hidden />
+        </button>
         <button
           type="button"
           className={panelStyles.iconLink}
@@ -823,5 +914,137 @@ export function JobActivityTab({ job }: { job: JobDetail }) {
         );
       })}
     </ol>
+  );
+}
+
+// ---- Invoice Status - Xero: honest about what's actually known -----------------------------
+
+export function JobInvoiceTab({ jobId }: { jobId: string }) {
+  const [editing, setEditing] = useState(false);
+  const [draftNumber, setDraftNumber] = useState('');
+  const [saving, setSaving] = useState(false);
+  const query = useQuery({
+    queryKey: ['customer-jobs', 'xero-invoice', jobId],
+    queryFn: () => customerJobsService.getXeroInvoiceStatus(jobId),
+  });
+  const money = (amount: number) => formatMoney(amount, query.data?.currencyCode);
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      await customerJobsService.update(jobId, { xeroInvoiceNumber: draftNumber.trim() || null });
+      await query.refetch();
+      toast.success(draftNumber.trim() ? 'Invoice linked' : 'Invoice link removed');
+      setEditing(false);
+    } catch (err) {
+      failed(err);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (query.isLoading) return <p className={detailStyles.muted}>Loading…</p>;
+  const data = query.data;
+
+  return (
+    <section className={detailStyles.section}>
+      <h3>Invoice Status — Xero</h3>
+      {!editing ? (
+        <div className={panelStyles.infoCard}>
+          <dl className={panelStyles.infoGrid}>
+            <div>
+              <dt>Linked invoice number</dt>
+              <dd>
+                {data?.invoiceNumber ?? 'Not linked'}{' '}
+                <button type="button" className={panelStyles.textButton} onClick={() => { setDraftNumber(data?.invoiceNumber ?? ''); setEditing(true); }}>
+                  {data?.invoiceNumber ? 'Change' : 'Link an invoice'}
+                </button>
+              </dd>
+            </div>
+          </dl>
+
+          {!data?.linked ? (
+            <p className={detailStyles.muted}>No Xero invoice is linked to this job yet.</p>
+          ) : !data.connected ? (
+            <p className={detailStyles.muted}>
+              <FiAlertCircle aria-hidden /> Xero isn’t connected for this organization. Connect it in Settings → Integrations.
+            </p>
+          ) : !data.configured ? (
+            <p className={detailStyles.muted}>
+              <FiAlertCircle aria-hidden /> Xero is connected, but nobody has set up the “Invoices” resource/endpoint yet
+              (Settings → Integrations → Xero). Once that’s configured, this tab will show the real invoice.
+            </p>
+          ) : data.error ? (
+            <p className={detailStyles.muted}>
+              <FiAlertCircle aria-hidden /> {data.error}
+            </p>
+          ) : (
+            <dl className={panelStyles.infoGrid}>
+              <div>
+                <dt>Status</dt>
+                <dd>{data.status ?? dash}</dd>
+              </div>
+              <div>
+                <dt>Total</dt>
+                <dd>{data.total !== undefined ? money(data.total) : dash}</dd>
+              </div>
+              <div>
+                <dt>Amount owing</dt>
+                <dd>{data.amountDue !== undefined ? money(data.amountDue) : dash}</dd>
+              </div>
+              <div>
+                <dt>Total tax</dt>
+                <dd>{data.totalTax !== undefined ? money(data.totalTax) : dash}</dd>
+              </div>
+              <div>
+                <dt>Due date</dt>
+                <dd>
+                  {data.dueDate ? formatDate(data.dueDate) : dash}
+                  {data.overdue && (
+                    <>
+                      {' '}
+                      <span className={styles.overdue}>Overdue</span>
+                    </>
+                  )}
+                </dd>
+              </div>
+              <div>
+                <dt>Transaction date</dt>
+                <dd>{data.transactionDate ? formatDate(data.transactionDate) : dash}</dd>
+              </div>
+              <div>
+                <dt>Xero customer name</dt>
+                <dd>{data.contactName ?? dash}</dd>
+              </div>
+            </dl>
+          )}
+        </div>
+      ) : (
+        <div className={styles.entryForm}>
+          <label className={panelStyles.fieldLabel}>
+            <span>Xero invoice number (e.g. INV-0342)</span>
+            <input
+              className={panelStyles.field}
+              value={draftNumber}
+              maxLength={80}
+              placeholder="INV-0342"
+              onChange={(e) => setDraftNumber(e.target.value)}
+            />
+          </label>
+          <div className={styles.entryActions}>
+            <Button type="button" size="sm" variant="ghost" onClick={() => setEditing(false)}>
+              Cancel
+            </Button>
+            <Button type="button" size="sm" leftIcon={<FiExternalLink />} loading={saving} onClick={() => void save()}>
+              Save
+            </Button>
+          </div>
+        </div>
+      )}
+      <p className={panelStyles.hint}>
+        This app has no automatic flow from a quotation/job to a Xero invoice — link the real invoice number by hand
+        once it exists in Xero, and this tab reads its live status from there.
+      </p>
+    </section>
   );
 }

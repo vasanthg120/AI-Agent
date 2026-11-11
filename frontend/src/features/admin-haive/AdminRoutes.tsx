@@ -16,6 +16,13 @@ const AdminPlansPage = lazy(() => import('./catalog/AdminPlansPage').then((m) =>
 const AdminSubscriptionsPage = lazy(() => import('./subscriptions/AdminSubscriptionsPage').then((m) => ({ default: m.AdminSubscriptionsPage })));
 const AdminInvoicesPage = lazy(() => import('./invoices/AdminInvoicesPage').then((m) => ({ default: m.AdminInvoicesPage })));
 const AdminAiUsagePage = lazy(() => import('./AdminAiUsagePage').then((m) => ({ default: m.AdminAiUsagePage })));
+const AiUsageOrganizationDetailPage = lazy(() =>
+  import('./ai-usage/AiUsageOrganizationDetailPage').then((m) => ({ default: m.AiUsageOrganizationDetailPage })),
+);
+const AiUsageUserDetailPage = lazy(() => import('./ai-usage/AiUsageUserDetailPage').then((m) => ({ default: m.AiUsageUserDetailPage })));
+const AiUsageRequestDetailPage = lazy(() =>
+  import('./ai-usage/AiUsageRequestDetailPage').then((m) => ({ default: m.AiUsageRequestDetailPage })),
+);
 const AdminPaymentSettingsPage = lazy(() => import('./AdminPaymentSettingsPage').then((m) => ({ default: m.AdminPaymentSettingsPage })));
 const AdminUsersManagementPage = lazy(() => import('./AdminUsersManagementPage').then((m) => ({ default: m.AdminUsersManagementPage })));
 const AdminSettingsPage = lazy(() => import('./AdminSettingsPage').then((m) => ({ default: m.AdminSettingsPage })));
@@ -67,6 +74,9 @@ export function AdminRoutes() {
             <Route path="payment-settings" element={<AdminPaymentSettingsPage />} />
             <Route path="invoices" element={<AdminInvoicesPage />} />
             <Route path="ai-usage" element={<AdminAiUsagePage />} />
+            <Route path="ai-usage/organizations/:organizationId" element={<AiUsageOrganizationDetailPage />} />
+            <Route path="ai-usage/organizations/:organizationId/users/:userId" element={<AiUsageUserDetailPage />} />
+            <Route path="ai-usage/organizations/:organizationId/users/:userId/requests/:requestId" element={<AiUsageRequestDetailPage />} />
             <Route path="admin-users" element={<AdminUsersManagementPage />} />
             <Route path="settings" element={<AdminSettingsPage />} />
           </Route>

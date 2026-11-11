@@ -522,6 +522,8 @@ def _run_forced_tool_extraction(
                 block = next((b for b in response.content if b.type == "tool_use"), None)
                 if block is None:
                     raise ValueError("Model did not return a tool_use block")
+                usage["input"] = user_content
+                usage["output"] = block.input
                 return block.input
         except Exception as exc:  # noqa: BLE001 - deliberately broad, retried once then surfaced
             last_error = exc
@@ -1023,6 +1025,8 @@ def classify_request(
         usage["output_tokens"] = response.usage.output_tokens
         usage["cache_creation_input_tokens"] = getattr(response.usage, "cache_creation_input_tokens", 0) or 0
         usage["cache_read_input_tokens"] = getattr(response.usage, "cache_read_input_tokens", 0) or 0
+        usage["input"] = input_items
+        usage["output"] = [b.model_dump() for b in response.content]
     block = next((b for b in response.content if b.type == "tool_use"), None)
     if block is None:
         raise ValueError("Planner did not return a tool_use block")
@@ -1095,6 +1099,8 @@ def critique_response(
         usage["output_tokens"] = response.usage.output_tokens
         usage["cache_creation_input_tokens"] = getattr(response.usage, "cache_creation_input_tokens", 0) or 0
         usage["cache_read_input_tokens"] = getattr(response.usage, "cache_read_input_tokens", 0) or 0
+        usage["input"] = {"user_message": user_message, "draft_reply": draft_reply}
+        usage["output"] = [b.model_dump() for b in response.content]
     block = next((b for b in response.content if b.type == "tool_use"), None)
     if block is None:
         raise ValueError("Critique did not return a tool_use block")
@@ -1172,6 +1178,8 @@ def suggest_follow_ups(
         usage["output_tokens"] = response.usage.output_tokens
         usage["cache_creation_input_tokens"] = getattr(response.usage, "cache_creation_input_tokens", 0) or 0
         usage["cache_read_input_tokens"] = getattr(response.usage, "cache_read_input_tokens", 0) or 0
+        usage["input"] = {"user_message": user_message, "reply": reply}
+        usage["output"] = [b.model_dump() for b in response.content]
     block = next((b for b in response.content if b.type == "tool_use"), None)
     if block is None:
         raise ValueError("suggest_follow_ups did not return a tool_use block")
@@ -1238,6 +1246,8 @@ def answer_business_question(
         usage["output_tokens"] = response.usage.output_tokens
         usage["cache_creation_input_tokens"] = getattr(response.usage, "cache_creation_input_tokens", 0) or 0
         usage["cache_read_input_tokens"] = getattr(response.usage, "cache_read_input_tokens", 0) or 0
+        usage["input"] = {"context": context, "question": question}
+        usage["output"] = [b.model_dump() for b in response.content]
     block = next((b for b in response.content if b.type == "text"), None)
     if block is None:
         raise ValueError("Business advisor call did not return a text block")
@@ -1357,6 +1367,8 @@ def call(
                 usage["output_tokens"] = response.usage.output_tokens
                 usage["cache_creation_input_tokens"] = getattr(response.usage, "cache_creation_input_tokens", 0) or 0
                 usage["cache_read_input_tokens"] = getattr(response.usage, "cache_read_input_tokens", 0) or 0
+                usage["input"] = input_items
+                usage["output"] = [b.model_dump() for b in response.content]
                 break
             except Exception as exc:
                 if not emitted_any and attempt < _MAX_CALL_ATTEMPTS - 1 and _is_retryable(exc):
@@ -1504,6 +1516,8 @@ def analyze_customer_activity(
                 block = next((b for b in response.content if b.type == "tool_use"), None)
                 if block is None:
                     raise ValueError("Model did not return a tool_use block")
+                usage["input"] = payload
+                usage["output"] = block.input
                 return block.input
         except Exception as exc:  # noqa: BLE001 - deliberately broad, retried once then surfaced
             last_error = exc
@@ -1613,6 +1627,8 @@ def analyze_finance_activity(
                 block = next((b for b in response.content if b.type == "tool_use"), None)
                 if block is None:
                     raise ValueError("Model did not return a tool_use block")
+                usage["input"] = payload
+                usage["output"] = block.input
                 return block.input
         except Exception as exc:  # noqa: BLE001 - deliberately broad, retried once then surfaced
             last_error = exc

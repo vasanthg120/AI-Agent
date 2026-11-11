@@ -32,6 +32,10 @@ import { IntegrationResource, IntegrationResourceSchema } from './schemas/integr
   providers: [IntegrationsService, IntegrationResourcesService, DynamicExecutorService],
   // PlivoModule keeps its Auth ID/Token here, encrypted like every other
   // per-organization credential, rather than inventing a second store.
-  exports: [IntegrationsService],
+  // DynamicExecutorService: JobBoard's "Invoice Status — Xero" (see
+  // customer-intelligence.module.ts's XeroModule import) reads a
+  // configured Xero resource/endpoint the same generic way any other
+  // caller of this service does.
+  exports: [IntegrationsService, DynamicExecutorService],
 })
 export class IntegrationsModule {}
