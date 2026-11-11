@@ -84,6 +84,17 @@ export class EmailFollowUpReminder {
   @Prop()
   dismissedAt?: Date;
 
+  // When the follow-up was done, and how (since 2026-11-11; older done ones
+  // fall back to sentAt, then updatedAt): the follow-up email was sent, a
+  // person marked it done, or it closed itself because the customer replied
+  // or a later message went out in the conversation. Team Performance counts
+  // "follow-ups completed" by this.
+  @Prop()
+  completedAt?: Date;
+
+  @Prop()
+  completedVia?: 'sent' | 'marked_done' | 'customer_replied' | 'later_message';
+
   @Prop()
   dismissedReason?: string;
 

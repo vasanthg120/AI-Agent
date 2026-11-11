@@ -13,6 +13,7 @@ import { periodToDateRange } from '../common/period.util';
 import { classifyEmailDeterministically } from './email-preclassification.util';
 import {
   deriveCategory,
+  deriveRespondedInfo,
   EmailCategory,
   EmailResponseStatus,
   needsResponseMatch,
@@ -78,6 +79,28 @@ export const RELEVANT_EMAIL_INTENTS = [
   'vendor', 'existing_customer', 'new_enquiry', 'quotation_request', 'price_negotiation',
   'complaint', 'technical_support', 'escalation', 'meeting_request',
 ];
+
+/** Team Performance's email figures (see teamEmailMatch). */
+export type TeamEmailMetric = 'received' | 'replied' | 'pending' | 'missed';
+
+/** One email in a Team Performance list. */
+export interface TeamEmailRow {
+  id: string;
+  employeeId: string;
+  receivedAt: Date;
+  subject: string;
+  from: string;
+  fromAddress: string;
+  business?: string;
+  respondedAt?: Date;
+  respondedVia?: 'app' | 'outlook' | 'thread';
+  // Who approved the reply sent through HaiVE (a HaiVE user id).
+  approvedBy?: string;
+  category: EmailCategory;
+  intent?: string;
+  summary?: string;
+  nextAction?: string;
+}
 
 const RELEVANT_INTENT_LABELS: Record<string, string> = {
   vendor: 'Vendor',
@@ -952,6 +975,104 @@ export class EmailIntelligenceService {
       intent: intent && RELEVANT_EMAIL_INTENTS.includes(intent) ? intent : { $in: RELEVANT_EMAIL_INTENTS },
       receivedAt: { $gte: start, $lt: end },
     };
+  }
+
+  // ---- Team Performance (team-performance/) ----
+  //
+  // The same rules as the Sent/Missed pages and Employee Productivity, so the
+  // numbers agree everywhere:
+  //  - received: relevant mail (RELEVANT_EMAIL_INTENTS) that arrived in the period;
+  //  - replied: a reply sent in the period through HaiVE (sentAt) or in Outlook
+  //    (externalReplyDetectedAt), any category but internal/spam — a later
+  //    message of the same conversation (threadRespondedAt) is not a second reply;
+  //  - pending: owed and unanswered (needsResponseMatch), still inside its 24 hours;
+  //  - missed: owed and unanswered, its 24 hours ran out inside the period — so
+  //    "missed today" is what became overdue today, not always zero.
+  // Mailboxes handled by someone else count for that person (mailboxAttribution).
+  private teamEmailMatch(organizationId: string, metric: TeamEmailMetric, start: Date, end: Date, owners: string[], now: Date): Record<string, unknown> {
+    const day = 24 * 60 * 60 * 1000;
+    const base = { organizationId, userId: { $in: owners } };
+    if (metric === 'received') return { ...base, intent: { $in: RELEVANT_EMAIL_INTENTS }, receivedAt: { $gte: start, $lt: end } };
+    if (metric === 'replied')
+      return {
+        ...base,
+        intent: { $nin: ['internal', 'spam'] },
+        $or: [{ sentAt: { $gte: start, $lt: end } }, { externalReplyDetectedAt: { $gte: start, $lt: end } }],
+      };
+    if (metric === 'pending')
+      return { ...base, intent: { $in: RELEVANT_EMAIL_INTENTS }, ...needsResponseMatch(), receivedAt: { $gte: start, $lt: end, $gt: new Date(now.getTime() - day) } };
+    const upTo = Math.min(end.getTime(), now.getTime());
+    return {
+      ...base,
+      intent: { $in: RELEVANT_EMAIL_INTENTS },
+      ...needsResponseMatch(),
+      receivedAt: { $gte: new Date(start.getTime() - day), $lt: new Date(upTo - day) },
+    };
+  }
+
+  /** Per employee: received, replied, pending and missed in the period. */
+  async teamEmailCounts(organizationId: string, start: Date, end: Date, employeeIds: string[], now = new Date()): Promise<Map<string, Record<TeamEmailMetric, number>>> {
+    const counts = new Map<string, Record<TeamEmailMetric, number>>();
+    if (employeeIds.length === 0) return counts;
+    const attribution = await this.mailboxAttribution(employeeIds);
+    if (attribution.mailboxOwnerIds.length === 0) return counts;
+    const metrics: TeamEmailMetric[] = ['received', 'replied', 'pending', 'missed'];
+    const grouped = await Promise.all(
+      metrics.map((metric) =>
+        this.itemModel
+          .aggregate<{ _id: string; count: number }>([
+            { $match: this.teamEmailMatch(organizationId, metric, start, end, attribution.mailboxOwnerIds, now) },
+            { $group: { _id: '$userId', count: { $sum: 1 } } },
+          ])
+          .exec(),
+      ),
+    );
+    metrics.forEach((metric, i) => {
+      for (const row of grouped[i]) {
+        const employee = attribution.employeeOf(String(row._id));
+        const entry = counts.get(employee) ?? { received: 0, replied: 0, pending: 0, missed: 0 };
+        entry[metric] += row.count;
+        counts.set(employee, entry);
+      }
+    });
+    return counts;
+  }
+
+  /** The emails behind one of those numbers, newest first. */
+  async teamEmailList(
+    organizationId: string,
+    metric: TeamEmailMetric,
+    start: Date,
+    end: Date,
+    employeeIds: string[],
+    limit = 200,
+    now = new Date(),
+  ): Promise<{ items: TeamEmailRow[]; total: number }> {
+    if (employeeIds.length === 0) return { items: [], total: 0 };
+    const attribution = await this.mailboxAttribution(employeeIds);
+    if (attribution.mailboxOwnerIds.length === 0) return { items: [], total: 0 };
+    const match = this.teamEmailMatch(organizationId, metric, start, end, attribution.mailboxOwnerIds, now);
+    const [docs, total] = await Promise.all([this.itemModel.find(match).sort({ receivedAt: -1 }).limit(limit).lean().exec(), this.itemModel.countDocuments(match).exec()]);
+    const items = docs.map((d) => {
+      const responded = deriveRespondedInfo(d);
+      return {
+        id: String(d._id),
+        employeeId: attribution.employeeOf(String(d.userId)),
+        receivedAt: d.receivedAt,
+        subject: d.subject,
+        from: d.fromName || d.fromAddress,
+        fromAddress: d.fromAddress,
+        business: d.matchedBusinessName,
+        respondedAt: responded.respondedAt,
+        respondedVia: responded.respondedVia,
+        approvedBy: d.approvedBy,
+        category: deriveCategory(d, now),
+        intent: d.intent,
+        summary: d.reason || d.draftReasoning,
+        nextAction: d.recommendedAction,
+      };
+    });
+    return { items, total };
   }
 
   // ---- Business Intelligence: Sent/Missed Email Analytics (sections 1+2) ----
@@ -1914,6 +2035,8 @@ export class EmailIntelligenceService {
     const reminder = await this.followUpModel.findOne({ _id: id, userId }).exec();
     if (!reminder) throw new NotFoundException('Follow-up reminder not found');
     reminder.status = 'done';
+    reminder.completedAt = new Date();
+    reminder.completedVia = 'marked_done';
     await reminder.save();
     return reminder;
   }
@@ -2044,6 +2167,8 @@ export class EmailIntelligenceService {
     reminder.sendError = undefined;
     reminder.draftStatus = 'sent';
     reminder.status = 'done';
+    reminder.completedAt = reminder.sentAt;
+    reminder.completedVia = 'sent';
     await reminder.save();
 
     // The real "employee eventually responded" signal for the email that
