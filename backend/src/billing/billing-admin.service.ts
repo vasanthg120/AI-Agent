@@ -221,7 +221,7 @@ export class BillingAdminService {
     // `planPriceId: 'none'` e2e stub) would otherwise throw a CastError and fail
     // the whole MRR call. Same "valid ObjectIds first" guard as
     // getAnalyticsTimeSeries; such a row counts like a missing price (skipped below).
-    const priceIds = [...new Set(activeSubscriptions.map((s) => s.planPriceId))];
+    const priceIds = [...new Set(activeSubscriptions.map((s) => s.planPriceId).filter((id) => Types.ObjectId.isValid(id)))];
     const prices = priceIds.length > 0 ? await this.priceModel.find({ _id: { $in: priceIds } }).exec() : [];
     const priceById = new Map(prices.map((p) => [p._id.toString(), p]));
 
