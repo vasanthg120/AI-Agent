@@ -125,7 +125,7 @@ export const AgentExecutionSchema = SchemaFactory.createForClass(AgentExecution)
 AgentExecutionSchema.index({ organizationId: 1, occurredAt: -1 });
 // Hierarchical AI usage analytics (Platform -> Organisation -> User ->
 // Request -> Generation, ai-usage-hierarchy.controller.ts) drills by
-// organizationId+userId and looks up every row for one requestId — both
-// additive, alongside the existing index above.
+// organizationId+userId — additive, alongside the existing index above.
+// (requestId already gets its own single-field index from its own
+// @Prop({ index: true }) above — no second explicit index needed for that.)
 AgentExecutionSchema.index({ organizationId: 1, userId: 1, occurredAt: -1 });
-AgentExecutionSchema.index({ requestId: 1 });

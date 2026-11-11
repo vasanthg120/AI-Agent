@@ -103,6 +103,7 @@ def traced_llm_call(
             output_tokens = usage.get("output_tokens", 0)
             cache_creation_input_tokens = usage.get("cache_creation_input_tokens", 0)
             cache_read_input_tokens = usage.get("cache_read_input_tokens", 0)
+            reasoning_tokens = usage.get("reasoning_tokens")
             cost_usd = (
                 estimate_cost(
                     input_tokens,
@@ -159,6 +160,7 @@ def traced_llm_call(
                     output_tokens=output_tokens,
                     cache_creation_input_tokens=cache_creation_input_tokens,
                     cache_read_input_tokens=cache_read_input_tokens,
+                    reasoning_tokens=reasoning_tokens,
                     cost_usd=cost_usd,
                     latency_ms=latency_ms,
                     success=success,

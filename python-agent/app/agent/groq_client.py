@@ -136,6 +136,17 @@ def call(
                 if getattr(chunk, "usage", None):
                     usage["input_tokens"] = chunk.usage.prompt_tokens
                     usage["output_tokens"] = chunk.usage.completion_tokens
+                    # CompletionUsage.completion_tokens_details.reasoning_tokens
+                    # — a real, typed field on the installed groq==1.6.0 SDK
+                    # (groq/types/completion_usage.py), only populated for
+                    # reasoning-capable models/requests (same ones
+                    # reasoning_effort applies to above) — both this and the
+                    # outer usage field are Optional, so both must be
+                    # defensively null-checked rather than assumed present.
+                    details = getattr(chunk.usage, "completion_tokens_details", None)
+                    reasoning_tokens = getattr(details, "reasoning_tokens", None) if details else None
+                    if reasoning_tokens is not None:
+                        usage["reasoning_tokens"] = reasoning_tokens
             except Exception:
                 pass
             if not chunk.choices:

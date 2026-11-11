@@ -35,6 +35,7 @@ def record_llm_execution(
     cache_read_input_tokens: int = 0,
     langfuse_trace_id: str | None = None,
     langfuse_trace_url: str | None = None,
+    reasoning_tokens: int | None = None,
 ) -> None:
     now = datetime.now(timezone.utc)
     get_db().agent_executions.insert_one(
@@ -79,6 +80,10 @@ def record_llm_execution(
             # optional field here follows.
             "langfuseTraceId": langfuse_trace_id,
             "langfuseTraceUrl": langfuse_trace_url,
+            # groq's CompletionUsage.completion_tokens_details.reasoning_tokens
+            # (see groq_client.py) — None for every other provider/call site,
+            # which don't expose an equivalent field in this codebase today.
+            "reasoningTokens": reasoning_tokens,
         }
     )
 

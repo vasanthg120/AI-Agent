@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
-import { FiCpu, FiDatabase, FiDollarSign, FiRefreshCw, FiSearch, FiZap } from 'react-icons/fi';
+import { FiCpu, FiDatabase, FiDollarSign, FiDownload, FiRefreshCw, FiSearch, FiZap } from 'react-icons/fi';
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { Badge, Button, Dropdown, Input, Modal, SectionCard, Skeleton, StatTile } from '@/components/ui';
 import {
@@ -11,9 +12,12 @@ import {
   type AnthropicUsageSummary,
   type AnthropicUsageTimeseriesPoint,
 } from '@/services/aiUsageAdminService';
+import { aiUsageHierarchyService, type OrganizationListRow } from '@/services/aiUsageHierarchyService';
+import { saveBlob } from '@/services/cloudFilesService';
 import { extractErrorMessage } from '@/utils/errors';
 import { formatNumber } from '@/utils/format';
 import { formatFullDate } from '@/utils/date';
+import { ADMIN_ROUTES } from '@/constants/routes';
 import { AdminRangeControl } from './AdminRangeControl';
 import { AdminPagination } from './components/AdminPagination';
 import shared from './adminShared.module.css';
@@ -230,6 +234,36 @@ export function AdminAiUsagePage() {
 
   useEffect(loadOverview, [days]);
 
+  // Provider-agnostic hierarchical analytics (every provider, not just
+  // Anthropic) — a separate fetch against ai-usage-hierarchy.service.ts's
+  // new endpoints, additive to everything above.
+  const navigate = useNavigate();
+  const [orgRows, setOrgRows] = useState<OrganizationListRow[]>([]);
+  const [orgsLoading, setOrgsLoading] = useState(true);
+  const [orgSearch, setOrgSearch] = useState('');
+  const [exportingOrgs, setExportingOrgs] = useState(false);
+
+  useEffect(() => {
+    setOrgsLoading(true);
+    aiUsageHierarchyService
+      .getOrganizations(days, orgSearch || undefined)
+      .then(setOrgRows)
+      .catch((error) => toast.error(extractErrorMessage(error)))
+      .finally(() => setOrgsLoading(false));
+  }, [days, orgSearch]);
+
+  const handleExportOrgs = async () => {
+    setExportingOrgs(true);
+    try {
+      const blob = await aiUsageHierarchyService.exportCsv({}, days);
+      saveBlob(blob, 'ai-usage-organizations.csv');
+    } catch (error) {
+      toast.error(extractErrorMessage(error));
+    } finally {
+      setExportingOrgs(false);
+    }
+  };
+
   useEffect(() => {
     setPage(1);
   }, [days, modelFilter, orgFilter, statusFilter, search]);
@@ -309,6 +343,68 @@ export function AdminAiUsagePage() {
       {!loading && summary?.connected && !summary.sync.providerReconciliationAvailable && (
         <div className={styles.reconciliationBanner}>Provider-level reconciliation unavailable for this API credential — showing Haive's internally recorded usage.</div>
       )}
+
+      {/* Hierarchical drill-down (Platform -> Organisation -> User ->
+          Request -> Generation), every provider — not scoped to Anthropic
+          like the sections below. Row click drills into a nested route
+          (ai-usage/organizations/:organizationId), same pattern
+          AdminOrganizationsPage's own row-click-to-navigate already uses. */}
+      <SectionCard title="Organizations">
+        <div className={shared.toolbar} style={{ marginBottom: 'var(--space-4)' }}>
+          <Input
+            className={shared.searchInput}
+            placeholder="Search organizations..."
+            leftIcon={<FiSearch />}
+            value={orgSearch}
+            onChange={(e) => setOrgSearch(e.target.value)}
+          />
+          <Button size="sm" variant="outline" leftIcon={<FiDownload />} loading={exportingOrgs} onClick={() => void handleExportOrgs()}>
+            Export CSV
+          </Button>
+        </div>
+        <div className={shared.tableWrap}>
+          <table className={shared.table}>
+            <thead>
+              <tr>
+                <th>Organization</th>
+                <th>Requests</th>
+                <th>Active Users</th>
+                <th>Tokens</th>
+                <th>Provider Cost</th>
+                <th>Customer Charges</th>
+              </tr>
+            </thead>
+            <tbody>
+              {orgsLoading &&
+                Array.from({ length: 5 }).map((_, i) => (
+                  <tr key={i}>
+                    <td colSpan={6}>
+                      <Skeleton height={20} />
+                    </td>
+                  </tr>
+                ))}
+              {!orgsLoading && orgRows.length === 0 && (
+                <tr>
+                  <td colSpan={6} className={shared.emptyState}>
+                    No organizations with AI activity in this range.
+                  </td>
+                </tr>
+              )}
+              {!orgsLoading &&
+                orgRows.map((o) => (
+                  <tr key={o.organizationId} className={shared.tableRow} onClick={() => navigate(ADMIN_ROUTES.aiUsageOrganizationDetail(o.organizationId))}>
+                    <td>{o.organizationName}</td>
+                    <td>{o.requests.toLocaleString()}</td>
+                    <td>{o.activeUsers.toLocaleString()}</td>
+                    <td>{(o.inputTokens + o.outputTokens).toLocaleString()}</td>
+                    <td>${o.providerCostUsd.toFixed(4)}</td>
+                    <td>{o.customerChargeCredits.toLocaleString()} cr</td>
+                  </tr>
+                ))}
+            </tbody>
+          </table>
+        </div>
+      </SectionCard>
 
       {loading || !summary ? (
         <div className={styles.statsGrid}>{Array.from({ length: 8 }).map((_, i) => <Skeleton key={i} height={92} />)}</div>
