@@ -111,7 +111,21 @@ export class AgentExecution {
 
   @Prop()
   langfuseTraceUrl?: string;
+
+  // Groq's CompletionUsage.completion_tokens_details.reasoning_tokens — a
+  // real, typed field on the installed groq==1.6.0 SDK that groq_client.py
+  // now reads (see tracing.py). Anthropic rows never set this (no
+  // equivalent field exists on that provider's response in this codebase
+  // today) — absent there, never guessed.
+  @Prop()
+  reasoningTokens?: number;
 }
 
 export const AgentExecutionSchema = SchemaFactory.createForClass(AgentExecution);
 AgentExecutionSchema.index({ organizationId: 1, occurredAt: -1 });
+// Hierarchical AI usage analytics (Platform -> Organisation -> User ->
+// Request -> Generation, ai-usage-hierarchy.controller.ts) drills by
+// organizationId+userId and looks up every row for one requestId — both
+// additive, alongside the existing index above.
+AgentExecutionSchema.index({ organizationId: 1, userId: 1, occurredAt: -1 });
+AgentExecutionSchema.index({ requestId: 1 });
