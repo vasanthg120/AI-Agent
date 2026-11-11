@@ -94,7 +94,22 @@
 
 .stateActions {
   display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
   margin-top: var(--space-2);
+}
+
+/* "Plivo number … is linked to you": the part of a state message that is a fact, not advice. */
+.linkedLine {
+  display: block;
+  margin-bottom: var(--space-1);
+  color: var(--color-text-secondary);
+}
+
+.linkedLine strong {
+  color: var(--color-text-primary);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 .selectField {

@@ -450,6 +450,8 @@ Open `https://YOUR.DOMAIN` in a browser, sign in, open the chat (websocket) and 
 | Plivo / Twilio | taken from `PLIVO_PUBLIC_BASE_URL` (Twilio uses the same unless `TWILIO_PUBLIC_BASE_URL` is set) — it must be `https://YOUR.DOMAIN/api`; calling does **not** fall back to `PUBLIC_API_BASE_URL` (no ngrok in production) |
 | Zapier webhooks | the address the Integrations page shows (built from `PUBLIC_API_BASE_URL`) |
 
+**Calling check after a deploy.** The backend logs one line at startup: `calling.config plivo_public_url=set|set(ngrok)|missing …` (never the address itself). `missing` means a number can be linked but nobody can call: Call Copilot then says "Your number is linked — calling isn't switched on yet" (builds before 2026-11-11 wrongly said "No phone line is linked to you yet" straight after "Number linked to you"). `set(ngrok)` on this server means it is calling back through a developer's tunnel. Outbound calls send Plivo their webhook URLs on every call, so only `PLIVO_PUBLIC_BASE_URL` matters for them. **Inbound** calls follow the Plivo console: Voice → Applications → the app attached to the number must have Answer URL `https://YOUR.DOMAIN/api/plivo/webhooks/answer` and Hangup URL `…/plivo/webhooks/hangup` (POST). One number has one application, so inbound goes to either a developer's tunnel or this server, never both.
+
 ### Step 12 — HaiVE Dialer (`/dialer/`) [nothing extra to install]
 The Dialer is a second page of the frontend image, at `https://YOUR.DOMAIN/dialer/`, installable on phones as its own app.
 - **HTTPS is required** — browsers only install apps and run service workers on https (certbot above covers it).

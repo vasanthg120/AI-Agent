@@ -92,7 +92,7 @@ export class PlivoController {
   @Roles('owner', 'admin')
   @Permission('integrations', 'manage')
   upsertLine(@CurrentUser() user: JwtPayload, @Body() dto: UpsertPlivoLineDto) {
-    return this.plivo.upsertLine(user.organizationId, dto);
+    return this.plivo.upsertLine(user.organizationId, dto, user.sub);
   }
 
   @Delete('lines/:id')

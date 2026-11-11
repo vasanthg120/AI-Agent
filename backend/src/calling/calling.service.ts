@@ -1,5 +1,5 @@
 import { HttpService } from '@nestjs/axios';
-import { HttpException, Injectable, Logger } from '@nestjs/common';
+import { HttpException, Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { AxiosError } from 'axios';
 import { Model, isValidObjectId } from 'mongoose';
@@ -29,6 +29,7 @@ const CALL_LOG_LIMIT = 30;
 const REACHABLE_TTL_MS = 60_000;
 const UNREACHABLE_TTL_MS = 15_000;
 const DUPLICATE_KEY_ERROR = 11000;
+const NOT_CONFIGURED_WARN_EVERY_MS = 10 * 60_000;
 
 export interface CallView {
   id: string;
@@ -132,13 +133,14 @@ const maskDigits = (text: string) => text.replace(/\d{6,}/g, (run) => maskPhone(
 // signed-in person can call with, placing a call (routed by destination), and a
 // single call log. Setup stays per provider (/plivo, /twilio).
 @Injectable()
-export class CallingService {
+export class CallingService implements OnModuleInit {
   private readonly logger = new Logger(CallingService.name);
   // One start at a time per person in this process, so the "already being set
   // up" check sees the first tap's call before a second tap can get past it.
   private readonly starting = new Map<string, Promise<unknown>>();
   private readonly reachabilityCache = new Map<string, { at: number; value: Reachability }>();
   private readonly probing = new Map<string, Promise<Reachability>>();
+  private readonly notConfiguredWarnedAt = new Map<string, number>();
 
   constructor(
     private plivo: PlivoService,
@@ -155,6 +157,21 @@ export class CallingService {
     return this.plivo.defaultCountryCode;
   }
 
+  /** Once at startup: whether the carriers have an address to call back on (never the address itself). */
+  onModuleInit() {
+    const describe = (base: string) => (!base ? 'missing' : /ngrok/i.test(base) ? 'set(ngrok)' : 'set');
+    this.logger.log(`calling.config plivo_public_url=${describe(this.plivo.publicBaseUrl)} twilio_public_url=${describe(this.twilio.publicBaseUrl)}`);
+    if (process.env.NODE_ENV === 'production' && /ngrok/i.test(`${this.plivo.publicBaseUrl} ${this.twilio.publicBaseUrl}`)) {
+      this.logger.warn('calling.config a production server is calling back through an ngrok tunnel; set PLIVO_PUBLIC_BASE_URL to https://<domain>/api');
+    }
+  }
+
+  /**
+   * What the signed-in person can call with. A provider is `ready` only when it is
+   * connected, the server has a public address for its callbacks, AND an active line
+   * is linked to this person — so a line can be linked (`line` set) while `ready` is
+   * still false. `publicUrlConfigured` says which part is missing.
+   */
   async overview(user: JwtPayload, canManage: boolean, recheck = false) {
     const org = user.organizationId;
     const [plivoStatus, twilioStatus, plivoLines, twilioLines] = await Promise.all([
@@ -165,32 +182,56 @@ export class CallingService {
     ]);
     const plivoLine = plivoLines.find((l) => l.active);
     const twilioLine = twilioLines.find((l) => l.active);
-    const plivoReady = plivoStatus.connected && this.plivo.publicBaseUrl !== '' && !!plivoLine;
-    const twilioReady = twilioStatus.connected && this.twilio.publicBaseUrl !== '' && !!twilioLine;
+    const plivoUrl = this.plivo.publicBaseUrl !== '';
+    const twilioUrl = this.twilio.publicBaseUrl !== '';
+    const plivoReady = plivoStatus.connected && plivoUrl && !!plivoLine;
+    const twilioReady = twilioStatus.connected && twilioUrl && !!twilioLine;
     // Only worth asking for a provider someone could actually call through.
     const [plivoReach, twilioReach] = await Promise.all([
       plivoStatus.connected ? this.reachability(this.plivo.publicBaseUrl, recheck) : Promise.resolve<Reachability>('unknown'),
       twilioStatus.connected ? this.reachability(this.twilio.publicBaseUrl, recheck) : Promise.resolve<Reachability>('unknown'),
     ]);
+    const canCall = plivoReady || twilioReady;
+
+    this.logger.debug(
+      `calling.status org=${org} user=${user.sub} can_call=${canCall} ` +
+        `plivo(connected=${plivoStatus.connected} public_url=${plivoUrl} lines=${plivoLines.length} active=${plivoLines.filter((l) => l.active).length}) ` +
+        `twilio(connected=${twilioStatus.connected} public_url=${twilioUrl} lines=${twilioLines.length} active=${twilioLines.filter((l) => l.active).length})`,
+    );
+    // A linked line that still can't call is the case people report as "linked, but it says no line".
+    if (plivoStatus.connected && plivoLine && !plivoUrl) this.warnNotConfigured(org, user.sub, 'plivo', 'PLIVO_PUBLIC_BASE_URL');
+    if (twilioStatus.connected && twilioLine && !twilioUrl) this.warnNotConfigured(org, user.sub, 'twilio', 'TWILIO_PUBLIC_BASE_URL');
+
     return {
       canManage,
       domesticCountryCode: this.domesticCountryCode,
-      canCall: plivoReady || twilioReady,
+      canCall,
       providers: {
         plivo: {
           connected: plivoStatus.connected,
           ready: plivoReady,
+          publicUrlConfigured: plivoUrl,
           reachability: plivoReach,
           line: plivoLine ? ({ businessNumber: plivoLine.plivoNumber, agentPhone: plivoLine.agentPhone } as ProviderLineSummary) : null,
         },
         twilio: {
           connected: twilioStatus.connected,
           ready: twilioReady,
+          publicUrlConfigured: twilioUrl,
           reachability: twilioReach,
           line: twilioLine ? ({ businessNumber: twilioLine.twilioNumber, agentPhone: twilioLine.agentPhone } as ProviderLineSummary) : null,
         },
       },
     };
+  }
+
+  // At most once per person and provider every ten minutes — the overview is read on every page focus.
+  private warnNotConfigured(org: string, userId: string, provider: CallingProvider, envName: string) {
+    const key = `${org}:${userId}:${provider}`;
+    const last = this.notConfiguredWarnedAt.get(key) ?? 0;
+    if (Date.now() - last < NOT_CONFIGURED_WARN_EVERY_MS) return;
+    this.notConfiguredWarnedAt.set(key, Date.now());
+    this.logger.warn(`calling.status.not_configured org=${org} user=${userId} provider=${provider} line=linked public_url=missing env=${envName}`);
   }
 
   // ---- can Plivo / Twilio reach us? ---------------------------------------------

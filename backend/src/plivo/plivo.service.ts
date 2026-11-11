@@ -11,6 +11,7 @@ import { IntegrationsService } from '../integrations/integrations.service';
 import { UsersService } from '../users/users.service';
 import { StartPlivoCallDto, UpsertPlivoLineDto } from './dto/plivo.dto';
 import { classifyFailureText } from '../calling/call-outcome';
+import { dialableProblem } from '../calling/dialable-number';
 import { maskPhone, normalizePhone } from './plivo-phone';
 import { PlivoCall, PlivoCallDocument } from './schemas/plivo-call.schema';
 import { PlivoLine, PlivoLineDocument } from './schemas/plivo-line.schema';
@@ -162,23 +163,37 @@ export class PlivoService {
     }));
   }
 
-  async upsertLine(organizationId: string, dto: UpsertPlivoLineDto): Promise<PlivoLineView[]> {
+  /** Links a Plivo number to a person (creating the line, or moving it to them). `actorId`
+   * is who made the change — for the log only. */
+  async upsertLine(organizationId: string, dto: UpsertPlivoLineDto, actorId?: string): Promise<PlivoLineView[]> {
+    const refuse = (reason: string, err: Error): Error => {
+      this.logger.warn(`plivo.line.refused org=${organizationId} by=${actorId ?? 'unknown'} for=${dto.userId} reason=${reason}`);
+      return err;
+    };
     const plivoNumber = this.normalize(dto.plivoNumber);
     const agentPhone = this.normalize(dto.agentPhone);
-    if (!plivoNumber) throw new BadRequestException('Enter the Plivo number with its country code, e.g. 91 80 1234 5678.');
-    if (!agentPhone) throw new BadRequestException("Enter the agent's phone number with its country code, e.g. 91 98765 43210.");
-    if (plivoNumber === agentPhone) throw new BadRequestException("The agent's phone must be different from the Plivo number — Plivo forwards calls from one to the other.");
+    if (!plivoNumber) throw refuse('bad_plivo_number', new BadRequestException('Enter the Plivo number with its country code, e.g. 91 80 1234 5678.'));
+    if (!agentPhone) throw refuse('bad_agent_phone', new BadRequestException("Enter the agent's phone number with its country code, e.g. 91 98765 43210."));
+    // Plivo rings this phone for every call, so a number that can never connect
+    // (a 9-digit Indian mobile) must not be saved as if it worked.
+    const problem = dialableProblem(agentPhone);
+    if (problem) throw refuse('agent_phone_not_dialable', new BadRequestException(problem));
+    if (plivoNumber === agentPhone) {
+      throw refuse('same_number', new BadRequestException("The agent's phone must be different from the Plivo number — Plivo forwards calls from one to the other."));
+    }
 
-    const user = await this.users.findById(dto.userId);
-    if (!user || user.organizationId !== organizationId) throw new BadRequestException('That user is not in this organization.');
+    // A malformed id is "no such person", not a server error.
+    const user = await Promise.resolve(this.users.findById(dto.userId)).catch(() => null);
+    if (!user || user.organizationId !== organizationId) throw refuse('user_not_in_org', new BadRequestException('That user is not in this organization.'));
 
     const existing = await this.lineModel.findOne({ plivoNumber }).exec();
     if (existing && existing.organizationId !== organizationId) {
-      throw new ConflictException('This Plivo number is already registered to another organization.');
+      throw refuse('number_in_other_org', new ConflictException('This Plivo number is already registered to another organization.'));
     }
 
-    await this.lineModel
-      .updateOne(
+    const active = dto.active ?? existing?.active ?? true;
+    const saved = await this.lineModel
+      .findOneAndUpdate(
         { plivoNumber },
         {
           $set: {
@@ -187,12 +202,17 @@ export class PlivoService {
             agentPhone,
             languageCode: dto.languageCode ?? existing?.languageCode ?? 'en',
             label: dto.label?.trim() || undefined,
-            active: dto.active ?? existing?.active ?? true,
+            active,
           },
         },
-        { upsert: true },
+        { upsert: true, new: true },
       )
       .exec();
+    this.logger.log(
+      `plivo.line.saved org=${organizationId} line=${saved?._id.toString()} by=${actorId ?? 'unknown'} user=${dto.userId} ` +
+        `previous_user=${existing && existing.userId !== dto.userId ? existing.userId : 'same'} created=${!existing} active=${active} ` +
+        `number=${maskPhone(plivoNumber)} agent=${maskPhone(agentPhone)}`,
+    );
     return this.listLines(organizationId);
   }
 
@@ -270,6 +290,10 @@ export class PlivoService {
       );
       call.requestUuid = data.request_uuid;
       await call.save();
+      this.logger.log(
+        `plivo.call.initiated org=${user.organizationId} user=${user.sub} call=${callId} line=${line._id.toString()} ` +
+          `from=${maskPhone(line.plivoNumber)} rings=${maskPhone(line.agentPhone)} customer=${maskPhone(customerNumber)}`,
+      );
       return call;
     } catch (err) {
       const message = plivoErrorMessage(err);

@@ -91,9 +91,13 @@ export interface CallingCall {
 
 export interface ProviderReadiness {
   connected: boolean;
-  // Connected, reachable, and the signed-in person has an active line on it.
+  // Connected, the server has a public address for callbacks, and the signed-in
+  // person has an active line on it.
   ready: boolean;
+  // Whether the server has that public address (PLIVO_/TWILIO_PUBLIC_BASE_URL). Absent from older servers.
+  publicUrlConfigured?: boolean;
   reachability?: Reachability;
+  // The active line linked to the signed-in person — set even when `ready` is false.
   line: { businessNumber: string; agentPhone: string } | null;
 }
 
@@ -103,6 +107,43 @@ export interface CallingOverview {
   canCall: boolean;
   providers: Record<CallingProvider, ProviderReadiness>;
 }
+
+/**
+ * Why the signed-in person can't place a call — one reading of the overview for
+ * Call Copilot and the Dialer alike. A line can be linked to them while calling is
+ * still off: that is `not_configured` (the server has no public address for the
+ * carrier to call back on), never "no line".
+ */
+export type CallingBlocker = 'no_provider' | 'no_line' | 'not_configured';
+
+const PROVIDERS: readonly CallingProvider[] = ['plivo', 'twilio'];
+
+export interface LinkedLine {
+  provider: CallingProvider;
+  businessNumber: string;
+  agentPhone: string;
+}
+
+/** The line linked to the signed-in person on a connected provider, ready or not. */
+export function linkedLine(overview: CallingOverview): LinkedLine | null {
+  for (const provider of PROVIDERS) {
+    const { connected, line } = overview.providers[provider];
+    if (connected && line) return { provider, ...line };
+  }
+  return null;
+}
+
+export function callingBlocker(overview: CallingOverview): CallingBlocker | null {
+  if (overview.canCall) return null;
+  if (!PROVIDERS.some((p) => overview.providers[p].connected)) return 'no_provider';
+  return linkedLine(overview) ? 'not_configured' : 'no_line';
+}
+
+/** The server setting that gives this provider its public address. */
+export const PUBLIC_URL_SETTING: Record<CallingProvider, string> = {
+  plivo: 'PLIVO_PUBLIC_BASE_URL',
+  twilio: 'TWILIO_PUBLIC_BASE_URL',
+};
 
 export const callingService = {
   async getOverview(): Promise<CallingOverview> {
