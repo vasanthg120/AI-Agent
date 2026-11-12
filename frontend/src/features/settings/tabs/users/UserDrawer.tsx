@@ -186,7 +186,8 @@ export function UserDrawer({ open, onClose, user, catalog, aiRoles, me, onSaved 
         ...(isAdministrator ? { role: 'admin' as const } : { role: 'agent_user' as const, assignedAgentId: form.role, permissions: form.permissions }),
       });
       setCreated(result);
-      toast.success(`${result.user.name} was created`);
+      if (result.emailSent === false) toast.error(`${result.user.name} was created, but the invitation email wasn’t sent`, { duration: 8_000 });
+      else toast.success(`${result.user.name} was created`);
       onSaved();
     } catch (err) {
       toast.error(extractErrorMessage(err), { duration: 8_000 });
@@ -498,7 +499,17 @@ export function UserDrawer({ open, onClose, user, catalog, aiRoles, me, onSaved 
             </>
           ) : (
             <>
-              <p className={styles.muted}>An invitation to set their own password has gone to {created.user.email}.</p>
+              {created.emailSent === false ? (
+                <p className={styles.warning}>
+                  The invitation email to {created.user.email} wasn’t sent. {created.emailProblem} Copy the activation link
+                  below and send it to them yourself — it works once and expires in 7 days.
+                </p>
+              ) : (
+                <p className={styles.muted}>
+                  An invitation to set their own password has gone to {created.user.email}. If it doesn’t arrive in a few
+                  minutes, ask them to check their spam folder, or send them the link below.
+                </p>
+              )}
               {created.activationLink && (
                 <div className={styles.field}>
                   <span className={styles.label}>Activation link</span>

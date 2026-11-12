@@ -28,6 +28,7 @@ import { subAccountsService, type SubAccountDetails, type SubAccountRow } from '
 import { useAuthStore } from '@/stores/authStore';
 import { formatCurrency } from '@/utils/currency';
 import { extractErrorMessage } from '@/utils/errors';
+import { announceInvitation } from '@/utils/invitations';
 import { ArchiveSubAccountDialog } from './ArchiveSubAccountDialog';
 import { SubAccountDrawer } from './SubAccountDrawer';
 import { AccountLogo, AccountStatusBadge, SubscriptionBadge, formatDate, formatPrice } from './subAccountParts';
@@ -92,11 +93,12 @@ export function SubAccountsPage() {
     await queryClient.invalidateQueries({ queryKey: ACCOUNTS_QUERY_KEY });
   };
 
-  const act = async (work: () => Promise<unknown>, done: string) => {
+  // done: the success message, or null when the work reports its own outcome.
+  const act = async (work: () => Promise<unknown>, done: string | null) => {
     setBusy(true);
     try {
       await work();
-      toast.success(done);
+      if (done) toast.success(done);
       await refresh();
     } catch (err) {
       toast.error(extractErrorMessage(err));
@@ -123,9 +125,11 @@ export function SubAccountsPage() {
   };
 
   const resend = (row: SubAccountRow) =>
+    // Whether the email actually went — not "sent" regardless.
     act(async () => {
-      await subAccountsService.resendInvitation(row.id);
-    }, `Invitation sent to ${row.email}`);
+      const result = await subAccountsService.resendInvitation(row.id);
+      await announceInvitation(result, result.email || row.email || 'the owner');
+    }, null);
 
   const actionsFor = (row: SubAccountRow): DropdownItem[] => {
     const open = row.status === 'active';

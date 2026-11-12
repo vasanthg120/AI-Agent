@@ -28,3 +28,18 @@ export function describeSource(
 export function formatCallDate(iso: string): string {
   return new Date(iso).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
 }
+
+// Calls that failed before 2026-11-11 stored the raw HTTP error ("Request failed
+// with status code 502"); newer ones store a sentence written for the user.
+const RAW_ERROR = /^(Request failed with status code \d+|connect E[A-Z]+|timeout of \d+ms exceeded|Network Error)/i;
+
+/** Why a call's recording couldn't be processed, always in words. */
+export function failureReason(errorMessage: string | undefined): string {
+  if (!errorMessage || RAW_ERROR.test(errorMessage.trim())) {
+    return (
+      'HaiVE’s AI service couldn’t transcribe this recording at the time ' +
+      '(for example, the speech-to-text account was out of credits).'
+    );
+  }
+  return errorMessage;
+}

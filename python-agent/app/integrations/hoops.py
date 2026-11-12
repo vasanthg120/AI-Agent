@@ -31,12 +31,15 @@ from __future__ import annotations
 import logging
 import re
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone, tzinfo
 from urllib.parse import urlparse
+from zoneinfo import ZoneInfo
 
 import requests
+from bson import ObjectId
 
 from app.memory import integration_store
+from app.memory.mongo_client import get_db
 
 logger = logging.getLogger(__name__)
 
@@ -96,9 +99,35 @@ def _iso(value: datetime) -> str:
     return value.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
-def _day(value) -> str | None:
+def _day(value, zone: tzinfo | None = None) -> str | None:
+    """The calendar day of a timestamp — in the business's own time zone when
+    given, as Hoops' reports count it (a job created at 9:30am in Sydney on
+    1 September is a September sale, though it is still 31 August in UTC)."""
     parsed = parse_date(value)
-    return parsed.strftime("%Y-%m-%d") if parsed else None
+    if not parsed:
+        return None
+    return (parsed.astimezone(zone) if zone else parsed).strftime("%Y-%m-%d")
+
+
+# Hoops is Australian: a business with no time zone set is taken to be in Sydney.
+DEFAULT_ZONE = "Australia/Sydney"
+
+
+def business_zone(organization_id: str) -> tzinfo:
+    """The time zone a business's Hoops dates are counted in (its own setting)."""
+    name = DEFAULT_ZONE
+    try:
+        org = get_db().organizations.find_one({"_id": ObjectId(organization_id)}, {"timezone": 1}) or {}
+        name = org.get("timezone") or DEFAULT_ZONE
+    except Exception:  # noqa: BLE001 - a malformed id or no database: the default zone
+        pass
+    try:
+        return ZoneInfo(name)
+    except Exception:  # noqa: BLE001 - an unknown zone name: Sydney, then UTC
+        try:
+            return ZoneInfo(DEFAULT_ZONE)
+        except Exception:  # noqa: BLE001
+            return timezone.utc
 
 
 def created_at(row: dict) -> datetime | None:
@@ -267,48 +296,70 @@ def _number(value) -> float | None:
         return None
 
 
-# Words in a transaction's own `status` that settle it, read alongside its
-# accepted / voided / completed flags. Live statuses seen (Oct 2026): CREATED,
-# SENT, ACCEPTED, LOST, and an account's own steps ("FOLLOW UP 1", "Provide
-# Samples!"), which are open quotes at that step. Voided/cancelled is not a sale
-# at all (left out of Reporting); lost was sent and turned down (still counted
-# as sent, as Pantheras' lost quotes are).
+# Words in a transaction's own `status`, read alongside its accepted / voided
+# flags and its jobs. Live statuses seen: CREATED, SENT, ACCEPTED, LOST, "Paid
+# In square", and an account's own steps ("FOLLOW UP 1", "Provide Samples!",
+# "ON HOLD"), which are open quotes at that step. A sale is won by its job, not
+# by a word (see transaction_fields); these words only say whether a quote
+# without a job was accepted. Voided/cancelled is not a sale at all (left out of
+# Reporting); lost was sent and turned down (still counted as sent, as
+# Pantheras' lost quotes are).
 _VOID_WORDS = ("VOID", "CANCEL")
 _LOST_WORDS = ("DECLIN", "REJECT", "LOST")
 _DRAFT_WORDS = ("DRAFT", "CREATED")
 _WON_WORDS = ("ACCEPT", "APPROV", "WON", "CONVERT", "INVOIC", "PAID", "COMPLET")
-_COMPLETED_WORDS = ("COMPLET", "INVOIC", "PAID")
 
 
 def _dict(value) -> dict:
     return value if isinstance(value, dict) else {}
 
 
-def transaction_fields(row: dict, currency: str) -> dict:
+ACCEPTED_NO_JOB = "Accepted – no job yet"
+IN_PRODUCTION = "In production"
+
+
+def transaction_fields(row: dict, currency: str, zone: tzinfo | None = None) -> dict:
     """A transaction with the fields HaiVE maps (see the module docstring).
 
     Live records keep the customer, contact and owner inside `summary` (the
     reference shows them at the top level — both are read). _status is what the
-    status mapping reads: voided / completed / accepted / quoted / draft.
-    _closeDate is when the sale was agreed — acceptedAt, else the best date
-    the record has for it — so a won sale always lands in a revenue month; a
-    voided one is dated when it was voided; an open one carries the quote
-    deadline, or — when Hoops has none — 30 days after it was created."""
+    status mapping reads: voided / job / accepted / quoted / draft.
+
+    Decided with the user (2026-11-11/12, from Hoops' own jobs report):
+    - a sale is WON WHEN ITS JOB IS CREATED (the report's "Won" section —
+      November: only job #2373), dated by the job, at the quote's value; the
+      stage then says whether the job is in production or completed;
+    - every quote CREATED BUT NOT WON is open, and the open quotes are the
+      pipeline: sent, at the account's own step (follow-ups, on hold, quoting
+      options…), a draft, or accepted with no job yet ("Accepted – no job yet");
+    - voided or lost: lost.
+    (For a few hours on 2026-11-12 the pipeline was the jobs in progress
+    instead — won sales — which the user corrected: the pipeline is what is
+    created but not won.)
+    _closeDate: a won sale is dated by its job; a voided one when it was
+    voided; an open one carries the quote deadline, or — when Hoops has none —
+    30 days after it was created. Never the last edit (updatedAt) for a won
+    sale: that moved old sales into whichever month they were last touched in."""
     summary = _dict(row.get("summary"))
     customer = _dict(row.get("customer")) or _dict(summary.get("customer"))
     contact = _dict(row.get("contact")) or _dict(summary.get("contact"))
     owner = _dict(summary.get("owner")) or _dict(row.get("owner"))
-    jobs = [j for j in (row.get("jobs") or []) if isinstance(j, dict) and not j.get("voided")]
+    all_jobs = [j for j in (row.get("jobs") or []) if isinstance(j, dict)]
+    jobs = [j for j in all_jobs if not j.get("voided")]
     raw = _text(row.get("status")).upper()
 
     cancelled = bool(row.get("voided")) or any(w in raw for w in _VOID_WORDS)
-    lost = not cancelled and any(w in raw for w in _LOST_WORDS)
+    # With a job list, a job only counts if it isn't voided; older records carry just the number.
+    has_job = bool(jobs) if all_jobs else bool(row.get("jobNumber") or row.get("jobCreatedAt"))
+    # The job is the sale, whatever the quote's own status still says.
+    won = not cancelled and has_job
+    lost = not cancelled and not won and any(w in raw for w in _LOST_WORDS)
     voided = cancelled or lost  # either way the sale didn't happen: the deal is lost
-    completed = not voided and (bool(row.get("completed")) or any(j.get("completed") for j in jobs) or any(w in raw for w in _COMPLETED_WORDS))
-    has_job = bool(jobs or row.get("jobNumber") or row.get("jobCreatedAt"))
-    accepted = not voided and (bool(row.get("accepted")) or completed or has_job or any(w in raw for w in _WON_WORDS))
+    # Only Hoops completing the job ends work in progress (a "Paid…" status doesn't).
+    completed = won and (bool(row.get("completed")) or any(j.get("completed") for j in jobs))
+    accepted = not voided and (won or bool(row.get("accepted")) or any(w in raw for w in _WON_WORDS))
     draft = not (voided or accepted) and any(raw.startswith(w) for w in _DRAFT_WORDS)
-    status = "voided" if voided else "completed" if completed else "accepted" if accepted else "draft" if draft else "quoted"
+    status = "voided" if voided else "job" if won else "accepted" if accepted else "draft" if draft else "quoted"
     # An open quote's stage is the account's own step ("Follow up 2", "Provide samples!").
     own_step = _text(row.get("status"))
     stage = (
@@ -318,9 +369,9 @@ def transaction_fields(row: dict, currency: str) -> dict:
         if lost
         else "Completed"
         if completed
-        else "In production"
-        if has_job
-        else "Accepted"
+        else IN_PRODUCTION
+        if won
+        else ACCEPTED_NO_JOB
         if accepted
         else "Draft"
         if draft
@@ -329,16 +380,9 @@ def transaction_fields(row: dict, currency: str) -> dict:
         else "Quote sent"
     )
 
-    if accepted:
+    if won:
         first_job = jobs[0] if jobs else {}
-        close = (
-            row.get("acceptedAt")
-            or row.get("completedAt")
-            or row.get("jobCreatedAt")
-            or first_job.get("createdAt")
-            or row.get("updatedAt")
-            or row.get("createdAt")
-        )
+        close = row.get("jobCreatedAt") or first_job.get("createdAt") or row.get("acceptedAt") or row.get("createdAt")
     elif voided:
         close = row.get("voidedAt") or row.get("updatedAt")
     else:
@@ -363,7 +407,8 @@ def transaction_fields(row: dict, currency: str) -> dict:
         "_name": name[:160],
         "_status": status,
         "_stage": stage,
-        "_closeDate": _day(close),
+        # The day in the business's own time zone (Hoops' reports count days there).
+        "_closeDate": _day(close, zone),
         "_quoteStatus": "voided" if cancelled else "lost" if lost else "accepted" if accepted else "draft" if draft else "viewed" if row.get("viewed") else "sent",
         "_approval": "rejected" if voided else "approved" if accepted else "pending",
         "_customerCompany": "" if individual else customer_name,

@@ -1,6 +1,6 @@
 import { computePlivoSignatureV3, isValidPlivoSignature, plivoSignatureBase } from './plivo-signature';
 import { maskPhone, normalizePhone } from './plivo-phone';
-import { EMPTY_RESPONSE_XML, recordAndDialXml, speakAndHangupXml } from './plivo-xml';
+import { EMPTY_RESPONSE_XML, RECORDING_MAX_SECONDS, recordAndDialXml, speakAndHangupXml } from './plivo-xml';
 
 // Every signature below was accepted by Plivo's own SDK (plivo-node,
 // validateV3Signature) when these vectors were generated, and the implementation
@@ -108,6 +108,13 @@ describe('Plivo call XML', () => {
     expect(xml).toContain('<Number>919876543210</Number>');
     expect(xml).toContain('callerId="918012345678"');
     expect(xml.indexOf('<Record')).toBeLessThan(xml.indexOf('<Dial')); // recording is armed before the dial
+  });
+
+  it('records the whole call, not just the first minute (Plivo stops a <Record> at 60 s by default)', () => {
+    expect(xml).toContain(`maxLength="${RECORDING_MAX_SECONDS}"`);
+    expect(RECORDING_MAX_SECONDS).toBe(7200);
+    // Finishing the recording must never move the call off the Dial.
+    expect(xml).toContain('redirect="false"');
   });
 
   it('escapes every interpolated value so a URL can never break out of an attribute', () => {

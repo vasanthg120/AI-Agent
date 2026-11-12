@@ -359,3 +359,16 @@
     animation: none;
   }
 }
+
+/* A shared company login in the CRM: neutral, not a warning, not linked. */
+.sharedAccount {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 10px;
+  border-radius: var(--radius-full);
+  background: var(--color-bg-hover);
+  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+  font-weight: 600;
+}

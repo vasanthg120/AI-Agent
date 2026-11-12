@@ -67,8 +67,10 @@ export class UsersController {
   async create(@CurrentUser() caller: JwtPayload, @Body() dto: CreateUserDto) {
     const created = await this.usersService.createByAdmin(dto, caller.organizationId, caller);
     if (!dto.sendInvite) return created;
-    const { activationLink } = await this.invitations.inviteById(created.user.id, caller.organizationId);
-    return { ...created, activationLink };
+    // Whether the email actually went is passed on, so the screen never says "sent" for one that wasn't.
+    const { activationLink, emailSent, emailProblem } = await this.invitations.inviteById(created.user.id, caller.organizationId);
+    // `created.user` was described before the invitation existed; it is pending now.
+    return { ...created, user: { ...created.user, pendingInvitation: true }, activationLink, emailSent, emailProblem };
   }
 
   @Post(':id/resend-invitation')
@@ -76,8 +78,8 @@ export class UsersController {
   @Roles('admin')
   async resendInvitation(@CurrentUser() caller: JwtPayload, @Param('id') id: string) {
     await this.usersService.assertMayManage(caller, id, caller.organizationId);
-    const { activationLink } = await this.invitations.inviteById(id, caller.organizationId);
-    return { activationLink };
+    const { activationLink, emailSent, emailProblem } = await this.invitations.inviteById(id, caller.organizationId);
+    return { activationLink, emailSent, emailProblem };
   }
 
   @Patch(':id')

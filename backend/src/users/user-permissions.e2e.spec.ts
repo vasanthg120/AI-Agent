@@ -60,7 +60,7 @@ describe('Per-person permissions (whole app, real HTTP, real Mongo)', () => {
       .overrideProvider(MailService)
       .useValue({
         invitationLink: (token: string) => `http://app.test/activate?token=${token}`,
-        sendInvitationEmail: async () => undefined,
+        sendInvitationEmail: async () => ({ sent: true }),
         sendWelcomeEmail: async () => undefined,
         sendVerificationOtp: async () => undefined,
         sendPasswordResetOtp: async () => undefined,

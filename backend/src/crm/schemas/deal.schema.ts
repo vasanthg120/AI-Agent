@@ -42,6 +42,13 @@ export class Deal {
   @Prop()
   ownerAssignedManually?: boolean;
 
+  // Set when ownerId came from the deal's latest quotation's CRM salesperson
+  // (the CRMs send no owner on deals themselves) through Settings → Deal
+  // Assignment — that salesperson's ref. Lets a later "shared account" mark
+  // take the owner back off again without touching a deal assigned by hand.
+  @Prop()
+  ownerFromQuoteOwnerRef?: string;
+
   // --- External CRM owner mapping (provider-agnostic) ---
   //
   // The raw owner/assigned-user identifier straight from whichever external

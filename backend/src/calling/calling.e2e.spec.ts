@@ -162,6 +162,7 @@ describe('Dialer calling API (whole app, real HTTP, real Mongo, stand-in Plivo)'
         invitationLink: (token: string) => `http://app.test/activate?token=${token}`,
         sendInvitationEmail: async (to: string, _n: string, _b: string, token: string) => {
           invited.set(to, token);
+          return { sent: true };
         },
         sendWelcomeEmail: async () => undefined,
         sendVerificationOtp: async () => undefined,
@@ -459,6 +460,122 @@ describe('Dialer calling API (whole app, real HTTP, real Mongo, stand-in Plivo)'
     it('never shows another business’s customers', async () => {
       const theirs = await call('GET', `/calling/contacts?search=${encodeURIComponent(PREFIX)}`, tokens.other);
       expect(theirs).toMatchObject({ status: 200, body: { items: [] } });
+    });
+  });
+
+  // Call Copilot's "Link to me": an administrator takes the business's Plivo number.
+  // The reported bug was "Number linked to you" followed by "No phone line is linked
+  // to you yet" — the save worked, but calling still wasn't ready on the server.
+  describe('linking a number to yourself ("Link to me")', () => {
+    const MY_PHONE = '919025881331';
+    let admin: { id: string; token: string };
+    let adminPassword: string;
+    let number: string;
+    let ownerPhone: string;
+
+    beforeAll(async () => {
+      const created = await call('POST', '/users', tokens.owner, { email: email('linker'), name: 'Linker Admin', role: 'admin' });
+      if (created.status !== 201) throw new Error(`creating admin: ${created.status} ${JSON.stringify(created.body)}`);
+      adminPassword = created.body.tempPassword;
+      admin = { id: created.body.user.id, token: ((await auth.login(email('linker'), adminPassword, {})) as { accessToken: string }).accessToken };
+      allUserIds.push(admin.id);
+      const ownerLine = (await call('GET', '/plivo/config', tokens.owner)).body.lines.find((l: { userId: string }) => l.userId === ownerId);
+      number = ownerLine.plivoNumber;
+      ownerPhone = ownerLine.agentPhone;
+    });
+
+    afterAll(async () => {
+      // Hand the number back, so nothing after this depends on the order tests run in.
+      await call('PUT', '/plivo/lines', tokens.owner, { plivoNumber: number, userId: ownerId, agentPhone: ownerPhone, active: true });
+    });
+
+    it('with nothing linked, the status says no line (and nothing else is missing)', async () => {
+      const status = await call('GET', '/calling/overview', admin.token);
+      expect(status.status).toBe(200);
+      expect(status.body).toMatchObject({
+        canManage: true,
+        canCall: false,
+        providers: { plivo: { connected: true, publicUrlConfigured: true, ready: false, line: null } },
+      });
+    });
+
+    it('links the number, stores it for this person in this business, and the status shows it straight away', async () => {
+      const linked = await call('PUT', '/plivo/lines', admin.token, { plivoNumber: number, userId: admin.id, agentPhone: '+91 90258 81331', active: true });
+      expect(linked.status).toBe(200);
+      expect(linked.body.find((l: { plivoNumber: string }) => l.plivoNumber === number)).toMatchObject({ userId: admin.id, userName: 'Linker Admin', agentPhone: MY_PHONE, active: true });
+
+      // Persisted: one record, digits with the country code, owned by this person in this business.
+      expect(await db.collection('plivo_lines').countDocuments({ plivoNumber: number })).toBe(1);
+      expect(await db.collection('plivo_lines').findOne({ plivoNumber: number })).toMatchObject({
+        organizationId: orgIds.main,
+        userId: admin.id,
+        agentPhone: MY_PHONE,
+        active: true,
+      });
+
+      const status = await call('GET', '/calling/overview', admin.token);
+      expect(status.body).toMatchObject({
+        canCall: true,
+        providers: { plivo: { ready: true, publicUrlConfigured: true, line: { businessNumber: number, agentPhone: MY_PHONE } } },
+      });
+    });
+
+    it('stays linked after signing in again (nothing about it lives in the browser)', async () => {
+      const fresh = ((await auth.login(email('linker'), adminPassword, {})) as { accessToken: string }).accessToken;
+      const status = await call('GET', '/calling/overview', fresh);
+      expect(status.body).toMatchObject({ canCall: true, providers: { plivo: { line: { businessNumber: number, agentPhone: MY_PHONE } } } });
+    });
+
+    it('the person it moved from no longer has it', async () => {
+      const status = await call('GET', '/calling/overview', tokens.owner);
+      expect(status.body).toMatchObject({ canCall: false, providers: { plivo: { line: null } } });
+    });
+
+    it('a call goes out on the linked line: Plivo rings the linked phone from the linked number', async () => {
+      const placed = await call('POST', '/calling/calls', admin.token, { customerNumber: '+91 98765 00010' });
+      expect(placed.status).toBe(201);
+      expect(placed.body).toMatchObject({ provider: 'plivo', userId: admin.id, businessNumber: number });
+      const sent = plivoCalls[plivoCalls.length - 1] as { from: string; to: string; answer_url: string };
+      expect(sent).toMatchObject({ from: number, to: MY_PHONE, answer_url: `${PUBLIC_BASE}/plivo/webhooks/answer?callId=${placed.body.id}` });
+      await finish(placed.body.id);
+    });
+
+    it('on a server with no public address the line still shows as linked, with what is missing — not "no line"', async () => {
+      const publicUrl = jest.spyOn(PlivoService.prototype, 'publicBaseUrl', 'get').mockReturnValue('');
+      try {
+        const status = await call('GET', '/calling/overview', admin.token);
+        expect(status.body).toMatchObject({
+          canCall: false,
+          providers: { plivo: { connected: true, ready: false, publicUrlConfigured: false, line: { businessNumber: number, agentPhone: MY_PHONE } } },
+        });
+        const before = plivoCalls.length;
+        expect((await call('POST', '/calling/calls', admin.token, { customerNumber: '+91 98765 00011' })).status).toBe(400);
+        expect(plivoCalls.length).toBe(before);
+      } finally {
+        publicUrl.mockReturnValue(PUBLIC_BASE);
+      }
+    });
+
+    it('a link that fails changes nothing', async () => {
+      const bad = await call('PUT', '/plivo/lines', admin.token, { plivoNumber: number, userId: admin.id, agentPhone: '+91 934447052', active: true });
+      expect(bad.status).toBe(400);
+      expect(bad.body.message).toBe('Indian numbers have 10 digits after +91 — this one has 9.');
+      expect(await db.collection('plivo_lines').findOne({ plivoNumber: number })).toMatchObject({ userId: admin.id, agentPhone: MY_PHONE });
+    });
+
+    it('stays inside its business: others cannot see it, take it, or link people across businesses', async () => {
+      const theirs = await call('GET', '/calling/overview', tokens.other);
+      expect(theirs.body.providers.plivo.line?.businessNumber).not.toBe(number);
+      expect((await call('PUT', '/plivo/lines', tokens.other, { plivoNumber: number, userId: sub(tokens.other), agentPhone: '+91 90000 00001' })).status).toBe(409);
+      expect((await call('PUT', '/plivo/lines', tokens.other, { plivoNumber: `9180${randomDigits(8)}`, userId: admin.id, agentPhone: '+91 90000 00002' })).status).toBe(400);
+      // Someone who may place calls but not manage calling can't move numbers around.
+      expect((await call('PUT', '/plivo/lines', caller.token, { plivoNumber: number, userId: caller.id, agentPhone: '+91 90000 00003' })).status).toBe(403);
+      // The same login in its sub-account has that business's own line, never this one.
+      if (tokens.ownerInBranch) {
+        const branch = await call('GET', '/calling/overview', tokens.ownerInBranch);
+        expect(branch.body.providers.plivo.line?.businessNumber).not.toBe(number);
+      }
+      expect(await db.collection('plivo_lines').findOne({ plivoNumber: number })).toMatchObject({ organizationId: orgIds.main, userId: admin.id });
     });
   });
 });

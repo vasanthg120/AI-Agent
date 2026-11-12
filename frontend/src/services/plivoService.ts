@@ -108,6 +108,7 @@ export const plivoService = {
   },
 
   // Try again to turn a recording into a Call Library entry (e.g. after topping up credits).
+  // The call log uses callingService.retryImport, which also reprocesses a failed transcription.
   async retryImport(id: string): Promise<PlivoCall> {
     const { data } = await axiosClient.post<PlivoCall>(`/plivo/calls/${id}/retry-import`);
     return data;
@@ -125,6 +126,14 @@ export interface CallLike {
   provider?: 'plivo' | 'twilio';
   createdAt: string;
   updatedAt: string;
+  // Where the call's Call Copilot report stands once its recording is saved
+  // (from /calling/calls — absent from the older /plivo/calls list).
+  report?: { stage: 'transcribing' | 'scoring' | 'ready' | 'failed'; error?: string };
+}
+
+/** The recording was saved, but turning it into a transcript and summary failed. */
+export function isReportFailed(call: CallLike): boolean {
+  return call.importStatus === 'imported' && call.report?.stage === 'failed';
 }
 
 // A call still marked live long after Plivo's own 4-hour call limit never got its
@@ -149,7 +158,12 @@ export function isImportStuck(call: CallLike): boolean {
 // is still being turned into a summary — the states worth polling for.
 export function isCallActive(call: CallLike): boolean {
   if (isCallStale(call) || isImportStuck(call)) return false;
-  return call.status === 'initiated' || call.status === 'in_progress' || call.importStatus === 'pending';
+  return (
+    call.status === 'initiated' ||
+    call.status === 'in_progress' ||
+    call.importStatus === 'pending' ||
+    (call.importStatus === 'imported' && call.report?.stage === 'transcribing')
+  );
 }
 
 export const CALL_STATUS_LABEL: Record<PlivoCallStatus, string> = {

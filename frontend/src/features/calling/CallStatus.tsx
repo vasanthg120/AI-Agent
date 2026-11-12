@@ -1,6 +1,6 @@
 import { Badge, Button } from '@/components/ui';
 import type { BadgeVariant } from '@/components/ui';
-import { CALL_STATUS_LABEL, isCallStale, isImportStuck, type CallLike } from '@/services/plivoService';
+import { CALL_STATUS_LABEL, isCallStale, isImportStuck, isReportFailed, type CallLike } from '@/services/plivoService';
 import styles from './CallStatus.module.css';
 
 const STATUS_VARIANT: Record<CallLike['status'], BadgeVariant> = {
@@ -34,6 +34,10 @@ export function CallStatus<T extends CallLike>({
   const stale = isCallStale(call);
   const lost = isImportStuck(call);
   const failed = call.importStatus === 'failed' || lost;
+  // The recording is saved; its transcript or summary is what failed.
+  const reportFailed = isReportFailed(call);
+  const transcribing = call.importStatus === 'imported' && call.report?.stage === 'transcribing';
+  const inLibrary = call.importStatus === 'imported' && !reportFailed && !transcribing;
   const waitingForRecording =
     call.status === 'completed' &&
     call.importStatus === 'none' &&
@@ -49,8 +53,10 @@ export function CallStatus<T extends CallLike>({
         )}
         {waitingForRecording && <Badge variant="info">Waiting for the recording…</Badge>}
         {call.importStatus === 'pending' && !lost && <Badge variant="info">Processing recording…</Badge>}
-        {call.importStatus === 'imported' && <Badge variant="success">In Call Library</Badge>}
+        {transcribing && <Badge variant="info">Transcribing…</Badge>}
+        {inLibrary && <Badge variant="success">In Call Library</Badge>}
         {failed && <Badge variant="danger">Recording not processed</Badge>}
+        {reportFailed && <Badge variant="danger">Transcription failed</Badge>}
       </div>
 
       {!stale &&
@@ -59,9 +65,13 @@ export function CallStatus<T extends CallLike>({
         call.status !== 'initiated' &&
         call.status !== 'in_progress' && <span className={styles.note}>{call.failureReason}</span>}
 
-      {failed && (
+      {(failed || reportFailed) && (
         <div className={styles.note}>
-          {lost ? 'Processing was interrupted.' : (call.importError ?? 'The recording could not be imported.')}
+          {reportFailed
+            ? `${call.report?.error ?? 'The recording could not be transcribed.'} Your recording is saved.`
+            : lost
+              ? 'Processing was interrupted.'
+              : (call.importError ?? 'The recording could not be imported.')}
           {onRetry && (
             <Button
               type="button"
@@ -77,7 +87,7 @@ export function CallStatus<T extends CallLike>({
         </div>
       )}
 
-      {call.importStatus === 'imported' && onOpenLibrary && (
+      {inLibrary && onOpenLibrary && (
         <button type="button" className={styles.link} onClick={onOpenLibrary}>
           View summary and AI Coach
         </button>

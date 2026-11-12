@@ -10,6 +10,7 @@ import { subAccountsService, type SubAccountDetails } from '@/services/subAccoun
 import { useAuthStore } from '@/stores/authStore';
 import { formatCurrency } from '@/utils/currency';
 import { extractErrorMessage } from '@/utils/errors';
+import { announceInvitation } from '@/utils/invitations';
 import { ArchiveSubAccountDialog } from './ArchiveSubAccountDialog';
 import { SubAccountDrawer } from './SubAccountDrawer';
 import { AccountLogo, AccountStatusBadge, SubscriptionBadge, formatDate, formatDateTime, formatPrice } from './subAccountParts';
@@ -69,11 +70,12 @@ export function SubAccountDetailPage() {
     await queryClient.invalidateQueries({ queryKey: ACCOUNTS_QUERY_KEY });
   };
 
-  const act = async (work: () => Promise<unknown>, done: string) => {
+  // done: the success message, or null when the work reports its own outcome.
+  const act = async (work: () => Promise<unknown>, done: string | null) => {
     setBusy(true);
     try {
       await work();
-      toast.success(done);
+      if (done) toast.success(done);
       await refresh();
     } catch (err) {
       toast.error(extractErrorMessage(err));
@@ -187,7 +189,9 @@ export function SubAccountDetailPage() {
             void act(async () => {
               const result = await subAccountsService.resendInvitation(id);
               setInviteLink(result.activationLink ?? null);
-            }, 'Invitation sent')
+              // Whether the email actually went — not "sent" regardless.
+              await announceInvitation(result, result.email);
+            }, null)
           }
         />
       )}

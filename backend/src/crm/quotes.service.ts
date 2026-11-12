@@ -1,5 +1,11 @@
 import { randomBytes } from 'crypto';
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  Logger,
+  NotFoundException,
+  Optional,
+} from '@nestjs/common';
 import { InjectConnection, InjectModel } from '@nestjs/mongoose';
 import { Connection, FilterQuery, Model } from 'mongoose';
 import { JOBS_COLLECTION } from '../customer-intelligence/customer-directory.service';
@@ -13,7 +19,7 @@ import { QuoteCounter, QuoteCounterDocument } from './schemas/quote-counter.sche
 import { CreateQuoteDto } from './dto/create-quote.dto';
 import { UpdateQuoteDto } from './dto/update-quote.dto';
 import { calculateQuoteTotals, validateQuoteItems } from './quote-pricing.util';
-
+import { CrmActivityService } from './crm-activity.service';
 // Fields the external CRM sync owns exclusively (see crm_mongo_sync.py) —
 // rejected outright (400) on any quote with externalId set, never a silent
 // no-op, so a human edit can never be quietly clobbered by the next sync
@@ -114,6 +120,11 @@ const QUOTE_SORTS: Record<string, keyof Quote | 'createdAt'> = {
 // codebase's one unbroken "never invent a figure" convention.
 @Injectable()
 export class QuotesService {
+  private readonly logger = new Logger(QuotesService.name);
+
+  // activity is optional: several modules and specs build this service
+  // without it. The CRM activity log is written after the change and never
+  // fails or slows it.
   constructor(
     @InjectModel(Quote.name) private quoteModel: Model<QuoteDocument>,
     @InjectModel(QuoteCounter.name) private counterModel: Model<QuoteCounterDocument>,
@@ -123,7 +134,12 @@ export class QuotesService {
     @InjectConnection() private connection: Connection,
     private vendorsService: VendorsService,
     private quoteGridFs: QuoteGridFsService,
+    @Optional() private activity?: CrmActivityService,
   ) {}
+
+  private logActivity(work: Promise<void> | undefined): void {
+    work?.catch((err: Error) => this.logger.warn(`CRM activity log: ${err.message}`));
+  }
 
   // The first real "build a priced quote" entry point this app has had —
   // every other Quote writer (createDraftQuote, the external sync) either
@@ -155,7 +171,7 @@ export class QuotesService {
     const totals = calculateQuoteTotals(dto.items);
     const quoteNumber = await this.nextQuoteNumber(organizationId);
 
-    return this.quoteModel.create({
+    const created = await this.quoteModel.create({
       organizationId,
       dealId: dto.dealId,
       quoteName: dto.quoteName,
@@ -176,6 +192,8 @@ export class QuotesService {
       discountAmount: totals.discountAmount,
       taxAmount: totals.taxAmount,
     });
+    this.logActivity(this.activity?.quoteCreated(created.toObject(), createdBy));
+    return created;
   }
 
   // Phase 19 — Unified Analytics Dashboard's quote drill-down. Quote has no
@@ -297,7 +315,7 @@ export class QuotesService {
 
   async createDraftQuote(organizationId: string, input: CreateDraftQuoteInput): Promise<QuoteDocument> {
     const quoteNumber = await this.nextQuoteNumber(organizationId);
-    return this.quoteModel.create({
+    const draft = await this.quoteModel.create({
       organizationId,
       dealId: input.dealId,
       quoteName: input.requestedItems ? input.requestedItems.slice(0, 120) : `Draft quote for ${input.businessName}`,
@@ -315,6 +333,9 @@ export class QuotesService {
       requestNotes: input.requestedItems,
       sourceEmailIntelligenceItemId: input.sourceEmailIntelligenceItemId,
     });
+    // Written by the AI from a customer's email, for the person who asked for it.
+    this.logActivity(this.activity?.quoteCreated(draft.toObject(), input.createdBy, { byAi: true }));
+    return draft;
   }
 
   private async nextQuoteNumber(organizationId: string): Promise<string> {
@@ -432,8 +453,9 @@ export class QuotesService {
   // scope (404 if out of reach) THEN the sync-owned-field guard (400) THEN
   // the actual write — a manager probing a quote outside their store must
   // never learn anything about it, not even that it's synced.
-  async updateQuote(organizationId: string, id: string, dto: UpdateQuoteDto, storeConstraint?: string): Promise<QuoteDocument> {
+  async updateQuote(organizationId: string, id: string, dto: UpdateQuoteDto, storeConstraint?: string, actorUserId?: string): Promise<QuoteDocument> {
     const quote = await this.getOne(organizationId, id, storeConstraint);
+    const before = { quoteStatus: quote.quoteStatus, clientApprovalStatus: quote.clientApprovalStatus };
 
     if (quote.externalId) {
       const attempted = SYNC_OWNED_FIELDS.filter((f) => dto[f] !== undefined);
@@ -496,6 +518,7 @@ export class QuotesService {
     }
 
     await quote.save();
+    this.logActivity(this.activity?.quoteChanged(before, quote.toObject(), actorUserId));
     return quote;
   }
 

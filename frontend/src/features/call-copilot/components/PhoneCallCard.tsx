@@ -5,7 +5,7 @@ import toast from 'react-hot-toast';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { AnimatePresence, motion } from 'framer-motion';
 import clsx from 'clsx';
-import { FiGlobe, FiPhoneCall, FiPhoneIncoming, FiPhoneOutgoing, FiSettings, FiShield } from 'react-icons/fi';
+import { FiGlobe, FiPhoneCall, FiPhoneIncoming, FiPhoneOutgoing, FiRefreshCw, FiSettings, FiShield } from 'react-icons/fi';
 import { Button, Skeleton } from '@/components/ui';
 import { CallProgress } from '@/features/calling/CallProgress';
 import { CallStatus } from '@/features/calling/CallStatus';
@@ -13,12 +13,15 @@ import { PhoneNumberField } from '@/features/calling/PhoneNumberField';
 import { ProviderPill } from '@/features/calling/ProviderPill';
 import { ROUTES } from '@/constants/routes';
 import {
+  callingBlocker,
   callingService,
   chooseProvider,
   countryOfNumber,
   flagPrefix,
   formatInternational,
+  linkedLine,
   PROVIDER_LABEL,
+  PUBLIC_URL_SETTING,
   COUNTRIES,
   type CallingCall,
   type CallingProvider,
@@ -77,6 +80,7 @@ export function PhoneCallCard({ onOpenLibrary }: { onOpenLibrary: () => void }) 
   const [calling, setCalling] = useState(false);
   const [retrying, setRetrying] = useState<string | null>(null);
   const [trackedId, setTrackedId] = useState<string | null>(null);
+  const [rechecking, setRechecking] = useState(false);
 
   const { data: overview } = useQuery({
     queryKey: ['calling', 'overview'],
@@ -111,6 +115,18 @@ export function PhoneCallCard({ onOpenLibrary }: { onOpenLibrary: () => void }) 
   const autoRoute = overview && number ? chooseProvider(number, available, overview.domesticCountryCode) : null;
   const international = !!overview && !!number && !number.startsWith(overview.domesticCountryCode);
 
+  // Asks the server afresh (it also re-tests whether the carrier can reach it).
+  const recheck = async () => {
+    setRechecking(true);
+    try {
+      queryClient.setQueryData(['calling', 'overview'], await callingService.recheckOverview());
+    } catch (err) {
+      toast.error(extractErrorMessage(err));
+    } finally {
+      setRechecking(false);
+    }
+  };
+
   if (!overview) {
     return (
       <div className={styles.loading} aria-busy>
@@ -144,6 +160,43 @@ export function PhoneCallCard({ onOpenLibrary }: { onOpenLibrary: () => void }) 
         {overview.canManage
           ? 'Connect Plivo (Indian numbers) or Twilio (international numbers) to place and receive calls here. Every call is recorded, then transcribed, summarized and coached automatically.'
           : 'An administrator needs to connect a phone provider in Settings → Calling before you can place calls from here.'}
+      </StateBlock>
+    );
+  }
+
+  // A number is linked to this person, but the server can't take calls yet (no public
+  // address for the carrier's callbacks). Saying "no line" here was the reported bug.
+  const mine = linkedLine(overview);
+  if (!overview.canCall && callingBlocker(overview) === 'not_configured' && mine) {
+    const provider = PROVIDER_LABEL[mine.provider];
+    return (
+      <StateBlock
+        title="Your number is linked — calling isn't switched on yet"
+        actions={
+          <div className={styles.stateActions}>
+            {overview.canManage && (
+              <Button
+                type="button"
+                variant="secondary"
+                leftIcon={<FiSettings />}
+                onClick={() => navigate(ROUTES.settingsCalling)}
+              >
+                Open calling settings
+              </Button>
+            )}
+            <Button type="button" variant="ghost" leftIcon={<FiRefreshCw />} loading={rechecking} onClick={recheck}>
+              Check again
+            </Button>
+          </div>
+        }
+      >
+        <span className={styles.linkedLine}>
+          {provider} number <strong>{formatInternational(mine.businessNumber)}</strong> is linked to you and rings your
+          phone <strong>{formatInternational(mine.agentPhone)}</strong>.
+        </span>{' '}
+        {overview.canManage
+          ? `Calls can't start yet: this server has no public address for ${provider} to call back on. Set ${PUBLIC_URL_SETTING[mine.provider]} on the backend (https://<your domain>/api in production), restart it, then check again.`
+          : "Calls can't start until an administrator finishes setting up calling on the server."}
       </StateBlock>
     );
   }
@@ -245,6 +298,8 @@ export function PhoneCallCard({ onOpenLibrary }: { onOpenLibrary: () => void }) 
               call={tracked}
               onOpenLibrary={onOpenLibrary}
               onDismiss={() => setTrackedId('')}
+              onRetry={(c) => void handleRetry(c)}
+              retrying={retrying === tracked.id}
             />
           )}
         </AnimatePresence>

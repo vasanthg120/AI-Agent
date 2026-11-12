@@ -313,8 +313,8 @@ export declare class UsersController {
         };
         tempPassword: string | undefined;
     } | {
-        activationLink: string | undefined;
         user: {
+            pendingInvitation: boolean;
             id: string;
             email: string;
             name: string;
@@ -327,16 +327,20 @@ export declare class UsersController {
             voiceAccessEnabled: boolean;
             aiAccessEnabled: boolean;
             linkedFromMain: boolean;
-            pendingInvitation: boolean;
             phone: string | undefined;
             timezone: string | undefined;
             language: string | undefined;
             createdAt: Date | undefined;
         };
+        activationLink: string | undefined;
+        emailSent: boolean;
+        emailProblem: string | undefined;
         tempPassword: string | undefined;
     }>;
     resendInvitation(caller: JwtPayload, id: string): Promise<{
         activationLink: string | undefined;
+        emailSent: boolean;
+        emailProblem: string | undefined;
     }>;
     update(caller: JwtPayload, id: string, dto: UpdateUserDto): Promise<{
         accountType: string;

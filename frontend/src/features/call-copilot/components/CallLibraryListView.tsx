@@ -25,10 +25,11 @@ import {
   type CallSessionDetail,
   type CallSessionSummary,
 } from '@/services/callCopilotService';
-import { OUTCOME_META, describeSource, formatCallDate, type CallKind } from '../callMeta';
+import { OUTCOME_META, describeSource, failureReason, formatCallDate, type CallKind } from '../callMeta';
 import { FADE_UP, staggerChildren } from '../motion';
 import { CallSummaryModal } from './CallSummaryModal';
 import { CountUp } from './CountUp';
+import { FailedCallDialog } from './FailedCallDialog';
 import { ScoreRing } from './ScoreRing';
 import { SentimentIndicator } from './SentimentIndicator';
 import styles from './CallLibraryListView.module.css';
@@ -86,6 +87,8 @@ export function CallLibraryListView({ onStartCall }: { onStartCall?: () => void 
   const [stats, setStats] = useState<CallLibraryStats | null>(null);
   const [selected, setSelected] = useState<CallSessionDetail | null>(null);
   const [openingId, setOpeningId] = useState<string | null>(null);
+  // Bumped to reload the current page in place (e.g. after "Try again").
+  const [reloadKey, setReloadKey] = useState(0);
 
   useEffect(() => {
     callCopilotService
@@ -135,7 +138,7 @@ export function CallLibraryListView({ onStartCall }: { onStartCall?: () => void 
     };
     // `searching` is derived from `query`, which is already a dependency.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [query, dateRange, page]);
+  }, [query, dateRange, page, reloadKey]);
 
   // The dialog opens once the call has loaded — not before, when it would show
   // an empty "not coached yet" state for a call that simply hasn't arrived.
@@ -309,7 +312,18 @@ export function CallLibraryListView({ onStartCall }: { onStartCall?: () => void 
         </nav>
       )}
 
-      {selected && (
+      {selected?.status === 'error' && (
+        <FailedCallDialog
+          session={selected}
+          onClose={() => setSelected(null)}
+          onRetried={() => {
+            setSelected(null);
+            setReloadKey((k) => k + 1);
+          }}
+        />
+      )}
+
+      {selected && selected.status !== 'error' && (
         <CallSummaryModal
           open
           onClose={() => setSelected(null)}
@@ -355,8 +369,9 @@ function CallRow({ item, opening, onOpen }: { item: CallSessionSummary; opening:
   // A mean of 0 means every skill scored 0 — nothing to score, not a bad call.
   const notScored = coached && item.overallScore === 0;
   const title = item.headline || (kind.kind === 'phone' ? 'Phone call' : item.originalFilename) || 'Sales call';
-  const snippet = item.summaryPoints?.[0];
   const state = item.status === 'error' ? 'Failed' : item.status === 'ended' ? null : 'Processing';
+  // A failed call shows why, so the reason is visible without opening it.
+  const snippet = state === 'Failed' ? failureReason(item.errorMessage) : item.summaryPoints?.[0];
 
   return (
     <motion.li variants={FADE_UP}>

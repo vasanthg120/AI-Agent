@@ -237,8 +237,11 @@ export class BillingMigrationService {
 
     // 3. Collapse isDefault to exactly one payment method (the
     // most-recently-created one), now that methods from every source wallet
-    // share the same organizationId.
-    const methods = await this.paymentMethodModel.find({ organizationId: plan.organizationId }).sort({ createdAt: -1 }).exec();
+    // share the same organizationId. createdAt is only millisecond-precise —
+    // two methods saved in the same millisecond tied, and the "winner" was
+    // whichever the database returned first (seen in CI) — so _id, which
+    // grows in creation order, settles a tie.
+    const methods = await this.paymentMethodModel.find({ organizationId: plan.organizationId }).sort({ createdAt: -1, _id: -1 }).exec();
     if (methods.length > 0) {
       await this.paymentMethodModel.updateMany({ _id: { $in: methods.map((m) => m._id) } }, { $set: { isDefault: false } });
       await this.paymentMethodModel.updateOne({ _id: methods[0]._id }, { $set: { isDefault: true } });

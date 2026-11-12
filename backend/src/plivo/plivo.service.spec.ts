@@ -1,4 +1,4 @@
-import { BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Logger, NotFoundException } from '@nestjs/common';
 import { getModelToken, MongooseModule } from '@nestjs/mongoose';
 import { Test } from '@nestjs/testing';
 import { Connection, Model } from 'mongoose';
@@ -148,6 +148,54 @@ describe('PlivoService (real Mongo)', () => {
       users.set('outsider', { _id: { toString: () => 'outsider' }, name: 'Out Sider', organizationId: `${orgId}-other` });
       await expect(service.upsertLine(orgId, { plivoNumber, userId: 'outsider', agentPhone: '9876543210' })).rejects.toThrow(/not in this organization/);
       await expect(service.upsertLine(orgId, { plivoNumber, userId: 'ghost', agentPhone: '9876543210' })).rejects.toThrow(/not in this organization/);
+    });
+
+    it('stores the link as digits with the country code, owned by that person in that organization, active', async () => {
+      await service.upsertLine(orgId, { plivoNumber: `+${plivoNumber}`, userId: agent.sub, agentPhone: '+91 98765-43210' });
+      const saved = await lines.findOne({ plivoNumber }).lean();
+      expect(saved).toMatchObject({ organizationId: orgId, userId: agent.sub, plivoNumber, agentPhone: '919876543210', active: true });
+    });
+
+    it('"Link to me" moves the number to the new person — one line, their phone, active again', async () => {
+      await addLine({ active: false });
+      const admin = `${PREFIX}-admin-${seq}`;
+      users.set(admin, { _id: { toString: () => admin }, name: 'Ada Admin', organizationId: orgId });
+      const result = await service.upsertLine(orgId, { plivoNumber, userId: admin, agentPhone: '90258 81331', active: true }, admin);
+      expect(result).toEqual([expect.objectContaining({ plivoNumber, userId: admin, userName: 'Ada Admin', agentPhone: '919025881331', active: true })]);
+      expect(await lines.countDocuments({ plivoNumber })).toBe(1);
+      expect(await service.listLines(orgId, agent.sub)).toHaveLength(0);
+      expect(await service.listLines(orgId, admin)).toHaveLength(1);
+    });
+
+    it('refuses a phone that can never be rung (a 9-digit Indian mobile) and saves nothing', async () => {
+      await expect(service.upsertLine(orgId, { plivoNumber, userId: agent.sub, agentPhone: '+91 934447052' })).rejects.toThrow(
+        'Indian numbers have 10 digits after +91 — this one has 9.',
+      );
+      expect(await lines.countDocuments({ plivoNumber })).toBe(0);
+    });
+
+    it('logs who linked which line to whom — internal ids and the last four digits only', async () => {
+      const log = jest.spyOn(Logger.prototype, 'log').mockImplementation(() => undefined);
+      const warn = jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+      try {
+        await service.upsertLine(orgId, { plivoNumber, userId: agent.sub, agentPhone: '9876543210' }, 'actor-1');
+        await service.upsertLine(orgId, { plivoNumber, userId: agent.sub, agentPhone: '+91 934447052' }, 'actor-1').catch(() => undefined);
+        const messages = (spy: jest.SpyInstance) => spy.mock.calls.map((c) => String(c[0]));
+        const saved = messages(log).find((m) => m.startsWith('plivo.line.saved'));
+        expect(saved).toMatch(/^plivo\.line\.saved org=\S+ line=[0-9a-f]{24} by=actor-1 user=\S+ previous_user=same created=true active=true number=•+\d{4} agent=•+3210$/);
+        expect(saved).toContain(`org=${orgId} `);
+        expect(saved).toContain(`user=${agent.sub} `);
+        expect(saved).toContain(`number=${'•'.repeat(plivoNumber.length - 4)}${plivoNumber.slice(-4)} `);
+        expect(messages(warn)).toContain(`plivo.line.refused org=${orgId} by=actor-1 for=${agent.sub} reason=agent_phone_not_dialable`);
+        for (const message of [...messages(log), ...messages(warn)]) {
+          expect(message).not.toContain('9876543210');
+          expect(message).not.toContain(plivoNumber);
+          expect(message).not.toContain('secret-token');
+        }
+      } finally {
+        log.mockRestore();
+        warn.mockRestore();
+      }
     });
 
     it('will not take a Plivo number another organization already registered', async () => {

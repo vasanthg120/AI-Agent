@@ -113,6 +113,13 @@ export interface CallSessionDetail extends CallSummaryResult, Partial<CoachingRe
   sentiment?: string;
   endedAt?: string;
   createdAt: string;
+  updatedAt?: string;
+  // Why processing failed, in words for the user (status 'error').
+  errorMessage?: string;
+  // The recording is saved, so processing can be run again.
+  retryable?: boolean;
+  // The language it was transcribed in; absent on calls saved before 2026-11-11.
+  languageCode?: string;
 }
 
 export type CallSessionSummary = Omit<CallSessionDetail, 'transcript'>;
@@ -257,6 +264,20 @@ export const callCopilotService = {
 
   async getSession(sessionId: string): Promise<CallSessionDetail> {
     const { data } = await axiosClient.get<CallSessionDetail>(`/call-copilot/sessions/${sessionId}`);
+    return data;
+  },
+
+  // "Try again" for a recording whose transcription failed — the server
+  // reprocesses the copy it already saved; the call returns to 'processing'.
+  // `languageCode` is only needed for a call saved before its language was kept.
+  async retrySession(
+    sessionId: string,
+    languageCode?: string,
+  ): Promise<{ sessionId: string; status: CallSessionDetail['status'] }> {
+    const { data } = await axiosClient.post<{ sessionId: string; status: CallSessionDetail['status'] }>(
+      `/call-copilot/sessions/${sessionId}/retry`,
+      languageCode ? { languageCode } : {},
+    );
     return data;
   },
 

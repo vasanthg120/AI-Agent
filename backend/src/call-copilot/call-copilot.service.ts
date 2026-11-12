@@ -563,9 +563,10 @@ export class CallCopilotService {
   /** A session that errors out (client disconnect mid-call, an unhandled
    * exception) releases its credit hold instead of leaving it pending
    * forever — same reasoning as chat's release() on a failed turn. */
-  async errorSession(session: CallSessionDocument, message: string): Promise<void> {
+  async errorSession(session: CallSessionDocument, message: string, options: { retryable?: boolean } = {}): Promise<void> {
     session.status = 'error';
     session.errorMessage = message;
+    if (options.retryable !== undefined) session.retryable = options.retryable;
     session.endedAt = new Date();
     await session.save();
     try {

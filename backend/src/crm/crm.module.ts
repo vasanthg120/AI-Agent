@@ -24,6 +24,7 @@ import { EmailIntelligenceItem, EmailIntelligenceItemSchema } from '../email-int
 import { Note, NoteSchema } from './schemas/note.schema';
 import { Product, ProductSchema } from './schemas/product.schema';
 import { Quote, QuoteSchema } from './schemas/quote.schema';
+import { CrmActivity, CrmActivitySchema } from './schemas/crm-activity.schema';
 import { QuoteCounter, QuoteCounterSchema } from './schemas/quote-counter.schema';
 import { QuotePayment, QuotePaymentSchema } from './schemas/quote-payment.schema';
 import { SalesTarget, SalesTargetSchema } from './schemas/sales-target.schema';
@@ -50,6 +51,7 @@ import { DealsService } from './deals.service';
 import { DealOwnerMappingService } from './deal-owner-mapping.service';
 import { QuotePaymentsService } from './quote-payments.service';
 import { QuotesService } from './quotes.service';
+import { CrmActivityService } from './crm-activity.service';
 import { SalesAnalyticsService } from './sales-analytics.service';
 import { SalesTargetController } from './sales-target.controller';
 
@@ -61,6 +63,8 @@ import { SalesTargetController } from './sales-target.controller';
       { name: Deal.name, schema: DealSchema },
       { name: DealOwnerMapping.name, schema: DealOwnerMappingSchema },
       { name: Quote.name, schema: QuoteSchema },
+      // The CRM activity log (CrmActivityService): every real change to a deal or a quotation.
+      { name: CrmActivity.name, schema: CrmActivitySchema },
       // Business Intelligence's Customer Quote & Payment Tracking (QuotePaymentsService,
       // added in a later build phase alongside its write endpoints on QuotesController).
       { name: QuotePayment.name, schema: QuotePaymentSchema },
@@ -119,6 +123,7 @@ import { SalesTargetController } from './sales-target.controller';
     DecorationsController,
   ],
   providers: [
+    CrmActivityService,
     CrmService,
     SalesAnalyticsService,
     BusinessDashboardService,
@@ -148,6 +153,7 @@ import { SalesTargetController } from './sales-target.controller';
   // QuotePaymentsService is consumed by BusinessIntelligenceModule's
   // customer-quote-payment.service.ts for the per-customer payment overlay.
   exports: [
+    CrmActivityService,
     CustomerActivityService,
     QuotesService,
     QuotePaymentsService,

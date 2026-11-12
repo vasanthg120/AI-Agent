@@ -55,6 +55,13 @@ export class GridFsService {
     return this.getBucket(bucketName).openDownloadStream(new mongoose.mongo.ObjectId(fileId));
   }
 
+  /** A whole stored file, read back into memory. Rejects when the file is gone. */
+  async download(bucketName: string, fileId: string): Promise<Buffer> {
+    const chunks: Buffer[] = [];
+    for await (const chunk of this.openDownloadStream(bucketName, fileId)) chunks.push(Buffer.from(chunk as Buffer));
+    return Buffer.concat(chunks);
+  }
+
   async delete(bucketName: string, fileId: string): Promise<void> {
     await this.getBucket(bucketName).delete(new mongoose.mongo.ObjectId(fileId));
   }

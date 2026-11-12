@@ -235,6 +235,31 @@ describe('BillingAdminService — Phase 7 metrics (real Mongo)', () => {
     });
   });
 
+  describe('getSubscriptionMetrics with a malformed price id', () => {
+    // Same class of incident as getAnalyticsTimeSeries below: the e2e specs'
+    // `planPriceId: 'none'` stub subscriptions (live while those suites run in
+    // parallel, or left behind by an interrupted run) made this call throw a
+    // CastError for every admin.
+    it('a malformed planPriceId on one active subscription never crashes the MRR call', async () => {
+      await subscriptionModel.create({
+        organizationId: `${TEST_PREFIX}-org-malformed-price`,
+        planId: 'none',
+        planPriceId: 'none',
+        status: 'active',
+        currentPeriodStart: new Date(),
+        currentPeriodEnd: new Date(Date.now() + 30 * 86_400_000),
+        createdBy: 'jest',
+      });
+
+      // Global, platform-wide figures — other suites change them in parallel,
+      // so only "answers, with real numbers" is asserted here.
+      const metrics = await adminService.getSubscriptionMetrics(3650);
+
+      expect(Number.isFinite(metrics.mrrUsd)).toBe(true);
+      expect(metrics.activeCount).toBeGreaterThanOrEqual(1);
+    });
+  });
+
   describe('getAnalyticsTimeSeries', () => {
     // Real production incident: two leftover BillingSubscription rows from
     // other e2e specs' own fixtures (calling.e2e.spec.ts,

@@ -324,7 +324,15 @@ export class SubAccountsService {
 
     const invitation = dto.sendInvite === false ? null : await this.invitations.invite(owner);
     this.logAction(caller, organizationId, 'sub_account.create', { name: dto.name });
-    return { id: organizationId, name: organization.name, ownerEmail: email, invited: !!invitation, activationLink: invitation?.activationLink };
+    return {
+      id: organizationId,
+      name: organization.name,
+      ownerEmail: email,
+      invited: !!invitation,
+      activationLink: invitation?.activationLink,
+      // Whether the invitation email actually went (and if not, why) — see invitations.service.ts.
+      ...(invitation ? { emailSent: invitation.emailSent, emailProblem: invitation.emailProblem } : {}),
+    };
   }
 
   // ---- details ------------------------------------------------------------------
@@ -577,8 +585,8 @@ export class SubAccountsService {
     const owner = org.ownerUserId ? await this.users.findById(org.ownerUserId) : null;
     if (!owner) throw new NotFoundException('This sub-account has no owner to invite.');
     if (owner.passwordHash) throw new BadRequestException('The owner has already activated their account.');
-    const { activationLink } = await this.invitations.invite(owner);
+    const { activationLink, emailSent, emailProblem } = await this.invitations.invite(owner);
     this.logAction(caller, id, 'sub_account.invite_resend');
-    return { email: owner.email, activationLink };
+    return { email: owner.email, activationLink, emailSent, emailProblem };
   }
 }

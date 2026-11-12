@@ -20,9 +20,9 @@ describe('provider catalog', () => {
     expect(CRM_PROVIDERS.hoops.syncDefaults?.window).toEqual({ utcOffsetMinutes: 600, start: '19:00', end: '05:00', label: 'AEST' });
     expect(connectionOf(CRM_PROVIDERS.prospectconnect)).toBe('pull');
     expect(PUSH_PROVIDERS).toEqual(['zapier']);
-    // Hoops carries none of Pantheras' field names; a sale is won when its quote is accepted.
+    // Hoops carries none of Pantheras' field names; a sale is won when its job is created (as Hoops' jobs report counts it).
     expect(JSON.stringify(CRM_PROVIDERS.hoops)).not.toContain('monetary_value');
-    expect(CRM_PROVIDERS.hoops.statusMapping).toEqual({ won: ['accepted', 'completed'], lost: ['voided'] });
+    expect(CRM_PROVIDERS.hoops.statusMapping).toEqual({ won: ['job'], lost: ['voided'] });
   });
 
   it('scores field names: exact known names high, look-alikes as "probably", unrelated 0', () => {
@@ -312,7 +312,7 @@ describe('CRM integrations (real Mongo)', () => {
     const stored = await sources.findOne({ organizationId: org, key: 'hoops' }).lean();
     expect(stored).toMatchObject({
       modules: ['deals', 'quotes', 'contacts', 'accounts'],
-      statusMapping: { won: ['accepted', 'completed'], lost: ['voided'] },
+      statusMapping: { won: ['job'], lost: ['voided'] },
       metadata: { currency: 'AUD' },
     });
     expect(stored?.metadata.webhookReceived).toBeUndefined();

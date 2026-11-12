@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { Flag } from '@/features/calling/Flag';
-import { callingService, chooseProvider, type CallingProvider, type Country } from '@/services/callingService';
+import { callingBlocker, callingService, chooseProvider, type CallingProvider, type Country } from '@/services/callingService';
 import { FiChevronDown, FiClipboard, FiDelete, FiLock, FiPhone, FiX } from '../components/icons';
 import { CountrySheet } from '../components/CountrySheet';
 import { ReadinessCard, type NotReady } from '../components/ReadinessCard';
@@ -104,11 +104,8 @@ export function KeypadScreen() {
 
   let notReady: NotReady | null = null;
   if (!overview) notReady = overviewQuery.isError ? 'error' : null;
-  else if (!overview.providers.plivo.connected && !overview.providers.twilio.connected) notReady = 'no_provider';
-  else if (!overview.canCall) {
-    const hasLine = (['plivo', 'twilio'] as const).some((p) => overview.providers[p].connected && overview.providers[p].line);
-    notReady = hasLine ? 'not_configured' : 'no_line';
-  } else if (!ignoreOffline && ready.every((p) => overview.providers[p].reachability === 'unreachable')) notReady = 'offline';
+  else if (!overview.canCall) notReady = callingBlocker(overview);
+  else if (!ignoreOffline && ready.every((p) => overview.providers[p].reachability === 'unreachable')) notReady = 'offline';
 
   const type = useCallback((key: string) => {
     haptic('key');

@@ -1,3 +1,4 @@
+import { HttpException, HttpStatus } from '@nestjs/common';
 import { getModelToken, MongooseModule } from '@nestjs/mongoose';
 import { Test } from '@nestjs/testing';
 import { Connection, Model } from 'mongoose';
@@ -35,7 +36,8 @@ describe('Plivo webhooks (real Mongo)', () => {
   let lines: Model<PlivoLineDocument>;
   let service: PlivoWebhooksService;
   let httpGet: jest.Mock;
-  let startSession: jest.Mock;
+  let storeRecording: jest.Mock;
+  let startProcessing: jest.Mock;
   let notify: jest.Mock;
   let publicBase: string;
   let credentialsFor: (org: string) => Promise<{ authId: string; authToken: string } | null>;
@@ -68,7 +70,8 @@ describe('Plivo webhooks (real Mongo)', () => {
     publicBase = BASE;
     credentialsFor = async (org) => (org === orgId ? { authId: 'MAXXXXXXXXXXXXXXXXXX', authToken: TOKEN } : null);
     httpGet = jest.fn(() => of({ data: new Uint8Array([1, 2, 3, 4]).buffer }));
-    startSession = jest.fn(async () => ({ _id: { toString: () => 'session-123' } }));
+    startProcessing = jest.fn(async () => undefined);
+    storeRecording = jest.fn(async () => ({ _id: { toString: () => 'session-123' } }));
     notify = jest.fn(async () => undefined);
     const plivo = {
       get publicBaseUrl() {
@@ -80,7 +83,7 @@ describe('Plivo webhooks (real Mongo)', () => {
       },
       getCredentials: (org: string) => credentialsFor(org),
     } as unknown as PlivoService;
-    service = new PlivoWebhooksService(calls, lines, plivo, { get: httpGet } as never, { startSessionFromRecording: startSession } as never, { create: notify } as never);
+    service = new PlivoWebhooksService(calls, lines, plivo, { get: httpGet } as never, { storeRecording: storeRecording, startProcessing } as never, { create: notify } as never);
     (service as unknown as { retryDelayMs: number }).retryDelayMs = 0;
   });
 
@@ -255,7 +258,7 @@ describe('Plivo webhooks (real Mongo)', () => {
 
       expect(result).toEqual({ status: 200, xml: '<Response></Response>' });
       expect(httpGet).toHaveBeenCalledWith(recordingBody().RecordUrl, expect.objectContaining({ responseType: 'arraybuffer' }));
-      expect(startSession).toHaveBeenCalledWith(orgId, userId, expect.any(Buffer), `plivo-${recId()}.mp3`, { dealId: 'deal-1', languageCode: 'hi' });
+      expect(storeRecording).toHaveBeenCalledWith(orgId, userId, expect.any(Buffer), `plivo-${recId()}.mp3`, { dealId: 'deal-1', languageCode: 'hi' });
       const after = await calls.findById(call._id);
       expect(after).toMatchObject({ recordingId: recId(), importStatus: 'imported', sessionId: 'session-123', recordingDurationSeconds: 187 });
       expect(notify).toHaveBeenCalledWith(userId, expect.objectContaining({ title: 'Call recording ready', source: 'call-copilot' }), orgId);
@@ -271,7 +274,7 @@ describe('Plivo webhooks (real Mongo)', () => {
       await settle(); // and long enough for a (wrong) second import to have started
 
       expect(again.status).toBe(200); // acknowledged, so Plivo stops retrying
-      expect(startSession).toHaveBeenCalledTimes(1);
+      expect(storeRecording).toHaveBeenCalledTimes(1);
     });
 
     it('never fetches anything for an unsigned or forged request', async () => {
@@ -298,7 +301,7 @@ describe('Plivo webhooks (real Mongo)', () => {
       await importFinished(call._id);
 
       expect(httpGet).not.toHaveBeenCalled();
-      expect(startSession).not.toHaveBeenCalled();
+      expect(storeRecording).not.toHaveBeenCalled();
       const after = await calls.findById(call._id);
       expect(after?.importStatus).toBe('failed');
       expect(after?.importError).toBeTruthy();
@@ -340,7 +343,7 @@ describe('Plivo webhooks (real Mongo)', () => {
       expect(failed?.importStatus).toBe('failed');
       expect(failed?.importError).toContain('Could not download the recording from Plivo (HTTP 500)');
       expect(notify).toHaveBeenCalledWith(userId, expect.objectContaining({ title: 'Call recording could not be processed' }), orgId);
-      expect(startSession).not.toHaveBeenCalled();
+      expect(storeRecording).not.toHaveBeenCalled();
 
       httpGet.mockReturnValue(of({ data: new Uint8Array([1]).buffer }));
       await service.importRecording(failed!);
@@ -349,12 +352,33 @@ describe('Plivo webhooks (real Mongo)', () => {
       expect(retried?.importError).toBeUndefined();
     });
 
-    it("surfaces Call Copilot's own refusal (e.g. out of credits) instead of hiding it", async () => {
-      startSession.mockRejectedValueOnce(new Error('Insufficient credits to process this recording.'));
+    it('saves the recording before anything is sent for transcription', async () => {
+      const call = await outboundCall();
+      await service.recordingReady(signed(`/plivo/webhooks/recording?callId=${call._id}`, recordingBody(`${recId()}-order`)), String(call._id));
+      await importFinished(call._id);
+      await settle();
+      expect(startProcessing).toHaveBeenCalledWith(expect.objectContaining({ _id: expect.anything() }), expect.any(Buffer));
+      expect(storeRecording.mock.invocationCallOrder[0]).toBeLessThan(startProcessing.mock.invocationCallOrder[0]);
+    });
+
+    it('keeps a saved recording (retryable) and says why in words when processing is refused, e.g. out of credits', async () => {
+      startProcessing.mockRejectedValueOnce(
+        new HttpException({ code: 'INSUFFICIENT_BALANCE', message: 'Your Haive Credits are exhausted.' }, HttpStatus.PAYMENT_REQUIRED),
+      );
       const call = await outboundCall();
       await service.recordingReady(signed(`/plivo/webhooks/recording?callId=${call._id}`, recordingBody(`${recId()}-broke`)), String(call._id));
       await importFinished(call._id);
-      expect((await calls.findById(call._id))).toMatchObject({ importStatus: 'failed', importError: 'Insufficient credits to process this recording.' });
+      await settle();
+      // The recording made it in; its session carries the failure, so "Try again" reprocesses the saved copy.
+      expect(await calls.findById(call._id)).toMatchObject({ importStatus: 'imported', sessionId: 'session-123' });
+      expect(notify).toHaveBeenCalledWith(
+        userId,
+        expect.objectContaining({
+          title: 'Call recording could not be processed',
+          description: expect.stringContaining('Your HaiVE credits ran out before this call could be processed.'),
+        }),
+        orgId,
+      );
     });
   });
 

@@ -6,6 +6,15 @@ import { UserDocument } from './schemas/user.schema';
 import { UsersService } from './users.service';
 
 const INVITATION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+
+export interface InvitationResult {
+  activationLink?: string;
+  expiresAt: Date;
+  /** The mail server accepted the invitation email. */
+  emailSent: boolean;
+  /** Why it wasn't sent (when emailSent is false), for the person who invited. */
+  emailProblem?: string;
+}
 const SALT_ROUNDS = 12;
 const INVALID_LINK = 'This invitation link has expired or was already used. Ask for a new one.';
 
@@ -24,13 +33,22 @@ export class InvitationsService {
     private mail: MailService,
   ) {}
 
-  async invite(user: UserDocument): Promise<{ activationLink?: string; expiresAt: Date }> {
+  /** Creates the link and emails it — waiting for the mail server's answer, so
+   * whoever invited is told whether the email actually went (`emailSent`, and
+   * if not `emailProblem`) instead of "sent" for an email that never left. The
+   * link is returned either way: it can be passed on by hand. */
+  async invite(user: UserDocument): Promise<InvitationResult> {
     const token = randomBytes(32).toString('base64url');
     const expiresAt = new Date(Date.now() + INVITATION_TTL_MS);
     await this.users.setInvitation(user._id.toString(), hashToken(token), expiresAt);
     const businessName = await this.users.organizationName(user.organizationId);
-    void this.mail.sendInvitationEmail(user.email, user.name, businessName, token);
-    return { activationLink: this.mail.invitationLink(token), expiresAt };
+    const delivery = await this.mail.sendInvitationEmail(user.email, user.name, businessName, token);
+    return {
+      activationLink: this.mail.invitationLink(token),
+      expiresAt,
+      emailSent: delivery.sent,
+      ...(delivery.sent ? {} : { emailProblem: delivery.problem }),
+    };
   }
 
   async inviteById(userId: string, organizationId: string) {

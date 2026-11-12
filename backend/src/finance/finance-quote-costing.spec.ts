@@ -6,11 +6,17 @@ import { JwtService } from '@nestjs/jwt';
 import { NotFoundException } from '@nestjs/common';
 import { Connection, Model, Types } from 'mongoose';
 import { of, throwError } from 'rxjs';
+import { GridFsService } from '../common/gridfs/gridfs.service';
 import { Deal, DealDocument, DealSchema } from '../crm/schemas/deal.schema';
+import { Decoration, DecorationSchema } from '../crm/schemas/decoration.schema';
 import { Product, ProductSchema } from '../crm/schemas/product.schema';
 import { Quote, QuoteDocument, QuoteSchema } from '../crm/schemas/quote.schema';
 import { QuoteCounter, QuoteCounterSchema } from '../crm/schemas/quote-counter.schema';
+import { QuoteGridFsService } from '../crm/quote-gridfs.service';
 import { QuotesService } from '../crm/quotes.service';
+import { Vendor, VendorSchema } from '../vendors/schemas/vendor.schema';
+import { VendorQuote, VendorQuoteSchema } from '../vendors/schemas/vendor-quote.schema';
+import { VendorsService } from '../vendors/vendors.service';
 import { UsersService } from '../users/users.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { FinanceDocument, FinanceDocumentDocument, FinanceDocumentSchema } from './schemas/finance-document.schema';
@@ -41,17 +47,24 @@ describe('Finance AI quote costing (real Mongo)', () => {
     const moduleRef = await Test.createTestingModule({
       imports: [
         MongooseModule.forRoot(uri),
+        // QuotesService's own dependencies, wired as in finance-quote-link.spec.ts.
         MongooseModule.forFeature([
           { name: Deal.name, schema: DealSchema },
           { name: Product.name, schema: ProductSchema },
+          { name: Decoration.name, schema: DecorationSchema },
           { name: Quote.name, schema: QuoteSchema },
           { name: QuoteCounter.name, schema: QuoteCounterSchema },
           { name: FinanceDocument.name, schema: FinanceDocumentSchema },
+          { name: Vendor.name, schema: VendorSchema },
+          { name: VendorQuote.name, schema: VendorQuoteSchema },
         ]),
       ],
       providers: [
         FinanceDocumentsService,
         QuotesService,
+        VendorsService,
+        GridFsService,
+        QuoteGridFsService,
         {
           provide: FinanceGridFsService,
           useValue: {
@@ -85,10 +98,12 @@ describe('Finance AI quote costing (real Mongo)', () => {
   });
 
   afterAll(async () => {
-    await quoteModel.deleteMany({ organizationId: { $regex: `^${TEST_PREFIX}` } });
-    await dealModel.deleteMany({ organizationId: { $regex: `^${TEST_PREFIX}` } });
-    await financeModel.deleteMany({ organizationId: { $regex: `^${TEST_PREFIX}` } });
-    await connection.close();
+    // beforeAll can fail part-way (e.g. a provider Nest can't resolve); clean up
+    // only what was set up, so the setup error is the one Jest reports.
+    await quoteModel?.deleteMany({ organizationId: { $regex: `^${TEST_PREFIX}` } });
+    await dealModel?.deleteMany({ organizationId: { $regex: `^${TEST_PREFIX}` } });
+    await financeModel?.deleteMany({ organizationId: { $regex: `^${TEST_PREFIX}` } });
+    await connection?.close();
   });
 
   const file = (name: string) =>

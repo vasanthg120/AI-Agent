@@ -23,6 +23,7 @@ import { CALL_RECORDING_UPLOAD_INTERCEPTOR_OPTIONS } from '../common/upload-limi
 import { CallCopilotUploadService } from './call-copilot-upload.service';
 import { CallCopilotService } from './call-copilot.service';
 import { SearchCallSessionsQueryDto } from './dto/search-call-sessions-query.dto';
+import { RetryCallSessionDto } from './dto/retry-call-session.dto';
 import { UploadCallRecordingDto } from './dto/upload-call-recording.dto';
 import { VoiceScriptDto } from './dto/voice-script.dto';
 import { Feature } from '../common/app-features';
@@ -108,6 +109,15 @@ export class CallCopilotController {
     const session = await this.callCopilotService.getSession(user.organizationId, user.sub, id);
     if (!session) throw new NotFoundException('Call session not found');
     return session;
+  }
+
+  // "Try again" on a recording whose transcription failed (Sarvam out of
+  // credits, the AI service down, …) — reprocesses the copy already saved in
+  // GridFS; responds at once, progress arrives over the socket as for an upload.
+  @Post('sessions/:id/retry')
+  async retry(@CurrentUser() user: JwtPayload, @Param('id') id: string, @Body() dto: RetryCallSessionDto) {
+    const session = await this.uploadService.retryProcessing(user.organizationId, id, { userId: user.sub, languageCode: dto.languageCode });
+    return { sessionId: session._id.toString(), status: session.status };
   }
 
   // On-demand AI Sales Coach generation — powers a "Generate Coaching

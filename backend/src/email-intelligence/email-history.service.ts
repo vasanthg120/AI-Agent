@@ -482,6 +482,8 @@ export class EmailHistoryService {
       ]);
       if (keptPromise || customerReplied) {
         reminder.status = 'done';
+        reminder.completedAt = new Date();
+        reminder.completedVia = keptPromise ? 'later_message' : 'customer_replied';
         reminder.dismissedReason = keptPromise ? 'A later message was sent in this conversation.' : 'The customer has replied since.';
         await reminder.save();
       }

@@ -1,4 +1,5 @@
 import { axiosClient } from '@/api/axiosClient';
+import type { InvitationOutcome } from '@/utils/invitations';
 
 export interface BillingSnapshot {
   // A subscription status, or 'none' when it has never had one.
@@ -89,12 +90,11 @@ export interface CreateSubAccountForm extends SubAccountForm {
   sendInvite: boolean;
 }
 
-export interface CreatedSubAccount {
+export interface CreatedSubAccount extends InvitationOutcome {
   id: string;
   name: string;
   ownerEmail: string;
   invited: boolean;
-  activationLink?: string;
 }
 
 export interface SubAccountUsers {
@@ -158,8 +158,8 @@ export const subAccountsService = {
   async restore(id: string): Promise<SubAccountDetails> {
     return (await axiosClient.post<SubAccountDetails>(`${base}/${id}/restore`)).data;
   },
-  async resendInvitation(id: string): Promise<{ email: string; activationLink?: string }> {
-    return (await axiosClient.post<{ email: string; activationLink?: string }>(`${base}/${id}/resend-invitation`)).data;
+  async resendInvitation(id: string): Promise<InvitationOutcome & { email: string }> {
+    return (await axiosClient.post<InvitationOutcome & { email: string }>(`${base}/${id}/resend-invitation`)).data;
   },
   async users(id: string): Promise<SubAccountUsers> {
     return (await axiosClient.get<SubAccountUsers>(`${base}/${id}/users`)).data;

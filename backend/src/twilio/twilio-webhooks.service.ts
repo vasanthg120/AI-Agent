@@ -5,6 +5,8 @@ import { AxiosError } from 'axios';
 import { Model, isValidObjectId } from 'mongoose';
 import { firstValueFrom } from 'rxjs';
 import { CallCopilotUploadService } from '../call-copilot/call-copilot-upload.service';
+import { describeProcessingFailure } from '../call-copilot/processing-failure';
+import { CallSessionDocument } from '../call-copilot/schemas/call-session.schema';
 import { CallFailure } from '../calling/call-outcome';
 import { assertPublicHttpUrl } from '../common/security/ssrf-guard';
 import { NotificationsService } from '../notifications/notifications.service';
@@ -326,24 +328,39 @@ export class TwilioWebhooksService {
    * AI Coach — exactly like an uploaded file. Also the retry path. */
   async importRecording(call: TwilioCallDocument): Promise<void> {
     await this.callModel.updateOne({ _id: call._id }, { $set: { importStatus: 'pending' }, $unset: { importError: '' } }).exec();
+    // Saved first; a transcription failing after that is retried from the saved copy (see Plivo's importRecording).
+    let audio: Buffer;
+    let session: CallSessionDocument;
     try {
       if (!call.recordingUrl || !call.recordingSid) throw new Error('This call has no recording to import.');
-      const audio = await this.downloadRecording(call.organizationId, call.recordingUrl);
-      const session = await this.uploads.startSessionFromRecording(call.organizationId, call.userId, audio, `twilio-${call.recordingSid}.mp3`, {
+      audio = await this.downloadRecording(call.organizationId, call.recordingUrl);
+      session = await this.uploads.storeRecording(call.organizationId, call.userId, audio, `twilio-${call.recordingSid}.mp3`, {
         dealId: call.dealId,
         languageCode: call.languageCode,
       });
       await this.callModel.updateOne({ _id: call._id }, { $set: { importStatus: 'imported', sessionId: session._id.toString() } }).exec();
+      this.logger.log(`twilio.recording.saved call=${call._id.toString()} session=${session._id.toString()} bytes=${audio.length}`);
+    } catch (err) {
+      const message = (err as Error).message || 'The recording could not be imported.';
+      this.logger.warn(`Twilio call ${call._id.toString()} import failed: ${message}`);
+      await this.callModel.updateOne({ _id: call._id }, { $set: { importStatus: 'failed', importError: message.slice(0, 300) } }).exec();
+      await this.notify(call, 'Call recording could not be processed', `${message} You can try again from the call log.`);
+      return;
+    }
+
+    try {
+      await this.uploads.startProcessing(session, audio);
       await this.notify(
         call,
         'Call recording ready',
         `Your call with +${call.customerNumber} is being transcribed. The summary and AI Coach report will appear in Call Library shortly.`,
       );
     } catch (err) {
-      const message = (err as Error).message || 'The recording could not be imported.';
-      this.logger.warn(`Twilio call ${call._id.toString()} import failed: ${message}`);
-      await this.callModel.updateOne({ _id: call._id }, { $set: { importStatus: 'failed', importError: message.slice(0, 300) } }).exec();
-      await this.notify(call, 'Call recording could not be processed', `${message} You can retry from Settings → Calling.`);
+      await this.notify(
+        call,
+        'Call recording could not be processed',
+        `${describeProcessingFailure(err).message} The recording is saved — you can try again from the call log.`,
+      );
     }
   }
 
@@ -361,7 +378,7 @@ export class TwilioWebhooksService {
         const { data } = await firstValueFrom(
           this.http.get<ArrayBuffer>(url, {
             responseType: 'arraybuffer',
-            timeout: 120_000,
+            timeout: 5 * 60_000, // a whole call, not a one-minute clip
             maxContentLength: MAX_RECORDING_BYTES,
             ...(creds ? { auth: { username: creds.accountSid, password: creds.authToken } } : {}),
           }),

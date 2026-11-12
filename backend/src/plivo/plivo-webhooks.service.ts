@@ -5,6 +5,8 @@ import { AxiosError } from 'axios';
 import { Model, isValidObjectId } from 'mongoose';
 import { firstValueFrom } from 'rxjs';
 import { CallCopilotUploadService } from '../call-copilot/call-copilot-upload.service';
+import { describeProcessingFailure } from '../call-copilot/processing-failure';
+import { CallSessionDocument } from '../call-copilot/schemas/call-session.schema';
 import { CallFailure, classifyFailureText } from '../calling/call-outcome';
 import { assertPublicHttpUrl } from '../common/security/ssrf-guard';
 import { NotificationsService } from '../notifications/notifications.service';
@@ -31,6 +33,8 @@ const MAX_RECORDING_BYTES = 300 * 1024 * 1024; // same ceiling as a browser uplo
 // lag a moment behind — a few short retries beat failing a whole call's import.
 const DOWNLOAD_ATTEMPTS = 3;
 const DOWNLOAD_RETRY_DELAY_MS = 5_000;
+// A whole call (up to two hours, ~30 MB) on a slow link — not a one-minute clip.
+const DOWNLOAD_TIMEOUT_MS = 5 * 60_000;
 
 const DIAL_STATUS_TO_CALL_STATUS: Record<string, PlivoCallStatus> = {
   completed: 'completed',
@@ -283,25 +287,48 @@ export class PlivoWebhooksService {
 
   // ---- Import -----------------------------------------------------------------
 
-  /** Downloads the recording and hands it to Call Copilot — the same pipeline as
-   * "Upload a Recording": transcript, summary, AI Coach. Also the retry path for
-   * an import that failed (e.g. out of credits): safe to call again. */
+  /** Downloads the recording, saves it, then hands it to Call Copilot — the
+   * same pipeline as "Upload a Recording": transcript, summary, AI Coach. Once
+   * saved the call counts as imported: a transcription that fails after that
+   * (Sarvam, credits, the AI service) is recorded on its session and retried
+   * from the saved copy. Also the retry path for a download that failed. */
   async importRecording(call: PlivoCallDocument): Promise<void> {
     await this.callModel.updateOne({ _id: call._id }, { $set: { importStatus: 'pending' }, $unset: { importError: '' } }).exec();
+    let audio: Buffer;
+    let session: CallSessionDocument;
     try {
       if (!call.recordingUrl || !call.recordingId) throw new Error('This call has no recording to import.');
-      const audio = await this.downloadRecording(call.organizationId, call.recordingUrl);
-      const session = await this.uploads.startSessionFromRecording(call.organizationId, call.userId, audio, `plivo-${call.recordingId}.mp3`, {
+      audio = await this.downloadRecording(call.organizationId, call.recordingUrl);
+      session = await this.uploads.storeRecording(call.organizationId, call.userId, audio, `plivo-${call.recordingId}.mp3`, {
         dealId: call.dealId,
         languageCode: call.languageCode,
       });
       await this.callModel.updateOne({ _id: call._id }, { $set: { importStatus: 'imported', sessionId: session._id.toString() } }).exec();
-      await this.notify(call, 'Call recording ready', `Your call with ${call.customerNumber} is being transcribed. The summary and AI Coach report will appear in Call Library shortly.`);
+      this.logger.log(
+        `plivo.recording.saved call=${call._id.toString()} session=${session._id.toString()} bytes=${audio.length} seconds=${call.recordingDurationSeconds ?? '?'}`,
+      );
     } catch (err) {
       const message = (err as Error).message || 'The recording could not be imported.';
       this.logger.warn(`Plivo call ${call._id.toString()} import failed: ${message}`);
       await this.callModel.updateOne({ _id: call._id }, { $set: { importStatus: 'failed', importError: message.slice(0, 300) } }).exec();
-      await this.notify(call, 'Call recording could not be processed', `${message} You can retry from Settings → Calling.`);
+      await this.notify(call, 'Call recording could not be processed', `${message} You can try again from the call log.`);
+      return;
+    }
+
+    try {
+      await this.uploads.startProcessing(session, audio);
+      await this.notify(
+        call,
+        'Call recording ready',
+        `Your call with ${call.customerNumber} is being transcribed. The summary and AI Coach report will appear in Call Library shortly.`,
+      );
+    } catch (err) {
+      // Credits couldn't be held. The recording is saved and its session says why.
+      await this.notify(
+        call,
+        'Call recording could not be processed',
+        `${describeProcessingFailure(err).message} The recording is saved — you can try again from the call log.`,
+      );
     }
   }
 
@@ -319,7 +346,7 @@ export class PlivoWebhooksService {
         const { data } = await firstValueFrom(
           this.http.get<ArrayBuffer>(recordUrl, {
             responseType: 'arraybuffer',
-            timeout: 120_000,
+            timeout: DOWNLOAD_TIMEOUT_MS,
             maxContentLength: MAX_RECORDING_BYTES,
             ...(creds ? { auth: { username: creds.authId, password: creds.authToken } } : {}),
           }),

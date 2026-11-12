@@ -3,7 +3,7 @@ import toast from 'react-hot-toast';
 import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query';
 import { AnimatePresence, motion } from 'framer-motion';
 import clsx from 'clsx';
-import { FiAlertCircle, FiCheck, FiChevronDown, FiLink, FiSearch, FiShuffle, FiUserCheck, FiUsers, FiX } from 'react-icons/fi';
+import { FiAlertCircle, FiCheck, FiChevronDown, FiHome, FiLink, FiSearch, FiShuffle, FiUserCheck, FiUsers, FiX } from 'react-icons/fi';
 import {
   Avatar,
   Badge,
@@ -230,6 +230,37 @@ export function DealAssignmentSettings() {
     }
   };
 
+  // A shared company login in the CRM ("Enquiry T.nagar"), not a person: its
+  // work is shown under its own name (Team Performance), credited to nobody.
+  // Taking it back from a person undoes what that link gave its quotations.
+  const handleMarkShared = async (row: ExternalOwnerRow) => {
+    const name = row.externalOwnerLabel ?? 'this CRM login';
+    if (row.mapping?.linkedUsers.length) {
+      const proceed = window.confirm(
+        `Mark ${name} as a shared company account? It will no longer be credited to ${row.mapping.linkedUsers.map((u) => u.name ?? 'its linked user').join(', ')}, and the deals that got their owner from its quotations go back to having none.`,
+      );
+      if (!proceed) return;
+    }
+    setMappingBusy(row.externalOwnerRef);
+    try {
+      await dealsService.upsertOwnerMapping({
+        provider: row.provider,
+        externalOwnerRef: row.externalOwnerRef,
+        externalOwnerLabel: row.externalOwnerLabel,
+        ownerIds: [],
+        shared: true,
+      });
+      toast.success(`${name} marked as a shared company account — its work is shown under its own name, credited to nobody`);
+      void queryClient.invalidateQueries({ queryKey: ['deal-owner-mappings'] });
+      void queryClient.invalidateQueries({ queryKey: ['deal-assignment'] });
+      refreshCounts();
+    } catch (err) {
+      toast.error(extractErrorMessage(err));
+    } finally {
+      setMappingBusy(null);
+    }
+  };
+
   const allOnPageSelected = deals.length > 0 && deals.every((d) => selected.has(d._id));
   const toggleAll = () =>
     setSelected((prev) => {
@@ -267,8 +298,8 @@ export function DealAssignmentSettings() {
       {mappings.length > 0 && (
         <SettingsSection
           icon={<FiLink />}
-          title="Link CRM owners"
-          description="Deals synced from your CRM carry the CRM's own owner. Link one HaiVE user and all of their deals — now and future syncs — are assigned automatically. Link several eligible users instead to record who could own this salesperson's deals without assigning any of them yet; assign those deals individually in the table below."
+          title="Link CRM salespeople"
+          description="Your CRM names a salesperson on its quotations (and, in some CRMs, on deals). Link each one to their HaiVE login: their quotations, and the deals of those quotations — now and on every future sync — count for that person in Team Performance and on the dashboards. A login the whole team shares in the CRM (like “Enquiry T.nagar”) is not a person: mark it as a shared account, and its work is shown under its own name, credited to nobody. Linking several users records who could own a salesperson's deals without assigning any yet."
           actions={
             unlinked.length > 0 ? <Badge variant="warning">{unlinked.length} not linked</Badge> : <Badge variant="success">All linked</Badge>
           }
@@ -295,10 +326,14 @@ export function DealAssignmentSettings() {
                       <div className={styles.mappingWho}>
                         <span className={styles.mappingName}>{m.externalOwnerLabel ?? m.externalOwnerRef}</span>
                         <span className={styles.mappingMeta}>
-                          {m.provider} · {m.dealCount} deal{m.dealCount === 1 ? '' : 's'}
+                          {m.provider} · {m.dealCount} deal{m.dealCount === 1 ? '' : 's'} · {m.quoteCount} quote{m.quoteCount === 1 ? '' : 's'}
                         </span>
                       </div>
-                      {m.mapping && m.mapping.linkedUsers.length > 0 ? (
+                      {m.mapping?.shared ? (
+                        <span className={styles.sharedAccount}>
+                          <FiHome /> Shared company account — credited to nobody
+                        </span>
+                      ) : m.mapping && m.mapping.linkedUsers.length > 0 ? (
                         <span className={styles.linked}>
                           <FiCheck />{' '}
                           {m.mapping.linkedUsers.length === 1
@@ -331,8 +366,21 @@ export function DealAssignmentSettings() {
                           loading={mappingBusy === m.externalOwnerRef}
                           onClick={() => void handleLinkOwner(m, choice)}
                         >
-                          {m.mapping ? 'Save' : 'Link'}
+                          {m.mapping && !m.mapping.shared ? 'Save' : 'Link'}
                         </Button>
+                        {!m.mapping?.shared && (
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="ghost"
+                            leftIcon={<FiHome />}
+                            loading={mappingBusy === m.externalOwnerRef}
+                            onClick={() => void handleMarkShared(m)}
+                            title="A login the whole team shares in the CRM, not one person"
+                          >
+                            Shared account
+                          </Button>
+                        )}
                       </div>
                     </div>
                   );

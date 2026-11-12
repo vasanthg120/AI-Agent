@@ -540,6 +540,8 @@ class HoopsAdapter(Adapter):
             raise AdapterError(str(exc)) from exc
         # Hoops is Australian and sends amounts without a currency: AUD unless the source says otherwise.
         self.currency = str((source.get("metadata") or {}).get("currency") or "AUD")
+        # A sale's day counted in the business's own time zone, as Hoops' reports count it.
+        self.zone = hoops.business_zone(self.organization_id)
         sync = source.get("sync") or {}
         # None: the whole history. A source set up before the choice existed reads one year back.
         if "historyFrom" in sync:
@@ -564,7 +566,7 @@ class HoopsAdapter(Adapter):
 
     def pages(self, module: str) -> Iterator[list[dict]]:
         if module in ("deals", "quotes"):
-            rows = [self._hoops.transaction_fields(r, self.currency) for r in self._read("transactions")]
+            rows = [self._hoops.transaction_fields(r, self.currency, self.zone) for r in self._read("transactions")]
         elif module == "contacts":
             rows = [c for customer in self._read("customers") for c in self._hoops.contacts_of(customer)]
         elif module == "accounts":

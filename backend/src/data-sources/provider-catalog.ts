@@ -420,7 +420,11 @@ export const CRM_PROVIDERS: Record<CrmProviderId, CrmProviderDefinition> = {
   // quote/SalesDoc with the job it became — is a deal and its quotation; each
   // customer an account, its contacts contacts. The "_" fields are computed by
   // the adapter (python-agent/app/integrations/hoops.py): a sale is won when
-  // the customer accepts the quote (on acceptedAt), lost when it's voided.
+  // its job is created (dated by the job, as Hoops' jobs report counts it);
+  // every quote created but not won — sent, at a follow-up step, on hold, a
+  // draft, or accepted with no job yet — is open, and the open quotes are the
+  // pipeline; lost when it's voided or lost. (Was "won when accepted" until
+  // 2026-11-11.)
   hoops: {
     id: 'hoops',
     label: 'Hoops CRM',
@@ -461,7 +465,9 @@ export const CRM_PROVIDERS: Record<CrmProviderId, CrmProviderDefinition> = {
       contacts: { externalId: '_id', name: '_name', email: 'email', phone: 'phone', company: '_company', createdAt: '_createdAt' },
       accounts: { externalId: '_id', name: 'name', domain: '_domain' },
     },
-    statusMapping: { won: ['accepted', 'completed'], lost: ['voided'] },
+    // Sources saved with earlier words (accepted, completed; invoiced) are moved
+    // to these once by python-agent (integrations/hoops_won_rule.py).
+    statusMapping: { won: ['job'], lost: ['voided'] },
     syncSupported: true,
     syncDefaults: { intervalMinutes: 1440, window: { utcOffsetMinutes: 600, start: '19:00', end: '05:00', label: 'AEST' } },
     defaultCurrency: 'AUD',

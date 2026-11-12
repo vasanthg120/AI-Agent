@@ -45,7 +45,13 @@ export function ReportSteps({ call, onRetry, retrying, onOpen }: { call: Calling
       )}
       {(importFailed || lost) && (
         <div className={styles.stepNote}>
-          <p>{lost ? 'No recording arrived from the phone system for this call.' : (report?.error ?? call.importError ?? 'The recording couldn’t be processed.')}</p>
+          <p>
+            {lost
+              ? 'No recording arrived from the phone system for this call.'
+              : report?.stage === 'failed'
+                ? `${report.error ?? 'The recording couldn’t be transcribed.'} Your recording is saved.`
+                : (call.importError ?? 'The recording couldn’t be processed.')}
+          </p>
           {onRetry && !lost && (
             <ActionButton variant="secondary" onClick={onRetry} busy={retrying}>
               <FiRefreshCw /> Try again
