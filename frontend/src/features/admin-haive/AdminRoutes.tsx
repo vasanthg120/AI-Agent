@@ -23,6 +23,9 @@ const AiUsageUserDetailPage = lazy(() => import('./ai-usage/AiUsageUserDetailPag
 const AiUsageRequestDetailPage = lazy(() =>
   import('./ai-usage/AiUsageRequestDetailPage').then((m) => ({ default: m.AiUsageRequestDetailPage })),
 );
+const AdminProviderFinancePage = lazy(() =>
+  import('./ai-usage/AdminProviderFinancePage').then((m) => ({ default: m.AdminProviderFinancePage })),
+);
 const AdminPaymentSettingsPage = lazy(() => import('./AdminPaymentSettingsPage').then((m) => ({ default: m.AdminPaymentSettingsPage })));
 const AdminUsersManagementPage = lazy(() => import('./AdminUsersManagementPage').then((m) => ({ default: m.AdminUsersManagementPage })));
 const AdminSettingsPage = lazy(() => import('./AdminSettingsPage').then((m) => ({ default: m.AdminSettingsPage })));
@@ -77,6 +80,7 @@ export function AdminRoutes() {
             <Route path="ai-usage/organizations/:organizationId" element={<AiUsageOrganizationDetailPage />} />
             <Route path="ai-usage/organizations/:organizationId/users/:userId" element={<AiUsageUserDetailPage />} />
             <Route path="ai-usage/organizations/:organizationId/users/:userId/requests/:requestId" element={<AiUsageRequestDetailPage />} />
+            <Route path="ai-usage/finance" element={<AdminProviderFinancePage />} />
             <Route path="admin-users" element={<AdminUsersManagementPage />} />
             <Route path="settings" element={<AdminSettingsPage />} />
           </Route>
