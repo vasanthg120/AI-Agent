@@ -169,7 +169,7 @@ describe('BillingMigrationService (real Mongo)', () => {
         creditsGranted: 30,
         status: 'captured',
       });
-      await paymentMethodModel.create({
+      const ownerMethod = await paymentMethodModel.create({
         organizationId: owner._id.toString(),
         provider: 'razorpay',
         gatewayCustomerId: 'cust-owner',
@@ -187,6 +187,12 @@ describe('BillingMigrationService (real Mongo)', () => {
         cardNetwork: 'visa',
         isDefault: true,
       });
+      // Both saved in the same millisecond — what happens on a fast machine (it
+      // failed CI): the later-created one must still win, every time.
+      await paymentMethodModel.collection.updateMany(
+        { _id: { $in: [ownerMethod._id, memberMethod._id] } },
+        { $set: { createdAt: new Date('2026-11-12T07:00:00.000Z') } },
+      );
 
       // Dry run: correct plan, zero writes.
       const dry = await migrationService.run({ dryRun: true, organizationId: org._id.toString() });
