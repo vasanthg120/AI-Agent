@@ -49,7 +49,7 @@ let UsersController = class UsersController {
         if (!dto.sendInvite)
             return created;
         const { activationLink, emailSent, emailProblem } = await this.invitations.inviteById(created.user.id, caller.organizationId);
-        return { ...created, activationLink, emailSent, emailProblem };
+        return { ...created, user: { ...created.user, pendingInvitation: true }, activationLink, emailSent, emailProblem };
     }
     async resendInvitation(caller, id) {
         await this.usersService.assertMayManage(caller, id, caller.organizationId);
