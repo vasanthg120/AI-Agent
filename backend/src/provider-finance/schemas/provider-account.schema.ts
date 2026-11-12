@@ -5,25 +5,25 @@ export type ProviderAccountDocument = ProviderAccount & Document;
 
 // Platform-wide, one document per LLM provider (Anthropic, Groq today) —
 // same "no organizationId, this is Haive's own spend, not a customer's"
-// shape as IntegrationCredential's platform rows. Deliberately a NEW,
-// dedicated schema rather than growing IntegrationCredential.budgetUsd/
-// budgetPeriod further: that schema exists for connection credentials, and
-// a confirmed-vs-estimated balance, payment-derived starting point,
-// reconciliation history, and alert thresholds don't belong bolted onto a
-// credential-storage row (see that schema's own budgetUsd comment, which
-// already carries exactly the honesty rule this schema generalizes:
-// "NOT an authoritative balance from the provider... never claimed as
-// provider truth").
+// shape as IntegrationCredential's platform rows.
 //
-// Neither Anthropic nor Groq expose a real balance-check API (verified live
-// via web search, not assumed — Anthropic has no GET endpoint for remaining
-// prepaid credit; Groq's own community asks for a billing API are still
-// open) — so confirmedBalance is ONLY ever set by an admin's manual
-// reconciliation (provider-finance.service.ts's recordReconciliation), never
-// computed or auto-synced. "Estimated balance" (confirmedBalance minus
-// tracked consumption since lastReconciledAt) is always derived at read
-// time by provider-finance.service.ts, never stored here, so it can never
-// drift out of sync with agent_executions.
+// Verified live (official docs + the installed anthropic/groq SDK source,
+// not assumed): neither Anthropic nor Groq expose ANY API for balance,
+// invoice history, or auto-recharge — all three are Console-UI-only for
+// both providers. A manual "confirmed balance" reconciliation used to live
+// here as the only honest number available; per explicit product decision,
+// that has been removed entirely rather than kept as a required manual
+// workflow — balance is now surfaced as an honest capability status
+// ('unsupported' for both real providers today), never a typed-in guess.
+//
+// What IS real and automatable: Anthropic's Usage and Cost Admin API
+// (`/v1/organizations/usage_report/messages`, `/v1/organizations/cost_report`)
+// and Rate Limits API (`/v1/organizations/rate_limits`) — both require a
+// separate Admin API key (adminApiKeyEncrypted below), distinct from the
+// normal platform apiKey IntegrationCredential already stores for making
+// chat completions. Groq has no equivalent API at all. See
+// provider-finance.service.ts / adapters/*.ts for how this drives the
+// capability matrix the dashboard renders.
 @Schema({ collection: 'provider_accounts', timestamps: true })
 export class ProviderAccount {
   @Prop({ required: true, unique: true })
@@ -35,65 +35,82 @@ export class ProviderAccount {
   accountIdentifier?: string;
 
   // 'unknown' until an admin sets it up; 'exhausted' is set either by an
-  // admin directly or (Phase C) automatically from a confirmed
-  // billing/quota-exceeded error the provider actually returned — never
-  // from a stale/guessed balance number ("never treat an unknown or stale
-  // balance as confirmed zero").
+  // admin directly or automatically from a confirmed billing/quota-exceeded
+  // error the provider actually returned (python-agent's
+  // provider_account_status.mark_exhausted(), driven by tracing.py's
+  // confirmed-signal detection) — never from a stale/guessed balance number.
   @Prop({ enum: ['active', 'degraded', 'exhausted', 'unknown'], default: 'unknown' })
   status: 'active' | 'degraded' | 'exhausted' | 'unknown';
 
-  // Admin-selected, honest about what kind of account this really is.
-  // Anthropic/Groq both start as 'balance-unavailable' per this module's
-  // own audit (see this file's leading comment) — an admin can change this
-  // later if either provider ever ships a real balance API.
+  // Admin-selected, purely descriptive (Groq really is postpaid; Anthropic's
+  // prepaid credit has no balance API, hence 'balance-unavailable') — never
+  // drives any computation.
   @Prop({ enum: ['prepaid', 'postpaid', 'usage-limited', 'balance-unavailable'], default: 'balance-unavailable' })
   accountType: 'prepaid' | 'postpaid' | 'usage-limited' | 'balance-unavailable';
 
   @Prop({ default: 'USD' })
   currency: string;
 
-  // Set only by recordReconciliation() — the one moment this module treats
-  // a balance number as confirmed. Absent means "never reconciled," which
-  // the dashboard shows honestly rather than defaulting to 0.
-  @Prop()
-  confirmedBalance?: number;
-
-  @Prop()
-  lastReconciledAt?: Date;
-
-  @Prop()
-  lastReconciledByAdminId?: string;
-
+  // Admin-set spending target — compared against Haive's own real,
+  // automatically-tracked consumption-to-date (agent_executions) for
+  // budget-pace alerts. Never a provider-confirmed figure, but never
+  // fabricated either: both sides of the comparison are real numbers.
   @Prop()
   monthlyBudget?: number;
 
-  // Spec defaults (50/25/10/0 informational->low->critical->exhausted) —
-  // this schema stores the two admin-overridable boundaries; 50%/0% are
-  // fixed semantic endpoints (healthy / exhausted), not configurable
-  // thresholds of their own.
-  @Prop({ default: 25 })
-  lowThresholdPct: number;
+  // Anthropic's separate "Admin API key" (console.anthropic.com -> Settings
+  // -> Admin keys) — required for the Usage/Cost Admin API and Rate Limits
+  // API; a normal platform apiKey (IntegrationCredential) cannot call either.
+  // Absent means those capabilities read as CONFIGURATION_REQUIRED, never
+  // silently skipped. Unused by Groq (no equivalent API exists at all).
+  @Prop()
+  adminApiKeyEncrypted?: string;
 
-  @Prop({ default: 10 })
-  criticalThresholdPct: number;
+  // Dedup state for the status-transition alert (fires only when `status`
+  // actually changes to/from 'exhausted', never re-fires every cron tick).
+  @Prop({ type: String, enum: ['active', 'degraded', 'exhausted', 'unknown'] })
+  lastAlertedStatus?: 'active' | 'degraded' | 'exhausted' | 'unknown' | null;
 
-  // Phase B uses this — what happens when estimatedBalance hits 0 (or a
-  // confirmed exhausted status arrives): alert only, or also mark the
-  // provider unavailable for routing (Phase C reads this).
-  @Prop({ enum: ['alert-only', 'mark-unavailable'], default: 'alert-only' })
-  zeroBalanceAction: 'alert-only' | 'mark-unavailable';
+  // Dedup state for the budget-pace alert tiers (50/80/100% of
+  // monthlyBudget consumed this month) — same "only fire on a NEW, worse
+  // crossing" rule the old balance-threshold alert used, just against a
+  // real, admin-set budget instead of a derived balance.
+  @Prop({ type: Number })
+  lastAlertedBudgetPct?: number | null;
+
+  // Usage-cost sync health (Anthropic only today — see
+  // AnthropicFinanceAdapter.syncUsageCost) — surfaced on the dashboard and
+  // drives the sync-failed/sync-recovered alert pair. lastUsageCostSyncAt is
+  // the last SUCCESSFUL sync specifically; lastUsageCostSyncAttemptedAt is
+  // updated on every attempt (success or failure) — kept as two separate
+  // fields so "last successful" and "last attempted" are never conflated
+  // (an admin needs to tell "it's working, just hasn't run recently" apart
+  // from "it's been failing for hours").
+  @Prop()
+  lastUsageCostSyncAt?: Date;
+
+  @Prop()
+  lastUsageCostSyncAttemptedAt?: Date;
+
+  @Prop({ type: String })
+  lastUsageCostSyncError?: string | null;
+
+  // The provider's OWN reported cost for the current month, once a real
+  // usage-cost sync has run — compared against Haive's own agent_executions
+  // cost tracking for the cost-variance alert. Null until a sync succeeds.
+  @Prop({ type: Number })
+  lastProviderReportedCostThisMonth?: number | null;
+
+  // Dedup state for the usage-cost-sync-failed/recovered alert pair —
+  // separate from lastAlertedStatus (that one tracks provider exhaustion,
+  // a different condition entirely).
+  @Prop({ default: false })
+  lastAlertedSyncFailing: boolean;
 
   // Empty/absent means "every active platform_admins row" (resolved at
   // send time, never cached here) — set only to narrow to specific people.
   @Prop({ type: [String], default: [] })
   alertRecipients: string[];
-
-  // Phase B's dedup state — which threshold (if any) the last alert was
-  // for, so a balance sitting at 8% doesn't re-fire "critical" every single
-  // hourly tick. Reset to null by a reconciliation/payment that brings the
-  // estimated balance back above it (see provider-alert.service.ts, Phase B).
-  @Prop({ type: Number })
-  lastAlertedThresholdPct?: number | null;
 }
 
 export const ProviderAccountSchema = SchemaFactory.createForClass(ProviderAccount);

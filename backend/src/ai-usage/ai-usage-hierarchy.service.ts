@@ -52,11 +52,11 @@ export class AiUsageHierarchyService {
   }
 
   // Single source of truth for "how much has this provider genuinely cost
-  // since a given moment" — used by provider-finance.service.ts's estimated-
-  // balance math (confirmedBalance minus cost since the last reconciliation)
-  // so that figure can never diverge from what this dashboard itself
-  // reports for the same provider/window. kind:'llm' only, same reasoning
-  // as every other cost sum in this file — a tool span carries no cost.
+  // since a given moment" — used by provider-finance.service.ts's
+  // consumption-this-month / budget-pace math so that figure can never
+  // diverge from what this dashboard itself reports for the same
+  // provider/window. kind:'llm' only, same reasoning as every other cost
+  // sum in this file — a tool span carries no cost.
   async getProviderCostSince(provider: string, since: Date): Promise<number> {
     const rows = await this.executionModel
       .aggregate<{ cost: number }>([

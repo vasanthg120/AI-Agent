@@ -1,11 +1,13 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import toast from 'react-hot-toast';
-import { FiArrowLeft, FiCheckCircle, FiPlus, FiUpload } from 'react-icons/fi';
+import { FiArrowLeft, FiKey, FiPlus, FiUpload, FiX } from 'react-icons/fi';
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { Badge, Button, Input, Modal, SectionCard, Skeleton, StatTile } from '@/components/ui';
 import {
   providerFinanceService,
+  type AlertLogRow,
+  type CapabilityStatus,
   type FinanceDashboard,
   type Profitability,
   type ProviderAccountView,
@@ -20,23 +22,43 @@ import shared from '../adminShared.module.css';
 const DAYS = 30;
 const money = (n: number | null | undefined, currency = 'USD') => (n == null ? '—' : `${currency === 'USD' ? '$' : currency + ' '}${n.toFixed(2)}`);
 
-function AccountCard({ account, onReconciled }: { account: ProviderAccountView; onReconciled: () => void }) {
-  const [modalOpen, setModalOpen] = useState(false);
-  const [balanceInput, setBalanceInput] = useState('');
+const CAPABILITY_LABELS: Record<string, string> = {
+  BALANCE_READ: 'Balance',
+  USAGE_COST_READ: 'Usage/Cost',
+  INVOICE_HISTORY_READ: 'Invoices',
+  PAYMENT_HISTORY_READ: 'Payments',
+  AUTO_RECHARGE_READ: 'Auto-Recharge (read)',
+  AUTO_RECHARGE_CONFIGURE: 'Auto-Recharge (set)',
+  SPEND_LIMIT_READ: 'Spend Limit (read)',
+  SPEND_LIMIT_CONFIGURE: 'Spend Limit (set)',
+  RATE_LIMIT_READ: 'Rate Limits',
+  EXHAUSTION_DETECTION: 'Exhaustion Detection',
+};
+
+function capabilityVariant(status: CapabilityStatus): 'success' | 'warning' | 'danger' | 'neutral' {
+  if (status === 'SUPPORTED') return 'success';
+  if (status === 'CONFIGURATION_REQUIRED' || status === 'PERMISSION_REQUIRED') return 'warning';
+  if (status === 'ERROR') return 'danger';
+  return 'neutral';
+}
+
+function AdminApiKeyControl({ account, onChanged }: { account: ProviderAccountView; onChanged: () => void }) {
+  const [open, setOpen] = useState(false);
+  const [key, setKey] = useState('');
   const [saving, setSaving] = useState(false);
 
   const save = async () => {
-    const value = Number.parseFloat(balanceInput);
-    if (!Number.isFinite(value) || value < 0) {
-      toast.error('Enter a valid non-negative balance.');
+    if (key.trim().length < 8) {
+      toast.error('Enter a valid Admin API key.');
       return;
     }
     setSaving(true);
     try {
-      await providerFinanceService.reconcile(account.provider, value);
-      toast.success(`${account.provider} balance reconciled.`);
-      setModalOpen(false);
-      onReconciled();
+      await providerFinanceService.setAdminApiKey(account.provider, key.trim());
+      toast.success('Admin API key saved.');
+      setOpen(false);
+      setKey('');
+      onChanged();
     } catch (error) {
       toast.error(extractErrorMessage(error));
     } finally {
@@ -44,51 +66,40 @@ function AccountCard({ account, onReconciled }: { account: ProviderAccountView; 
     }
   };
 
-  const statusVariant = account.status === 'active' ? 'success' : account.status === 'exhausted' ? 'danger' : account.status === 'degraded' ? 'warning' : 'neutral';
+  const clear = async () => {
+    try {
+      await providerFinanceService.clearAdminApiKey(account.provider);
+      toast.success('Admin API key removed.');
+      onChanged();
+    } catch (error) {
+      toast.error(extractErrorMessage(error));
+    }
+  };
 
   return (
-    <SectionCard title={account.provider.charAt(0).toUpperCase() + account.provider.slice(1)}>
-      <div style={{ display: 'flex', gap: 'var(--space-2)', marginBottom: 'var(--space-3)', flexWrap: 'wrap' }}>
-        <Badge variant={statusVariant}>{account.status}</Badge>
-        <Badge variant="neutral">{account.accountType}</Badge>
-      </div>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))', gap: 'var(--space-3)', marginBottom: 'var(--space-3)' }}>
-        <div>
-          <div className={shared.mono} style={{ fontSize: 'var(--text-xs)' }}>
-            CONFIRMED BALANCE
-          </div>
-          <div style={{ fontSize: 'var(--text-lg)', fontWeight: 700 }}>{money(account.confirmedBalance, account.currency)}</div>
-        </div>
-        <div>
-          <div className={shared.mono} style={{ fontSize: 'var(--text-xs)' }}>
-            ESTIMATED BALANCE
-          </div>
-          <div style={{ fontSize: 'var(--text-lg)', fontWeight: 700 }}>
-            {money(account.estimatedBalance, account.currency)}
-            {account.estimatedBalance != null && (
-              <Badge variant="warning" style={{ marginLeft: 6 }}>
-                estimated
-              </Badge>
-            )}
-          </div>
-        </div>
-      </div>
-      <p className={shared.pageSubtitle} style={{ marginBottom: 'var(--space-3)' }}>
-        {account.lastReconciledAt ? `Last reconciled ${formatFullDate(account.lastReconciledAt)}` : 'Never reconciled — estimated balance unavailable until an admin confirms one.'}
-      </p>
-      <Button size="sm" variant="outline" leftIcon={<FiCheckCircle />} onClick={() => { setBalanceInput(''); setModalOpen(true); }}>
-        Reconcile Balance
-      </Button>
+    <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
+      {account.hasAdminApiKey ? (
+        <>
+          <Badge variant="success">Admin API key configured</Badge>
+          <Button size="sm" variant="ghost" leftIcon={<FiX />} onClick={() => void clear()}>
+            Remove
+          </Button>
+        </>
+      ) : (
+        <Button size="sm" variant="outline" leftIcon={<FiKey />} onClick={() => setOpen(true)}>
+          Add Admin API Key
+        </Button>
+      )}
 
       <Modal
-        open={modalOpen}
-        onClose={() => setModalOpen(false)}
-        title={`Reconcile ${account.provider}`}
-        description={`Enter the confirmed balance shown in ${account.provider}'s own console right now. Neither Anthropic nor Groq expose a balance API, so this is the only way this figure stays accurate.`}
+        open={open}
+        onClose={() => setOpen(false)}
+        title={`${account.provider}: Admin API Key`}
+        description="A separate Admin-tier key (not the normal chat-completion key) — required to enable real usage/cost sync and rate-limit reads. Create one in the provider's own console under Settings -> Admin keys."
       >
-        <Input label="Confirmed balance" type="number" min={0} step="0.01" value={balanceInput} onChange={(e) => setBalanceInput(e.target.value)} autoFocus />
+        <Input label="Admin API key" type="password" value={key} onChange={(e) => setKey(e.target.value)} autoFocus />
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 'var(--space-2)', marginTop: 'var(--space-5)' }}>
-          <Button variant="ghost" onClick={() => setModalOpen(false)}>
+          <Button variant="ghost" onClick={() => setOpen(false)}>
             Cancel
           </Button>
           <Button loading={saving} onClick={() => void save()}>
@@ -96,6 +107,106 @@ function AccountCard({ account, onReconciled }: { account: ProviderAccountView; 
           </Button>
         </div>
       </Modal>
+    </div>
+  );
+}
+
+function AccountCard({ account, onChanged }: { account: ProviderAccountView; onChanged: () => void }) {
+  const statusVariant = account.status === 'active' ? 'success' : account.status === 'exhausted' ? 'danger' : account.status === 'degraded' ? 'warning' : 'neutral';
+  const pace = account.budgetPacePct;
+  const paceVariant = pace == null ? 'neutral' : pace >= 100 ? 'danger' : pace >= 80 ? 'warning' : 'success';
+  const sync = account.usageCostSync;
+
+  return (
+    <SectionCard title={account.provider.charAt(0).toUpperCase() + account.provider.slice(1)}>
+      <div style={{ display: 'flex', gap: 'var(--space-2)', marginBottom: 'var(--space-3)', flexWrap: 'wrap' }}>
+        <Badge variant={account.connected ? 'success' : 'neutral'}>{account.connected ? 'Connected' : 'Not connected'}</Badge>
+        <Badge variant={statusVariant} title="Operational health for AI requests">
+          {account.status}
+        </Badge>
+        <Badge variant="neutral">{account.accountType}</Badge>
+      </div>
+
+      <div style={{ marginBottom: 'var(--space-3)' }}>
+        <div className={shared.mono} style={{ fontSize: 'var(--text-xs)' }}>
+          BALANCE
+        </div>
+        <Badge variant={capabilityVariant(account.balance.status)}>{account.balance.status.replace(/_/g, ' ')}</Badge>
+        <p className={shared.pageSubtitle} style={{ marginTop: 4, marginBottom: 0 }}>
+          {account.balance.note}
+        </p>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))', gap: 'var(--space-3)', marginBottom: 'var(--space-3)' }}>
+        <div>
+          <div className={shared.mono} style={{ fontSize: 'var(--text-xs)' }}>
+            CONSUMPTION THIS MONTH
+          </div>
+          <div style={{ fontSize: 'var(--text-lg)', fontWeight: 700 }}>{money(account.consumptionThisMonth, account.currency)}</div>
+          <div className={shared.pageSubtitle} style={{ fontSize: 'var(--text-xs)' }}>
+            {formatFullDate(account.consumptionPeriod.start)} – {formatFullDate(account.consumptionPeriod.end)} ({account.consumptionPeriod.timezone})
+          </div>
+        </div>
+        <div>
+          <div className={shared.mono} style={{ fontSize: 'var(--text-xs)' }}>
+            BUDGET PACE
+          </div>
+          <div style={{ fontSize: 'var(--text-lg)', fontWeight: 700 }}>
+            {pace == null ? (
+              '— (no monthlyBudget set)'
+            ) : (
+              <>
+                {pace.toFixed(0)}% <Badge variant={paceVariant}>{money(account.monthlyBudget, account.currency)} budget</Badge>
+              </>
+            )}
+          </div>
+        </div>
+      </div>
+
+      <div style={{ marginBottom: 'var(--space-3)' }}>
+        <div className={shared.mono} style={{ fontSize: 'var(--text-xs)' }}>
+          FINANCE API AUTHENTICATION
+        </div>
+        {!account.hasAdminApiKey ? (
+          <Badge variant="neutral">No Admin API key configured</Badge>
+        ) : sync.lastAttemptSuccessful == null ? (
+          <Badge variant="neutral">Not yet attempted</Badge>
+        ) : sync.lastAttemptSuccessful ? (
+          <Badge variant="success">Authenticated — last sync succeeded</Badge>
+        ) : (
+          <Badge variant="danger">Authentication/sync failing</Badge>
+        )}
+      </div>
+
+      {sync.providerReportedCostThisMonth != null && (
+        <p className={shared.pageSubtitle} style={{ marginBottom: 'var(--space-3)' }}>
+          Provider-reported cost: {money(sync.providerReportedCostThisMonth, account.currency)}
+          {sync.costVariancePct != null && ` (${sync.costVariancePct > 0 ? '+' : ''}${sync.costVariancePct.toFixed(1)}% vs. Haive-tracked)`}
+        </p>
+      )}
+      {(sync.lastSuccessAt || sync.lastAttemptedAt) && (
+        <p className={shared.pageSubtitle} style={{ marginBottom: 4, fontSize: 'var(--text-xs)' }}>
+          {sync.lastSuccessAt && `Last successful sync: ${formatFullDate(sync.lastSuccessAt)}`}
+          {sync.lastAttemptedAt && ` — last attempt: ${formatFullDate(sync.lastAttemptedAt)}`}
+          {sync.nextScheduledSyncAt && ` — next: ${formatFullDate(sync.nextScheduledSyncAt)}`}
+        </p>
+      )}
+      {sync.lastError && (
+        <p className={shared.pageSubtitle} style={{ marginBottom: 'var(--space-3)', color: 'var(--color-danger)' }}>
+          Last sync error: {sync.lastError}
+        </p>
+      )}
+
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 'var(--space-3)' }}>
+        {account.capabilities &&
+          Object.entries(account.capabilities).map(([key, entry]) => (
+            <Badge key={key} variant={capabilityVariant(entry.status)} title={entry.detail}>
+              {CAPABILITY_LABELS[key] ?? key}
+            </Badge>
+          ))}
+      </div>
+
+      <AdminApiKeyControl account={account} onChanged={onChanged} />
     </SectionCard>
   );
 }
@@ -178,6 +289,7 @@ function RecordPaymentModal({ open, onClose, onSaved }: { open: boolean; onClose
 export function AdminProviderFinancePage() {
   const [dashboard, setDashboard] = useState<FinanceDashboard | null>(null);
   const [profitability, setProfitability] = useState<Profitability | null>(null);
+  const [alerts, setAlerts] = useState<AlertLogRow[]>([]);
   const [payments, setPayments] = useState<ProviderPaymentRow[]>([]);
   const [paymentsTotal, setPaymentsTotal] = useState(0);
   const [page, setPage] = useState(1);
@@ -186,10 +298,11 @@ export function AdminProviderFinancePage() {
 
   const loadDashboard = () => {
     setLoading(true);
-    Promise.all([providerFinanceService.getDashboard(DAYS), providerFinanceService.getProfitability(DAYS)])
-      .then(([d, p]) => {
+    Promise.all([providerFinanceService.getDashboard(DAYS), providerFinanceService.getProfitability(DAYS), providerFinanceService.getRecentAlerts(20)])
+      .then(([d, p, a]) => {
         setDashboard(d);
         setProfitability(p);
+        setAlerts(a);
       })
       .catch((error) => toast.error(extractErrorMessage(error)))
       .finally(() => setLoading(false));
@@ -216,7 +329,7 @@ export function AdminProviderFinancePage() {
       <div className={shared.headerRow}>
         <div>
           <h1 className={shared.pageTitle}>LLM Provider Finance</h1>
-          <p className={shared.pageSubtitle}>What Haive pays LLM providers, remaining balance, payment history, and profitability.</p>
+          <p className={shared.pageSubtitle}>What Haive pays LLM providers, budget pace, payment history, and profitability.</p>
         </div>
         <Button size="sm" leftIcon={<FiPlus />} onClick={() => setRecordModalOpen(true)}>
           Record Payment
@@ -228,29 +341,41 @@ export function AdminProviderFinancePage() {
       ) : (
         <>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(170px, 1fr))', gap: 'var(--space-4)' }}>
-            <StatTile value={`$${dashboard.totalExpenditureThisYear.toFixed(2)}`} label="Expenditure This Year" />
-            <StatTile value={`$${dashboard.totalPaymentsInRange.toFixed(2)}`} label={`Payments (${DAYS}d)`} />
+            <StatTile value={`$${dashboard.totalPaymentsInRange.toFixed(2)}`} label={`Payments (trailing ${DAYS}d)`} />
             <StatTile value={`$${dashboard.totalConsumptionThisMonth.toFixed(2)}`} label="Consumption This Month" />
             <StatTile value={dashboard.activeProviderCount} label="Active Providers" />
-            <StatTile value={dashboard.lowBalanceProviderCount} label="Low Balance" />
+            <StatTile value={dashboard.nearOrOverBudgetProviderCount} label="Near/Over Budget" />
             <StatTile value={dashboard.exhaustedProviderCount} label="Exhausted" />
+            <StatTile value={dashboard.needsConfigurationProviderCount} label="Needs Configuration" />
             <StatTile value={dashboard.lastPaymentDate ? formatFullDate(dashboard.lastPaymentDate) : 'Never'} label="Last Payment" />
             <StatTile value={dashboard.nextExpectedRechargeDateEstimate ? formatFullDate(dashboard.nextExpectedRechargeDateEstimate) : 'Not enough data'} label="Next Recharge (est.)" />
           </div>
+          <p className={shared.pageSubtitle} style={{ fontSize: 'var(--text-xs)' }}>
+            &ldquo;Payments (trailing {DAYS}d)&rdquo; covers {formatFullDate(dashboard.periodStart)} – {formatFullDate(dashboard.periodEnd)}. &ldquo;Consumption This Month&rdquo; is calendar
+            month-to-date ({dashboard.accounts[0] ? `${formatFullDate(dashboard.accounts[0].consumptionPeriod.start)} – ${formatFullDate(dashboard.accounts[0].consumptionPeriod.end)}` : ''}) — a
+            deliberately different, shorter window, so a lower figure here than in Profitability below is expected, not a discrepancy.
+          </p>
 
-          <SectionCard title="Provider Balances">
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 'var(--space-4)' }}>
+          <SectionCard title="Provider Accounts">
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: 'var(--space-4)' }}>
               {dashboard.accounts.map((a) => (
-                <AccountCard key={a.provider} account={a} onReconciled={loadDashboard} />
+                <AccountCard key={a.provider} account={a} onChanged={loadDashboard} />
               ))}
             </div>
           </SectionCard>
 
           {profitability && (
             <SectionCard title="Profitability">
+              <p className={shared.pageSubtitle} style={{ fontSize: 'var(--text-xs)', marginBottom: 'var(--space-3)' }}>
+                {formatFullDate(profitability.periodStart)} – {formatFullDate(profitability.periodEnd)} · reported in {profitability.reportingCurrency} (revenue converted from Credits, never
+                added to USD directly)
+              </p>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(170px, 1fr))', gap: 'var(--space-4)', marginBottom: 'var(--space-4)' }}>
-                <StatTile value={`${profitability.totalRevenueCredits.toLocaleString()} cr`} label="Customer Revenue" />
+                <StatTile value={`${profitability.totalRevenueCredits.toLocaleString()} cr`} label="Customer Revenue (Credits)" />
+                <StatTile value={`$${profitability.totalRevenueUsd.toFixed(2)}`} label="Customer Revenue (USD)" />
                 <StatTile value={`$${profitability.totalProviderCostUsd.toFixed(2)}`} label="Provider Cost" />
+                <StatTile value={`$${profitability.grossProfitUsd.toFixed(2)}`} label="Gross Profit" />
+                <StatTile value={profitability.grossMarginPct == null ? '—' : `${profitability.grossMarginPct.toFixed(1)}%`} label="Gross Margin" />
                 {profitability.providerCostBreakdown.map((p) => (
                   <StatTile key={p.provider} value={`$${p.costUsd.toFixed(2)}`} label={`${p.provider} cost`} />
                 ))}
@@ -268,6 +393,28 @@ export function AdminProviderFinancePage() {
               )}
             </SectionCard>
           )}
+
+          <SectionCard title="Recent Alerts">
+            {alerts.length === 0 ? (
+              <p className={shared.emptyState}>No alerts fired yet.</p>
+            ) : (
+              <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
+                {alerts.map((a) => (
+                  <li key={a._id} style={{ borderBottom: '1px solid var(--color-border)', paddingBottom: 'var(--space-2)' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 'var(--space-2)' }}>
+                      <strong>{a.title}</strong>
+                      <span className={shared.mono} style={{ fontSize: 'var(--text-xs)' }}>
+                        {formatFullDate(a.createdAt)}
+                      </span>
+                    </div>
+                    <p className={shared.pageSubtitle} style={{ margin: 0, whiteSpace: 'pre-line' }}>
+                      {a.message}
+                    </p>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </SectionCard>
         </>
       )}
 

@@ -1,4 +1,4 @@
-import { IsArray, IsIn, IsNumber, IsOptional, IsString, Max, Min } from 'class-validator';
+import { IsArray, IsIn, IsNumber, IsOptional, IsString } from 'class-validator';
 
 export class UpsertProviderAccountDto {
   @IsOptional()
@@ -16,22 +16,6 @@ export class UpsertProviderAccountDto {
   @IsOptional()
   @IsNumber()
   monthlyBudget?: number;
-
-  @IsOptional()
-  @IsNumber()
-  @Min(0)
-  @Max(100)
-  lowThresholdPct?: number;
-
-  @IsOptional()
-  @IsNumber()
-  @Min(0)
-  @Max(100)
-  criticalThresholdPct?: number;
-
-  @IsOptional()
-  @IsIn(['alert-only', 'mark-unavailable'])
-  zeroBalanceAction?: 'alert-only' | 'mark-unavailable';
 
   @IsOptional()
   @IsArray()
