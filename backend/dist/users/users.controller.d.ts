@@ -314,6 +314,8 @@ export declare class UsersController {
         tempPassword: string | undefined;
     } | {
         activationLink: string | undefined;
+        emailSent: boolean;
+        emailProblem: string | undefined;
         user: {
             id: string;
             email: string;
@@ -337,6 +339,8 @@ export declare class UsersController {
     }>;
     resendInvitation(caller: JwtPayload, id: string): Promise<{
         activationLink: string | undefined;
+        emailSent: boolean;
+        emailProblem: string | undefined;
     }>;
     update(caller: JwtPayload, id: string, dto: UpdateUserDto): Promise<{
         accountType: string;

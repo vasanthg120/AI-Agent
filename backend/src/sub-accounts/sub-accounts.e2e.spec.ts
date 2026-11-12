@@ -119,6 +119,7 @@ describe('Sub-accounts (real HTTP, real Mongo)', () => {
         invitationLink: (token: string) => `http://app.test/activate?token=${encodeURIComponent(token)}`,
         sendInvitationEmail: async (to: string, _name: string, _business: string, token: string) => {
           sent.push({ to, token });
+          return { sent: true };
         },
         sendVerificationOtp: async () => undefined,
         sendWelcomeEmail: async () => undefined,

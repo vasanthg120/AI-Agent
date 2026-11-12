@@ -162,6 +162,7 @@ describe('Dialer calling API (whole app, real HTTP, real Mongo, stand-in Plivo)'
         invitationLink: (token: string) => `http://app.test/activate?token=${token}`,
         sendInvitationEmail: async (to: string, _n: string, _b: string, token: string) => {
           invited.set(to, token);
+          return { sent: true };
         },
         sendWelcomeEmail: async () => undefined,
         sendVerificationOtp: async () => undefined,

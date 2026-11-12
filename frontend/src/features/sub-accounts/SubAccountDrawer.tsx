@@ -184,9 +184,11 @@ export function SubAccountDrawer({ open, onClose, account, onSaved }: SubAccount
         <div className={styles.form}>
           <p className={styles.lead}>
             <strong>{created.name}</strong> is ready.{' '}
-            {created.invited
-              ? `An invitation to set a password has gone to ${created.ownerEmail}.`
-              : 'No invitation was sent, so nobody can sign in to it yet. You can send one from its details page.'}
+            {!created.invited
+              ? 'No invitation was sent, so nobody can sign in to it yet. You can send one from its details page.'
+              : created.emailSent === false
+                ? `The invitation email to ${created.ownerEmail} wasn’t sent. ${created.emailProblem ?? ''} Send them the activation link below yourself.`
+                : `An invitation to set a password has gone to ${created.ownerEmail}.`}
           </p>
           {created.invited && created.activationLink && (
             <div className={styles.field}>

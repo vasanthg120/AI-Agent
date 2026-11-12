@@ -70,6 +70,7 @@ describe('Tenant isolation across modules (whole app, real HTTP, real Mongo)', (
         invitationLink: (token: string) => `http://app.test/activate?token=${token}`,
         sendInvitationEmail: async (to: string, _n: string, _b: string, token: string) => {
           invited.set(to, token);
+          return { sent: true };
         },
         sendWelcomeEmail: async () => undefined,
         sendVerificationOtp: async () => undefined,

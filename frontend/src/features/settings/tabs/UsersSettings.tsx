@@ -7,6 +7,7 @@ import { Avatar, Badge, Button, EmptyState, IconButton, Input, Modal, Skeleton, 
 import { usersService, type AdminUser } from '@/services/usersService';
 import { useAuthStore } from '@/stores/authStore';
 import { can, isPermissionManaged } from '@/utils/access';
+import { announceInvitation } from '@/utils/invitations';
 import { extractErrorMessage } from '@/utils/errors';
 import { hasRole } from '@/utils/roles';
 import { SettingsSection } from '../components/SettingsSection';
@@ -115,8 +116,18 @@ export function UsersSettings() {
     if (ok) setDeactivating(null);
   };
 
-  const resendInvitation = (user: AdminUser) =>
-    act(user, () => usersService.resendInvitation(user.id), `A new invitation has gone to ${user.email}`);
+  // Says whether the email actually went; if not, why — and puts the link on the clipboard to send by hand.
+  const resendInvitation = async (user: AdminUser) => {
+    setBusyId(user.id);
+    try {
+      await announceInvitation(await usersService.resendInvitation(user.id), user.email);
+      refresh();
+    } catch (err) {
+      toast.error(extractErrorMessage(err));
+    } finally {
+      setBusyId(null);
+    }
+  };
 
   const remove = async () => {
     const user = deleting;

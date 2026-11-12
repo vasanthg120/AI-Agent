@@ -48,13 +48,13 @@ let UsersController = class UsersController {
         const created = await this.usersService.createByAdmin(dto, caller.organizationId, caller);
         if (!dto.sendInvite)
             return created;
-        const { activationLink } = await this.invitations.inviteById(created.user.id, caller.organizationId);
-        return { ...created, activationLink };
+        const { activationLink, emailSent, emailProblem } = await this.invitations.inviteById(created.user.id, caller.organizationId);
+        return { ...created, activationLink, emailSent, emailProblem };
     }
     async resendInvitation(caller, id) {
         await this.usersService.assertMayManage(caller, id, caller.organizationId);
-        const { activationLink } = await this.invitations.inviteById(id, caller.organizationId);
-        return { activationLink };
+        const { activationLink, emailSent, emailProblem } = await this.invitations.inviteById(id, caller.organizationId);
+        return { activationLink, emailSent, emailProblem };
     }
     update(caller, id, dto) {
         if (id === caller.sub && (dto.active === false || (dto.role && dto.role !== 'admin'))) {

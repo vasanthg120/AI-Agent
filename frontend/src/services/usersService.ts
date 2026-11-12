@@ -106,11 +106,17 @@ export interface CreateUserPayload {
   active?: boolean;
 }
 
-export interface CreateUserResult {
-  user: AdminUser;
-  // Exactly one of these, depending on sendInvite.
-  tempPassword?: string;
+/** An invitation email's outcome: whether the mail server took it, and if not why. */
+export interface InvitationDelivery {
   activationLink?: string;
+  emailSent?: boolean;
+  emailProblem?: string;
+}
+
+export interface CreateUserResult extends InvitationDelivery {
+  user: AdminUser;
+  // tempPassword, or the invitation fields — depending on sendInvite.
+  tempPassword?: string;
 }
 
 export interface UpdateUserPayload {
@@ -137,8 +143,8 @@ export const usersService = {
     return data;
   },
 
-  async resendInvitation(id: string): Promise<{ activationLink?: string }> {
-    const { data } = await axiosClient.post<{ activationLink?: string }>(`/users/${id}/resend-invitation`);
+  async resendInvitation(id: string): Promise<InvitationDelivery> {
+    const { data } = await axiosClient.post<InvitationDelivery>(`/users/${id}/resend-invitation`);
     return data;
   },
 
