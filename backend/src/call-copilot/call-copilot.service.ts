@@ -3,7 +3,7 @@ import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { InjectModel } from '@nestjs/mongoose';
-import { Model } from 'mongoose';
+import { Model, isValidObjectId } from 'mongoose';
 import { firstValueFrom } from 'rxjs';
 import { randomUUID } from 'crypto';
 import FormData from 'form-data';
@@ -13,6 +13,17 @@ import { CallSession, CallSessionDocument } from './schemas/call-session.schema'
 import { sessionRangeEnd, sessionRangeStart } from './session-date-range';
 
 const AUDIO_BUCKET = 'call_recordings';
+
+/** The Call Library's status and score filters, as a Mongo condition. */
+export function callFilterMatch(options: { status?: string; score?: string }): Record<string, unknown>[] {
+  const and: Record<string, unknown>[] = [];
+  if (options.status) and.push({ status: options.status });
+  if (options.score === 'good') and.push({ overallScore: { $gte: 7 } });
+  else if (options.score === 'fair') and.push({ overallScore: { $gte: 5, $lt: 7 } });
+  else if (options.score === 'low') and.push({ overallScore: { $gt: 0, $lt: 5 } });
+  else if (options.score === 'none') and.push({ $or: [{ overallScore: { $exists: false } }, { overallScore: 0 }] });
+  return and;
+}
 
 export interface AnalyzeResult {
   skipped: boolean;
@@ -69,7 +80,7 @@ export class CallCopilotService {
   async searchSessions(
     organizationId: string,
     userId: string,
-    options: { q?: string; dealId?: string; dateFrom?: string; dateTo?: string; page?: number; pageSize?: number },
+    options: { q?: string; dealId?: string; dateFrom?: string; dateTo?: string; page?: number; pageSize?: number; status?: string; score?: string },
   ): Promise<{ items: CallSessionDocument[]; total: number; page: number; pageSize: number; mode: 'browse' | 'search' }> {
     const query = options.q?.trim();
     if (query) {
@@ -96,6 +107,8 @@ export class CallCopilotService {
     const pageSize = options.pageSize ?? 25;
     const match: Record<string, unknown> = { organizationId, userId };
     if (options.dealId) match.dealId = options.dealId;
+    const filters = callFilterMatch(options);
+    if (filters.length) match.$and = filters;
     if (options.dateFrom || options.dateTo) {
       const range: Record<string, Date> = {};
       if (options.dateFrom) range.$gte = sessionRangeStart(options.dateFrom);
@@ -114,6 +127,69 @@ export class CallCopilotService {
       this.sessionModel.countDocuments(match).exec(),
     ]);
     return { items, total, page, pageSize, mode: 'browse' };
+  }
+
+  /** Any session by id, whoever made it — the caller decides whether it may be shown (TeamScopeService.canSee). */
+  async findSessionById(sessionId: string): Promise<CallSessionDocument | null> {
+    if (!isValidObjectId(sessionId)) return null;
+    return this.sessionModel.findById(sessionId).exec();
+  }
+
+  /**
+   * The Call Library across a team. `owners` is a filter TeamScopeService's
+   * scope was turned into (which businesses, which people) — never the
+   * client's. Words are matched in the summary and the transcript (the
+   * semantic search only covers the caller's own calls), page by page.
+   */
+  async browseTeamSessions(
+    owners: Record<string, unknown>,
+    options: { q?: string; dateFrom?: string; dateTo?: string; page?: number; pageSize?: number; status?: string; score?: string },
+  ): Promise<{ items: CallSessionDocument[]; total: number; page: number; pageSize: number; mode: 'browse' }> {
+    const page = options.page ?? 1;
+    const pageSize = options.pageSize ?? 25;
+    const and: Record<string, unknown>[] = [owners, ...callFilterMatch(options)];
+    if (options.dateFrom || options.dateTo) {
+      const range: Record<string, Date> = {};
+      if (options.dateFrom) range.$gte = sessionRangeStart(options.dateFrom);
+      if (options.dateTo) range.$lte = sessionRangeEnd(options.dateTo);
+      and.push({ createdAt: range });
+    }
+    const words = options.q?.trim();
+    if (words) {
+      const pattern = new RegExp(words.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
+      and.push({
+        $or: [{ headline: pattern }, { summary: pattern }, { summaryPoints: pattern }, { keyTakeaways: pattern }, { originalFilename: pattern }, { 'transcript.text': pattern }],
+      });
+    }
+    const match = { $and: and };
+    const [items, total] = await Promise.all([
+      this.sessionModel
+        .find(match)
+        .select({ transcript: 0 })
+        .sort({ createdAt: -1 })
+        .skip((page - 1) * pageSize)
+        .limit(pageSize)
+        .exec(),
+      this.sessionModel.countDocuments(match).exec(),
+    ]);
+    return { items, total, page, pageSize, mode: 'browse' };
+  }
+
+  /** getStats across a team (see browseTeamSessions). */
+  async getTeamStats(owners: Record<string, unknown>): Promise<{ total: number; last7Days: number; live: number; uploaded: number; avgScore: number | null; scored: number }> {
+    const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60_000);
+    const within = (extra: Record<string, unknown>) => ({ $and: [owners, extra] });
+    const [total, last7Days, live, uploaded, scores] = await Promise.all([
+      this.sessionModel.countDocuments(owners).exec(),
+      this.sessionModel.countDocuments(within({ createdAt: { $gte: sevenDaysAgo } })).exec(),
+      this.sessionModel.countDocuments(within({ $or: [{ source: 'live' }, { source: { $exists: false } }] })).exec(),
+      this.sessionModel.countDocuments(within({ source: 'upload' })).exec(),
+      this.sessionModel
+        .aggregate<{ _id: null; avg: number; n: number }>([{ $match: within({ overallScore: { $gt: 0 } }) }, { $group: { _id: null, avg: { $avg: '$overallScore' }, n: { $sum: 1 } } }])
+        .exec(),
+    ]);
+    const avg = scores[0]?.avg;
+    return { total, last7Days, live, uploaded, avgScore: typeof avg === 'number' ? Math.round(avg * 10) / 10 : null, scored: scores[0]?.n ?? 0 };
   }
 
   /** Backs the Call Library's StatTile summary row — computed independently

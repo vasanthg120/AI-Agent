@@ -220,4 +220,45 @@ describe('Tenant isolation across modules (whole app, real HTTP, real Mongo)', (
       // Chat history goes through the Redis cache, which waits before giving up when Redis isn't running.
     }, 180_000);
   });
+
+  describe('team views (team calls, Agent Activity) stay inside the hierarchy', () => {
+    const PEOPLE = ['main', 'mainInSubA', 'mainInSubB', 'subAOwner', 'other'] as const;
+    const seenIn = (raw: string) => PEOPLE.filter((whose) => raw.toLowerCase().includes(mark('call', whose).toLowerCase())).sort();
+    const sessionOf = async (whose: string) => (await db.collection('call_sessions').findOne({ headline: mark('call', whose) }))!._id.toString();
+
+    it('team calls: the Main Account owner sees every business’s, a sub-account owner their own, nobody another company’s', async () => {
+      const asMain = await call('GET', '/call-copilot/sessions/search?scope=team&pageSize=100', tokens.main);
+      expect(asMain.status).toBe(200);
+      expect(seenIn(asMain.raw)).toEqual(['main', 'mainInSubA', 'mainInSubB', 'subAOwner']);
+      expect(seenIn((await call('GET', '/call-copilot/sessions/search?scope=team&pageSize=100', tokens.subAOwner)).raw)).toEqual(['mainInSubA', 'subAOwner']);
+      expect(seenIn((await call('GET', '/call-copilot/sessions/search?scope=team&pageSize=100', tokens.other)).raw)).toEqual(['other']);
+      // Asking for a business outside one's reach is refused, never answered empty.
+      expect((await call('GET', `/call-copilot/sessions/search?scope=team&organizationId=${orgIds.subB}`, tokens.subAOwner)).status).toBe(403);
+    });
+
+    it('opening one call: a teammate’s opens read-only, another business’s is not found', async () => {
+      const shared = await call('GET', `/call-copilot/sessions/${await sessionOf('subAOwner')}`, tokens.main);
+      expect(shared.status).toBe(200);
+      expect(shared.body).toMatchObject({ readOnly: true, headline: mark('call', 'subAOwner') });
+      expect((await call('GET', `/call-copilot/sessions/${await sessionOf('mainInSubB')}`, tokens.subAOwner)).status).toBe(404);
+      expect((await call('GET', `/call-copilot/sessions/${await sessionOf('main')}`, tokens.other)).status).toBe(404);
+    });
+
+    it('Agent Activity: the same reach', async () => {
+      const names = (res: { body: { businesses?: { name: string }[] } }) => (res.body.businesses ?? []).map((b) => b.name).sort();
+      expect(names(await call('GET', '/team-activity/overview?period=today', tokens.main))).toEqual([`${PREFIX}-main`, `${PREFIX}-suba`, `${PREFIX}-subb`].sort());
+      expect(names(await call('GET', '/team-activity/overview?period=today', tokens.subAOwner))).toEqual([`${PREFIX}-suba`]);
+      expect(names(await call('GET', '/team-activity/overview?period=today', tokens.other))).toEqual([`${PREFIX}-other`]);
+      expect((await call('GET', `/team-activity/overview?period=today&organizationId=${orgIds.other}`, tokens.main)).status).toBe(403);
+      expect((await call('GET', `/team-activity/list?kind=calls&period=today&organizationId=${orgIds.subB}`, tokens.subAOwner)).status).toBe(403);
+    });
+
+    it('the deal panel: a deal of another company can’t be opened', async () => {
+      const otherDeal = await db.collection('crm_deals').findOne({ organizationId: orgIds.other });
+      expect((await call('GET', `/deal-insight/${otherDeal!._id}`, tokens.main)).status).toBe(404);
+      const subBDeal = await db.collection('crm_deals').findOne({ organizationId: orgIds.subB });
+      expect((await call('GET', `/deal-insight/${subBDeal!._id}`, tokens.main)).status).toBe(200);
+      expect((await call('GET', `/deal-insight/${subBDeal!._id}`, tokens.subAOwner)).status).toBe(404);
+    });
+  });
 });

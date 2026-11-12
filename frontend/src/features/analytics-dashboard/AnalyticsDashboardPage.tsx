@@ -32,6 +32,7 @@ import { OverallPipelineCard } from './components/OverallPipelineCard';
 import { DealFunnelCard } from './components/DealFunnelCard';
 import { DealStatusDistributionCard } from './components/DealStatusDistributionCard';
 import { TeamPerformanceSummaryCards } from './components/TeamPerformanceSummaryCards';
+import { TeamActivityPanel } from '@/features/team-activity/TeamActivityPanel';
 import { EmailResponseSlaTable } from './components/EmailResponseSlaTable';
 import { SlaDashboardSection } from './components/SlaDashboardSection';
 import styles from './analytics-dashboard.module.css';
@@ -216,6 +217,7 @@ export function AnalyticsDashboardPage() {
         );
         return result.items.map((d) => ({
           id: d._id,
+          dealId: d._id,
           title: d.name,
           subtitle: d.dealStatus,
           meta: d.expectedClosingDate,
@@ -432,6 +434,9 @@ export function AnalyticsDashboardPage() {
 
             {activeTab === 'team' && (
               <div className={styles.tabContent}>
+                {/* Per-person activity (deals, emails, calls, call scores) with its own day filter — the same figures as Agent Activity. */}
+                <TeamActivityPanel />
+
                 <TeamPerformanceSummaryCards data={data} dateFrom={dateFrom} dateTo={dateTo} storeId={canOverrideStore ? storeId : undefined} />
 
                 <SectionCard title="Employee Leaderboard" icon={FiUsers} glass>

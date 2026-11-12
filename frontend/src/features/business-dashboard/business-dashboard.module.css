@@ -245,3 +245,20 @@
     padding: var(--space-4);
   }
 }
+
+/* A deal in a list: opens the deal panel. */
+.listItemButton {
+  width: 100%;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    border-color var(--duration-fast) var(--ease-out),
+    background var(--duration-fast) var(--ease-out);
+}
+
+.listItemButton:hover {
+  border-color: var(--color-border-strong);
+  background: var(--color-bg-hover);
+}

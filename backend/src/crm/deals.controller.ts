@@ -226,7 +226,7 @@ export class DealsController {
   async assignBulk(@CurrentUser() user: JwtPayload, @Body() dto: AssignDealsBulkDto) {
     const ownerId = await this.assertAssignable(user.organizationId, dto.ownerId);
     const canOverride = user.roles.includes('admin') || user.roles.includes('owner');
-    return this.dealsService.assignOwnerBulk(dto.dealIds, user.organizationId, ownerId, canOverride ? undefined : user.storeId);
+    return this.dealsService.assignOwnerBulk(dto.dealIds, user.organizationId, ownerId, canOverride ? undefined : user.storeId, { userId: user.sub, reason: dto.reason });
   }
 
   @Patch(':id/assign')
@@ -236,6 +236,6 @@ export class DealsController {
     const ownerId = await this.assertAssignable(user.organizationId, dto.ownerId);
     const canOverride = user.roles.includes('admin') || user.roles.includes('owner');
     const storeConstraint = canOverride ? undefined : user.storeId;
-    return this.dealsService.assignOwner(id, user.organizationId, ownerId, storeConstraint);
+    return this.dealsService.assignOwner(id, user.organizationId, ownerId, storeConstraint, { userId: user.sub, reason: dto.reason });
   }
 }

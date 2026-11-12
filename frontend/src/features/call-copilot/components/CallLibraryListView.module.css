@@ -429,3 +429,95 @@
     display: none;
   }
 }
+
+/* ---------- team view (owners, admins, managers, the Main Account owner) ---------- */
+
+.teamBar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+
+.scopeToggle {
+  display: inline-flex;
+  padding: 3px;
+  border-radius: var(--radius-full);
+  border: 1px solid var(--color-border);
+  background: var(--color-bg-hover);
+}
+
+.scopeOption {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  border: none;
+  border-radius: var(--radius-full);
+  background: transparent;
+  font: inherit;
+  font-size: var(--text-sm);
+  font-weight: 500;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.scopeOptionActive {
+  background: var(--color-bg-surface);
+  box-shadow: var(--shadow-sm);
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.teamFilters {
+  display: flex;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.teamPicker {
+  width: 210px;
+  max-width: 100%;
+}
+
+.owner {
+  font-size: var(--text-xs);
+  font-weight: 700;
+  color: var(--color-text-secondary);
+}
+
+@media (max-width: 560px) {
+  .teamFilters,
+  .teamPicker {
+    width: 100%;
+  }
+
+  .teamFilters > * {
+    flex: 1 1 0;
+    min-width: 0;
+  }
+}
+
+.callFilters {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.callFilter {
+  width: 190px;
+  max-width: 100%;
+}
+
+.clearFilters {
+  border: none;
+  background: none;
+  font: inherit;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--color-accent);
+  cursor: pointer;
+}

@@ -9,6 +9,8 @@ import { AuditModule } from './audit/audit.module';
 import { AuthModule } from './auth/auth.module';
 import { OrganizationsModule } from './organizations/organizations.module';
 import { SubAccountsModule } from './sub-accounts/sub-accounts.module';
+import { TeamActivityModule } from './team-activity/team-activity.module';
+import { DealInsightModule } from './deal-insight/deal-insight.module';
 import { UsersModule } from './users/users.module';
 import { ChatModule } from './chat/chat.module';
 import { DocumentsModule } from './documents/documents.module';
@@ -82,6 +84,8 @@ import { ModulePermissionInterceptor } from './common/permissions/module-permiss
     AuthModule,
     OrganizationsModule,
     SubAccountsModule,
+    TeamActivityModule,
+    DealInsightModule,
     UsersModule,
     ChatModule,
     DocumentsModule,

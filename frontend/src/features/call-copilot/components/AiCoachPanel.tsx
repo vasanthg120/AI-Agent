@@ -89,9 +89,12 @@ export interface AiCoachPanelProps {
   pending?: boolean;
   coaching?: CoachingReport | null;
   onGenerated?: (report: CoachingReport) => void;
+  // A teammate's call: the report is shown, but only its owner can ask for one or hear it spoken.
+  readOnly?: boolean;
+  ownerName?: string;
 }
 
-export function AiCoachPanel({ sessionId, createdAt, pending, coaching, onGenerated }: AiCoachPanelProps) {
+export function AiCoachPanel({ sessionId, createdAt, pending, coaching, onGenerated, readOnly, ownerName }: AiCoachPanelProps) {
   const [generating, setGenerating] = useState(false);
   const [voiceLanguage, setVoiceLanguage] = useState(readStoredCoachLanguage);
   const [openCategory, setOpenCategory] = useState<CallScoreCategory | null>(null);
@@ -151,9 +154,13 @@ export function AiCoachPanel({ sessionId, createdAt, pending, coaching, onGenera
             Your AI Coach reviews the conversation, scores it on six sales skills and tells you what to try next.
           </span>
         </div>
-        <Button type="button" leftIcon={<FiZap />} disabled={!sessionId} onClick={() => void handleGenerate()}>
-          Generate coaching report
-        </Button>
+        {readOnly ? (
+          <span className={styles.readOnlyNote}>Only {ownerName ?? 'the person who made the call'} can ask for a coaching report.</span>
+        ) : (
+          <Button type="button" leftIcon={<FiZap />} disabled={!sessionId} onClick={() => void handleGenerate()}>
+            Generate coaching report
+          </Button>
+        )}
       </div>
     );
   }
@@ -177,7 +184,7 @@ export function AiCoachPanel({ sessionId, createdAt, pending, coaching, onGenera
           <p className={styles.scoreCopy}>
             {notScored ? 'There was no sales conversation to score in this call.' : BAND_TEXT[tone]}
           </p>
-          {report.voiceScript && (
+          {report.voiceScript && !readOnly && (
             <div className={styles.voiceRow}>
               <span className={styles.voiceLabel}>Hear it from your coach</span>
               <select

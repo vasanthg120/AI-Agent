@@ -11,7 +11,7 @@ import { DrillDownModal, type DrillDownRow } from './DrillDownModal';
 import styles from './PipelineHealthCard.module.css';
 
 function toRows(items: Deal[]): DrillDownRow[] {
-  return items.map((d) => ({ id: d._id, title: d.name, subtitle: d.dealStatus, meta: d.expectedClosingDate, value: d.monetaryValue }));
+  return items.map((d) => ({ id: d._id, dealId: d._id, title: d.name, subtitle: d.dealStatus, meta: d.expectedClosingDate, value: d.monetaryValue }));
 }
 
 type OpenDrilldown = 'total' | 'won' | 'pastDue' | null;

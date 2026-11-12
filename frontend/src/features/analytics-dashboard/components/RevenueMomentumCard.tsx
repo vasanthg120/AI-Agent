@@ -63,6 +63,7 @@ export function RevenueMomentumCard({ dateFrom, dateTo, storeId }: RevenueMoment
 
   const dealRows: DrillDownRow[] = (wonDeals?.items ?? []).map((d) => ({
     id: d._id,
+    dealId: d._id,
     title: d.name,
     subtitle: d.expectedClosingDate,
     value: d.monetaryValue,

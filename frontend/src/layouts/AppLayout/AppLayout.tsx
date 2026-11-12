@@ -13,6 +13,7 @@ import { useNotificationsStore } from '@/stores/notificationsStore';
 import { useUiStore } from '@/stores/uiStore';
 import { CommandPalette } from '@/components/common/CommandPalette';
 import { FloatingAssistant } from '@/components/assistant/FloatingAssistant';
+import { DealInsightDrawer } from '@/features/deals/DealInsightDrawer';
 import { ROUTES } from '@/constants/routes';
 import { AccountContextStrip } from './AccountContextStrip';
 import { Sidebar } from './Sidebar';
@@ -155,6 +156,8 @@ export function AppLayout() {
           {/* Floats over the page in the bottom-right corner — it no longer
               docks beside the page and squeezes it narrower. */}
           <FloatingAssistant />
+          {/* One deal panel for every list of deals (see stores/dealDrawerStore). */}
+          <DealInsightDrawer />
         </div>
       </MotionConfig>
     );
@@ -196,6 +199,7 @@ export function AppLayout() {
 
         {/* Same floating window as desktop; on phones its CSS turns it into a bottom sheet. */}
         <FloatingAssistant />
+        <DealInsightDrawer />
       </div>
     </MotionConfig>
   );

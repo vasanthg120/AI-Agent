@@ -22,7 +22,9 @@ import { GridFsService } from '../common/gridfs/gridfs.service';
 import { CALL_RECORDING_UPLOAD_INTERCEPTOR_OPTIONS } from '../common/upload-limits';
 import { CallCopilotUploadService } from './call-copilot-upload.service';
 import { CallCopilotService } from './call-copilot.service';
-import { SearchCallSessionsQueryDto } from './dto/search-call-sessions-query.dto';
+import { CallTeamQueryDto, SearchCallSessionsQueryDto } from './dto/search-call-sessions-query.dto';
+import { CallSessionDocument } from './schemas/call-session.schema';
+import { TeamScopeService } from '../team-activity/team-scope.service';
 import { RetryCallSessionDto } from './dto/retry-call-session.dto';
 import { UploadCallRecordingDto } from './dto/upload-call-recording.dto';
 import { VoiceScriptDto } from './dto/voice-script.dto';
@@ -69,6 +71,7 @@ export class CallCopilotController {
     private callCopilotService: CallCopilotService,
     private uploadService: CallCopilotUploadService,
     private gridFs: GridFsService,
+    private scopes: TeamScopeService,
   ) {}
 
   @Get('sessions')
@@ -76,18 +79,87 @@ export class CallCopilotController {
     return this.callCopilotService.listSessions(user.organizationId, user.sub);
   }
 
+  // Team calls (decided 2026-11-12): an owner or admin sees every call of their
+  // business, a manager their store's, and the Main Account owner every
+  // business's — the Main Account and each sub-account. Everyone else, as
+  // before, only their own. Whose is always worked out here from the caller.
+  @Get('team')
+  async team(@CurrentUser() user: JwtPayload) {
+    const scope = await this.scopes.resolve(user);
+    if (!scope.team) return { team: false, acrossBusinesses: false, businesses: [], people: [] };
+    const people = await Promise.all(
+      scope.businesses.map(async (b) =>
+        (await this.scopes.people(scope, b)).map((p) => ({ id: p.id, name: p.mainAccountMember ? `${p.name} (Main Account)` : p.name, businessId: b.id, active: p.active })),
+      ),
+    );
+    return {
+      team: true,
+      acrossBusinesses: scope.acrossBusinesses,
+      businesses: scope.businesses.map((b) => ({ id: b.id, name: b.name, isMain: b.isMain, isCurrent: b.isCurrent })),
+      people: people.flat().sort((a, b) => a.name.localeCompare(b.name)),
+    };
+  }
+
   // Powers the Call Library page — browse (paginated, filterable) when `q`
   // is empty, semantic search (ranked top-N, no real pagination) when it's
   // not. A separate endpoint from plain listSessions above, which stays
-  // exactly as-is for whatever already calls it.
+  // exactly as-is for whatever already calls it. scope=team lists the team's
+  // calls instead, each with whose and which business it is.
   @Get('sessions/search')
-  searchSessions(@CurrentUser() user: JwtPayload, @Query() query: SearchCallSessionsQueryDto) {
+  async searchSessions(@CurrentUser() user: JwtPayload, @Query() query: SearchCallSessionsQueryDto) {
+    if (query.scope === 'team') {
+      const team = await this.teamOwners(user, query);
+      if (team) {
+        const result = await this.callCopilotService.browseTeamSessions(team.match, query);
+        return { ...result, items: result.items.map((s) => this.labelled(s, user, team.names, team.businessNames)) };
+      }
+    }
     return this.callCopilotService.searchSessions(user.organizationId, user.sub, query);
   }
 
   @Get('sessions/stats')
-  getStats(@CurrentUser() user: JwtPayload) {
+  async getStats(@CurrentUser() user: JwtPayload, @Query() query: CallTeamQueryDto) {
+    if (query.scope === 'team') {
+      const team = await this.teamOwners(user, query);
+      if (team) return this.callCopilotService.getTeamStats(team.match);
+    }
     return this.callCopilotService.getStats(user.organizationId, user.sub);
+  }
+
+  /** The filter for the team's calls the caller may see (one business / one person if asked), or null when they only see their own. */
+  private async teamOwners(user: JwtPayload, query: CallTeamQueryDto) {
+    const scope = await this.scopes.resolve(user);
+    if (!scope.team) return null;
+    const businesses = this.scopes.pick(scope, query.organizationId);
+    const clauses: Record<string, unknown>[] = [];
+    const names = new Map<string, string>();
+    for (const business of businesses) {
+      const people = await this.scopes.people(scope, business);
+      for (const p of people) names.set(p.id, p.name);
+      const ids = people.map((p) => p.id).filter((id) => !query.userId || id === query.userId);
+      if (ids.length) clauses.push({ organizationId: business.id, userId: { $in: ids } });
+    }
+    // Nobody in reach (a person of another business asked for): a filter that matches nothing.
+    const match = clauses.length ? { $or: clauses } : { _id: null };
+    return { match, names, businessNames: new Map(businesses.map((b) => [b.id, b.name])) };
+  }
+
+  /** A session as the team list shows it: with whose it is and which business, and whether it is the caller's own. */
+  private labelled(session: CallSessionDocument, user: JwtPayload, names: Map<string, string>, businessNames: Map<string, string>) {
+    const mine = session.organizationId === user.organizationId && session.userId === user.sub;
+    return {
+      ...session.toJSON(),
+      ownerName: names.get(session.userId) ?? 'Former user',
+      businessName: businessNames.get(session.organizationId),
+      readOnly: !mine,
+    };
+  }
+
+  /** Someone else's call the caller may open (TeamScopeService.canSee), or null. */
+  private async teamSession(user: JwtPayload, id: string): Promise<CallSessionDocument | null> {
+    const session = await this.callCopilotService.findSessionById(id);
+    if (!session || !(await this.scopes.canSee(user, session.organizationId, session.userId))) return null;
+    return session;
   }
 
   // "Upload a Recording" — processes in the background; responds immediately
@@ -107,8 +179,12 @@ export class CallCopilotController {
   @Get('sessions/:id')
   async getSession(@CurrentUser() user: JwtPayload, @Param('id') id: string) {
     const session = await this.callCopilotService.getSession(user.organizationId, user.sub, id);
-    if (!session) throw new NotFoundException('Call session not found');
-    return session;
+    if (session) return session;
+    // A teammate's call: shown to read — coaching, "try again" and the spoken
+    // coach stay with the person who made it (they bill their business).
+    const shared = await this.teamSession(user, id);
+    if (!shared) throw new NotFoundException('Call session not found');
+    return { ...shared.toJSON(), ...(await this.scopes.describeOwner(shared.organizationId, shared.userId)), readOnly: true };
   }
 
   // "Try again" on a recording whose transcription failed (Sarvam out of
@@ -163,7 +239,7 @@ export class CallCopilotController {
 
   @Get('sessions/:id/audio/:fileId')
   async streamAudio(@CurrentUser() user: JwtPayload, @Param('id') id: string, @Param('fileId') fileId: string, @Res() res: Response) {
-    const session = await this.callCopilotService.getSession(user.organizationId, user.sub, id);
+    const session = (await this.callCopilotService.getSession(user.organizationId, user.sub, id)) ?? (await this.teamSession(user, id));
     const isKnownFile = fileId === session?.originalRecordingFileId || session?.transcript.some((s) => s.audioFileId === fileId);
     if (!session || !isKnownFile) {
       throw new NotFoundException('Recording segment not found');

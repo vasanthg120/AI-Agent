@@ -16,6 +16,7 @@ export * from './Dropdown';
 export * from './Tabs';
 export * from './Stepper';
 export * from './MultiSelectDropdown';
+export * from './SelectMenu';
 export * from './DateRangeControl';
 export * from './DateRangePopup';
 export * from './MonthYearFilterPopup';

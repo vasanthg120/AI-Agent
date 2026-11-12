@@ -120,12 +120,26 @@ export interface CallSessionDetail extends CallSummaryResult, Partial<CoachingRe
   retryable?: boolean;
   // The language it was transcribed in; absent on calls saved before 2026-11-11.
   languageCode?: string;
+  // Someone else's call, opened from the team view (an admin's, a manager's or
+  // the Main Account owner's): who made it, in which business, and read-only.
+  readOnly?: boolean;
+  ownerName?: string;
+  businessName?: string;
 }
 
 export type CallSessionSummary = Omit<CallSessionDetail, 'transcript'>;
 
-export interface SearchCallSessionsParams {
+/** Whose calls: your own (the default) or the team's you may see — one business or person of it. */
+export interface CallTeamFilter {
+  scope?: 'mine' | 'team';
+  organizationId?: string;
+  userId?: string;
+}
+
+export interface SearchCallSessionsParams extends CallTeamFilter {
   q?: string;
+  status?: 'ended' | 'processing' | 'error';
+  score?: 'good' | 'fair' | 'low' | 'none';
   dealId?: string;
   dateFrom?: string;
   dateTo?: string;
@@ -146,7 +160,19 @@ export interface CallLibraryStats {
   last7Days: number;
   live: number;
   uploaded: number;
-  avgSentiment: string | null;
+  // Your own calls only.
+  avgSentiment?: string | null;
+  // The team's calls only: the mean AI Coach score (out of 10) of the scored ones.
+  avgScore?: number | null;
+  scored?: number;
+}
+
+/** Who the team view can show: the businesses and people the caller may look at. */
+export interface CallTeamInfo {
+  team: boolean;
+  acrossBusinesses: boolean;
+  businesses: { id: string; name: string; isMain: boolean; isCurrent: boolean }[];
+  people: { id: string; name: string; businessId: string; active: boolean }[];
 }
 
 export interface StartCallParams {
@@ -257,8 +283,13 @@ export const callCopilotService = {
     return data;
   },
 
-  async getStats(): Promise<CallLibraryStats> {
-    const { data } = await axiosClient.get<CallLibraryStats>('/call-copilot/sessions/stats');
+  async getStats(filter: CallTeamFilter = {}): Promise<CallLibraryStats> {
+    const { data } = await axiosClient.get<CallLibraryStats>('/call-copilot/sessions/stats', { params: filter });
+    return data;
+  },
+
+  async getTeam(): Promise<CallTeamInfo> {
+    const { data } = await axiosClient.get<CallTeamInfo>('/call-copilot/team');
     return data;
   },
 

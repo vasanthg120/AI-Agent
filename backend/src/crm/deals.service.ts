@@ -9,6 +9,14 @@ import { ListDealsQueryDto } from './dto/list-deals-query.dto';
 import { buildDealMatchStage } from './deal-filter.util';
 import { CrmActivityService } from './crm-activity.service';
 
+/** Who changed a deal's owner, and why — kept for the deal panel and Deal Assignment. */
+export interface AssignmentActor {
+  userId: string;
+  reason?: string;
+}
+
+export const ASSIGNMENT_HISTORY_COLLECTION = 'deal_assignment_history';
+
 @Injectable()
 export class DealsService {
   private readonly logger = new Logger(DealsService.name);
@@ -34,7 +42,19 @@ export class DealsService {
   // storeId, when passed, scopes the match itself (not just the input) —
   // a manager can only ever touch a deal that's actually in their own store,
   // regardless of what the caller claims.
-  async assignOwner(id: string, organizationId: string, ownerId: string | null, storeId?: string) {
+  // A row per change of owner (deal_assignment_history): from, to, by whom, when, why. A
+  // "change" to the owner it already has is not a change and leaves no row.
+  private async recordAssignments(organizationId: string, changes: { dealId: string; from?: string; to: string | null }[], actor?: AssignmentActor) {
+    const rows = changes.filter((c) => (c.from ?? null) !== c.to);
+    if (rows.length === 0 || !actor) return;
+    const at = new Date();
+    const reason = actor.reason?.trim() || undefined;
+    await this.dealModel.db.collection(ASSIGNMENT_HISTORY_COLLECTION).insertMany(
+      rows.map((c) => ({ organizationId, dealId: c.dealId, fromOwnerId: c.from ?? null, toOwnerId: c.to, assignedBy: actor.userId, ...(reason ? { reason } : {}), at })),
+    );
+  }
+
+  async assignOwner(id: string, organizationId: string, ownerId: string | null, storeId?: string, actor?: AssignmentActor) {
     const filter = { _id: id, organizationId, ...(storeId ? { storeId } : {}) };
     // ownerAssignedManually marks this as a deliberate human assignment —
     // see deal.schema.ts's own comment on the field: a background CRM
@@ -42,19 +62,26 @@ export class DealsService {
     // silently overwrites what's set here. Unassigning clears it too,
     // which deliberately opts the deal back into automatic resolution.
     const update = ownerId ? { $set: { ownerId, ownerAssignedManually: true } } : { $unset: { ownerId: '', ownerAssignedManually: '' } };
-    const updated = await this.dealModel.findOneAndUpdate(filter, update, { new: true }).exec();
-    if (!updated) throw new NotFoundException('Deal not found');
-    return updated;
+    const before = await this.dealModel.findOneAndUpdate(filter, update).select({ ownerId: 1 }).exec();
+    if (!before) throw new NotFoundException('Deal not found');
+    await this.recordAssignments(organizationId, [{ dealId: id, from: before.ownerId, to: ownerId }], actor).catch((err: Error) => this.logger.warn(`Assignment history: ${err.message}`));
+    return (await this.dealModel.findById(id).exec())!;
   }
 
   /** Gives many deals the same owner (or none) in one write. Returns how many
    * of the requested deals were found — a deal from another organization (or,
    * for a manager, another store) is simply not among them. */
-  async assignOwnerBulk(ids: string[], organizationId: string, ownerId: string | null, storeId?: string): Promise<{ requested: number; assigned: number }> {
+  async assignOwnerBulk(ids: string[], organizationId: string, ownerId: string | null, storeId?: string, actor?: AssignmentActor): Promise<{ requested: number; assigned: number }> {
     const unique = [...new Set(ids)];
     const filter = { _id: { $in: unique }, organizationId, ...(storeId ? { storeId } : {}) };
     const update = ownerId ? { $set: { ownerId, ownerAssignedManually: true } } : { $unset: { ownerId: '', ownerAssignedManually: '' } };
+    const before = actor ? await this.dealModel.find(filter).select({ ownerId: 1 }).lean().exec() : [];
     const result = await this.dealModel.updateMany(filter, update).exec();
+    await this.recordAssignments(
+      organizationId,
+      before.map((d) => ({ dealId: String(d._id), from: d.ownerId, to: ownerId })),
+      actor,
+    ).catch((err: Error) => this.logger.warn(`Assignment history: ${err.message}`));
     return { requested: unique.length, assigned: result.matchedCount };
   }
 

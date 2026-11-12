@@ -1,82 +1,75 @@
 import { useMemo, useState } from 'react';
-import { useQuery, keepPreviousData } from '@tanstack/react-query';
-import { AnimatePresence, LayoutGroup, motion } from 'framer-motion';
+import { Link, useLocation } from 'react-router-dom';
+import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import clsx from 'clsx';
-import {
-  FiActivity,
-  FiArrowRight,
-  FiAward,
-  FiBarChart2,
-  FiClock,
-  FiDollarSign,
-  FiSearch,
-  FiTarget,
-  FiTrendingUp,
-  FiUsers,
-} from 'react-icons/fi';
-import { Avatar, EmptyState, MonthYearFilterPopup, PageHeader, SectionCard, Skeleton, StatTile } from '@/components/ui';
-import type { DateRange } from '@/components/ui';
-import { CURRENT_MONTH, CURRENT_YEAR, rangeForMonth } from '@/components/ui';
-import { formatINR as money } from '@/utils/currency';
+import dayjs from 'dayjs';
+import { FiActivity, FiAlertTriangle, FiBarChart2, FiGrid, FiHome, FiTrendingUp, FiUsers } from 'react-icons/fi';
+import { EmptyState, PageHeader, SectionCard, SelectMenu, Skeleton } from '@/components/ui';
+import { ROUTES } from '@/constants/routes';
 import { analyticsDashboardService } from '@/services/analyticsDashboardService';
-import { UserPerformanceDetailView } from './components/UserPerformanceDetailView';
+import { teamActivityService, type TeamActivityPerson, type TeamPeriodValue } from '@/services/teamActivityService';
+import { ActivityListModal } from '@/features/team-activity/ActivityList';
+import { PersonActivityView } from '@/features/team-activity/PersonActivityView';
+import { PeriodPicker, describePeriod } from '@/features/team-activity/PeriodPicker';
+import { TeamActivityKpis } from '@/features/team-activity/TeamActivityKpis';
+import { TeamActivityTable } from '@/features/team-activity/TeamActivityTable';
+import { TeamTrendChart } from '@/features/team-activity/TeamTrendChart';
+import { TeamSummaryStrip, BusinessesTable } from '@/features/team-activity/TeamOverviewParts';
+import type { AgentActivityLinkState } from '@/features/team-activity/TeamActivityPanel';
+import type { MetricDef } from '@/features/team-activity/metrics';
+import teamStyles from '@/features/team-activity/TeamActivity.module.css';
 import { UserRevenueComparisonChart } from './components/UserRevenueComparisonChart';
-import styles from './DashboardPage.module.css';
 
-function defaultRange(): DateRange {
-  return rangeForMonth(CURRENT_YEAR, CURRENT_MONTH);
+/** The current month, for the sales chart (revenue is counted by whole month). */
+function thisMonth(): { dateFrom: string; dateTo: string } {
+  return { dateFrom: dayjs().startOf('month').format('YYYY-MM-DD'), dateTo: dayjs().endOf('month').format('YYYY-MM-DD') };
 }
 
-type SortKey = 'revenue' | 'pipelineValue' | 'outstanding';
-const SORTS: { id: SortKey; label: string }[] = [
-  { id: 'revenue', label: 'Revenue' },
-  { id: 'pipelineValue', label: 'Pipeline' },
-  { id: 'outstanding', label: 'Dues' },
-];
-
-// Agent Activity — redesigned from an AI chat-agent task/report tracker into
-// a team revenue/pipeline/dues view: every admin-created user compared on
-// one chart, with a click-through to that user's own numbers. Backed by the
-// same GET /analytics-dashboard/overview endpoint the Analytics Dashboard
-// page uses (includeAllUsers=true here so every org user is listed, not just
-// manager/consultant — see that endpoint's own comments). An admin/owner
-// sees the whole org; a manager/consultant/agent_user sees only their own
-// row (server-scoped, not a client-side check) — the chart and drill-down
-// code paths are identical either way, just with a shorter roster.
+// Agent Activity: what everyone did in a period — deals created, emails sent,
+// replied, not replied and missed, calls and talk time, and how the AI Coach
+// scored their calls — each number opening the calls, emails or deals behind
+// it, and each person opening their own page. The Main Account owner sees
+// every business (with a business filter); an owner or admin their team; a
+// manager their store; anyone else themselves — the server decides.
 export function DashboardPage() {
-  const [range, setRange] = useState<DateRange>(defaultRange());
-  const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
-  const [query, setQuery] = useState('');
-  const [sortBy, setSortBy] = useState<SortKey>('revenue');
-  const dateFrom = range.dateFrom ?? defaultRange().dateFrom!;
-  const dateTo = range.dateTo ?? defaultRange().dateTo!;
+  // Opened from the Dashboard's Team Performance: on that person, for that period.
+  const linked = (useLocation().state ?? {}) as AgentActivityLinkState;
+  const [period, setPeriod] = useState<TeamPeriodValue>(linked.period ?? { period: 'today' });
+  const [business, setBusiness] = useState('all');
+  const [selected, setSelected] = useState<TeamActivityPerson | null>(linked.person ?? null);
+  const [openList, setOpenList] = useState<MetricDef | null>(null);
 
-  const { data, isLoading } = useQuery({
-    queryKey: ['agent-activity-overview', dateFrom, dateTo],
-    queryFn: () => analyticsDashboardService.getOverview(dateFrom, dateTo, undefined, undefined, true),
+  const { data, isLoading, isError, isFetching, dataUpdatedAt } = useQuery({
+    queryKey: ['team-activity', period, business],
+    queryFn: () => teamActivityService.overview(period, { organizationId: business }),
     refetchInterval: 60_000,
     placeholderData: keepPreviousData,
   });
 
-  const people = useMemo(() => {
-    const rows = data?.employeeLeaderboard ?? [];
-    const q = query.trim().toLowerCase();
-    return rows.filter((r) => !q || r.userName.toLowerCase().includes(q)).sort((a, b) => b[sortBy] - a[sortBy]);
-  }, [data, query, sortBy]);
-  // Revenue rank is fixed regardless of the chosen sort, so medals don't move around.
-  const revenueRank = useMemo(() => {
-    const ranked = [...(data?.employeeLeaderboard ?? [])].sort((a, b) => b.revenue - a.revenue);
-    return new Map(ranked.map((r, i) => [r.userId, i]));
-  }, [data]);
-  const topValue = Math.max(1, ...people.map((p) => p[sortBy]));
+  const current = data?.businesses.find((b) => b.isCurrent);
+  const showBusiness = !!data?.acrossBusinesses && business === 'all';
+  const month = thisMonth();
+  const salesForCurrent = !!data?.team && (business === 'all' || business === current?.id);
+  const { data: sales } = useQuery({
+    queryKey: ['agent-activity-overview', month.dateFrom, month.dateTo],
+    queryFn: () => analyticsDashboardService.getOverview(month.dateFrom, month.dateTo, undefined, undefined, true),
+    enabled: salesForCurrent,
+    staleTime: 60_000,
+  });
 
-  if (selectedUserId) {
+  const businessOptions = useMemo(
+    () => [{ value: 'all', label: 'All businesses' }, ...(data?.businesses ?? []).map((b) => ({ value: b.id, label: b.name, hint: b.isMain ? 'Main Account' : 'Sub-account' }))],
+    [data?.businesses],
+  );
+
+  if (selected) {
     return (
-      <UserPerformanceDetailView
-        userId={selectedUserId}
-        dateFrom={dateFrom}
-        dateTo={dateTo}
-        onBack={() => setSelectedUserId(null)}
+      <PersonActivityView
+        person={selected}
+        period={period}
+        onPeriodChange={setPeriod}
+        onBack={data?.team ? () => setSelected(null) : undefined}
+        isCurrentBusiness={selected.businessId === current?.id}
       />
     );
   }
@@ -85,152 +78,129 @@ export function DashboardPage() {
     <PageHeader
       icon={FiActivity}
       title="Agent Activity"
-      subtitle="Team revenue, pipeline and dues across your organization. Click anyone to see their numbers in detail."
-      actions={<MonthYearFilterPopup value={range} onChange={setRange} />}
+      subtitle={
+        data && !data.team
+          ? 'Your own deals, emails and calls — and how your calls scored.'
+          : 'What everyone did — deals, emails and calls — and how their calls scored. Click any number to see what’s behind it.'
+      }
+      meta={dataUpdatedAt ? <span className={teamStyles.updated}>Updated {dayjs(dataUpdatedAt).format('h:mm a')} · refreshes every minute</span> : undefined}
+      actions={
+        <div className={teamStyles.headerActions}>
+          {data?.acrossBusinesses && (
+            <SelectMenu value={business} options={businessOptions} onChange={setBusiness} ariaLabel="Business" icon={<FiHome aria-hidden />} className={teamStyles.businessPicker} />
+          )}
+          <PeriodPicker value={period} onChange={setPeriod} />
+        </div>
+      }
     />
   );
 
-  if (isLoading || !data) {
+  if (isLoading) {
     return (
-      <div className={styles.page}>
+      <div className={teamStyles.page}>
         {header}
-        <div className={styles.statsGrid}>
-          {[0, 1, 2, 3].map((i) => (
+        <div className={teamStyles.kpis}>
+          {Array.from({ length: 8 }).map((_, i) => (
             <Skeleton key={i} height={104} />
           ))}
         </div>
-        <Skeleton height={280} />
+        <Skeleton height={320} />
       </div>
     );
   }
 
+  if (isError || !data) {
+    return (
+      <div className={teamStyles.page}>
+        {header}
+        <EmptyState icon={FiAlertTriangle} title="Agent Activity couldn’t be loaded" description="Please try again in a moment." />
+      </div>
+    );
+  }
+
+  const periodWords = describePeriod(period);
+  const rangeNote =
+    data.businesses.length === 1 && period.period !== 'today' && period.period !== 'yesterday'
+      ? `${dayjs(data.businesses[0].from).format('D MMM')} – ${dayjs(data.businesses[0].to).format('D MMM YYYY')}`
+      : undefined;
+
   return (
-    <div className={styles.page}>
+    <div className={teamStyles.page}>
       {header}
 
-      <SectionCard title="Overview" icon={FiBarChart2}>
-        <div className={styles.statsGrid}>
-          <StatTile value={money(data.revenue.achieved)} label="Total Revenue" icon={FiDollarSign} />
-          <StatTile value={money(data.deals.openValue)} label="Pipeline" icon={FiTrendingUp} />
-          <StatTile value={money(data.outstanding.total)} label="Dues" icon={FiClock} />
-          <StatTile value={data.deals.wonCount} label="Deals Won" icon={FiTarget} />
+      <div className={clsx(teamStyles.fade, isFetching && teamStyles.fading)}>
+        <SectionCard
+          title={data.team ? `Team ${periodWords}` : `You ${periodWords}`}
+          icon={FiBarChart2}
+          action={rangeNote ? <span className={teamStyles.rangeNote}>{rangeNote}</span> : undefined}
+        >
+          <div className={teamStyles.panel}>
+            {data.team && <TeamSummaryStrip overview={data} />}
+            <TeamActivityKpis counts={data.totals} onOpen={setOpenList} currency={data.summary.currency} />
+          </div>
+        </SectionCard>
+      </div>
+
+      {showBusiness && data.businesses.length > 1 && (
+        <SectionCard title={`Businesses ${periodWords}`} icon={FiGrid}>
+          <BusinessesTable businesses={data.businesses} onSelect={setBusiness} />
+        </SectionCard>
+      )}
+
+      <SectionCard title="Activity trend" icon={FiTrendingUp}>
+        <TeamTrendChart period={period} filters={{ organizationId: business }} />
+      </SectionCard>
+
+      {data.unattributedDeals.total > 0 && (
+        <div className={teamStyles.notice} role="note">
+          <FiAlertTriangle aria-hidden />
+          <span>
+            <strong>
+              {data.unattributedDeals.total} deal{data.unattributedDeals.total === 1 ? '' : 's'} created {periodWords} {data.unattributedDeals.total === 1 ? 'isn’t' : 'aren’t'} credited to
+              anyone
+            </strong>{' '}
+            — the CRM names a salesperson who isn’t linked to a login:{' '}
+            {data.unattributedDeals.byCrmOwner
+              .slice(0, 4)
+              .map((o) => `${o.label}${o.shared ? ' (shared account)' : ''} ${o.count}`)
+              .join(', ')}
+            {data.unattributedDeals.byCrmOwner.length > 4 ? '…' : ''}. <Link to={ROUTES.settingsDealAssignment}>Link them in Deal Assignment</Link>
+          </span>
         </div>
-      </SectionCard>
+      )}
 
-      <SectionCard title="Team Performance" icon={FiBarChart2}>
-        {data.employeeLeaderboard.length === 0 ? (
-          <EmptyState icon={FiUsers} title="No users to show yet" description="Add people under Settings → Users." />
-        ) : (
-          <UserRevenueComparisonChart rows={data.employeeLeaderboard} onSelect={setSelectedUserId} />
-        )}
-      </SectionCard>
+      {data.team && (
+        <SectionCard title="People" icon={FiUsers}>
+          <TeamActivityTable people={data.people} onSelect={setSelected} showBusiness={showBusiness} />
+        </SectionCard>
+      )}
 
-      <SectionCard title="All Users" icon={FiUsers}>
-        {data.employeeLeaderboard.length === 0 ? (
-          <EmptyState icon={FiUsers} title="No admin-created users to show yet" />
-        ) : (
-          <>
-            <div className={styles.peopleToolbar}>
-              <label className={styles.peopleSearch}>
-                <FiSearch aria-hidden />
-                <input value={query} placeholder="Search people" onChange={(e) => setQuery(e.target.value)} />
-              </label>
-              <LayoutGroup id="agent-sort">
-                <div className={styles.segmented} role="radiogroup" aria-label="Sort people by">
-                  <span className={styles.segmentedLabel}>Sort by</span>
-                  {SORTS.map((s) => (
-                    <button
-                      key={s.id}
-                      type="button"
-                      role="radio"
-                      aria-checked={sortBy === s.id}
-                      className={clsx(styles.segment, sortBy === s.id && styles.segmentActive)}
-                      onClick={() => setSortBy(s.id)}
-                    >
-                      {sortBy === s.id && (
-                        <motion.span
-                          layoutId="agent-sort-thumb"
-                          className={styles.segmentThumb}
-                          transition={{ type: 'spring', stiffness: 460, damping: 36 }}
-                        />
-                      )}
-                      <span className={styles.segmentText}>{s.label}</span>
-                    </button>
-                  ))}
-                </div>
-              </LayoutGroup>
-            </div>
+      {!data.team && data.people[0] && (
+        <SectionCard title="Your calls, emails and deals" icon={FiUsers}>
+          <TeamActivityTable people={data.people} onSelect={setSelected} showBusiness={false} searchable={false} />
+        </SectionCard>
+      )}
 
-            {people.length === 0 ? (
-              <EmptyState compact icon={FiSearch} title="Nobody matches that search" />
-            ) : (
-              <motion.div className={styles.agentsGrid}>
-                <AnimatePresence initial={false}>
-                  {people.map((row, i) => {
-                    const rank = revenueRank.get(row.userId) ?? 99;
-                    return (
-                      <motion.button
-                        key={row.userId}
-                        type="button"
-                        className={styles.personCard}
-                        onClick={() => setSelectedUserId(row.userId)}
-                        initial={{ opacity: 0, scale: 0.96 }}
-                        animate={{ opacity: 1, scale: 1 }}
-                        exit={{ opacity: 0, scale: 0.96 }}
-                        transition={{ duration: 0.25, ease: [0.16, 1, 0.3, 1], delay: Math.min(i, 12) * 0.03 }}
-                      >
-                        <div className={styles.personTop}>
-                          <Avatar name={row.userName} size="md" />
-                          <div className={styles.personName}>
-                            <span className={styles.agentName}>{row.userName}</span>
-                            <span className={styles.personSub}>
-                              {row.wonCount} deal{row.wonCount === 1 ? '' : 's'} won
-                            </span>
-                          </div>
-                          {rank < 3 && row.revenue > 0 && (
-                            <span className={clsx(styles.medal, styles[`medal${rank + 1}`])} title={`#${rank + 1} by revenue`}>
-                              <FiAward />
-                            </span>
-                          )}
-                        </div>
+      {salesForCurrent && sales && sales.employeeLeaderboard.length > 0 && (
+        <SectionCard title={`Revenue by person · ${dayjs().format('MMMM')}${showBusiness && current ? ` · ${current.name}` : ''}`} icon={FiTrendingUp}>
+          <UserRevenueComparisonChart
+            rows={sales.employeeLeaderboard}
+            onSelect={(userId) => {
+              const person = data.people.find((p) => p.userId === userId && p.businessId === current?.id);
+              if (person) setSelected(person);
+            }}
+          />
+        </SectionCard>
+      )}
 
-                        <div className={styles.personFigure}>
-                          <span className={styles.personFigureValue}>{money(row[sortBy])}</span>
-                          <span className={styles.personFigureLabel}>{SORTS.find((s) => s.id === sortBy)?.label}</span>
-                        </div>
-                        <div className={styles.personTrack}>
-                          <motion.div
-                            className={styles.personFill}
-                            initial={{ width: 0 }}
-                            animate={{ width: `${(row[sortBy] / topValue) * 100}%` }}
-                            transition={{ duration: 0.7, ease: [0.16, 1, 0.3, 1] }}
-                          />
-                        </div>
-
-                        <div className={styles.personStats}>
-                          <span>
-                            Revenue <strong>{money(row.revenue)}</strong>
-                          </span>
-                          <span>
-                            Pipeline <strong>{money(row.pipelineValue)}</strong>
-                          </span>
-                          <span>
-                            Dues <strong>{money(row.outstanding)}</strong>
-                          </span>
-                        </div>
-
-                        <span className={styles.personCta}>
-                          View details <FiArrowRight />
-                        </span>
-                      </motion.button>
-                    );
-                  })}
-                </AnimatePresence>
-              </motion.div>
-            )}
-          </>
-        )}
-      </SectionCard>
+      <ActivityListModal
+        kind={openList?.list ?? null}
+        onClose={() => setOpenList(null)}
+        period={period}
+        filters={{ organizationId: business, callFilter: openList?.callFilter }}
+        showPerson={data.team}
+        subtitle={openList?.meaning}
+      />
     </div>
   );
 }

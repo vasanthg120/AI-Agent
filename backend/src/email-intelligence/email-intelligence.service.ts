@@ -81,7 +81,22 @@ export const RELEVANT_EMAIL_INTENTS = [
 ];
 
 /** Team Performance's email figures (see teamEmailMatch). */
-export type TeamEmailMetric = 'received' | 'replied' | 'pending' | 'missed';
+export type TeamEmailMetric = 'received' | 'replied' | 'pending' | 'missed' | 'customer_replies' | 'awaiting_customer';
+
+export const TEAM_EMAIL_METRICS: TeamEmailMetric[] = ['received', 'replied', 'pending', 'missed', 'customer_replies', 'awaiting_customer'];
+
+/** One follow-up reminder in a Team Performance list. */
+export interface TeamFollowUpRow {
+  id: string;
+  employeeId: string;
+  title: string;
+  business?: string;
+  dueDate: Date;
+  status: 'pending' | 'done';
+  overdue: boolean;
+  completedAt?: Date;
+  completedVia?: string;
+}
 
 /** One email in a Team Performance list. */
 export interface TeamEmailRow {
@@ -100,6 +115,18 @@ export interface TeamEmailRow {
   intent?: string;
   summary?: string;
   nextAction?: string;
+}
+
+/** One message from a mailbox's Sent Items, in a Team Performance list. */
+export interface TeamSentEmailRow {
+  id: string;
+  employeeId: string;
+  sentAt: Date;
+  subject: string;
+  to: string;
+  preview: string;
+  // Sent as an answer to another message (it has an In-Reply-To).
+  isReply: boolean;
 }
 
 const RELEVANT_INTENT_LABELS: Record<string, string> = {
@@ -987,7 +1014,11 @@ export class EmailIntelligenceService {
   //    message of the same conversation (threadRespondedAt) is not a second reply;
   //  - pending: owed and unanswered (needsResponseMatch), still inside its 24 hours;
   //  - missed: owed and unanswered, its 24 hours ran out inside the period — so
-  //    "missed today" is what became overdue today, not always zero.
+  //    "missed today" is what became overdue today, not always zero;
+  //  - customer_replies: customers writing back in a conversation (the message
+  //    answers an earlier one) that arrived in the period;
+  //  - awaiting_customer: we replied in the period and asked the customer
+  //    something, and they have not written back since.
   // Mailboxes handled by someone else count for that person (mailboxAttribution).
   private teamEmailMatch(organizationId: string, metric: TeamEmailMetric, start: Date, end: Date, owners: string[], now: Date): Record<string, unknown> {
     const day = 24 * 60 * 60 * 1000;
@@ -997,6 +1028,15 @@ export class EmailIntelligenceService {
       return {
         ...base,
         intent: { $nin: ['internal', 'spam'] },
+        $or: [{ sentAt: { $gte: start, $lt: end } }, { externalReplyDetectedAt: { $gte: start, $lt: end } }],
+      };
+    if (metric === 'customer_replies')
+      return { ...base, intent: { $in: RELEVANT_EMAIL_INTENTS }, receivedAt: { $gte: start, $lt: end }, inReplyTo: { $exists: true, $nin: [null, ''] } };
+    if (metric === 'awaiting_customer')
+      return {
+        ...base,
+        threadHead: { $ne: false },
+        replyAwaitsCustomer: true,
         $or: [{ sentAt: { $gte: start, $lt: end } }, { externalReplyDetectedAt: { $gte: start, $lt: end } }],
       };
     if (metric === 'pending')
@@ -1010,13 +1050,13 @@ export class EmailIntelligenceService {
     };
   }
 
-  /** Per employee: received, replied, pending and missed in the period. */
+  /** Per employee: every TEAM_EMAIL_METRICS figure in the period. */
   async teamEmailCounts(organizationId: string, start: Date, end: Date, employeeIds: string[], now = new Date()): Promise<Map<string, Record<TeamEmailMetric, number>>> {
     const counts = new Map<string, Record<TeamEmailMetric, number>>();
     if (employeeIds.length === 0) return counts;
     const attribution = await this.mailboxAttribution(employeeIds);
     if (attribution.mailboxOwnerIds.length === 0) return counts;
-    const metrics: TeamEmailMetric[] = ['received', 'replied', 'pending', 'missed'];
+    const metrics = TEAM_EMAIL_METRICS;
     const grouped = await Promise.all(
       metrics.map((metric) =>
         this.itemModel
@@ -1030,12 +1070,130 @@ export class EmailIntelligenceService {
     metrics.forEach((metric, i) => {
       for (const row of grouped[i]) {
         const employee = attribution.employeeOf(String(row._id));
-        const entry = counts.get(employee) ?? { received: 0, replied: 0, pending: 0, missed: 0 };
+        const entry = counts.get(employee) ?? { received: 0, replied: 0, pending: 0, missed: 0, customer_replies: 0, awaiting_customer: 0 };
         entry[metric] += row.count;
         counts.set(employee, entry);
       }
     });
     return counts;
+  }
+
+  /**
+   * Per employee: every message that left their mailbox in the period (its Sent
+   * Items — written in HaiVE or in Outlook, replies and new mail alike). The
+   * mailbox counts for whoever handles it, as for the figures above.
+   */
+  async teamSentCounts(organizationId: string, start: Date, end: Date, employeeIds: string[]): Promise<Map<string, number>> {
+    if (employeeIds.length === 0) return new Map();
+    const attribution = await this.mailboxAttribution(employeeIds);
+    if (attribution.mailboxOwnerIds.length === 0) return new Map();
+    const rows = await this.itemModel.db
+      .collection('email_sent_items')
+      .aggregate<{ _id: string; count: number }>([
+        { $match: { organizationId, userId: { $in: attribution.mailboxOwnerIds }, sentAt: { $gte: start, $lt: end } } },
+        { $group: { _id: '$userId', count: { $sum: 1 } } },
+      ])
+      .toArray();
+    return attribution.countsByEmployee(rows);
+  }
+
+  /**
+   * Per employee: email follow-ups (the reminders HaiVE keeps for promised or
+   * owed replies) completed in the period, still pending now, and of those the
+   * ones past their due date. A mailbox counts for whoever handles it.
+   */
+  async teamFollowUpCounts(
+    organizationId: string,
+    start: Date,
+    end: Date,
+    employeeIds: string[],
+    now = new Date(),
+  ): Promise<Map<string, { completed: number; pending: number; overdue: number }>> {
+    const counts = new Map<string, { completed: number; pending: number; overdue: number }>();
+    if (employeeIds.length === 0) return counts;
+    const attribution = await this.mailboxAttribution(employeeIds);
+    if (attribution.mailboxOwnerIds.length === 0) return counts;
+    const owners = { organizationId, userId: { $in: attribution.mailboxOwnerIds } };
+    const rows = await this.followUpModel
+      .aggregate<{ _id: string; completed: number; pending: number; overdue: number }>([
+        { $match: { ...owners, $or: [{ status: 'pending' }, { status: 'done', completedAt: { $gte: start, $lt: end } }] } },
+        {
+          $group: {
+            _id: '$userId',
+            completed: { $sum: { $cond: [{ $eq: ['$status', 'done'] }, 1, 0] } },
+            pending: { $sum: { $cond: [{ $eq: ['$status', 'pending'] }, 1, 0] } },
+            overdue: { $sum: { $cond: [{ $and: [{ $eq: ['$status', 'pending'] }, { $lt: ['$dueDate', now] }] }, 1, 0] } },
+          },
+        },
+      ])
+      .exec();
+    for (const row of rows) {
+      const employee = attribution.employeeOf(String(row._id));
+      const entry = counts.get(employee) ?? { completed: 0, pending: 0, overdue: 0 };
+      entry.completed += row.completed;
+      entry.pending += row.pending;
+      entry.overdue += row.overdue;
+      counts.set(employee, entry);
+    }
+    return counts;
+  }
+
+  /** The reminders behind teamFollowUpCounts: still pending (soonest due first), then completed in the period. */
+  async teamFollowUpList(organizationId: string, start: Date, end: Date, employeeIds: string[], limit = 200, now = new Date()): Promise<{ items: TeamFollowUpRow[]; total: number }> {
+    if (employeeIds.length === 0) return { items: [], total: 0 };
+    const attribution = await this.mailboxAttribution(employeeIds);
+    if (attribution.mailboxOwnerIds.length === 0) return { items: [], total: 0 };
+    const match = { organizationId, userId: { $in: attribution.mailboxOwnerIds }, $or: [{ status: 'pending' }, { status: 'done', completedAt: { $gte: start, $lt: end } }] };
+    const [docs, total] = await Promise.all([this.followUpModel.find(match).sort({ status: -1, dueDate: 1 }).limit(limit).lean().exec(), this.followUpModel.countDocuments(match).exec()]);
+    return {
+      items: docs.map((d) => ({
+        id: String(d._id),
+        employeeId: attribution.employeeOf(String(d.userId)),
+        title: d.title,
+        business: d.businessName,
+        dueDate: d.dueDate,
+        status: d.status === 'done' ? 'done' : 'pending',
+        overdue: d.status === 'pending' && new Date(d.dueDate).getTime() < now.getTime(),
+        completedAt: d.completedAt,
+        completedVia: d.completedVia,
+      })),
+      total,
+    };
+  }
+
+  /** The messages behind teamSentCounts, newest first. */
+  async teamSentList(
+    organizationId: string,
+    start: Date,
+    end: Date,
+    employeeIds: string[],
+    limit = 200,
+  ): Promise<{ items: TeamSentEmailRow[]; total: number }> {
+    if (employeeIds.length === 0) return { items: [], total: 0 };
+    const attribution = await this.mailboxAttribution(employeeIds);
+    if (attribution.mailboxOwnerIds.length === 0) return { items: [], total: 0 };
+    const collection = this.itemModel.db.collection('email_sent_items');
+    const match = { organizationId, userId: { $in: attribution.mailboxOwnerIds }, sentAt: { $gte: start, $lt: end } };
+    const [docs, total] = await Promise.all([
+      collection
+        .find(match, { projection: { userId: 1, sentAt: 1, subject: 1, toAddresses: 1, bodyPreview: 1, inReplyTo: 1 } })
+        .sort({ sentAt: -1 })
+        .limit(limit)
+        .toArray(),
+      collection.countDocuments(match),
+    ]);
+    return {
+      items: docs.map((d) => ({
+        id: String(d._id),
+        employeeId: attribution.employeeOf(String(d.userId)),
+        sentAt: d.sentAt as Date,
+        subject: (d.subject as string) || '(no subject)',
+        to: ((d.toAddresses as string[] | undefined) ?? []).join(', '),
+        preview: (d.bodyPreview as string | undefined) ?? '',
+        isReply: !!d.inReplyTo,
+      })),
+      total,
+    };
   }
 
   /** The emails behind one of those numbers, newest first. */

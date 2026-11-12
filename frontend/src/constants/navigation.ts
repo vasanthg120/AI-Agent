@@ -42,7 +42,7 @@ export const NAV_GROUPS: NavGroup[] = [
         path: ROUTES.agentActivity,
         icon: FiActivity,
         module: 'dashboard',
-        hint: 'What your AI agents are working on',
+        hint: 'What everyone did — deals, emails, calls and scores',
       },
       {
         id: 'timeline',

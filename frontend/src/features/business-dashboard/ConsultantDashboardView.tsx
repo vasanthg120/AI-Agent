@@ -15,6 +15,7 @@ import { TodaysTasksSection } from './components/TodaysTasksSection';
 import { EmailSummarySection } from './components/EmailSummarySection';
 import { TimelineSection } from './components/TimelineSection';
 import { HistoricalActivityFooter } from './components/HistoricalActivityFooter';
+import { openDealDrawer } from '@/stores/dealDrawerStore';
 import styles from './business-dashboard.module.css';
 
 export function ConsultantDashboardView() {
@@ -115,13 +116,13 @@ export function ConsultantDashboardView() {
           <div className={styles.emptyState}>Your pipeline is empty.</div>
         ) : (
           data.customerPipeline.map((d) => (
-            <div key={d.dealId} className={styles.listItem}>
+            <button key={d.dealId} type="button" className={`${styles.listItem} ${styles.listItemButton}`} onClick={() => openDealDrawer(d.dealId)}>
               <div className={styles.listItemMain}>
                 <span className={styles.listItemTitle}>{d.name}</span>
                 <span className={styles.listItemMeta}>Stage: {d.stageId ? formatStageLabel(d.stageId) : '—'}</span>
               </div>
               <span className={styles.rankValue}>{money(d.monetaryValue)}</span>
-            </div>
+            </button>
           ))
         )}
       </SectionCard>

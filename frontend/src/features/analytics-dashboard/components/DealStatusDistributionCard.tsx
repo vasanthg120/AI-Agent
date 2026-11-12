@@ -16,7 +16,7 @@ export interface DealStatusDistributionCardProps {
 }
 
 function toRows(items: Deal[]): DrillDownRow[] {
-  return items.map((d) => ({ id: d._id, title: d.name, subtitle: d.dealStatus, meta: d.expectedClosingDate, value: d.monetaryValue }));
+  return items.map((d) => ({ id: d._id, dealId: d._id, title: d.name, subtitle: d.dealStatus, meta: d.expectedClosingDate, value: d.monetaryValue }));
 }
 
 // "In review" = open deals with no unapproved quote out yet (i.e. not

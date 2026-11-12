@@ -5,25 +5,31 @@ import { AnimatePresence, motion } from 'framer-motion';
 import clsx from 'clsx';
 import { FiAlertCircle, FiCheck, FiChevronDown, FiHome, FiLink, FiSearch, FiShuffle, FiUserCheck, FiUsers, FiX } from 'react-icons/fi';
 import {
-  Avatar,
   Badge,
   Button,
   ChoiceCards,
   EmptyState,
   Input,
   MultiSelectDropdown,
+  SelectMenu,
   Skeleton,
   type ChoiceCardItem,
   type MultiSelectOption,
+  type SelectMenuOption,
 } from '@/components/ui';
 import { extractErrorMessage } from '@/utils/errors';
 import { formatINR } from '@/utils/currency';
 import { useDebouncedValue } from '@/hooks/useDebouncedValue';
 import { usersService } from '@/services/usersService';
-import { isSalesperson } from '@/utils/access';
+import { SALES_ROLE_LABEL, isSalesperson } from '@/utils/access';
+import { openDealDrawer } from '@/stores/dealDrawerStore';
+import dayjs from 'dayjs';
+import relativeTime from 'dayjs/plugin/relativeTime';
 import { dealsService, type AssignmentDealRow, type DealFilters, type ExternalOwnerRow } from '@/services/dealsService';
 import { SettingsSection } from '../components/SettingsSection';
 import styles from './DealAssignmentSettings.module.css';
+
+dayjs.extend(relativeTime);
 
 const STATUS_VARIANT: Record<AssignmentDealRow['dealStatus'], 'success' | 'danger' | 'neutral'> = {
   won: 'success',
@@ -50,6 +56,7 @@ export function DealAssignmentSettings() {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [bulkOwner, setBulkOwner] = useState('');
   const [bulkBusy, setBulkBusy] = useState(false);
+  const [bulkReason, setBulkReason] = useState('');
   const [assigning, setAssigning] = useState<Record<string, boolean>>({});
   const [flash, setFlash] = useState<Record<string, number>>({});
   const [mappingsOpen, setMappingsOpen] = useState(false);
@@ -114,8 +121,11 @@ export function DealAssignmentSettings() {
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const employeeName = (id?: string) => employees.find((e) => e.id === id)?.name;
 
+  // An owner change moves figures everywhere: the counts here, Agent Activity, the dashboards, an open deal panel.
   const refreshCounts = () => {
-    void queryClient.invalidateQueries({ queryKey: ['deal-assignment-count'] });
+    for (const key of ['deal-assignment-count', 'team-activity', 'team-activity-list', 'team-activity-person', 'deal-insight', 'analytics-dashboard', 'agent-activity-overview']) {
+      void queryClient.invalidateQueries({ queryKey: [key] });
+    }
   };
 
   // Optimistic: the row changes immediately and flashes; only a failure puts
@@ -164,7 +174,7 @@ export function DealAssignmentSettings() {
     const ids = [...selected];
     try {
       // One request for the whole selection.
-      const result = await dealsService.assignMany(ids, bulkOwner);
+      const result = await dealsService.assignMany(ids, bulkOwner, bulkReason);
       ids.forEach((id) => applyOwner(id, bulkOwner));
       if (result.assigned === result.requested) {
         toast.success(`${result.assigned} deal${result.assigned === 1 ? '' : 's'} assigned to ${employeeName(bulkOwner)}`);
@@ -175,6 +185,7 @@ export function DealAssignmentSettings() {
       }
       setSelected(new Set());
       setBulkOwner('');
+      setBulkReason('');
     } catch (err) {
       // Nothing was changed: the selection is kept so it can be tried again as it is.
       toast.error(`The deals couldn’t be assigned: ${extractErrorMessage(err)}`, { duration: 8_000 });
@@ -289,7 +300,11 @@ export function DealAssignmentSettings() {
     { id: 'all', label: 'All deals', description: 'Every deal, with who owns it now', icon: FiUsers, count: allCount, tone: 'neutral' },
   ];
 
-  const employeeOptions: MultiSelectOption[] = employees.map((e) => ({ value: e.id, label: e.name }));
+  // Same people in every picker, with their email so two people with one name can be told apart.
+  const roleOf = (roles: string[]) => roles.map((r) => SALES_ROLE_LABEL[r]).find(Boolean);
+  const employeeOptions: (MultiSelectOption & SelectMenuOption)[] = employees.map((e) => ({ value: e.id, label: e.name, hint: [roleOf(e.roles), e.email].filter(Boolean).join(' · ') }));
+  const ownerOptionsFor = (d: AssignmentDealRow): SelectMenuOption[] =>
+    d.ownerId && !employees.some((e) => e.id === d.ownerId) ? [{ value: d.ownerId, label: d.ownerName ?? 'Unknown user' }, ...employeeOptions] : employeeOptions;
 
   return (
     <>
@@ -357,6 +372,9 @@ export function DealAssignmentSettings() {
                           label={m.mapping ? 'Linked users' : 'Choose users…'}
                           options={employeeOptions}
                           selected={choice}
+                          showNames
+                          searchFrom={6}
+                          className={styles.mappingDropdown}
                           onChange={(values) => setMappingChoice((prev) => ({ ...prev, [m.externalOwnerRef]: values }))}
                         />
                         <Button
@@ -438,14 +456,24 @@ export function DealAssignmentSettings() {
                 <span className={styles.bulkCount}>
                   <FiUserCheck /> {selected.size} selected
                 </span>
-                <select className={styles.select} value={bulkOwner} onChange={(e) => setBulkOwner(e.target.value)} aria-label="Assign selected to">
-                  <option value="">Assign to…</option>
-                  {employees.map((e) => (
-                    <option key={e.id} value={e.id}>
-                      {e.name}
-                    </option>
-                  ))}
-                </select>
+                <SelectMenu
+                  value={bulkOwner}
+                  options={employeeOptions}
+                  onChange={setBulkOwner}
+                  placeholder="Assign to…"
+                  ariaLabel="Assign selected to"
+                  avatars
+                  searchFrom={6}
+                  className={styles.bulkPicker}
+                />
+                <input
+                  className={styles.reasonInput}
+                  value={bulkReason}
+                  onChange={(e) => setBulkReason(e.target.value)}
+                  placeholder="Reason (optional)"
+                  aria-label="Reason for the reassignment"
+                  maxLength={300}
+                />
                 <Button type="button" size="sm" disabled={!bulkOwner} loading={bulkBusy} onClick={() => void handleBulkAssign()}>
                   Assign {selected.size}
                 </Button>
@@ -501,7 +529,9 @@ export function DealAssignmentSettings() {
                         />
                       </td>
                       <td>
-                        <span className={styles.dealName}>{d.name}</span>
+                        <button type="button" className={styles.dealNameButton} onClick={() => openDealDrawer(d._id)} title="Open the deal">
+                          {d.name}
+                        </button>
                         {d.expectedClosingDate && <span className={styles.dealMeta}>Closes {d.expectedClosingDate}</span>}
                       </td>
                       <td className={styles.customer}>{d.customerName ?? '—'}</td>
@@ -511,32 +541,32 @@ export function DealAssignmentSettings() {
                       <td className={styles.valueCol}>{formatINR(d.monetaryValue)}</td>
                       <td>
                         <div className={styles.ownerCell}>
-                          {d.ownershipStatus === 'assigned' ? (
-                            <Avatar name={d.ownerName ?? '?'} size="sm" />
-                          ) : (
+                          {d.ownershipStatus !== 'assigned' && (
                             <span className={clsx(styles.ownerDot, d.ownershipStatus === 'pending_mapping' && styles.ownerDotPending)} />
                           )}
-                          <select
-                            className={clsx(styles.ownerSelect, d.ownershipStatus !== 'assigned' && styles.ownerSelectEmpty)}
+                          <SelectMenu
                             value={d.ownerId ?? ''}
+                            options={ownerOptionsFor(d)}
+                            onChange={(ownerId) => void handleAssign(d, ownerId)}
+                            emptyOption={d.ownershipStatus === 'pending_mapping' ? 'Not linked yet' : 'Unassigned'}
+                            ariaLabel={`Owner of ${d.name}`}
                             disabled={assigning[d._id]}
-                            onChange={(e) => void handleAssign(d, e.target.value)}
-                            aria-label={`Owner of ${d.name}`}
-                          >
-                            <option value="">{d.ownershipStatus === 'pending_mapping' ? 'Not linked yet' : 'Unassigned'}</option>
-                            {d.ownerId && !employees.some((e) => e.id === d.ownerId) && (
-                              <option value={d.ownerId}>{d.ownerName ?? 'Unknown user'}</option>
-                            )}
-                            {employees.map((e) => (
-                              <option key={e.id} value={e.id}>
-                                {e.name}
-                              </option>
-                            ))}
-                          </select>
+                            avatars
+                            size="sm"
+                            searchFrom={6}
+                            className={styles.ownerPicker}
+                          />
                         </div>
                         {/* The CRM does name an owner here — it just isn't linked to a HaiVE user. Never "Unassigned". */}
                         {d.ownershipStatus === 'pending_mapping' && (
                           <span className={styles.crmOwner}>CRM owner: {d.externalOwnerLabel ?? d.externalOwnerRef}</span>
+                        )}
+                        {d.lastAssignment && (
+                          <span className={styles.lastAssigned} title={d.lastAssignment.reason ? `Reason: ${d.lastAssignment.reason}` : undefined}>
+                            Assigned {dayjs(d.lastAssignment.at).fromNow()}
+                            {d.lastAssignment.byName ? ` by ${d.lastAssignment.byName}` : ''}
+                            {d.lastAssignment.reason ? ` — ${d.lastAssignment.reason}` : ''}
+                          </span>
                         )}
                       </td>
                     </tr>

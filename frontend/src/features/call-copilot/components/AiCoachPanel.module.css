@@ -604,3 +604,9 @@
     animation: none;
   }
 }
+
+/* A teammate's call, viewed from the team list: nothing to press. */
+.readOnlyNote {
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+}
