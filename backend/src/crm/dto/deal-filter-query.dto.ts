@@ -1,5 +1,5 @@
 import { Transform } from 'class-transformer';
-import { IsArray, IsBoolean, IsIn, IsNumber, IsOptional, IsString, Matches, Min } from 'class-validator';
+import { IsArray, IsIn, IsNumber, IsOptional, IsString, Matches, Min } from 'class-validator';
 
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -57,14 +57,6 @@ export class DealFilterQueryDto {
   @IsOptional()
   @Matches(DATE, { message: 'closingBefore must be YYYY-MM-DD' })
   closingBefore?: string;
-
-  // Only deals in the pipeline (crm/pipeline.util.ts): the lists behind the
-  // dashboard's pipeline figures. Open deals, or for a CRM like Hoops its work
-  // in progress — use this rather than dealStatus=open for those lists.
-  @IsOptional()
-  @Transform(({ value }) => (value === undefined || value === '' ? undefined : value === true || value === 'true'))
-  @IsBoolean()
-  inPipeline?: boolean;
 
   @IsOptional()
   @Transform(splitCsv)

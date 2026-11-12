@@ -419,11 +419,12 @@ export const CRM_PROVIDERS: Record<CrmProviderId, CrmProviderDefinition> = {
   // 7:00pm AEST, as Hoops requires (syncDefaults.window). Each transaction — a
   // quote/SalesDoc with the job it became — is a deal and its quotation; each
   // customer an account, its contacts contacts. The "_" fields are computed by
-  // the adapter (python-agent/app/integrations/hoops.py), as Hoops' own jobs
-  // report reads them: a sale is won when its job is created (dated by the
-  // job); the pipeline is its work in progress (jobs neither completed nor
-  // voided, `inPipeline`); an accepted quote with no job yet is open; lost when
-  // it's voided or lost. (Was "won when accepted" until 2026-11-11.)
+  // the adapter (python-agent/app/integrations/hoops.py): a sale is won when
+  // its job is created (dated by the job, as Hoops' jobs report counts it);
+  // every quote created but not won — sent, at a follow-up step, on hold, a
+  // draft, or accepted with no job yet — is open, and the open quotes are the
+  // pipeline; lost when it's voided or lost. (Was "won when accepted" until
+  // 2026-11-11.)
   hoops: {
     id: 'hoops',
     label: 'Hoops CRM',

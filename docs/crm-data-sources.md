@@ -354,15 +354,14 @@ source on connecting (Hoops mapping and schedule; its webhook key stops working)
     - **Won when its job is created** (the report's "Won" section), dated by
       the job (`jobCreatedAt`), at the quote's value. November 2026 = one job,
       #2373, where counting accepted quotes gave 23.
-    - **The pipeline is the work in progress** (the report's "Work in
-      progress"): every job neither completed nor voided — paid or invoiced
-      jobs included, until Hoops completes them. Those deals are won *and*
-      carry `inPipeline: true`; the Dashboard's pipeline figures and their
-      lists count `inPipeline` (`crm/pipeline.util.ts`; deals without the flag
-      — other CRMs — still count when open). Quotes waiting on a customer, and
-      accepted quotes with no job yet ("Accepted – no job yet"), are open but
-      not in the pipeline (open quotes still drive follow-ups and overdue
-      alerts).
+    - **The pipeline is every quote created but not won** — open: sent, at the
+      account's own step (follow-ups, on hold, quoting options…), a draft, or
+      accepted with no job yet ("Accepted – no job yet"). The Dashboard's
+      pipeline figures count open deals, as for every CRM. (On 2026-11-12 the
+      pipeline was briefly the jobs in progress, flagged `inPipeline`; the user
+      corrected it — those are won — and the flag was removed from every deal.)
+      Surry Hills, 12 Nov 2026: 307 quotes, A$818k incl. GST, a third of it
+      one quote on hold (#3587 Vertiv, A$259,969, since Dec 2025).
     - Lost when voided (`voidedAt`) or lost; open quotes carry the quote
       deadline, or 30 days after creation.
     - **Days are the business's own** (its time zone, Sydney by default for
@@ -373,9 +372,9 @@ source on connecting (Hoops mapping and schedule; its webhook key stops working)
       `sourceData` (`hoops_won_rule.py`, at python-agent startup, flag
       `sync.wonRule`): no activity rows, no `lastActivityAt`; the default
       status words (`accepted, completed` or `invoiced`) become `job`.
-    - The work in progress reaches back years (jobs are rarely closed in
-      Hoops), so a Hoops source that should match it reads **Everything**
-      (Surry Hills: switched from 12 months on 2026-11-11).
+    - History stays as chosen when connecting (Surry Hills: 12 months). Quotes
+      still open in Hoops from years ago would otherwise all join the pipeline
+      as past due.
   - Quotation: status voided / accepted / viewed / sent, approval, number,
     customer and contact details, tax (`taxTotal`) and shipping as charge
     lines, the configured currency. **Voided quotations are left out of

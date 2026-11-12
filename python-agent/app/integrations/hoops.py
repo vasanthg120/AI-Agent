@@ -325,14 +325,17 @@ def transaction_fields(row: dict, currency: str, zone: tzinfo | None = None) -> 
     reference shows them at the top level — both are read). _status is what the
     status mapping reads: voided / job / accepted / quoted / draft.
 
-    Hoops' own jobs report decides it (user, 2026-11-11, from that report):
+    Decided with the user (2026-11-11/12, from Hoops' own jobs report):
     - a sale is WON WHEN ITS JOB IS CREATED (the report's "Won" section —
-      November: only job #2373), dated by the job, at the quote's value;
-    - _inPipeline: the job is still WORK IN PROGRESS — neither completed nor
-      voided (the report's "Work in progress", which HaiVE's pipeline shows).
-      A paid or invoiced job is still in progress until Hoops completes it;
-    - an accepted quote with no job yet is open ("Accepted – no job yet"),
-      not won and not in the pipeline; quotes waiting on the customer are open.
+      November: only job #2373), dated by the job, at the quote's value; the
+      stage then says whether the job is in production or completed;
+    - every quote CREATED BUT NOT WON is open, and the open quotes are the
+      pipeline: sent, at the account's own step (follow-ups, on hold, quoting
+      options…), a draft, or accepted with no job yet ("Accepted – no job yet");
+    - voided or lost: lost.
+    (For a few hours on 2026-11-12 the pipeline was the jobs in progress
+    instead — won sales — which the user corrected: the pipeline is what is
+    created but not won.)
     _closeDate: a won sale is dated by its job; a voided one when it was
     voided; an open one carries the quote deadline, or — when Hoops has none —
     30 days after it was created. Never the last edit (updatedAt) for a won
@@ -406,8 +409,6 @@ def transaction_fields(row: dict, currency: str, zone: tzinfo | None = None) -> 
         "_stage": stage,
         # The day in the business's own time zone (Hoops' reports count days there).
         "_closeDate": _day(close, zone),
-        # Work in progress: what HaiVE's pipeline figures count for Hoops (see the docstring).
-        "_inPipeline": won and not completed,
         "_quoteStatus": "voided" if cancelled else "lost" if lost else "accepted" if accepted else "draft" if draft else "viewed" if row.get("viewed") else "sent",
         "_approval": "rejected" if voided else "approved" if accepted else "pending",
         "_customerCompany": "" if individual else customer_name,

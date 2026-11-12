@@ -113,8 +113,7 @@ export function OverallPipelineCard({
   return (
     <SectionCard title="Overall Pipeline" icon={FiLayers} glass>
       <p className={pageStyles.sectionNote}>
-        Everything in the pipeline, month by month: open deals by when they’re expected to close, and for Hoops its jobs in
-        progress by the month they were won. This section has its own month controls and doesn’t follow
+        Every open deal, by the month it is expected to close. This section has its own month controls and doesn’t follow
         the month chosen above.
       </p>
 
@@ -131,8 +130,8 @@ export function OverallPipelineCard({
         <EmptyState
           compact
           icon={FiLayers}
-          title="Nothing in the pipeline"
-          description="No open deals, and no jobs in progress, right now."
+          title="No open deals"
+          description="Nothing is in the pipeline right now: every deal is won or lost."
         />
       ) : (
         <>
@@ -260,7 +259,7 @@ export function OverallPipelineCard({
                       disabled={month.count === 0}
                       aria-label={
                         month.count === 0
-                          ? `${label}: nothing in the pipeline`
+                          ? `${label}: no open deals`
                           : `${label}: ${money(month.value)} in ${deals(month.count)}. Open them`
                       }
                       onClick={() =>

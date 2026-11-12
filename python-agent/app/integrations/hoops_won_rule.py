@@ -1,15 +1,15 @@
 """One-time move of the Hoops sales already stored to the current won rule.
 
 Until 2026-11-11 a Hoops sale was won when its quote was accepted. It is now
-read as Hoops' own jobs report reads it (see hoops.transaction_fields): won
-when its JOB IS CREATED, dated by the job; in the pipeline (`inPipeline`) while
-that job is work in progress; an accepted quote with no job yet is open. (For a
-few hours on 2026-11-11 it was "won when invoiced", before the user's jobs
-report showed the rule; sources moved to that are moved on again.) New and
-changed sales get the rule from the nightly sync; this re-classifies the ones
-stored before, once per Hoops source, from the copy of its transaction each
-deal keeps (`sourceData`: status, flags, jobs, invoice) — without asking Hoops
-for anything (it allows one read a night).
+won when its JOB IS CREATED, dated by the job in the business's time zone, and
+every quote created but not won is open — the pipeline (see
+hoops.transaction_fields). Earlier steps on the way are undone here too: "won
+when invoiced" (a few hours on 2026-11-11) and the `inPipeline` flag that made
+the pipeline the jobs in progress (a few hours on 2026-11-12) — the flag is
+removed from every deal. New and changed sales get the rule from the nightly
+sync; this re-classifies the ones stored before, once per Hoops source, from the
+copy of its transaction each deal keeps (`sourceData`: status, flags, jobs,
+invoice) — without asking Hoops for anything (it allows one read a night).
 
 It is a change of rule, not of the sales themselves, so it:
 - writes no CRM activity rows (no "won"/"reopened" today for ~500 old sales,
@@ -37,7 +37,7 @@ from app.memory.mongo_client import get_db
 
 logger = logging.getLogger(__name__)
 
-RULE = "job-created-2026-11-11"
+RULE = "job-created-open-pipeline-2026-11-12"
 # Every default the won words have had; only these are replaced.
 OLD_WON_WORDS = (["accepted", "completed"], ["invoiced"])
 NEW_WON_WORDS = ["job"]
@@ -74,18 +74,25 @@ def reclassified(deal: dict, status_mapping: dict, currency: str, zone=None) -> 
         "dealStatus": status,
         "stageId": fields.get("_stage"),
         "expectedClosingDate": fields.get("_closeDate") or deal.get("expectedClosingDate"),
-        "inPipeline": bool(fields.get("_inPipeline")),
     }
 
 
 def _update_for(deal: dict, target: dict) -> UpdateOne | None:
     changes = {k: v for k, v in target.items() if deal.get(k) != v}
-    if not changes:
-        return None
-    update: dict = {"$set": changes}
+    unset: dict = {}
     # No longer closed: it has no closing moment. (Newly closed: when is unknown, none is set.)
     if "dealStatus" in changes and target["dealStatus"] == "open" and deal.get("closedAt") is not None:
-        update["$unset"] = {"closedAt": ""}
+        unset["closedAt"] = ""
+    # The short-lived "pipeline = jobs in progress" flag (2026-11-12): the pipeline is the open deals.
+    if "inPipeline" in deal:
+        unset["inPipeline"] = ""
+    if not changes and not unset:
+        return None
+    update: dict = {}
+    if changes:
+        update["$set"] = changes
+    if unset:
+        update["$unset"] = unset
     return UpdateOne({"_id": deal["_id"]}, update)
 
 
@@ -141,7 +148,7 @@ def apply_hoops_won_rule() -> None:
             if result["statusMappingChanged"]:
                 release["$set"]["statusMapping"] = result["statusMapping"]
             logger.info(
-                "Hoops won rule (won when the job is created; pipeline = work in progress) applied to source %s (org %s): %s deals changed; before %s, after %s.",
+                "Hoops won rule (won when the job is created; pipeline = quotes not won) applied to source %s (org %s): %s deals changed; before %s, after %s.",
                 claimed["_id"],
                 claimed.get("organizationId"),
                 result["changed"],
