@@ -10,7 +10,9 @@ export type QuoteCounterDocument = QuoteCounter & Document<Types.ObjectId>;
 // (see python-agent/app/integrations/crm_mongo_sync.py).
 @Schema({ timestamps: true, collection: 'crm_quote_counters' })
 export class QuoteCounter {
-  @Prop({ required: true, index: true })
+  // Indexed by the unique index below only — a second, plain `index: true`
+  // shares its name, and whichever is built first wins (uniqueness was lost).
+  @Prop({ required: true })
   organizationId: string;
 
   @Prop({ default: 0 })

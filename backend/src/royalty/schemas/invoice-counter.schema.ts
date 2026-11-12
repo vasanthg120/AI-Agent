@@ -9,7 +9,8 @@ export type InvoiceCounterDocument = InvoiceCounter & Document<Types.ObjectId>;
 // Mirrors crm/schemas/quote-counter.schema.ts exactly.
 @Schema({ timestamps: true, collection: 'royalty_invoice_counters' })
 export class InvoiceCounter {
-  @Prop({ required: true, index: true })
+  // Indexed by the unique index below only (see quote-counter.schema.ts).
+  @Prop({ required: true })
   organizationId: string;
 
   @Prop({ default: 0 })

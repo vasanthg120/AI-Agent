@@ -52,7 +52,8 @@ export function KeyStatsGrid({ deals, businessHealthScore, revenueTrend, dateFro
     queryKey: ['analytics-open-deals-aging', dateFrom, dateTo, storeId],
     queryFn: () =>
       dealsService.listFiltered(
-        { dealStatus: ['open'], dateFrom, dateTo, dateField: 'expectedClosingDate', ...(storeId ? { storeId: [storeId] } : {}) },
+        // The deals in the Pipeline box's figure: open, or a CRM's work in progress (Hoops).
+        { inPipeline: true, dateFrom, dateTo, dateField: 'expectedClosingDate', ...(storeId ? { storeId: [storeId] } : {}) },
         1,
         100,
       ),
@@ -71,7 +72,12 @@ export function KeyStatsGrid({ deals, businessHealthScore, revenueTrend, dateFro
   const conversionPct = closedDeals > 0 ? Math.round((deals.wonCount / closedDeals) * 100) : null;
 
   const period = countedMonths(dateFrom, dateTo).label;
-  const hasPipeline = deals.openCount > 0;
+  // What's in the pipeline: open deals — or, for a CRM like Hoops, its work in
+  // progress — counted by the server (pipeline health); the overview's open
+  // figures only until that has loaded (they are the same deals for most CRMs).
+  const pipelineCount = health?.open.count ?? deals.openCount;
+  const pipelineValue = health?.open.value ?? deals.openValue;
+  const hasPipeline = pipelineCount > 0;
   const pipelineFooter = !health ? 'Loading…' : overdueCount > 0 ? `${money(overdueValue)} past due` : 'Nothing past due';
 
   const closedDealRows: DrillDownRow[] = (closedDealsResult?.items ?? []).map((d) => ({
@@ -136,10 +142,10 @@ export function KeyStatsGrid({ deals, businessHealthScore, revenueTrend, dateFro
       <Card className={styles.cell} interactive={hasPipeline} onClick={hasPipeline ? () => setOpenDrilldown('pipeline') : undefined}>
         <div className={styles.label}>Pipeline · {period}</div>
         <div className={styles.value}>
-          <AnimatedNumber value={deals.openValue} format={money} />
+          <AnimatedNumber value={pipelineValue} format={money} />
         </div>
         <div className={styles.caption}>
-          {hasPipeline ? `${deals.openCount} open ${deals.openCount === 1 ? 'deal' : 'deals'} expected to close` : 'No open deals expected to close'}
+          {hasPipeline ? `${pipelineCount} ${pipelineCount === 1 ? 'deal' : 'deals'} in the pipeline` : 'Nothing in the pipeline'}
         </div>
         <div className={styles.divider} />
         <div className={health && overdueCount > 0 ? styles.footerWarn : styles.footerOk}>{pipelineFooter}</div>
@@ -155,7 +161,7 @@ export function KeyStatsGrid({ deals, businessHealthScore, revenueTrend, dateFro
       <DrillDownModal
         open={openDrilldown === 'pipeline'}
         onClose={() => setOpenDrilldown(null)}
-        title={`Open Pipeline — ${period}`}
+        title={`Pipeline — ${period}`}
         isLoading={!openDeals}
         rows={pipelineRows}
         totalCount={openDeals?.total}

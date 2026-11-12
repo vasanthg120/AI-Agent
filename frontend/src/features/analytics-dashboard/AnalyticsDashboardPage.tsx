@@ -102,6 +102,8 @@ type DrillDownTarget =
       kind: 'deals';
       title: string;
       dealStatus?: ('open' | 'won' | 'lost')[];
+      // The deals behind a pipeline figure (open, or a CRM's work in progress).
+      inPipeline?: boolean;
       ownerId?: string[];
       dateField?: 'createdAt' | 'expectedClosingDate';
       // The Overall Pipeline section looks past the month chosen at the top:
@@ -208,6 +210,7 @@ export function AnalyticsDashboardPage() {
             ...(drillDown.range === 'all' ? {} : (drillDown.range ?? { dateFrom, dateTo })),
             ...(drillDown.dateField ? { dateField: drillDown.dateField } : {}),
             ...(drillDown.dealStatus ? { dealStatus: drillDown.dealStatus } : {}),
+            ...(drillDown.inPipeline ? { inPipeline: true } : {}),
             ...(drillDown.ownerId ? { ownerId: drillDown.ownerId } : {}),
             ...(canOverrideStore && storeId ? { storeId: [storeId] } : {}),
           },
@@ -344,7 +347,7 @@ export function AnalyticsDashboardPage() {
                   storeId={canOverrideStore ? storeId : undefined}
                   selectedPeriod={dateFrom.slice(0, 7)}
                   onOpenDeals={({ title, range }) =>
-                    setDrillDown({ kind: 'deals', title, dealStatus: ['open'], dateField: 'expectedClosingDate', range })
+                    setDrillDown({ kind: 'deals', title, inPipeline: true, dateField: 'expectedClosingDate', range })
                   }
                 />
 

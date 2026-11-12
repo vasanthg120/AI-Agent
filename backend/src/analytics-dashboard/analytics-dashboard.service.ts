@@ -5,6 +5,7 @@ import { JwtPayload } from '../auth/jwt-payload.interface';
 import { currentDataSourceScope } from '../data-sources/data-source-context';
 import { CustomerActivityService } from '../crm/customer-activity.service';
 import { DealPerformanceDashboardService } from '../crm/deal-performance-dashboard.service';
+import { IN_PIPELINE, IN_PIPELINE_EXPR } from '../crm/pipeline.util';
 import { QuotesService } from '../crm/quotes.service';
 import { Deal, DealDocument } from '../crm/schemas/deal.schema';
 import { Quote, QuoteDocument } from '../crm/schemas/quote.schema';
@@ -320,19 +321,23 @@ export class AnalyticsDashboardService {
               $group: {
                 _id: { name: { $toLower: { $trim: { input: '$name' } } }, value: '$monetaryValue', closing: '$expectedClosingDate' },
                 dealStatus: { $first: '$dealStatus' },
+                inPipeline: { $first: '$inPipeline' },
                 monetaryValue: { $first: '$monetaryValue' },
                 expectedClosingDate: { $first: '$expectedClosingDate' },
               },
             },
           ];
     const rows = await this.dealModel
-      .aggregate<{ _id: { status: string; pastDue: boolean }; count: number; value: number }>([
+      .aggregate<{ _id: { status: string; inPipeline: boolean; pastDue: boolean }; count: number; value: number }>([
         { $match: periodDealMatch(caller.organizationId, scope, dateFrom, dateTo) },
         ...dedupe,
         {
           $group: {
             _id: {
               status: '$dealStatus',
+              // Open deals, or a CRM's own pipeline such as Hoops' work in progress (crm/pipeline.util.ts).
+              inPipeline: IN_PIPELINE_EXPR,
+              // Past its expected close: only an open deal has one to miss (a job in progress is already won).
               pastDue: { $and: [{ $eq: ['$dealStatus', 'open'] }, { $lt: [{ $substrBytes: [{ $ifNull: ['$expectedClosingDate', ''] }, 0, 10] }, today] }] },
             },
             count: { $sum: 1 },
@@ -350,9 +355,9 @@ export class AnalyticsDashboardService {
     return {
       period: { first, last },
       today,
-      open: sum((r) => r._id.status === 'open'),
-      onTime: sum((r) => r._id.status === 'open' && !r._id.pastDue),
-      pastDue: sum((r) => r._id.status === 'open' && r._id.pastDue),
+      open: sum((r) => r._id.inPipeline),
+      onTime: sum((r) => r._id.inPipeline && !r._id.pastDue),
+      pastDue: sum((r) => r._id.inPipeline && r._id.pastDue),
       won,
       lost,
       winRatePct: closed > 0 ? round1((won.count / closed) * 100) : null,
@@ -363,7 +368,8 @@ export class AnalyticsDashboardService {
     const organizationId = caller.organizationId;
     const match: Record<string, unknown> = {
       organizationId,
-      dealStatus: 'open',
+      // Open deals — or, for a CRM like Hoops, its work in progress (crm/pipeline.util.ts).
+      ...IN_PIPELINE,
       ...(scope.level === 'store' && scope.storeId ? { storeId: scope.storeId } : {}),
       ...(scope.level === 'user' && scope.userId ? { ownerId: scope.userId } : {}),
     };

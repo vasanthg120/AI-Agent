@@ -107,6 +107,13 @@ export class Deal {
   @Prop({ enum: ['open', 'won', 'lost'], default: 'open' })
   dealStatus: 'open' | 'won' | 'lost';
 
+  // Whether the deal is in the pipeline, for a CRM whose pipeline isn't simply
+  // its open deals — set by its sync, unset for every other CRM (whose pipeline
+  // is its open deals; see crm/pipeline.util.ts). Hoops: the job is work in
+  // progress (neither completed nor voided), which a won job can be.
+  @Prop()
+  inPipeline?: boolean;
+
   @Prop({ default: 0 })
   monetaryValue: number;
 

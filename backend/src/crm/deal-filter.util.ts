@@ -2,6 +2,7 @@ import { FilterQuery } from 'mongoose';
 import { Deal } from './schemas/deal.schema';
 import { DealFilterQueryDto } from './dto/deal-filter-query.dto';
 import { HOOPS_SALESPERSON_PREFIX, isHoopsSalesperson, unlinkedHoopsSales } from './hoops-salespeople';
+import { IN_PIPELINE } from './pipeline.util';
 
 // Single place the Mongo match stage gets built from a DealFilterQueryDto —
 // reused by deals.service.ts's listFiltered/listForExport and
@@ -101,6 +102,9 @@ export function buildDealMatchStage(
     const existing = match.expectedClosingDate as Record<string, unknown> | undefined;
     match.expectedClosingDate = { ...(existing ?? {}), $lt: filters.closingBefore };
   }
+
+  // In the pipeline (an $or of its own, so kept beside the owner $or above, never over it).
+  if (filters.inPipeline) match.$and = [...((match.$and as FilterQuery<Deal>[]) ?? []), IN_PIPELINE];
 
   if (filters.valueMin !== undefined || filters.valueMax !== undefined) {
     match.monetaryValue = {

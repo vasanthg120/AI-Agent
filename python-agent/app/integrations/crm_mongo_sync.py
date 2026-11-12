@@ -360,6 +360,11 @@ def _deal_update(source, store_id, raw, existing_by_external_id, owner_mapping_b
     }
     if store_id:
         fields["storeId"] = store_id
+    # A CRM whose pipeline isn't simply its open deals says so per deal (Hoops:
+    # jobs still in progress, won or not — see hoops.transaction_fields). Every
+    # other CRM leaves it unset, and the backend counts its open deals.
+    if "_inPipeline" in raw:
+        fields["inPipeline"] = bool(raw["_inPipeline"])
     if details is not None:
         fields["sourceData"] = details
     # The product lines the CRM holds on the deal (only for CRMs that send them).

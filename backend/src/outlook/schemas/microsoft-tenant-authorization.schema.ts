@@ -14,7 +14,9 @@ export type MicrosoftTenantAuthorizationDocument = MicrosoftTenantAuthorization 
 // the same Microsoft tenant could theoretically span org boundaries here.
 @Schema({ timestamps: true, collection: 'microsoft_tenant_authorizations' })
 export class MicrosoftTenantAuthorization {
-  @Prop({ required: true, index: true })
+  // Indexed by the unique index below only — a second, plain `index: true`
+  // shares its name, and whichever is built first wins (uniqueness was lost).
+  @Prop({ required: true })
   tenantId: string;
 
   @Prop({ required: true })

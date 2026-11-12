@@ -59,6 +59,10 @@ export interface DealFilters {
   dateField?: 'createdAt' | 'expectedClosingDate';
   // Only deals expected to close before this day ("YYYY-MM-DD") — the past-due list.
   closingBefore?: string;
+  // Only deals in the pipeline: open deals, or for a CRM like Hoops its work in
+  // progress (jobs not yet completed, which are won). Use for lists behind a
+  // pipeline figure instead of dealStatus: ['open'].
+  inPipeline?: boolean;
   ownerId?: string[];
   storeId?: string[];
   dealStatus?: ('open' | 'won' | 'lost')[];

@@ -90,6 +90,48 @@ describe('Dashboard: pipeline health (real Mongo)', () => {
     expect(nov).toMatchObject({ period: { first: '2026-11', last: '2026-11' }, open: { count: 3, value: 339000 }, winRatePct: null });
   });
 
+  // Hoops (2026-11-11, from the user's Hoops jobs report): the pipeline is the
+  // work in progress — jobs neither completed nor voided — which are WON sales;
+  // its quotes still waiting on a customer are open but not in the pipeline.
+  // The sync says so per deal (inPipeline); a deal without the flag (another
+  // CRM, or one typed into HaiVE) still counts when it's open.
+  it('a CRM whose pipeline is its work in progress: counted from the flag, beside open deals of other CRMs', async () => {
+    const hoopsOrg = `${org}-hoops`;
+    const deal = (name: string, dealStatus: string, monetaryValue: number, expectedClosingDate: string, inPipeline?: boolean) => ({
+      organizationId: hoopsOrg,
+      name,
+      dealStatus,
+      monetaryValue,
+      expectedClosingDate,
+      ...(inPipeline === undefined ? {} : { inPipeline }),
+    });
+    await connection.collection('crm_deals').insertMany([
+      deal('#4397 job in progress', 'won', 990, '2026-11-02', true),
+      deal('#4278 job in progress', 'won', 9452, '2026-09-15', true),
+      deal('#3400 job completed', 'won', 500, '2026-08-01', false),
+      deal('#4526 quote sent', 'open', 261.8, '2026-10-01', false),
+      deal('#4496 accepted, no job yet', 'open', 61, '2026-11-05', false),
+      deal('Typed into HaiVE', 'open', 100, '2026-11-20'),
+    ]);
+    const hoopsCaller = { sub: 'u1', organizationId: hoopsOrg, roles: ['owner'], email: 'x' } as never;
+
+    const health = await service.getPipelineHealth(hoopsCaller, { level: 'org' }, '2026-08-01', '2026-11-30', '2026-11-12');
+    expect(health).toMatchObject({
+      open: { count: 3, value: 10542 },
+      // A job in progress has no closing date left to miss: it was won when the job was created.
+      pastDue: { count: 0, value: 0 },
+      onTime: { count: 3, value: 10542 },
+      won: { count: 3, value: 10942 },
+    });
+
+    const byMonth = await service.getPipelineByMonth(hoopsCaller, { level: 'org' });
+    expect(byMonth).toMatchObject({ totalCount: 3, totalValue: 10542 });
+
+    const listed = buildDealMatchStage(hoopsOrg, { inPipeline: true });
+    const names = (await connection.collection('crm_deals').find(listed as Record<string, unknown>).toArray()).map((d) => d.name).sort();
+    expect(names).toEqual(['#4278 job in progress', '#4397 job in progress', 'Typed into HaiVE']);
+  });
+
   it('the past-due list filter picks exactly the deals counted as past due', async () => {
     const match = buildDealMatchStage(org, {
       dealStatus: ['open'],

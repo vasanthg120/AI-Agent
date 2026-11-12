@@ -15,6 +15,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name
 from app.config import settings
 from app.integrations.crm_mongo_sync import sync_all_orgs as sync_crm_deals_to_mongo
 from app.integrations.crm_mongo_sync import sync_all_quote_orgs as sync_crm_quotes_to_mongo
+from app.integrations.hoops_won_rule import apply_hoops_won_rule
 from app.mcp_server import app as mcp_app
 from app.rag.business_sync import sync_all
 from app.rag.vector_store import stamp_role_documents
@@ -67,6 +68,8 @@ scheduler = BackgroundScheduler()
 @app.on_event("startup")
 def _start_scheduler():
     scheduler.add_job(stamp_role_documents, id="stamp_role_documents")
+    # Once per Hoops source: stored sales re-classified to "won when invoiced".
+    scheduler.add_job(apply_hoops_won_rule, id="hoops_won_rule")
     scheduler.add_job(sync_all, "interval", minutes=settings.rag_sync_interval_minutes, id="rag_sync")
     scheduler.add_job(
         sync_crm_deals_to_mongo,
