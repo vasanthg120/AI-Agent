@@ -101,7 +101,9 @@ export class EmailIntelligenceController {
   @Post('sync/replies')
   @Permission('email', 'view')
   refreshReplies(@CurrentUser() user: JwtPayload) {
-    return this.emailIntelligenceSyncService.refreshReplies(user.sub);
+    return this.emailIntelligenceSyncService.refreshReplies(user.sub).catch((err: unknown) => {
+      throw readableSyncFailure(err);
+    });
   }
 
   // When the caller's mailbox was last synced, whether a sync is running now,
