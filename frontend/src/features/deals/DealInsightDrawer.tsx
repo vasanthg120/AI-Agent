@@ -1,4 +1,4 @@
-import { useMemo, useState, type ReactNode } from 'react';
+import { useMemo, useRef, useState, type ReactNode } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { AnimatePresence, motion } from 'framer-motion';
 import clsx from 'clsx';
@@ -130,6 +130,7 @@ export function DealInsightDrawer() {
   const close = useDealDrawerStore((s) => s.close);
   const [tab, setTab] = useState<TabId>('activity');
   const [openCall, setOpenCall] = useState<string | null>(null);
+  const tabsRef = useRef<HTMLDivElement>(null);
   const [preset, setPreset] = useState<{ type: DealActionType; title?: string } | null>(null);
   const queryClient = useQueryClient();
 
@@ -183,16 +184,17 @@ export function DealInsightDrawer() {
         width={720}
         title={deal?.name ?? 'Deal'}
         description={deal ? [data?.customer.company ?? data?.customer.name, deal.businessName].filter(Boolean).join(' · ') : undefined}
-        scrollKey={tab}
-        header={
-          isLoading ? (
-            <div className={styles.loading}>
-              <Skeleton height={64} />
-              <Skeleton height={140} />
-            </div>
-          ) : isError || !data ? (
-            <EmptyState compact icon={FiAlertTriangle} title="This deal couldn’t be opened" description={extractErrorMessage(error)} />
-          ) : (
+      >
+        {/* Everything scrolls as one: the facts, the brief and the actions above, the tabs (kept in view) and their records below. */}
+        {isLoading ? (
+          <div className={styles.loading}>
+            <Skeleton height={64} />
+            <Skeleton height={140} />
+          </div>
+        ) : isError || !data ? (
+          <EmptyState compact icon={FiAlertTriangle} title="This deal couldn’t be opened" description={extractErrorMessage(error)} />
+        ) : (
+          <>
             <div className={styles.head}>
               <DealFacts data={data} />
               <HealthCard health={data.health} />
@@ -212,10 +214,20 @@ export function DealInsightDrawer() {
                 <DealAgentActions data={data} brief={data.brief} preset={preset} onPresetUsed={() => setPreset(null)} />
               </section>
             </div>
-          )
-        }
-        tabs={data ? <Tabs items={tabs} activeId={tab} onChange={(id) => setTab(id as TabId)} /> : undefined}
-      >
+            <div className={styles.stickyTabs} ref={tabsRef}>
+              <Tabs
+                items={tabs}
+                activeId={tab}
+                onChange={(id) => {
+                  setTab(id as TabId);
+                  // Another tab is read from its top: bring the tabs back up if the reader had scrolled past them.
+                  const el = tabsRef.current;
+                  if (el && el.getBoundingClientRect().top < 0) el.scrollIntoView({ block: 'start' });
+                }}
+              />
+            </div>
+          </>
+        )}
         {data && (
           <AnimatePresence mode="wait" initial={false}>
             <motion.div key={tab} initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} transition={{ duration: 0.16 }}>
@@ -259,8 +271,8 @@ function DealFacts({ data }: { data: DealOverview }) {
         />
         <Fact
           icon={<FiMail />}
-          label="Emails"
-          value={`${stats.emailsIn} in · ${stats.emailsOut} out`}
+          label="Emails with the customer"
+          value={stats.emailsIn + stats.emailsOut === 0 ? 'None found' : `${stats.emailsOut} sent · ${stats.emailsIn} received`}
           note={stats.waitingForReply > 0 ? `${stats.waitingForReply} waiting for a reply` : undefined}
           tone={stats.waitingForReply > 0 ? 'warning' : undefined}
         />
@@ -359,7 +371,10 @@ function BriefCard({ brief, busy, onAnalyse, onDo }: { brief: DealBrief | null; 
       {brief.nextBestAction ? (
         <div className={styles.nextAction}>
           <span className={styles.nextLabel}>
-            Next best action · {URGENCY[brief.nextBestAction.urgency] ?? brief.nextBestAction.urgency} · {brief.nextBestAction.deadline}
+            Next best action · {URGENCY[brief.nextBestAction.urgency] ?? brief.nextBestAction.urgency}
+            {brief.nextBestAction.deadline && brief.nextBestAction.deadline.toLowerCase() !== (URGENCY[brief.nextBestAction.urgency] ?? '').toLowerCase()
+              ? ` · ${brief.nextBestAction.deadline}`
+              : ''}
           </span>
           <strong>{brief.nextBestAction.action}</strong>
           <span className={styles.why}>{brief.nextBestAction.why}</span>
@@ -638,6 +653,7 @@ function buildTimeline(data: DealOverview, openCall: (sessionId: string) => void
       tone: 'quote',
       title: `Quotation ${q.number ?? q.name ?? ''} · ${formatAmountIn(q.amount, q.currency)}`,
       meta: [q.status, q.approval && q.approval !== 'pending' ? q.approval : undefined, q.owner].filter(Boolean).join(' · '),
+      body: [q.items?.length ? q.items.map((i) => `${i.quantity} × ${i.description}`).join('\n') : undefined, q.requestNotes ? `Enquiry: ${q.requestNotes}` : undefined].filter(Boolean).join('\n') || undefined,
     });
   }
   for (const h of data.history) {
@@ -728,7 +744,7 @@ function Details({ data }: { data: DealOverview }) {
     ['Owner in HaiVE', deal.ownerName],
     ['Salesperson in the CRM', deal.crmOwner],
     ['Lead source', deal.leadSource],
-    ['Product', deal.product],
+    ['Product', deal.product ?? (deal.products?.length ? deal.products.join(', ') : undefined)],
     ['Lost because', deal.lostReason],
     ['From', deal.provider],
     ['Business', deal.businessName],

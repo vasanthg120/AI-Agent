@@ -5,7 +5,7 @@ import { Connection, Types } from 'mongoose';
 import { of, throwError } from 'rxjs';
 import { JwtPayload } from '../auth/jwt-payload.interface';
 import { TeamScopeService } from '../team-activity/team-scope.service';
-import { DealBrief, DealInsightService } from './deal-insight.service';
+import { DealBrief, DealInsightService, readableStage } from './deal-insight.service';
 import { HEALTH_WEIGHTS, dealHealth } from './deal-health';
 
 // Against a real Mongo: the deal panel gathers one deal's quotations, CRM
@@ -221,6 +221,45 @@ describe('deal insight (real Mongo)', () => {
     ).rejects.toThrow(ForbiddenException);
   });
 
+  it('finds the whole email conversation: by address, thread, quotation number and the company the email AI matched', async () => {
+    const galaxy = new Types.ObjectId();
+    const admin = caller('subAdmin', org('sub'), ['admin']);
+    const inbox = (key: string, extra: Record<string, unknown>) => ({
+      organizationId: org('sub'),
+      userId: who('owner'),
+      mailboxEmail: 'owner@x.com',
+      externalMessageId: `jest-deal-${key}-${galaxy}`,
+      receivedAt: new Date('2026-11-12T03:00:00Z'),
+      bodyPreview: '',
+      intent: 'existing_customer',
+      status: 'pending',
+      ...extra,
+    });
+    await connection.collection('crm_deals').insertOne({ _id: galaxy, organizationId: org('sub'), name: 'Galaxy cast - Polos', dealStatus: 'open', monetaryValue: 46251, ownerId: who('owner'), stageId: '694baae22365c712b3e1afd2_stage_e3110b37-0168-499e-b306-c4d310f8de36' });
+    await connection.collection('crm_quotes').insertOne({ organizationId: org('sub'), dealId: galaxy.toString(), quoteNumber: '142', quoteStatus: 'published', quoteAmount: 46251, currency: 'INR', clientDetails: { companyName: 'Galaxy Cast Tech', contactName: 'Karthik', email: 'karthik@gmail.com' }, items: [{ description: 'Tipping polo', quantity: 70, lineTotal: 43050 }], requestNotes: 'Navy with red tipping', createdAt: new Date('2026-11-11T00:00:00Z') });
+    await connection.collection('email_sent_items').insertOne({ organizationId: org('sub'), userId: who('owner'), mailboxEmail: 'owner@x.com', externalMessageId: `jest-deal-g-out-${galaxy}`, sentAt: new Date('2026-11-11T05:00:00Z'), subject: 'Your quotation', toAddresses: ['karthik@gmail.com'], bodyPreview: 'Please find the quote', conversationId: `conv-${galaxy}` });
+    await connection.collection('email_intelligence_items').insertMany([
+      inbox('thread', { fromAddress: 'karthik.work@yahoo.com', subject: 'RE: Your quotation', conversationId: `conv-${galaxy}` }),
+      inbox('subject', { fromAddress: 'buyer@elsewhere.com', subject: 'Quote #142 - sizes', conversationId: `other-${galaxy}` }),
+      inbox('company', { fromAddress: 'ops@galaxycast.in', subject: 'Delivery address', matchedBusinessName: 'Galaxy Cast Tech', conversationId: `third-${galaxy}` }),
+      inbox('noise', { fromAddress: 'someone@gmail.com', subject: 'Hello', conversationId: `noise-${galaxy}` }),
+    ]);
+
+    const overview = await service.overview(admin, galaxy.toString());
+    expect(overview.emails.map((e) => [e.direction, e.subject]).sort()).toEqual(
+      [
+        ['in', 'Delivery address'],
+        ['in', 'Quote #142 - sizes'],
+        ['in', 'RE: Your quotation'],
+        ['out', 'Your quotation'],
+      ].sort(),
+    );
+    expect(overview.stats).toMatchObject({ emailsIn: 3, emailsOut: 1 });
+    // No name is stored for a Pantheras stage: none shown, never the id.
+    expect(overview.deal.stage).toBeUndefined();
+    expect(overview.quotes[0]).toMatchObject({ items: [{ description: 'Tipping polo', quantity: 70, total: 43050 }], requestNotes: 'Navy with red tipping' });
+  });
+
   it('refuses when AI access is switched off for the person', async () => {
     const off = { ...caller('subAdmin', org('sub'), ['admin']), aiAccessEnabled: false } as JwtPayload;
     await expect(service.analyse(off, dealId.toString())).rejects.toThrow(ForbiddenException);
@@ -260,5 +299,15 @@ describe('deal health (worked out from the records)', () => {
 
   it('a closed deal has no health score', () => {
     expect(dealHealth({ ...base, status: 'won' })).toMatchObject({ score: null, band: 'closed' });
+  });
+});
+
+describe('readable stage names', () => {
+  it('shows a CRM stage written in words, never an id', () => {
+    expect(readableStage('ACCEPTED_NO_JOB')).toBe('Accepted no job');
+    expect(readableStage('in_production')).toBe('In production');
+    expect(readableStage('694baae22365c712b3e1afd2_stage_e3110b37-0168-499e-b306-c4d310f8de36')).toBeUndefined();
+    expect(readableStage('6af3f7db14b1830e8841ad41')).toBeUndefined();
+    expect(readableStage(undefined)).toBeUndefined();
   });
 });

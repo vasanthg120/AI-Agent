@@ -104,6 +104,8 @@ export interface DealOverview {
     lastActivityAt?: Date;
     leadSource?: string;
     product?: string;
+    // What the customer asked for (the CRM's product lines on the deal).
+    products: string[];
     lostReason?: string;
     provider?: string;
     ownerName?: string;
@@ -111,7 +113,21 @@ export interface DealOverview {
     businessName: string;
   };
   customer: { name?: string; company?: string; email?: string; phone?: string; addresses: string[] };
-  quotes: { id: string; number?: string; name?: string; amount: number; currency: string; status: string; approval?: string; createdAt?: Date; expires?: string; owner?: string }[];
+  quotes: {
+    id: string;
+    number?: string;
+    name?: string;
+    amount: number;
+    currency: string;
+    status: string;
+    approval?: string;
+    createdAt?: Date;
+    expires?: string;
+    owner?: string;
+    // What was quoted, line by line, and the customer's enquiry in their own words.
+    items: { description: string; quantity: number; total?: number }[];
+    requestNotes?: string;
+  }[];
   notes: { id: string; body: string; at?: Date; by?: string }[];
   emails: DealEmail[];
   calls: DealCall[];
@@ -189,6 +205,40 @@ const FREE_MAIL_DOMAINS = new Set([
 ]);
 
 const escapeRegex = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+/**
+ * A stage worth showing: Hoops' words ("ACCEPTED_NO_JOB") are; Pantheras' stage ids
+ * ("<pipeline>_stage_<uuid>") and bare database ids are not — no name is stored for them.
+ */
+export function readableStage(stageId: unknown): string | undefined {
+  if (typeof stageId !== 'string' || !stageId.trim()) return undefined;
+  const value = stageId.trim();
+  if (/_stage_|[0-9a-f]{8}-[0-9a-f]{4}-|^[0-9a-f]{24}$/i.test(value)) return undefined;
+  const words = value.replace(/[_-]+/g, ' ').toLowerCase();
+  return words.charAt(0).toUpperCase() + words.slice(1);
+}
+
+const INBOUND_PROJECTION = {
+  userId: 1,
+  receivedAt: 1,
+  subject: 1,
+  fromAddress: 1,
+  fromName: 1,
+  bodyPreview: 1,
+  reason: 1,
+  status: 1,
+  shouldDraft: 1,
+  expectedNextAction: 1,
+  aiStatus: 1,
+  sentAt: 1,
+  externalReplyDetectedAt: 1,
+  threadRespondedAt: 1,
+  threadHead: 1,
+  mailboxRemovedAt: 1,
+  conversationId: 1,
+};
+const SENT_PROJECTION = { userId: 1, sentAt: 1, subject: 1, toAddresses: 1, bodyPreview: 1, conversationId: 1 };
+const EMAIL_LIMIT = 30;
 const text = (value: unknown): string | undefined => (typeof value === 'string' && value.trim() ? value.trim() : undefined);
 const DAY_MS = 86_400_000;
 
@@ -432,6 +482,46 @@ export class DealInsightService implements OnModuleInit {
     };
   }
 
+  /**
+   * Every email exchanged with the customer, from the whole inbox and Sent Items of
+   * every mailbox in the business: first by who it was from or to (their address,
+   * their company's own domain), by the company the email AI matched it to, and by
+   * a quotation number in the subject; then everything else in those same
+   * conversations — a reply from a colleague of theirs, a forward, our own follow-ups.
+   */
+  private async customerEmails(organizationId: string, mailPatterns: RegExp[], company: string | undefined, quoteNumbers: string[]) {
+    const subjectPatterns = quoteNumbers.map((n) => new RegExp(`\\b(quote|quotation|qt|estimate|est)\\b[\\s#:.-]*(no\\.?\\s*)?${escapeRegex(n)}\\b`, 'i'));
+    if (company && company.length >= 5) subjectPatterns.push(new RegExp(escapeRegex(company), 'i'));
+    const inboundBy: Record<string, unknown>[] = [];
+    const outboundBy: Record<string, unknown>[] = [];
+    if (mailPatterns.length) {
+      inboundBy.push({ fromAddress: { $in: mailPatterns } });
+      outboundBy.push({ toAddresses: { $in: mailPatterns } });
+    }
+    if (company) inboundBy.push({ matchedBusinessName: new RegExp(`^${escapeRegex(company)}$`, 'i') });
+    if (subjectPatterns.length) {
+      inboundBy.push({ subject: { $in: subjectPatterns } });
+      outboundBy.push({ subject: { $in: subjectPatterns } });
+    }
+    const items = this.col('email_intelligence_items');
+    const sentItems = this.col('email_sent_items');
+    const [inbound, outbound]: [Doc[], Doc[]] = await Promise.all([
+      inboundBy.length ? items.find({ organizationId, $or: inboundBy }, { projection: INBOUND_PROJECTION }).sort({ receivedAt: -1 }).limit(EMAIL_LIMIT).toArray() : [],
+      outboundBy.length ? sentItems.find({ organizationId, $or: outboundBy }, { projection: SENT_PROJECTION }).sort({ sentAt: -1 }).limit(EMAIL_LIMIT).toArray() : [],
+    ]);
+    const conversations = [...new Set([...inbound, ...outbound].map((e) => e.conversationId).filter((c): c is string => typeof c === 'string' && !!c))];
+    if (conversations.length) {
+      const [moreIn, moreOut] = await Promise.all([
+        items.find({ organizationId, conversationId: { $in: conversations }, _id: { $nin: inbound.map((e) => e._id) } }, { projection: INBOUND_PROJECTION }).sort({ receivedAt: -1 }).limit(EMAIL_LIMIT).toArray(),
+        sentItems.find({ organizationId, conversationId: { $in: conversations }, _id: { $nin: outbound.map((e) => e._id) } }, { projection: SENT_PROJECTION }).sort({ sentAt: -1 }).limit(EMAIL_LIMIT).toArray(),
+      ]);
+      inbound.push(...moreIn);
+      outbound.push(...moreOut);
+    }
+    const newest = (key: 'receivedAt' | 'sentAt') => (a: Doc, b: Doc) => new Date(b[key]).getTime() - new Date(a[key]).getTime();
+    return { inbound: inbound.sort(newest('receivedAt')).slice(0, EMAIL_LIMIT), outbound: outbound.sort(newest('sentAt')).slice(0, EMAIL_LIMIT) };
+  }
+
   // ---- the facts --------------------------------------------------------------------
 
   private async names(ids: (string | undefined)[]): Promise<Map<string, string>> {
@@ -491,43 +581,10 @@ export class DealInsightService implements OnModuleInit {
     const mailPatterns = [...addressPatterns, ...domainPatterns];
 
     const phonePatterns = [...phones].map((p) => new RegExp(`${escapeRegex(p)}$`));
-    const [inbound, outbound, notes, sessions, phoneCalls, history] = await Promise.all([
-      mailPatterns.length
-        ? this.col('email_intelligence_items')
-            .find(
-              { organizationId, fromAddress: { $in: mailPatterns } },
-              {
-                projection: {
-                  userId: 1,
-                  receivedAt: 1,
-                  subject: 1,
-                  fromAddress: 1,
-                  fromName: 1,
-                  bodyPreview: 1,
-                  reason: 1,
-                  status: 1,
-                  shouldDraft: 1,
-                  expectedNextAction: 1,
-                  aiStatus: 1,
-                  sentAt: 1,
-                  externalReplyDetectedAt: 1,
-                  threadRespondedAt: 1,
-                  threadHead: 1,
-                  mailboxRemovedAt: 1,
-                },
-              },
-            )
-            .sort({ receivedAt: -1 })
-            .limit(20)
-            .toArray()
-        : [],
-      mailPatterns.length
-        ? this.col('email_sent_items')
-            .find({ organizationId, toAddresses: { $in: mailPatterns } }, { projection: { userId: 1, sentAt: 1, subject: 1, toAddresses: 1, bodyPreview: 1 } })
-            .sort({ sentAt: -1 })
-            .limit(20)
-            .toArray()
-        : [],
+    const company = text(account?.name) ?? text(quotes.find((q) => text(q.clientDetails?.companyName))?.clientDetails?.companyName);
+    const quoteNumbers = quotes.map((q) => text(q.quoteNumber)).filter((n): n is string => !!n);
+    const { inbound, outbound } = await this.customerEmails(organizationId, mailPatterns, company, quoteNumbers);
+    const [notes, sessions, phoneCalls, history] = await Promise.all([
       this.col('crm_notes')
         .find({ organizationId, $or: [{ dealId }, ...(deal.contactId ? [{ contactId: String(deal.contactId), dealId: { $exists: false } }] : [])] })
         .sort({ createdAt: -1 })
@@ -696,13 +753,17 @@ export class DealInsightService implements OnModuleInit {
         status: deal.dealStatus ?? 'open',
         value: deal.monetaryValue ?? 0,
         currency,
-        stage: stage && !isValidObjectId(stage) ? stage : undefined,
+        stage: readableStage(stage),
         expectedClosingDate: text(deal.expectedClosingDate)?.slice(0, 10),
         closedAt: deal.closedAt,
         createdAt: deal.createdAt,
         lastActivityAt: deal.lastActivityAt,
         leadSource: text(deal.leadSource),
         product: text(deal.product),
+        products: ((deal.products as Doc[] | undefined) ?? [])
+          .map((p) => [p.quantity ? `${p.quantity} ×` : '', text(p.name) ?? '', text(p.description) ? `(${text(p.description)})` : ''].filter(Boolean).join(' '))
+          .filter(Boolean)
+          .slice(0, 20),
         lostReason: text(deal.lostReason),
         provider: text(deal.sourceProvider),
         ownerName: deal.ownerId ? nameOf.get(String(deal.ownerId)) : undefined,
@@ -727,6 +788,10 @@ export class DealInsightService implements OnModuleInit {
         createdAt: q.createdAt,
         expires: text(q.expirationDate),
         owner: text(q.quoteOwnerLabel) ?? (q.ownerUserId ? nameOf.get(String(q.ownerUserId)) : undefined),
+        items: ((q.items as Doc[] | undefined) ?? [])
+          .map((i) => ({ description: text(i.description) ?? 'Item', quantity: Number(i.quantity) || 0, total: typeof i.lineTotal === 'number' ? i.lineTotal : undefined }))
+          .slice(0, 20),
+        requestNotes: text(q.requestNotes),
       })),
       notes: notes.map((n) => ({ id: n._id.toString(), body: (n.body as string) ?? '', at: n.createdAt, by: n.createdBy ? nameOf.get(String(n.createdBy)) : undefined })),
       emails,

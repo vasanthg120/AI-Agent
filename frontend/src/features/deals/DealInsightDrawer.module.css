@@ -866,3 +866,19 @@
     grid-template-columns: 1fr;
   }
 }
+
+/* The tabs stay at the top of the panel while their records scroll under them. */
+.stickyTabs {
+  position: sticky;
+  top: calc(-1 * var(--space-5));
+  z-index: 2;
+  margin: var(--space-4) 0 var(--space-3);
+  padding-top: var(--space-2);
+  background: var(--color-bg-surface);
+}
+
+@media (max-width: 640px) {
+  .stickyTabs {
+    top: 0;
+  }
+}

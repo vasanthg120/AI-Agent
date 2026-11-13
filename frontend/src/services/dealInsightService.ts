@@ -77,6 +77,7 @@ export interface DealOverview {
     lastActivityAt?: string;
     leadSource?: string;
     product?: string;
+    products?: string[];
     lostReason?: string;
     provider?: string;
     ownerName?: string;
@@ -84,7 +85,20 @@ export interface DealOverview {
     businessName: string;
   };
   customer: { name?: string; company?: string; email?: string; phone?: string; addresses: string[] };
-  quotes: { id: string; number?: string; name?: string; amount: number; currency: string; status: string; approval?: string; createdAt?: string; expires?: string; owner?: string }[];
+  quotes: {
+    id: string;
+    number?: string;
+    name?: string;
+    amount: number;
+    currency: string;
+    status: string;
+    approval?: string;
+    createdAt?: string;
+    expires?: string;
+    owner?: string;
+    items?: { description: string; quantity: number; total?: number }[];
+    requestNotes?: string;
+  }[];
   notes: { id: string; body: string; at?: string; by?: string }[];
   emails: DealEmail[];
   calls: DealCall[];
