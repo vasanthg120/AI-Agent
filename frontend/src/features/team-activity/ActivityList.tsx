@@ -199,7 +199,7 @@ function DealRow({ deal, showPerson, pipeline }: { deal: TeamDealItem; showPerso
         </span>
       </span>
       <span className={styles.recordEnd}>
-        <strong className={styles.recordValue}>{money(deal.value, deal.currency)}</strong>
+        <strong className={styles.recordValue}>{deal.value ? money(deal.value, deal.currency) : '—'}</strong>
         {deal.dealId && <FiChevronRight className={styles.recordChevron} aria-hidden />}
       </span>
     </>

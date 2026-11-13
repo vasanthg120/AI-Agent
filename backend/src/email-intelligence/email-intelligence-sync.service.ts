@@ -587,7 +587,10 @@ export class EmailIntelligenceSyncService {
     } catch (err) {
       // The sync itself failed (python-agent unreachable, Outlook refused) — the
       // window it meant to cover is NOT counted as covered (see resolveSyncSince).
-      await finish({ status: 'failed', error: (err as Error).message.slice(0, 300) });
+      // The AI service's own reason when it gave one (e.g. Microsoft refusing the app's
+      // secret) — a bare "Request failed with status code 500" hid that for days.
+      const detail = (err as { response?: { data?: { detail?: unknown } } }).response?.data?.detail;
+      await finish({ status: 'failed', error: (typeof detail === 'string' && detail.trim() ? detail : (err as Error).message).slice(0, 300) });
       throw err;
     }
   }

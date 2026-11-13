@@ -254,7 +254,7 @@ function DealFacts({ data }: { data: DealOverview }) {
       <div className={styles.factsTop}>
         <span className={clsx(styles.statusChip, styles[`tone_${STATUS_TONE[deal.status]}`])}>{deal.status === 'open' ? 'Open' : deal.status === 'won' ? 'Won' : 'Lost'}</span>
         {deal.stage && <span className={styles.stage}>{deal.stage.replace(/_/g, ' ').toLowerCase()}</span>}
-        <strong className={styles.value}>{formatAmountIn(deal.value, deal.currency)}</strong>
+        <strong className={styles.value}>{deal.value ? formatAmountIn(deal.value, deal.currency) : 'No value yet'}</strong>
       </div>
       <div className={styles.factGrid}>
         <Fact icon={<FiUser />} label="Owner" value={deal.ownerName ?? (deal.crmOwner ? `${deal.crmOwner} (CRM)` : 'Nobody yet')} />
@@ -736,7 +736,7 @@ function Details({ data }: { data: DealOverview }) {
     ['Contact', customer.name],
     ['Email', customer.email],
     ['Phone', customer.phone],
-    ['Value', formatAmountIn(deal.value, deal.currency)],
+    ['Value', deal.value ? formatAmountIn(deal.value, deal.currency) : 'No value yet'],
     ['Status', deal.status],
     ['Stage', deal.stage?.replace(/_/g, ' ').toLowerCase()],
     ['Expected to close', deal.expectedClosingDate],

@@ -188,9 +188,29 @@ def record_of(body: dict) -> dict:
 
 
 def display_name(record: dict) -> str:
-    """"Priya Sharma (Acme)" / "Acme" / "priya@acme.com" — whichever the record has."""
-    person = " ".join(str(record.get(k) or "").strip() for k in ("first_name", "last_name")).strip()
-    business = str(record.get("business_name") or "").strip()
-    if person and business:
+    """"Priya Sharma (Acme)" / "Acme" / "priya@acme.com" — whichever the record has.
+
+    A person record has the names on itself; an enquiry carries them on its
+    "person" (and the form's own "Business Name" field) - read both, so an
+    enquiry is never "Untitled deal".
+    """
+    nested = record.get("person") if isinstance(record.get("person"), dict) else {}
+    source = nested or record
+    person = " ".join(str(source.get(k) or "").strip() for k in ("first_name", "last_name")).strip()
+    business = str(source.get("business_name") or record.get("business_name") or _form_field(record, "business name") or "").strip()
+    if person and business and person.lower() != business.lower():
         return f"{person} ({business})"
-    return person or business or str(record.get("email") or record.get("name") or "").strip()
+    name = person or business or str(source.get("email") or record.get("email") or record.get("name") or "").strip()
+    if name:
+        return name
+    form = record.get("enquiry_form") if isinstance(record.get("enquiry_form"), dict) else {}
+    return f"{form.get('name') or 'Website'} enquiry".strip()
+
+
+def _form_field(record: dict, name: str) -> str | None:
+    """One of the enquiry form's own fields by its label ("Business Name", "Message")."""
+    for field in record.get("fields") or []:
+        if isinstance(field, dict) and str(field.get("name") or "").strip().lower() == name:
+            value = str(field.get("value") or "").strip()
+            return value or None
+    return None

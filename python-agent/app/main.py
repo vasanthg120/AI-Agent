@@ -1,8 +1,11 @@
 import logging
 import sys
 
+import requests
+
 from apscheduler.schedulers.background import BackgroundScheduler
 from fastapi import FastAPI
+from fastapi.responses import JSONResponse
 
 # Python's root logger has no handler by default, so every logger.info() call
 # anywhere in this app (this file's own workflow logs, the new [PERF] timing
@@ -16,6 +19,8 @@ from app.config import settings
 from app.integrations.crm_mongo_sync import sync_all_orgs as sync_crm_deals_to_mongo
 from app.integrations.crm_mongo_sync import sync_all_quote_orgs as sync_crm_quotes_to_mongo
 from app.integrations.hoops_won_rule import apply_hoops_won_rule
+from app.integrations.gorilladash_names import repair_gorilladash_names
+from app.memory.outlook_store import MicrosoftAppCredentialsError
 from app.mcp_server import app as mcp_app
 from app.rag.business_sync import sync_all
 from app.rag.vector_store import stamp_role_documents
@@ -33,6 +38,39 @@ for _stream in (sys.stdout, sys.stderr):
         _stream.reconfigure(encoding="utf-8", errors="replace")
 
 app = FastAPI(title="AI Agent Service")
+
+
+# Microsoft refusing the app's own secret is a configuration problem, not a
+# crash: answer with the reason in words (the email sync records it) instead
+# of a bare 500 that hid it for days.
+@app.exception_handler(MicrosoftAppCredentialsError)
+async def _microsoft_app_credentials(_request, exc: MicrosoftAppCredentialsError):
+    return JSONResponse(status_code=503, content={"detail": str(exc)})
+
+
+# Microsoft Graph failing (its mail service down, a mailbox it can't reach) is
+# said in words with Microsoft's request id — the email sync records it — not
+# as a bare 500 that reads like a HaiVE crash.
+@app.exception_handler(requests.HTTPError)
+async def _microsoft_graph_error(_request, exc: requests.HTTPError):
+    response = exc.response
+    url = str(getattr(response, "url", "") or "")
+    if response is None or "graph.microsoft.com" not in url:
+        return JSONResponse(status_code=500, content={"detail": "Something went wrong talking to an outside service."})
+    request_id = response.headers.get("request-id", "")
+    status = response.status_code
+    if status >= 500:
+        detail = (
+            f"Microsoft 365's mail service didn't answer for this mailbox (Microsoft error {status}, request id {request_id}). "
+            "It's on Microsoft's side; HaiVE tries again on the next sync and catches up on everything missed."
+        )
+    elif status in (401, 403):
+        detail = f"Microsoft refused access to this mailbox ({status}). Reconnect it in Settings, Integrations."
+    elif status == 404:
+        detail = "Microsoft says this mailbox can't be reached through Microsoft 365 (it may not be an Exchange Online mailbox, or has no licence)."
+    else:
+        detail = f"Microsoft 365 refused the request ({status}, request id {request_id})."
+    return JSONResponse(status_code=503, content={"detail": detail})
 
 app.include_router(health.router)
 app.include_router(chat.router)
@@ -70,6 +108,7 @@ def _start_scheduler():
     scheduler.add_job(stamp_role_documents, id="stamp_role_documents")
     # Once per Hoops source: stored sales re-classified to "won when invoiced".
     scheduler.add_job(apply_hoops_won_rule, id="hoops_won_rule")
+    scheduler.add_job(repair_gorilladash_names, id="gorilladash_names")
     scheduler.add_job(sync_all, "interval", minutes=settings.rag_sync_interval_minutes, id="rag_sync")
     scheduler.add_job(
         sync_crm_deals_to_mongo,

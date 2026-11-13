@@ -260,6 +260,29 @@ describe('deal insight (real Mongo)', () => {
     expect(overview.quotes[0]).toMatchObject({ items: [{ description: 'Tipping polo', quantity: 70, total: 43050 }], requestNotes: 'Navy with red tipping' });
   });
 
+  it('a website enquiry (Gorilla Dash): the person who sent it, their message, and their emails', async () => {
+    const lead = new Types.ObjectId();
+    await connection.collection('crm_deals').insertOne({
+      _id: lead,
+      organizationId: org('sub'),
+      name: 'Joe Doe (Bright Prints)',
+      dealStatus: 'open',
+      monetaryValue: 0,
+      sourceProvider: 'gorilladash',
+      sourceData: {
+        created_at: '2026-11-10T09:00:00.000000Z',
+        enquiry_form: { name: 'Inquiry Form' },
+        person: { first_name: 'Joe', last_name: 'Doe', business_name: 'Bright Prints', email: 'joe@brightprints.co', number_e164: '+61400999888' },
+        fields: [{ name: 'Message', value: 'Need 50 caps with our logo' }, { name: 'Business Name', value: 'Bright Prints' }, { name: 'Quantity', value: '50' }],
+      },
+    });
+    await connection.collection('email_intelligence_items').insertOne({ organizationId: org('sub'), userId: who('owner'), mailboxEmail: 'owner@x.com', externalMessageId: `jest-deal-lead-${lead}`, receivedAt: new Date('2026-11-11T00:00:00Z'), subject: 'Caps follow up', fromAddress: 'joe@brightprints.co', bodyPreview: 'Any update?', intent: 'existing_customer', status: 'pending' });
+    const overview = await service.overview(caller('subAdmin', org('sub'), ['admin']), lead.toString());
+    expect(overview.customer).toMatchObject({ name: 'Joe Doe', company: 'Bright Prints', email: 'joe@brightprints.co', phone: '+61400999888' });
+    expect(overview.notes.map((n) => [n.body, n.by])).toContainEqual(['Need 50 caps with our logo\nQuantity: 50', 'Inquiry Form (website)']);
+    expect(overview.emails.map((e) => e.subject)).toEqual(['Caps follow up']);
+  });
+
   it('refuses when AI access is switched off for the person', async () => {
     const off = { ...caller('subAdmin', org('sub'), ['admin']), aiAccessEnabled: false } as JwtPayload;
     await expect(service.analyse(off, dealId.toString())).rejects.toThrow(ForbiddenException);

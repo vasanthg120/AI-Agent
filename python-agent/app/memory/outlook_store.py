@@ -1,3 +1,4 @@
+import logging
 from datetime import datetime, timedelta
 
 import requests
@@ -13,6 +14,14 @@ from app.memory.mongo_client import get_db
 # never provide their own OAuth credentials.
 TOKEN_ENDPOINT = "https://login.microsoftonline.com/organizations/oauth2/v2.0/token"
 GRAPH_SCOPES = "offline_access User.Read Mail.Read Calendars.Read Contacts.Read"
+
+logger = logging.getLogger(__name__)
+
+
+class MicrosoftAppCredentialsError(RuntimeError):
+    """Microsoft refused HaiVE's own app credentials (client id / secret) - every
+    mailbox fails the same way and reconnecting a mailbox cannot help: the
+    MS_GRAPH_CLIENT_SECRET in this service's settings has to be put right."""
 
 
 def get_connection(user_id: str) -> dict | None:
@@ -73,6 +82,20 @@ def _refresh(connection: dict) -> dict | None:
             {"$set": {"status": "needs_reauth"}},
         )
         return None
+
+    if response.status_code in (400, 401):
+        try:
+            body = response.json()
+        except ValueError:
+            body = {}
+        if body.get("error") in ("invalid_client", "unauthorized_client"):
+            codes = ",".join(str(c) for c in body.get("error_codes") or [])
+            logger.error("Microsoft refused the app credentials (%s %s) - check MS_GRAPH_CLIENT_SECRET", body.get("error"), codes)
+            raise MicrosoftAppCredentialsError(
+                f"Microsoft refused HaiVE's app sign-in (AADSTS{codes or '?'}): the MS_GRAPH_CLIENT_SECRET in the AI service "
+                "settings is wrong or has expired. Put the current secret value from Azure (App registrations, Certificates & "
+                "secrets) there and restart the AI service - the mailboxes themselves don't need reconnecting."
+            )
 
     response.raise_for_status()
     payload = response.json()

@@ -218,6 +218,36 @@ export function readableStage(stageId: unknown): string | undefined {
   return words.charAt(0).toUpperCase() + words.slice(1);
 }
 
+/**
+ * A website enquiry kept on the deal (Gorilla Dash's copy in `sourceData`): who sent
+ * it, how to reach them, and what they wrote — undefined for any other deal.
+ */
+export function enquiryOf(sourceData: unknown):
+  | { name?: string; company?: string; email?: string; phone?: string; message?: string; form?: string; at?: Date }
+  | undefined {
+  if (!sourceData || typeof sourceData !== 'object') return undefined;
+  const data = sourceData as Doc;
+  const person = data.person && typeof data.person === 'object' ? (data.person as Doc) : undefined;
+  if (!person) return undefined;
+  const fields: Doc[] = Array.isArray(data.fields) ? data.fields : [];
+  const field = (label: string) => text(fields.find((f) => String(f?.name ?? '').trim().toLowerCase() === label)?.value);
+  const name = [text(person.first_name), text(person.last_name)].filter(Boolean).join(' ') || undefined;
+  const otherFields = fields
+    .filter((f) => !['message', 'business name'].includes(String(f?.name ?? '').trim().toLowerCase()) && text(f?.value))
+    .map((f) => `${text(f.name)}: ${text(f.value)}`);
+  const message = [field('message'), ...otherFields].filter(Boolean).join('\n') || undefined;
+  const created = text(data.created_at);
+  return {
+    name,
+    company: text(person.business_name) ?? field('business name'),
+    email: text(person.email),
+    phone: text(person.number_e164) ?? text(person.number_display),
+    message,
+    form: text((data.enquiry_form as Doc | undefined)?.name),
+    at: created && !Number.isNaN(Date.parse(created)) ? new Date(created) : undefined,
+  };
+}
+
 const INBOUND_PROJECTION = {
   userId: 1,
   receivedAt: 1,
@@ -568,6 +598,10 @@ export class DealInsightService implements OnModuleInit {
       addAddress(q.clientDetails?.email);
       addPhone(q.clientDetails?.phone);
     }
+    // A website enquiry (Gorilla Dash) carries the person who sent it and what they wrote.
+    const enquiry = enquiryOf(deal.sourceData);
+    addAddress(enquiry?.email);
+    addPhone(enquiry?.phone);
     const domains = new Set<string>();
     for (const email of addresses) {
       const domain = email.split('@')[1];
@@ -581,7 +615,7 @@ export class DealInsightService implements OnModuleInit {
     const mailPatterns = [...addressPatterns, ...domainPatterns];
 
     const phonePatterns = [...phones].map((p) => new RegExp(`${escapeRegex(p)}$`));
-    const company = text(account?.name) ?? text(quotes.find((q) => text(q.clientDetails?.companyName))?.clientDetails?.companyName);
+    const company = text(account?.name) ?? text(quotes.find((q) => text(q.clientDetails?.companyName))?.clientDetails?.companyName) ?? enquiry?.company;
     const quoteNumbers = quotes.map((q) => text(q.quoteNumber)).filter((n): n is string => !!n);
     const { inbound, outbound } = await this.customerEmails(organizationId, mailPatterns, company, quoteNumbers);
     const [notes, sessions, phoneCalls, history] = await Promise.all([
@@ -771,10 +805,10 @@ export class DealInsightService implements OnModuleInit {
         businessName: business.name,
       },
       customer: {
-        name: text(contact?.name) ?? ([contact?.firstName, contact?.lastName].filter(Boolean).join(' ') || undefined) ?? text(quotes[0]?.clientDetails?.contactName),
-        company: text(account?.name) ?? text(quotes[0]?.clientDetails?.companyName),
-        email: text(contact?.email) ?? text(quotes[0]?.clientDetails?.email),
-        phone: text(contact?.phone) ?? text(quotes[0]?.clientDetails?.phone),
+        name: text(contact?.name) ?? ([contact?.firstName, contact?.lastName].filter(Boolean).join(' ') || undefined) ?? text(quotes[0]?.clientDetails?.contactName) ?? enquiry?.name,
+        company: text(account?.name) ?? text(quotes[0]?.clientDetails?.companyName) ?? enquiry?.company,
+        email: text(contact?.email) ?? text(quotes[0]?.clientDetails?.email) ?? enquiry?.email,
+        phone: text(contact?.phone) ?? text(quotes[0]?.clientDetails?.phone) ?? enquiry?.phone,
         addresses: [...addresses],
       },
       quotes: quotes.map((q) => ({
@@ -793,7 +827,11 @@ export class DealInsightService implements OnModuleInit {
           .slice(0, 20),
         requestNotes: text(q.requestNotes),
       })),
-      notes: notes.map((n) => ({ id: n._id.toString(), body: (n.body as string) ?? '', at: n.createdAt, by: n.createdBy ? nameOf.get(String(n.createdBy)) : undefined })),
+      notes: [
+        ...notes.map((n) => ({ id: n._id.toString(), body: (n.body as string) ?? '', at: n.createdAt, by: n.createdBy ? nameOf.get(String(n.createdBy)) : undefined })),
+        // The enquiry itself, in the customer's words, as the first note on the deal.
+        ...(enquiry?.message ? [{ id: `enquiry-${dealId}`, body: enquiry.message, at: enquiry.at, by: enquiry.form ? `${enquiry.form} (website)` : 'Website enquiry' }] : []),
+      ],
       emails,
       calls,
       history: history.map((h) => ({
