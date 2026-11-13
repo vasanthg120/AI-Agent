@@ -328,6 +328,9 @@ export function AdminAiUsagePage() {
           <Button variant="secondary" size="sm" leftIcon={<FiRefreshCw />} loading={refreshing} onClick={handleRefresh}>
             Refresh
           </Button>
+          <Button variant="secondary" size="sm" leftIcon={<FiDollarSign />} onClick={() => navigate(ADMIN_ROUTES.aiUsageProviderFinance)}>
+            Provider Finance
+          </Button>
         </div>
       </div>
 

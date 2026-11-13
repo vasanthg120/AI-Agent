@@ -34,7 +34,7 @@ from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor, ConsoleSpanExporter, SimpleSpanProcessor
 
-from app.core import langfuse_config
+from app.core import langfuse_config, provider_account_status
 from app.observability import execution_store
 from app.observability.cost import estimate_cost
 
@@ -50,6 +50,72 @@ else:
 
 trace.set_tracer_provider(_provider)
 tracer = trace.get_tracer("python-agent")
+
+# Confirmed-only provider-exhaustion detection (LLM Provider Finance feature)
+# — verified against the installed anthropic==0.120.2 SDK's own
+# _exceptions.py, not guessed.
+#
+# FIX (previously shipped as isinstance(exc, BadRequestError), which could
+# never actually fire): Anthropic's real billing_error is delivered over
+# HTTP 402, confirmed against the current official docs — and 402 has no
+# dedicated subclass in the SDK's _exceptions.py (only 400/401/403/404/409/
+# 413/422/429/503/529/504 do), so a real 402 response constructs the generic
+# base APIStatusError, which BadRequestError (status_code hard-locked to 400)
+# can never match. The fix checks APIStatusError instead: `.type` is parsed
+# generically in THAT class's own __init__ for every subclass and status
+# code (confirmed by reading _exceptions.py directly), so this one change
+# catches 402/billing_error without broadening which `.type` values count —
+# RateLimitError (429) still can't match since "rate_limit_error" isn't in
+# the set below.
+#
+# Groq's SDK exposes no `.type` field at all (groq._exceptions.APIStatusError
+# only has status_code/body), but console.groq.com/docs/spend-limits
+# confirms a real, documented signal: a configured spend limit being hit
+# returns HTTP 400 with error code "blocked_api_access". The exact JSON
+# nesting isn't shown in the docs text, so this checks the OpenAI-compatible
+# {"error": {"code": ...}} shape Groq's API otherwise follows, AND a
+# top-level {"code": ...} as a defensive fallback — never a guess at a
+# single unconfirmed nesting.
+try:
+    import anthropic as _anthropic_sdk
+except Exception:  # pragma: no cover - the SDK is always installed in practice
+    _anthropic_sdk = None
+
+try:
+    import groq as _groq_sdk
+except Exception:  # pragma: no cover - the SDK is always installed in practice
+    _groq_sdk = None
+
+_ANTHROPIC_EXHAUSTED_ERROR_TYPES = {"billing_error", "invalid_request_error"}
+_GROQ_EXHAUSTED_ERROR_CODE = "blocked_api_access"
+
+
+def _groq_error_code(body: object) -> str | None:
+    if not isinstance(body, dict):
+        return None
+    nested = body.get("error")
+    if isinstance(nested, dict) and isinstance(nested.get("code"), str):
+        return nested["code"]
+    if isinstance(body.get("code"), str):
+        return body["code"]
+    return None
+
+
+def _mark_provider_exhausted_if_confirmed(provider: str, exc: Exception) -> None:
+    if (
+        provider == "anthropic"
+        and _anthropic_sdk is not None
+        and isinstance(exc, _anthropic_sdk.APIStatusError)
+        and getattr(exc, "type", None) in _ANTHROPIC_EXHAUSTED_ERROR_TYPES
+    ):
+        provider_account_status.mark_exhausted(provider)
+    elif (
+        provider == "groq"
+        and _groq_sdk is not None
+        and isinstance(exc, _groq_sdk.APIStatusError)
+        and _groq_error_code(getattr(exc, "body", None)) == _GROQ_EXHAUSTED_ERROR_CODE
+    ):
+        provider_account_status.mark_exhausted(provider)
 
 
 @contextmanager
@@ -94,6 +160,10 @@ def traced_llm_call(
         except Exception as exc:
             success = False
             error = str(exc)[:500]
+            try:
+                _mark_provider_exhausted_if_confirmed(provider, exc)
+            except Exception:
+                pass  # observability must never mask the real exception below
             raise
         finally:
             latency_ms = (time.monotonic() - start) * 1000

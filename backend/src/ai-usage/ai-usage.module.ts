@@ -28,5 +28,10 @@ import { AiUsageHierarchyService } from './ai-usage-hierarchy.service';
   ],
   controllers: [AiUsageAdminController, AiUsageHierarchyController],
   providers: [AiUsageAdminService, AiUsageHierarchyService],
+  // AiUsageHierarchyService: provider-finance.module.ts reads its
+  // getProviderCostSince() for estimated-balance/profitability math — the
+  // one shared source of truth for "cost since X," so that figure can
+  // never diverge from what this dashboard itself reports.
+  exports: [AiUsageHierarchyService],
 })
 export class AiUsageModule {}
