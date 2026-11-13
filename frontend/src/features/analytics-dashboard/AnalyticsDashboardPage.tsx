@@ -244,7 +244,7 @@ export function AnalyticsDashboardPage() {
   return (
     <div className={styles.page}>
       <DashboardHeroHeader
-        firstName={user?.firstName}
+        name={[user?.firstName, user?.lastName].filter(Boolean).join(' ') || undefined}
         range={range}
         onRangeChange={setRange}
         dateFrom={dateFrom}
