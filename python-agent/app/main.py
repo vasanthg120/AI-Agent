@@ -1,5 +1,6 @@
 import logging
 import sys
+from urllib.parse import urlsplit
 
 import requests
 
@@ -20,7 +21,7 @@ from app.integrations.crm_mongo_sync import sync_all_orgs as sync_crm_deals_to_m
 from app.integrations.crm_mongo_sync import sync_all_quote_orgs as sync_crm_quotes_to_mongo
 from app.integrations.hoops_won_rule import apply_hoops_won_rule
 from app.integrations.gorilladash_names import repair_gorilladash_names
-from app.memory.outlook_store import MicrosoftAppCredentialsError
+from app.memory.outlook_store import MicrosoftSignInError
 from app.mcp_server import app as mcp_app
 from app.rag.business_sync import sync_all
 from app.rag.vector_store import stamp_role_documents
@@ -41,11 +42,12 @@ app = FastAPI(title="AI Agent Service")
 _log = logging.getLogger("app.main")
 
 
-# Microsoft refusing the app's own secret is a configuration problem, not a
-# crash: answer with the reason in words (the email sync records it) instead
-# of a bare 500 that hid it for days.
-@app.exception_handler(MicrosoftAppCredentialsError)
-async def _microsoft_app_credentials(_request, exc: MicrosoftAppCredentialsError):
+# Microsoft's sign-in refusing to renew a mailbox's access (the app's own
+# secret wrong or missing, or any other refusal) is a configuration problem,
+# not a crash: answer with the reason in words (the email sync records it)
+# instead of a bare 500 that hid it for days.
+@app.exception_handler(MicrosoftSignInError)
+async def _microsoft_sign_in(_request, exc: MicrosoftSignInError):
     return JSONResponse(status_code=503, content={"detail": str(exc)})
 
 
@@ -58,7 +60,8 @@ async def _microsoft_graph_error(_request, exc: requests.HTTPError):
     url = str(getattr(response, "url", "") or "")
     if response is None or "graph.microsoft.com" not in url:
         _log.error("Outside service error", exc_info=exc)
-        return JSONResponse(status_code=500, content={"detail": "Something went wrong talking to an outside service."})
+        where = f" ({urlsplit(url).hostname}, error {response.status_code})" if response is not None and url else ""
+        return JSONResponse(status_code=500, content={"detail": f"Something went wrong talking to an outside service{where}."})
     request_id = response.headers.get("request-id", "")
     status = response.status_code
     _log.warning("Microsoft Graph %s for %s (request id %s)", status, url.split("?")[0], request_id)
@@ -84,7 +87,8 @@ async def _microsoft_graph_unreachable(_request, exc: requests.RequestException)
     url = str(getattr(getattr(exc, "request", None), "url", "") or "")
     if "graph.microsoft.com" not in url:
         _log.error("Outside service unreachable", exc_info=exc)
-        return JSONResponse(status_code=500, content={"detail": "An outside service didn't answer."})
+        where = f" ({urlsplit(url).hostname})" if url else ""
+        return JSONResponse(status_code=500, content={"detail": f"An outside service{where} didn't answer."})
     _log.warning("Microsoft Graph didn't answer for %s: %s", url.split("?")[0], type(exc).__name__)
     return JSONResponse(
         status_code=503,

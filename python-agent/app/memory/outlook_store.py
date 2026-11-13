@@ -1,4 +1,5 @@
 import logging
+import re
 from datetime import datetime, timedelta
 
 import requests
@@ -18,7 +19,13 @@ GRAPH_SCOPES = "offline_access User.Read Mail.Read Calendars.Read Contacts.Read"
 logger = logging.getLogger(__name__)
 
 
-class MicrosoftAppCredentialsError(RuntimeError):
+class MicrosoftSignInError(RuntimeError):
+    """Microsoft's sign-in server would not renew a mailbox's access, for a reason
+    other than an expired grant (that one marks the mailbox needs_reauth). The
+    message is what Microsoft said, in words; the AI service answers 503 with it."""
+
+
+class MicrosoftAppCredentialsError(MicrosoftSignInError):
     """Microsoft refused HaiVE's own app credentials (client id / secret) - every
     mailbox fails the same way and reconnecting a mailbox cannot help: the
     MS_GRAPH_CLIENT_SECRET in this service's settings has to be put right."""
@@ -57,7 +64,36 @@ def get_valid_access_token(user_id: str) -> str | None:
     return decrypt_token(connection["accessToken"])
 
 
+def _sign_in_refusal(response: requests.Response) -> str:
+    """What Microsoft's sign-in server said, without its trace ids and timestamps."""
+    if response.status_code >= 500:
+        return (
+            f"Microsoft's sign-in service didn't answer (error {response.status_code}). "
+            "It's on Microsoft's side; HaiVE tries again on the next sync."
+        )
+    try:
+        body = response.json()
+    except ValueError:
+        body = {}
+    codes = ",".join(str(c) for c in body.get("error_codes") or [])
+    description = (body.get("error_description") or "").splitlines()[0] if body.get("error_description") else ""
+    description = re.sub(r"^AADSTS\d+:\s*", "", description.split(" Trace ID")[0]).strip().rstrip(".")
+    logger.error("Microsoft sign-in refused to renew a mailbox token: %s %s AADSTS%s", response.status_code, body.get("error"), codes)
+    return (
+        f"Microsoft's sign-in refused to renew this mailbox's access ({body.get('error') or response.status_code}"
+        f"{', AADSTS' + codes if codes else ''}): {description or 'no reason given'}. If that names the app, client or "
+        "secret, the AI service's Microsoft settings need fixing; otherwise reconnect the mailbox in Settings, Integrations."
+    )
+
+
 def _refresh(connection: dict) -> dict | None:
+    missing = [name for name, value in (("MS_GRAPH_CLIENT_ID", settings.ms_graph_client_id), ("MS_GRAPH_CLIENT_SECRET", settings.ms_graph_client_secret)) if not value]
+    if missing:
+        raise MicrosoftAppCredentialsError(
+            f"The AI service has no {' or '.join(missing)} set, so it can't sign in to Microsoft to read mailboxes. Add the "
+            "app's values from Azure (App registrations) to the AI service settings and restart it - the mailboxes "
+            "themselves don't need reconnecting."
+        )
     response = requests.post(
         TOKEN_ENDPOINT,
         data={
@@ -97,7 +133,8 @@ def _refresh(connection: dict) -> dict | None:
                 "secrets) there and restart the AI service - the mailboxes themselves don't need reconnecting."
             )
 
-    response.raise_for_status()
+    if response.status_code >= 400:
+        raise MicrosoftSignInError(_sign_in_refusal(response))
     payload = response.json()
 
     new_access_token = payload["access_token"]
