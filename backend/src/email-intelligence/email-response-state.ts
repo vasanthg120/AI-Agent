@@ -33,7 +33,8 @@ export type EmailResponseStatus =
   // decided no reply is owed (or the user approved it as "no reply needed").
   | 'resolved';
 
-export type EmailRespondedVia = 'app' | 'outlook' | 'thread';
+// 'manual': the person said they replied (by phone, another mailbox…) — see markReplied.
+export type EmailRespondedVia = 'app' | 'outlook' | 'thread' | 'manual';
 
 // One label per conversation, finer than the three views above and never two at
 // once: what the row is, read from the same stored facts.
@@ -45,6 +46,9 @@ export type EmailCategory =
   | 'responded' // we replied; nothing is pending either way
   | 'informational' // no reply was ever needed
   | 'completed'; // closed by a person: dismissed, or the email was deleted in Outlook
+
+/** replyMatchedVia of a reply the person marked themselves (EmailIntelligenceService.markReplied). */
+export const MANUAL_REPLY = 'manual';
 
 /** How long a customer may leave our question unanswered before the conversation is flagged for a follow-up. */
 export const FOLLOW_UP_AFTER_DAYS = 3;
@@ -67,6 +71,8 @@ export interface ResponseStateFields {
   urgency?: string;
   // Our reply asked the customer for something (see replyAwaitsCustomer).
   replyAwaitsCustomer?: boolean;
+  // How the reply was found; 'manual' when the person marked it replied themselves.
+  replyMatchedVia?: string;
 }
 
 /** Mongo: nobody has answered this message. */
@@ -155,7 +161,7 @@ export function deriveResponseStatus(item: ResponseStateFields): EmailResponseSt
 /** When and how it was answered, for display. */
 export function deriveRespondedInfo(item: ResponseStateFields): { respondedAt?: Date; respondedVia?: EmailRespondedVia } {
   if (item.sentAt) return { respondedAt: item.sentAt, respondedVia: 'app' };
-  if (item.externalReplyDetectedAt) return { respondedAt: item.externalReplyDetectedAt, respondedVia: 'outlook' };
+  if (item.externalReplyDetectedAt) return { respondedAt: item.externalReplyDetectedAt, respondedVia: item.replyMatchedVia === MANUAL_REPLY ? 'manual' : 'outlook' };
   if (item.threadRespondedAt) return { respondedAt: item.threadRespondedAt, respondedVia: 'thread' };
   return {};
 }

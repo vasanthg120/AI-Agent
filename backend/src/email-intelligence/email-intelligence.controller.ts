@@ -8,7 +8,7 @@ import { Throttle } from '@nestjs/throttler';
 import { JwtPayload } from '../auth/jwt-payload.interface';
 import { EmailConversationService } from './email-conversation.service';
 import { EmailHistoryService } from './email-history.service';
-import { AUTO_DRAFT_BATCH, EmailIntelligenceSyncService } from './email-intelligence-sync.service';
+import { AUTO_DRAFT_BATCH, EmailIntelligenceSyncService, readableSyncFailure } from './email-intelligence-sync.service';
 import { EmailResponseStatus } from './email-response-state';
 import { AUTO_DRAFT_MAX_AGE_DAYS, EmailIntelligenceService, ListEmailsQuery } from './email-intelligence.service';
 import { Feature } from '../common/app-features';
@@ -76,7 +76,9 @@ export class EmailIntelligenceController {
   // below.
   @Get('sync/preview')
   previewSync(@CurrentUser() user: JwtPayload) {
-    return this.emailIntelligenceSyncService.previewSync(user.sub);
+    return this.emailIntelligenceSyncService.previewSync(user.sub).catch((err: unknown) => {
+      throw readableSyncFailure(err);
+    });
   }
 
   // Explicit, user-triggered sync — the button click gets an immediate,
@@ -88,7 +90,9 @@ export class EmailIntelligenceController {
   @Post('sync')
   @Permission('email', 'view')
   sync(@CurrentUser() user: JwtPayload) {
-    return this.emailIntelligenceSyncService.syncMyMailbox(user.sub, 'user');
+    return this.emailIntelligenceSyncService.syncMyMailbox(user.sub, 'user').catch((err: unknown) => {
+      throw readableSyncFailure(err);
+    });
   }
 
   // The cheap reply check: has anything waiting been answered in Outlook?
@@ -352,6 +356,19 @@ export class EmailIntelligenceController {
   @Post(':id/approve')
   approve(@CurrentUser() user: JwtPayload, @Param('id') id: string, @Body() body: { finalDraftReply?: string }) {
     return this.emailIntelligenceService.approve(user.sub, id, body?.finalDraftReply);
+  }
+
+  // "I already replied" — answered somewhere HaiVE can't see; and taking it back.
+  @Post(':id/mark-replied')
+  @Permission('email', 'edit')
+  markReplied(@CurrentUser() user: JwtPayload, @Param('id') id: string) {
+    return this.emailIntelligenceService.markReplied(user.sub, id);
+  }
+
+  @Post(':id/unmark-replied')
+  @Permission('email', 'edit')
+  unmarkReplied(@CurrentUser() user: JwtPayload, @Param('id') id: string) {
+    return this.emailIntelligenceService.unmarkReplied(user.sub, id);
   }
 
   @Post(':id/reject')

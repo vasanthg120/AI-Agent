@@ -166,7 +166,8 @@ export interface EmailIntelligenceItem {
 }
 
 export type EmailResponseStatus = 'needs_response' | 'responded' | 'resolved';
-export type EmailRespondedVia = 'app' | 'outlook' | 'thread';
+// 'manual': the person marked it replied themselves (answered by phone, from another mailbox…).
+export type EmailRespondedVia = 'app' | 'outlook' | 'thread' | 'manual';
 export type EmailCategory =
   | 'urgent'
   | 'needs_response'
@@ -184,10 +185,20 @@ export interface ReplyRefreshResult {
   checked: boolean;
 }
 
+/** Is the mailbox being read — and if not, since when and why (in words). */
+export interface MailboxHealth {
+  status: 'ok' | 'failing' | 'never_synced';
+  lastSuccessAt?: string;
+  failingSince?: string;
+  failedRuns?: number;
+  reason?: string;
+}
+
 export interface EmailSyncState {
   lastSyncedAt: string | null;
   running: boolean;
   awaitingAnalysis: number;
+  health?: MailboxHealth;
 }
 
 export interface EmailThreadSentMessage {
@@ -477,6 +488,17 @@ export const emailIntelligenceService = {
     const { data } = await axiosClient.post<EmailIntelligenceItem>(`/email-intelligence/${id}/approve`, {
       finalDraftReply,
     });
+    return data;
+  },
+
+  /** "I already replied" — answered somewhere HaiVE can't see (phone, another mailbox). */
+  async markReplied(id: string): Promise<EmailIntelligenceItem> {
+    const { data } = await axiosClient.post<EmailIntelligenceItem>(`/email-intelligence/${id}/mark-replied`);
+    return data;
+  },
+
+  async unmarkReplied(id: string): Promise<EmailIntelligenceItem> {
+    const { data } = await axiosClient.post<EmailIntelligenceItem>(`/email-intelligence/${id}/unmark-replied`);
     return data;
   },
 

@@ -16,6 +16,7 @@ export const RESPONDED_VIA_LABEL: Record<EmailRespondedVia, string> = {
   app: 'Replied',
   outlook: 'Replied in Outlook',
   thread: 'Answered by a later reply',
+  manual: 'Marked as replied',
 };
 
 export const RESPONSE_VIEW_LABEL: Record<EmailResponseStatus, string> = {

@@ -14,7 +14,10 @@ import { classifyEmailDeterministically } from './email-preclassification.util';
 import {
   deriveCategory,
   deriveRespondedInfo,
+  deriveResponseStatus,
+  MANUAL_REPLY,
   EmailCategory,
+  EmailRespondedVia,
   EmailResponseStatus,
   needsResponseMatch,
   responseStatusMatch,
@@ -108,7 +111,7 @@ export interface TeamEmailRow {
   fromAddress: string;
   business?: string;
   respondedAt?: Date;
-  respondedVia?: 'app' | 'outlook' | 'thread';
+  respondedVia?: EmailRespondedVia;
   // Who approved the reply sent through HaiVE (a HaiVE user id).
   approvedBy?: string;
   category: EmailCategory;
@@ -2344,6 +2347,36 @@ export class EmailIntelligenceService {
     }
 
     return reminder;
+  }
+
+  /**
+   * "I already replied": the person answered this email where HaiVE can't see it
+   * (on the phone, from another mailbox) or before HaiVE could read their Sent
+   * Items. Recorded as a reply made outside HaiVE — so it counts as answered
+   * everywhere (the queues, missed-email figures, Team Performance, response
+   * times) — marked as the person's own word, which they can take back.
+   */
+  async markReplied(userId: string, id: string): Promise<EmailIntelligenceItemDocument> {
+    const item = await this.getOne(userId, id);
+    if (deriveResponseStatus(item) === 'responded') return item;
+    const at = new Date();
+    item.externalReplyDetectedAt = at;
+    item.replyMatchedVia = MANUAL_REPLY;
+    await item.save();
+    await this.emailSla.recordFirstResponse(item.organizationId, item._id.toString(), at).catch((err: Error) => this.logger.warn(`SLA first response: ${err.message}`));
+    return item;
+  }
+
+  /** Takes back markReplied — only a reply the person marked; one HaiVE found or sent stays. */
+  async unmarkReplied(userId: string, id: string): Promise<EmailIntelligenceItemDocument> {
+    const item = await this.getOne(userId, id);
+    if (item.replyMatchedVia !== MANUAL_REPLY) {
+      throw new BadRequestException('This reply was sent from HaiVE or found in your Sent Items, so it can’t be undone here.');
+    }
+    item.set('externalReplyDetectedAt', undefined);
+    item.set('replyMatchedVia', undefined);
+    await item.save();
+    return item;
   }
 
   async reject(userId: string, id: string, reason?: string): Promise<EmailIntelligenceItemDocument> {

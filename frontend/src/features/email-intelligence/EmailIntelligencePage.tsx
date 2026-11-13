@@ -39,6 +39,7 @@ import { FollowUpAnalysisSection } from './components/FollowUpAnalysisSection';
 import { FollowUpsSection } from './components/FollowUpsSection';
 import { DRAFT_SUMMARY_KEY, ReplyAssistBar } from './components/ReplyAssistBar';
 import { MailboxHistorySection } from './components/MailboxHistorySection';
+import { InboxAgentPanel } from './components/InboxAgentPanel';
 import { RESPONSE_VIEW_LABEL } from './emailResponseLabels';
 import styles from './email-intelligence.module.css';
 
@@ -342,9 +343,11 @@ export function EmailIntelligencePage() {
       }
       void queryClient.invalidateQueries({ queryKey: [QUERY_ROOT] });
     } catch (err) {
-      toast.error(extractErrorMessage(err));
+      toast.error(extractErrorMessage(err), { duration: 8_000 });
     } finally {
       setSyncing(false);
+      // Worked or not, the mailbox's health line should say so now, not in a minute.
+      void queryClient.invalidateQueries({ queryKey: [QUERY_ROOT, 'sync-state'] });
     }
   };
 
@@ -435,13 +438,14 @@ export function EmailIntelligencePage() {
         subtitle="Emails waiting for your reply, with drafts ready. Reply here or in Outlook — it is picked up automatically."
         meta={
           <>
-            {(lastSyncedAt || syncState?.lastSyncedAt) && (
+            {/* On the Inbox tab the agent panel says these. */}
+            {section !== 'inbox' && (lastSyncedAt || syncState?.lastSyncedAt) && (
               <span className={styles.lastSynced}>
                 <FiClock /> {syncState?.running ? 'Syncing now · last synced ' : 'Last synced '}
                 {dayjs(lastSyncedAt ?? syncState?.lastSyncedAt).format('h:mm A')}
               </span>
             )}
-            {(syncState?.awaitingAnalysis ?? 0) > 0 && (
+            {section !== 'inbox' && (syncState?.awaitingAnalysis ?? 0) > 0 && (
               <span
                 className={styles.lastSynced}
                 title="These emails are stored and tracked. The AI will read them once it is available again (for example after credits are added)."
@@ -494,6 +498,17 @@ export function EmailIntelligencePage() {
 
       {section === 'inbox' && (
         <>
+          <InboxAgentPanel
+            syncState={syncState}
+            counts={countsStale ? undefined : counts}
+            drafts={draftSummary}
+            followUpsDue={followUpsDue}
+            onView={setView}
+            onFollowUps={() => setSection('follow_ups')}
+            onRetry={() => void handleConfirmSync()}
+            retrying={syncing}
+          />
+
           <ChoiceCards ariaLabel="Email queue" items={queueCards} activeId={view} onChange={setView} />
 
           <ReplyAssistBar onDrafted={refreshLists} />

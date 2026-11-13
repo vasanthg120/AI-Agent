@@ -38,6 +38,7 @@ for _stream in (sys.stdout, sys.stderr):
         _stream.reconfigure(encoding="utf-8", errors="replace")
 
 app = FastAPI(title="AI Agent Service")
+_log = logging.getLogger("app.main")
 
 
 # Microsoft refusing the app's own secret is a configuration problem, not a
@@ -56,9 +57,11 @@ async def _microsoft_graph_error(_request, exc: requests.HTTPError):
     response = exc.response
     url = str(getattr(response, "url", "") or "")
     if response is None or "graph.microsoft.com" not in url:
+        _log.error("Outside service error", exc_info=exc)
         return JSONResponse(status_code=500, content={"detail": "Something went wrong talking to an outside service."})
     request_id = response.headers.get("request-id", "")
     status = response.status_code
+    _log.warning("Microsoft Graph %s for %s (request id %s)", status, url.split("?")[0], request_id)
     if status >= 500:
         detail = (
             f"Microsoft 365's mail service didn't answer for this mailbox (Microsoft error {status}, request id {request_id}). "
@@ -71,6 +74,25 @@ async def _microsoft_graph_error(_request, exc: requests.HTTPError):
     else:
         detail = f"Microsoft 365 refused the request ({status}, request id {request_id})."
     return JSONResponse(status_code=503, content={"detail": detail})
+
+
+# Microsoft not answering at all (a timeout, a dropped connection) — the same
+# outage, said the same way. Anything else is still logged in full.
+@app.exception_handler(requests.Timeout)
+@app.exception_handler(requests.ConnectionError)
+async def _microsoft_graph_unreachable(_request, exc: requests.RequestException):
+    url = str(getattr(getattr(exc, "request", None), "url", "") or "")
+    if "graph.microsoft.com" not in url:
+        _log.error("Outside service unreachable", exc_info=exc)
+        return JSONResponse(status_code=500, content={"detail": "An outside service didn't answer."})
+    _log.warning("Microsoft Graph didn't answer for %s: %s", url.split("?")[0], type(exc).__name__)
+    return JSONResponse(
+        status_code=503,
+        content={
+            "detail": "Microsoft 365's mail service took too long to answer for this mailbox. "
+            "It's on Microsoft's side; HaiVE tries again on the next sync and catches up on everything missed."
+        },
+    )
 
 app.include_router(health.router)
 app.include_router(chat.router)

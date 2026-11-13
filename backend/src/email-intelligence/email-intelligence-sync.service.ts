@@ -1,6 +1,6 @@
 import { HttpService } from '@nestjs/axios';
 import { archivedOrganizationIds } from '../common/archived-organizations';
-import { Injectable, Logger } from '@nestjs/common';
+import { HttpException, Injectable, Logger, ServiceUnavailableException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { InjectModel } from '@nestjs/mongoose';
@@ -142,6 +142,40 @@ export interface DraftRunResult {
   noDraft: number;
   /** Why the run stopped early, in words a person can act on (credits used up, the AI unreachable). */
   error?: string;
+}
+
+/** Whether a mailbox is being read (see EmailIntelligenceSyncService.mailboxHealth). */
+export interface MailboxHealth {
+  status: 'ok' | 'failing' | 'never_synced';
+  lastSuccessAt?: Date;
+  failingSince?: Date;
+  failedRuns?: number;
+  reason?: string;
+}
+
+/** A failed sync's error, in words for the mailbox owner. */
+export function describeSyncError(error: string | null | undefined): string {
+  const raw = (error ?? '').trim();
+  if (!raw) return 'The last sync stopped without saying why. HaiVE tries again every 30 minutes.';
+  // Already written for people (the AI service's own reasons, our own messages).
+  if (!/^(Request failed with status code|timeout of|connect E|getaddrinfo|socket hang up)/i.test(raw)) return raw;
+  if (/status code 503/i.test(raw)) return 'HaiVE’s AI service couldn’t read the mailbox right now. HaiVE tries again every 30 minutes.';
+  if (/status code 50[02]/i.test(raw)) return 'The mailbox couldn’t be read: Microsoft 365 or HaiVE’s AI service answered with an error. HaiVE tries again every 30 minutes.';
+  if (/status code 40[13]/i.test(raw)) return 'Microsoft refused to let HaiVE read this mailbox. Reconnect it in Settings → Integrations.';
+  if (/timeout/i.test(raw)) return 'Microsoft 365 took too long to answer. HaiVE tries again every 30 minutes.';
+  if (/ECONNREFUSED|connect E|getaddrinfo|socket hang up/i.test(raw)) return 'HaiVE’s AI service, which reads the mailbox, isn’t running. It needs to be started again.';
+  return raw;
+}
+
+/**
+ * A sync the person started that failed, as an error they can read: the AI
+ * service's own reason when it gave one, else the HTTP failure in words — not
+ * a bare "Internal server error".
+ */
+export function readableSyncFailure(err: unknown): Error {
+  if (err instanceof HttpException) return err;
+  const detail = (err as { response?: { data?: { detail?: unknown } } }).response?.data?.detail;
+  return new ServiceUnavailableException(describeSyncError(typeof detail === 'string' && detail.trim() ? detail : (err as Error)?.message));
 }
 
 @Injectable()
@@ -718,8 +752,8 @@ export class EmailIntelligenceSyncService {
     return this.syncJobModel.find({ userId }).sort({ createdAt: -1 }).limit(limit).exec();
   }
 
-  /** When this mailbox last finished a sync, and whether one is running now. */
-  async syncState(userId: string): Promise<{ lastSyncedAt: Date | null; running: boolean; awaitingAnalysis: number }> {
+  /** When this mailbox last finished a sync, whether one is running now, and — when the syncs keep failing — since when and why, in words. */
+  async syncState(userId: string): Promise<{ lastSyncedAt: Date | null; running: boolean; awaitingAnalysis: number; health: MailboxHealth }> {
     const [last, running, awaiting] = await Promise.all([
       this.syncJobModel
         .findOne({ userId, status: { $in: ['completed', 'completed_with_errors'] } })
@@ -730,6 +764,34 @@ export class EmailIntelligenceSyncService {
       this.syncJobModel.exists({ userId, status: 'running' }),
       this.emailIntelligenceService.listAwaitingAnalysis(userId, 200),
     ]);
-    return { lastSyncedAt: last?.completedAt ?? null, running: !!running, awaitingAnalysis: awaiting.length };
+    return { lastSyncedAt: last?.completedAt ?? null, running: !!running, awaitingAnalysis: awaiting.length, health: await this.mailboxHealth(userId) };
+  }
+
+  /**
+   * Is this mailbox being read? The latest finished syncs tell: ok, or failing
+   * since the first failure after the last success — with why, in plain words
+   * (a bare "Request failed with status code 500" hid a dead sync for days).
+   */
+  async mailboxHealth(userId: string): Promise<MailboxHealth> {
+    const recent = await this.syncJobModel
+      .find({ userId, status: { $ne: 'running' } })
+      .sort({ createdAt: -1 })
+      .limit(200)
+      .select('status error createdAt completedAt startedAt')
+      .lean<{ status: string; error?: string; createdAt?: Date; completedAt?: Date; startedAt?: Date }[]>()
+      .exec();
+    if (recent.length === 0) return { status: 'never_synced' };
+    const ok = (s: string) => s === 'completed' || s === 'completed_with_errors';
+    const lastSuccess = recent.find((j) => ok(j.status));
+    if (ok(recent[0].status)) return { status: 'ok', lastSuccessAt: lastSuccess?.completedAt ?? lastSuccess?.createdAt };
+    const failures = recent.slice(0, lastSuccess ? recent.indexOf(lastSuccess) : recent.length);
+    const first = failures[failures.length - 1];
+    return {
+      status: 'failing',
+      lastSuccessAt: lastSuccess?.completedAt ?? lastSuccess?.createdAt,
+      failingSince: first?.startedAt ?? first?.createdAt,
+      failedRuns: failures.length,
+      reason: describeSyncError(recent[0].error),
+    };
   }
 }

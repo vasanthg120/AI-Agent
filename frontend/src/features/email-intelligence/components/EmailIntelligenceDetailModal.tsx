@@ -28,16 +28,18 @@ const SENTIMENT_VARIANT: Record<string, BadgeVariant> = {
   neutral: 'neutral',
 };
 
-type Busy = 'send' | 'approve' | 'draft' | 'close' | null;
+type Busy = 'send' | 'approve' | 'draft' | 'close' | 'replied' | null;
 
 // One clear sentence about where this email stands, driven by the backend's
 // derived state — including an email answered in Outlook, an approved reply
 // that has not gone out, and one whose send failed.
-function ResponseBanner({ item }: { item: EmailIntelligenceItem }) {
+function ResponseBanner({ item, onUndo, undoing }: { item: EmailIntelligenceItem; onUndo: () => void; undoing: boolean }) {
   if (item.responseStatus === 'responded') {
     const via = item.respondedVia ? RESPONDED_VIA_LABEL[item.respondedVia] : 'Replied';
     const detail =
-      item.respondedVia === 'outlook'
+      item.respondedVia === 'manual'
+        ? 'You marked it as replied — answered somewhere HaiVE can’t see.'
+        : item.respondedVia === 'outlook'
         ? 'A reply to this conversation was found in your Outlook Sent Items.'
         : item.respondedVia === 'thread'
           ? 'A later reply in this conversation answered it.'
@@ -50,6 +52,11 @@ function ResponseBanner({ item }: { item: EmailIntelligenceItem }) {
           {item.respondedAt ? ` · ${formatWhen(item.respondedAt)}` : ''}
           <div className={styles.listItemMeta}>{detail}</div>
         </div>
+        {item.respondedVia === 'manual' && (
+          <button type="button" className={styles.bannerAction} onClick={onUndo} disabled={undoing}>
+            {undoing ? 'Undoing…' : 'Undo'}
+          </button>
+        )}
       </div>
     );
   }
@@ -208,6 +215,22 @@ export function EmailIntelligenceDetailModal({
       }
     });
 
+  // Answered somewhere HaiVE can't see (a call, another mailbox) — or before HaiVE could read the Sent Items.
+  const markReplied = () =>
+    run('replied', async () => {
+      const updated = await emailIntelligenceService.markReplied(item._id);
+      toast.success('Marked as replied — it has left Needs Response.');
+      onUpdated(updated);
+      onClose();
+    });
+
+  const undoReplied = () =>
+    run('replied', async () => {
+      const updated = await emailIntelligenceService.unmarkReplied(item._id);
+      toast.success('Back in Needs Response.');
+      onUpdated(updated);
+    });
+
   const closeWithoutReply = () =>
     run('close', async () => {
       const updated = await emailIntelligenceService.reject(item._id, closeReason.trim() || undefined);
@@ -219,7 +242,7 @@ export function EmailIntelligenceDetailModal({
   return (
     <Modal open={open} onClose={onClose} title={item.subject || '(no subject)'} maxWidth={680}>
       <div className={styles.detail}>
-        <ResponseBanner item={item} />
+        <ResponseBanner item={item} onUndo={() => void undoReplied()} undoing={busy === 'replied'} />
 
         {/* 1 — what the customer wrote */}
         <section className={styles.detailSection}>
@@ -403,6 +426,19 @@ export function EmailIntelligenceDetailModal({
             {canReply && !isClosed && (
               <Button type="button" variant="ghost" disabled={busy !== null} onClick={() => setClosing(true)}>
                 No reply needed
+              </Button>
+            )}
+            {canReply && !isClosed && (
+              <Button
+                type="button"
+                variant="outline"
+                leftIcon={<FiCheckCircle />}
+                disabled={busy !== null}
+                loading={busy === 'replied'}
+                title="You answered it on the phone, from another mailbox or in Outlook — take it out of Needs Response"
+                onClick={() => void markReplied()}
+              >
+                I already replied
               </Button>
             )}
             <span className={styles.footerSpacer} />
