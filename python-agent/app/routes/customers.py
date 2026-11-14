@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends
 
-from app.agent.anthropic_client import analyze_customer, brief_deal
+from app.agent.anthropic_client import analyze_customer, brief_deal, customer_intelligence
 from app.security import get_current_user
 
 router = APIRouter()
@@ -14,6 +14,21 @@ router = APIRouter()
 @router.post("/customers/analyze")
 def analyze(payload: dict, user: dict = Depends(get_current_user)):
     return analyze_customer(
+        payload,
+        organization_id=user.get("organizationId"),
+        user_id=user.get("sub", ""),
+        request_id=payload.get("request_id", ""),
+    )
+
+
+# One customer's numbered records (Customer 360°), assembled by NestJS's
+# customer-360.service.ts - internal, trusted input; CUSTOMER_INTELLIGENCE_TOOL's
+# forced tool choice fixes the output shape, and the backend drops any statement
+# that does not cite a record it gave. Only run when someone clicks "Analyse"
+# (billed by the backend around it).
+@router.post("/customers/intelligence")
+def intelligence(payload: dict, user: dict = Depends(get_current_user)):
+    return customer_intelligence(
         payload,
         organization_id=user.get("organizationId"),
         user_id=user.get("sub", ""),

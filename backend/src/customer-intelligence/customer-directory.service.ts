@@ -459,6 +459,10 @@ export class CustomerDirectoryService {
           externalId: 1,
           // What is being sold on the deal — the items of the quotations raised from it.
           products: 1,
+          // For Customer 360°'s deal history.
+          closedAt: 1,
+          lostReason: 1,
+          ownerId: 1,
         },
       ),
       find(
@@ -1226,13 +1230,13 @@ export class CustomerDirectoryService {
   async searchCallable(organizationId: string, search: string, onlyRepUserId?: string, limit = 20): Promise<CallableCustomer[]> {
     const directory = await this.compute(organizationId);
     const words = search.trim().toLowerCase();
-    const digits = search.replace(/D/g, '');
-    const digitsOf = (phone?: string) => (phone ?? '').replace(/D/g, '');
+    const digits = search.replace(/\D/g, '');
+    const digitsOf = (phone?: string) => (phone ?? '').replace(/\D/g, '');
     const phonesOf = (e: Entry) => {
       const seen = new Set<string>();
       const phones: CallableCustomer['phones'] = [];
       for (const [number, label] of [[e.phone, undefined], ...e.people.map((p) => [p.phone, p.name] as const)] as const) {
-        const tidy = (number ?? '').replace(/s+/g, ' ').trim();
+        const tidy = (number ?? '').replace(/\s+/g, ' ').trim();
         const key = digitsOf(tidy);
         if (key.length < 6 || seen.has(key)) continue;
         seen.add(key);
@@ -1442,6 +1446,157 @@ export class CustomerDirectoryService {
   async customerIds(organizationId: string): Promise<Map<string, string>> {
     const { entries } = await this.compute(organizationId);
     return new Map(entries.flatMap((entry) => entry.keys.map((key) => [key, entry.id] as [string, string])));
+  }
+
+  /** The customer a call is with: by the deal the call was linked to, else by the number dialled. */
+  async customerForCall(organizationId: string, ref: { dealId?: string; phone?: string }): Promise<{ id: string; repUserId?: string } | null> {
+    const { entries } = await this.compute(organizationId);
+    const live = [...entries].sort((a, b) => Number(a.archived) - Number(b.archived));
+    const dealId = text(ref.dealId);
+    if (dealId) {
+      const byDeal = live.find((e) => e.records.some((p) => p.doc._id?.toString() === dealId || text(p.doc.externalId) === dealId));
+      if (byDeal) return { id: byDeal.id, repUserId: byDeal.repUserId };
+    }
+    const key = phoneKey(ref.phone);
+    const byPhone = key ? live.find((e) => e.keys.includes(`p:${key}`)) : undefined;
+    return byPhone ? { id: byPhone.id, repUserId: byPhone.repUserId } : null;
+  }
+
+  /**
+   * Customers matching what someone typed — a name, company, email, phone number,
+   * quotation or invoice number, deal name or a CRM's own id — each with what
+   * matched, strongest first. Identity comes from the directory's matching
+   * (links, email, phone): two customers who merely share a name stay two results.
+   */
+  async searchIdentities(organizationId: string, query: string, limit = 20) {
+    const q = query.trim();
+    if (q.length < 2) return [];
+    const { entries } = await this.compute(organizationId);
+    const words = q.toLowerCase();
+    const email = emailKey(q);
+    const digits = q.replace(/\D/g, '');
+    const phone = digits.length >= 6 ? (digits.length >= 10 ? digits.slice(-10) : digits) : '';
+    const STRENGTH: Record<string, number> = { email: 0, phone: 0, quotation: 1, invoice: 1, 'CRM id': 1, name: 2, company: 2, deal: 3 };
+    const hits: { entry: Entry; matchedOn: string[] }[] = [];
+    for (const entry of entries) {
+      const matchedOn: string[] = [];
+      if (email && entry.emails.includes(email)) matchedOn.push('email');
+      else if (!email && words.includes('@') && entry.emails.some((e) => e.includes(words))) matchedOn.push('email');
+      if (phone && entry.keys.some((k) => k.startsWith('p:') && (k.slice(2).endsWith(phone) || phone.endsWith(k.slice(2))))) matchedOn.push('phone');
+      if (entry.profile.quotations.some((x) => lower(x.number) === words)) matchedOn.push('quotation');
+      if (entry.profile.invoiceList.some((x) => lower(x.number) === words)) matchedOn.push('invoice');
+      if (entry.records.some((p) => lower(p.doc.externalId) === words || p.doc._id?.toString() === q)) matchedOn.push('CRM id');
+      if (!email && !phone && words.length >= 2) {
+        if (lower(entry.name).includes(words)) matchedOn.push('name');
+        if (entry.company && lower(entry.company).includes(words)) matchedOn.push('company');
+        if (!matchedOn.length && entry.records.some((p) => (p.kind === 'deal' || p.kind === 'enquiry') && lower(p.doc.name).includes(words))) matchedOn.push('deal');
+      }
+      if (matchedOn.length) hits.push({ entry, matchedOn });
+    }
+    const strength = (h: { matchedOn: string[] }) => Math.min(...h.matchedOn.map((m) => STRENGTH[m] ?? 9));
+    const latest = (e: Entry) => (e.activityAt.length ? Math.max(...e.activityAt) : 0);
+    return hits
+      .sort((a, b) => strength(a) - strength(b) || Number(a.entry.archived) - Number(b.entry.archived) || latest(b.entry) - latest(a.entry))
+      .slice(0, limit)
+      .map(({ entry, matchedOn }) => ({
+        id: entry.id,
+        name: entry.name,
+        company: entry.company,
+        email: entry.email,
+        phone: entry.phone,
+        matchedOn,
+        typeLabel: entry.profile.typeLabel,
+        orders: entry.profile.orders.count,
+        lastActivityAt: entry.activityAt.length ? new Date(latest(entry)) : undefined,
+        archived: entry.archived,
+      }));
+  }
+
+  /**
+   * What Customer 360° builds on for one customer: the panel's own detail, plus
+   * the facts the panel doesn't show — every phone number (to find their calls),
+   * their deals in full, how each record was tied to them, possible duplicates
+   * kept apart, and the revenue of the business's other paying customers.
+   */
+  async intelligenceBasis(organizationId: string, id: string) {
+    const { entry, directory } = await this.found(organizationId, id);
+    const detail = await this.detail(organizationId, id);
+    const sourceLabel = (sourceId?: string) => directory.sources.find((src) => src.id === sourceId)?.label;
+    const phones = [...new Set(entry.keys.filter((k) => k.startsWith('p:')).map((k) => k.slice(2)))];
+    const deals = entry.records
+      .filter((p) => p.kind === 'deal' || p.kind === 'enquiry')
+      .map((p) => ({
+        id: p.doc._id.toString(),
+        externalId: text(p.doc.externalId) || undefined,
+        kind: p.kind,
+        name: text(p.doc.name) || undefined,
+        status: (['won', 'lost'].includes(lower(p.doc.dealStatus)) ? lower(p.doc.dealStatus) : 'open') as 'open' | 'won' | 'lost',
+        value: amount(p.doc.monetaryValue),
+        createdAt: asDate(p.doc.createdAt),
+        expectedClosingDate: asDate(p.doc.expectedClosingDate),
+        closedAt: asDate(p.doc.closedAt),
+        lastActivityAt: asDate(p.doc.lastActivityAt),
+        owner: text(p.doc.externalOwnerLabel) || undefined,
+        leadSource: text(p.doc.leadSource) || undefined,
+        lostReason: text(p.doc.lostReason) || undefined,
+        source: sourceLabel(p.sourceId),
+      }))
+      .sort((a, b) => time(b.createdAt) - time(a.createdAt));
+
+    // How each record was tied to this customer — the identity's evidence. A tie by
+    // name alone is weak and shown as such; nothing is merged across businesses.
+    const phoneSet = new Set(phones);
+    const companyOf = companyKey(entry.company);
+    const evidence = entry.records.map((p) => {
+      const how = emailKey(p.identity.email) && entry.emails.includes(emailKey(p.identity.email))
+        ? 'email'
+        : phoneKey(p.identity.phone) && phoneSet.has(phoneKey(p.identity.phone))
+          ? 'phone'
+          : p.links.length
+            ? 'linked'
+            : companyOf && companyKey(p.identity.company) === companyOf
+              ? 'company'
+              : 'name';
+      return { kind: p.kind, how, source: sourceLabel(p.sourceId), label: text(p.doc.quoteNumber) || text(p.doc.invoiceNumber) || text(p.doc.name) || p.identity.name || p.kind };
+    });
+    const tally = (how: string) => evidence.filter((e) => e.how === how).length;
+
+    // Others that look alike (same company or name) but share no email or phone: kept apart, shown for a person to judge.
+    const nameOf = lower(entry.name);
+    const possibleDuplicates = directory.entries
+      .filter((other) => other.id !== entry.id && !other.keys.some((k) => entry.keys.includes(k)))
+      .map((other) => {
+        const sameCompany = !!companyOf && companyKey(other.company) === companyOf;
+        const sameName = !!nameOf && nameOf.length >= 4 && lower(other.name) === nameOf;
+        return { other, reason: sameCompany && sameName ? 'Same name and company' : sameCompany ? 'Same company' : sameName ? 'Same name' : '' };
+      })
+      .filter((d) => d.reason)
+      .slice(0, 5)
+      .map(({ other, reason }) => ({ id: other.id, name: other.name, company: other.company, email: other.email, phone: other.phone, reason }));
+
+    const dated = entry.activityAt.filter((at) => at > 0);
+    return {
+      detail,
+      keys: entry.keys,
+      emails: entry.emails,
+      phones,
+      deals,
+      firstSeenAt: dated.length ? new Date(Math.min(...dated)) : undefined,
+      lastActivityAt: dated.length ? new Date(Math.max(...dated)) : undefined,
+      peerRevenues: directory.entries.filter((e) => !e.archived && e.profile.orders.count > 0).map((e) => e.profile.orders.totalValue),
+      identity: {
+        records: evidence.length,
+        byEmail: tally('email'),
+        byPhone: tally('phone'),
+        byLink: tally('linked'),
+        byCompany: tally('company'),
+        byNameOnly: tally('name'),
+        weak: evidence.filter((e) => e.how === 'company' || e.how === 'name').slice(0, 10),
+      },
+      possibleDuplicates,
+      factsHash: entry.factsHash,
+      sources: directory.sources.filter((src) => entry.sourceIds.includes(src.id)).map((src) => ({ label: src.label, lastSyncAt: src.lastSyncAt, lastError: src.lastError })),
+    };
   }
 
   /** What the team wrote, set itself to do and attached, as timeline entries. */

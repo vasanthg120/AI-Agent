@@ -6,6 +6,7 @@ import { Button, Skeleton } from '@/components/ui';
 import type { CallEvent, CallRecommendation } from '@/services/callCopilotService';
 import { FADE_UP, staggerChildren } from '../motion';
 import { CustomerContextCard } from './CustomerContextCard';
+import { CustomerSnapshotCard } from './CustomerSnapshotCard';
 import { EventsFeed } from './EventsFeed';
 import { LevelMeter } from './LevelMeter';
 import { Panel } from './Panel';
@@ -26,6 +27,8 @@ export interface LiveConsoleProps {
   contextBlob: string;
   warning: string | null;
   customerLabel?: string;
+  // The linked deal: its customer is summed up at the top of the customer panel.
+  dealId?: string;
   languageLabel: string;
   stream: MediaStream | null;
   onEnd: () => void;
@@ -59,6 +62,7 @@ export function LiveConsole({
   contextBlob,
   warning,
   customerLabel,
+  dealId,
   languageLabel,
   stream,
   onEnd,
@@ -132,6 +136,7 @@ export function LiveConsole({
             <EventsFeed events={events} />
           </Panel>
           <Panel title="Customer context" icon={<FiUser />}>
+            {dealId && <CustomerSnapshotCard dealId={dealId} />}
             {contextBlob === '' && status === 'starting' ? (
               <div className={styles.skeletons}>
                 <Skeleton height={54} />
