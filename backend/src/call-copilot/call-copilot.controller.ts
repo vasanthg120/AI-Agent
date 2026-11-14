@@ -1,9 +1,10 @@
 import {
-  BadGatewayException,
   BadRequestException,
   Body,
   Controller,
   Get,
+  HttpCode,
+  HttpStatus,
   NotFoundException,
   Param,
   Post,
@@ -196,12 +197,13 @@ export class CallCopilotController {
     return { sessionId: session._id.toString(), status: session.status };
   }
 
-  // On-demand AI Sales Coach generation — powers a "Generate Coaching
-  // Report" button for a call that ended before this feature existed (no
-  // backfill/migration; those sessions simply have no coaching fields until
-  // this is called). Reuses the exact same best-effort generateCoaching()
-  // both the live and upload paths already call automatically at call-end.
+  // "Generate coaching report" — for a call with no report (it ended before
+  // the AI Coach existed, or the automatic review failed). Answers 202 at once
+  // and reviews in the background: a long call takes over a minute, which a
+  // proxy won't hold a request open for. The page then waits on the session's
+  // coachingGeneratedAt / coachingError (see requestCoaching).
   @Post('sessions/:id/coach')
+  @HttpCode(HttpStatus.ACCEPTED)
   async coach(@CurrentUser() user: JwtPayload, @Param('id') id: string) {
     const session = await this.callCopilotService.getSession(user.organizationId, user.sub, id);
     if (!session) throw new NotFoundException('Call session not found');
@@ -209,8 +211,7 @@ export class CallCopilotController {
       .map((s) => s.text)
       .filter(Boolean)
       .join(' ');
-    // generateCoaching is best-effort and returns the session untouched when it
-    // can't coach — fine at call-end, but here a button would seem to do nothing.
+    // Said up front: with nothing to review the button would seem to do nothing.
     if (!fullTranscript.trim()) {
       throw new BadRequestException(
         session.status === 'error'
@@ -218,12 +219,7 @@ export class CallCopilotController {
           : 'This call has no transcript yet, so there’s nothing for the AI Coach to review.',
       );
     }
-    const coachedBefore = session.coachingGeneratedAt?.getTime();
-    const coached = await this.callCopilotService.generateCoaching(session, fullTranscript);
-    if (!coached.coachingGeneratedAt || coached.coachingGeneratedAt.getTime() === coachedBefore) {
-      throw new BadGatewayException('The AI Coach couldn’t review this call right now. Please try again in a minute.');
-    }
-    return coached;
+    return this.callCopilotService.requestCoaching(session, fullTranscript);
   }
 
   // The AI Coach's spoken script in the language picked in the panel — the

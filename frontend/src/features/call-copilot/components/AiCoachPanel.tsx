@@ -132,7 +132,8 @@ export function AiCoachPanel({ sessionId, createdAt, pending, coaching, onGenera
           <div className={styles.pendingText}>
             <strong>Your AI Coach is reviewing this call…</strong>
             <span>
-              This usually takes under a minute. You can close this window — the report will be waiting in Call Library.
+              This takes about a minute, a little longer for a long call. You can close this window — the report will be
+              waiting in Call Library.
             </span>
           </div>
           <div className={styles.pendingLines} aria-hidden>

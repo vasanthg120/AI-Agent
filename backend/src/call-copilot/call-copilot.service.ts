@@ -11,6 +11,7 @@ import { GridFsService } from '../common/gridfs/gridfs.service';
 import { ReservationService } from '../billing/reservation.service';
 import { CallSession, CallSessionDocument } from './schemas/call-session.schema';
 import { sessionRangeEnd, sessionRangeStart } from './session-date-range';
+import { AI_REPORT_TIMEOUT_MS, COACHING_ABANDONED_AFTER_MS, describeCoachingFailure } from './processing-failure';
 
 const AUDIO_BUCKET = 'call_recordings';
 
@@ -23,6 +24,17 @@ export function callFilterMatch(options: { status?: string; score?: string }): R
   else if (options.score === 'low') and.push({ overallScore: { $gt: 0, $lt: 5 } });
   else if (options.score === 'none') and.push({ $or: [{ overallScore: { $exists: false } }, { overallScore: 0 }] });
   return and;
+}
+
+/** An AI Coach run has started for this call and hasn't finished, failed or been abandoned. */
+export function coachingInProgress(
+  session: Pick<CallSession, 'coachingStartedAt' | 'coachingGeneratedAt' | 'coachingError'>,
+  now = Date.now(),
+): boolean {
+  const started = session.coachingStartedAt?.getTime();
+  if (!started || session.coachingError) return false;
+  if (session.coachingGeneratedAt && session.coachingGeneratedAt.getTime() >= started) return false;
+  return now - started < COACHING_ABANDONED_AFTER_MS;
 }
 
 export interface AnalyzeResult {
@@ -468,7 +480,7 @@ export class CallCopilotService {
             fullTranscript,
             detectedEvents: session.events.map((e) => e.text),
           },
-          { headers: { Authorization: `Bearer ${token}` } },
+          { headers: { Authorization: `Bearer ${token}` }, timeout: AI_REPORT_TIMEOUT_MS },
         ),
       );
       session.headline = data.headline;
@@ -533,12 +545,50 @@ export class CallCopilotService {
    * after their own existing summarize step, then emit 'call:coaching'
    * themselves once it resolves — this service is deliberately NOT given a
    * reference to the gateway, since call-copilot.gateway.ts already imports
-   * CallCopilotService and the reverse import would be circular. Also the
-   * target of the on-demand POST sessions/:id/coach route, for a call that
-   * ended before this feature existed. */
+   * CallCopilotService and the reverse import would be circular. A run
+   * already going for this call (the coach button) is left to finish instead. */
   async generateCoaching(session: CallSessionDocument, fullTranscript: string): Promise<CallSessionDocument> {
     if (!fullTranscript.trim()) return session;
+    if (!(await this.claimCoachingRun(session))) return session;
+    return this.runCoaching(session, fullTranscript);
+  }
 
+  /** The "Generate coaching report" button. Starts the review in the
+   * background and answers at once: on a long call the review takes over a
+   * minute, longer than a proxy keeps a request open (the old synchronous
+   * route 502'd on every 10-minute call). A run already going is joined, not
+   * paid for twice. The caller waits for coachingGeneratedAt or coachingError
+   * to pass `startedAt` on the session. */
+  async requestCoaching(session: CallSessionDocument, fullTranscript: string): Promise<{ status: 'generating'; startedAt: Date }> {
+    if (coachingInProgress(session)) return { status: 'generating', startedAt: session.coachingStartedAt! };
+    if (!(await this.claimCoachingRun(session))) {
+      // Someone else (a double click, the automatic run) started one just now.
+      const current = await this.sessionModel.findById(session._id).select({ coachingStartedAt: 1 }).exec();
+      return { status: 'generating', startedAt: current?.coachingStartedAt ?? new Date() };
+    }
+    void this.runCoaching(session, fullTranscript).catch((err: Error) =>
+      this.logger.warn(`Call copilot coaching crashed for session ${session._id}: ${err.message}`),
+    );
+    return { status: 'generating', startedAt: session.coachingStartedAt! };
+  }
+
+  /** Marks a new coaching run as started — only if nobody else did since this
+   * document was read, so two runs never start for the same call. */
+  private async claimCoachingRun(session: CallSessionDocument): Promise<boolean> {
+    const startedAt = new Date();
+    const { modifiedCount } = await this.sessionModel
+      .updateOne({ _id: session._id, coachingStartedAt: session.coachingStartedAt ?? null }, { $set: { coachingStartedAt: startedAt }, $unset: { coachingError: '' } })
+      .exec();
+    if (!modifiedCount) return false;
+    // Mirrored on the document, so its own save() later writes the same values.
+    session.coachingStartedAt = startedAt;
+    session.coachingError = undefined;
+    return true;
+  }
+
+  /** The review itself. Never throws: a failure is logged and kept on the
+   * session in words the coach panel can show. */
+  private async runCoaching(session: CallSessionDocument, fullTranscript: string): Promise<CallSessionDocument> {
     try {
       const token = this.bridgeToken(session.userId, session.organizationId);
       const summaryText = [session.headline, ...session.summaryPoints, ...session.keyTakeaways].filter(Boolean).join('\n');
@@ -561,7 +611,7 @@ export class CallCopilotService {
             detectedEvents: session.events.map((e) => e.text),
             summary: summaryText,
           },
-          { headers: { Authorization: `Bearer ${token}` } },
+          { headers: { Authorization: `Bearer ${token}` }, timeout: AI_REPORT_TIMEOUT_MS },
         ),
       );
 
@@ -591,7 +641,10 @@ export class CallCopilotService {
       session.coachingGeneratedAt = new Date();
       await session.save();
     } catch (err) {
-      this.logger.warn(`Call copilot coaching failed for session ${session._id}: ${(err as Error).message}`);
+      const failure = describeCoachingFailure(err);
+      this.logger.warn(`Call copilot coaching failed for session ${session._id}: ${failure.technical}`);
+      session.coachingError = failure.message;
+      await session.save().catch((saveErr: Error) => this.logger.warn(`Call copilot coaching failure not saved for session ${session._id}: ${saveErr.message}`));
     }
     return session;
   }

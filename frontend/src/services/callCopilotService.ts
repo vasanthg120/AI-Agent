@@ -2,6 +2,11 @@ import { axiosClient } from '@/api/axiosClient';
 import { getCallCopilotSocket } from '@/api/socketClient';
 import { useAuthStore } from '@/stores/authStore';
 
+// Waiting on an AI Coach review started from the button: the server allows a
+// run 5 minutes (plus a minute's slack before it counts as abandoned).
+const COACHING_POLL_MS = 4_000;
+const COACHING_WAIT_MS = 6 * 60_000;
+
 export interface CallTranscriptSegment {
   sequence: number;
   text: string;
@@ -120,6 +125,10 @@ export interface CallSessionDetail extends CallSummaryResult, Partial<CoachingRe
   retryable?: boolean;
   // The language it was transcribed in; absent on calls saved before 2026-11-11.
   languageCode?: string;
+  // The latest AI Coach run: when it finished, when it started, and why it failed if it did.
+  coachingGeneratedAt?: string;
+  coachingStartedAt?: string;
+  coachingError?: string;
   // Someone else's call, opened from the team view (an admin's, a manager's or
   // the Main Account owner's): who made it, in which business, and read-only.
   readOnly?: boolean;
@@ -312,12 +321,36 @@ export const callCopilotService = {
     return data;
   },
 
-  // On-demand "Generate Coaching Report" for a call that ended before this
-  // feature existed (no coaching fields yet) — new calls get this
-  // automatically a few seconds after ending, via onCoaching above instead.
+  // "Generate coaching report" for a call with no report. The server starts the
+  // review in the background (a long call takes over a minute — more than a
+  // proxy holds one request open), so this waits on the session until the
+  // report is saved or the run's failure is.
   async generateCoaching(sessionId: string): Promise<CoachingReport> {
-    const { data } = await axiosClient.post<CoachingReport>(`/call-copilot/sessions/${sessionId}/coach`);
-    return data;
+    const { data } = await axiosClient.post<{ status: 'generating'; startedAt: string }>(
+      `/call-copilot/sessions/${sessionId}/coach`,
+    );
+    const startedAt = new Date(data.startedAt).getTime();
+    const deadline = Date.now() + COACHING_WAIT_MS;
+    let failedChecks = 0;
+    while (Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, COACHING_POLL_MS));
+      let session: CallSessionDetail;
+      try {
+        session = await callCopilotService.getSession(sessionId);
+        failedChecks = 0;
+      } catch (err) {
+        // A blip while waiting doesn't stop the review on the server.
+        if (++failedChecks >= 5) throw err;
+        continue;
+      }
+      if (session.coachingGeneratedAt && new Date(session.coachingGeneratedAt).getTime() >= startedAt) {
+        return session as CoachingReport;
+      }
+      if (session.coachingError && session.coachingStartedAt && new Date(session.coachingStartedAt).getTime() === startedAt) {
+        throw new Error(session.coachingError);
+      }
+    }
+    throw new Error('The AI Coach is still reviewing this call. Its report will appear in Call Library when it’s ready.');
   },
 
   // The AI Coach's spoken script rewritten natively in the chosen language
