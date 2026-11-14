@@ -1,6 +1,7 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { Document, Types } from 'mongoose';
 import { deriveCategory, deriveRespondedInfo, deriveResponseStatus, EmailCategory, EmailRespondedVia, EmailResponseStatus } from '../email-response-state';
+import { inboxBoxOf } from '../email-inbox-boxes';
 
 export type EmailIntelligenceItemDocument = EmailIntelligenceItem & Document<Types.ObjectId>;
 
@@ -342,6 +343,10 @@ EmailIntelligenceItemSchema.virtual('respondedAt').get(function (this: EmailInte
 });
 EmailIntelligenceItemSchema.virtual('respondedVia').get(function (this: EmailIntelligenceItemDocument) {
   return deriveRespondedInfo(this).respondedVia;
+});
+// Which inbox box it is in (email-inbox-boxes.ts) — so the page can move a row the moment it changes.
+EmailIntelligenceItemSchema.virtual('inboxBox').get(function (this: EmailIntelligenceItemDocument) {
+  return inboxBoxOf(this);
 });
 EmailIntelligenceItemSchema.virtual('category').get(function (this: EmailIntelligenceItemDocument) {
   return deriveCategory(this);

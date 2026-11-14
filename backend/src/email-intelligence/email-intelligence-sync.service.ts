@@ -554,6 +554,7 @@ export class EmailIntelligenceSyncService {
             internetMessageId: email.internetMessageId,
             fromAddress: email.from,
             subject: email.subject,
+            replyTo: email.replyTo,
           });
           const created = await this.emailIntelligenceService.analyzeAndCreate(user.organizationId, userId, connection.email, email, context, {
             ownAddresses,
@@ -585,7 +586,12 @@ export class EmailIntelligenceSyncService {
       await step('Read-state refresh', async () => {
         await this.emailIntelligenceService.refreshReadState(userId, alreadyStored);
       });
-      await step('Mailbox check', () => this.checkMailboxState(userId));
+      await step('Mailbox check', async () => {
+        await this.checkMailboxState(userId);
+        // Waiting website enquiries may just have learned their customer's address (Reply-To):
+        // a message already sent to that customer answers them now, not on the next check.
+        answeredCount += await this.conversations.applyReplies(userId);
+      });
       await step('AI retry', async () => {
         deferredCount = Math.max(0, deferredCount - (await this.retryDeferredAnalysis(userId, context, ownAddresses, deferredCount > 0)));
       });

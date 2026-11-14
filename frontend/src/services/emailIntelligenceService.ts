@@ -147,6 +147,8 @@ export interface EmailIntelligenceItem {
   // AI-draft approval lifecycle, so an email answered directly in Outlook is
   // still status:'pending' but is 'responded' here.
   responseStatus: EmailResponseStatus;
+  // Which inbox box it is in (derived on the server).
+  inboxBox?: InboxBox;
   respondedAt?: string;
   respondedVia?: EmailRespondedVia;
   // The conversation's single category, derived by the backend from the same facts.
@@ -179,7 +181,14 @@ export type EmailCategory =
   | 'informational'
   | 'completed';
 
-export type EmailInboxCounts = Record<EmailResponseStatus, number> & { categories?: Record<EmailCategory, number> };
+/** The inbox's boxes — every email is in exactly one, by what it needs from you (backend email-inbox-boxes.ts). */
+export const INBOX_BOXES = ['new_enquiries', 'to_reply', 'awaiting_customer', 'replied', 'no_reply', 'junk'] as const;
+export type InboxBox = (typeof INBOX_BOXES)[number];
+
+export type EmailInboxCounts = Record<EmailResponseStatus, number> & {
+  categories?: Record<EmailCategory, number>;
+  boxes?: Record<InboxBox, number>;
+};
 
 export interface ReplyRefreshResult {
   connected: boolean;
@@ -214,6 +223,8 @@ export interface EmailThreadSentMessage {
 export interface EmailListParams {
   // The inbox question: still needs a reply / already answered / nothing to do.
   view?: EmailResponseStatus;
+  // One of the inbox's boxes ("New enquiries", "Need to reply", …).
+  box?: InboxBox;
   // The AI-draft approval lifecycle, for callers that mean exactly that.
   status?: 'pending' | 'approved' | 'rejected';
   dateFrom?: string;
@@ -338,6 +349,7 @@ export interface ProviderHealthStatus {
 function toQueryParams(params: EmailListParams): Record<string, string | number> {
   const query: Record<string, string | number> = {};
   if (params.view) query.view = params.view;
+  if (params.box) query.box = params.box;
   if (params.status) query.status = params.status;
   if (params.dateFrom) query.from = params.dateFrom;
   if (params.dateTo) query.to = params.dateTo;

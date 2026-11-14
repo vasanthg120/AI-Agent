@@ -7,29 +7,18 @@ import clsx from 'clsx';
 import { getSocket } from '@/api/socketClient';
 import { useAuthStore } from '@/stores/authStore';
 import { useDebouncedValue } from '@/hooks/useDebouncedValue';
-import { Button, ChoiceCards, Input, MultiSelectDropdown, PageHeader, SectionCard, Tabs } from '@/components/ui';
-import type { ChoiceCardItem, DateRange } from '@/components/ui';
-import {
-  FiAlertCircle,
-  FiCheckCircle,
-  FiClock,
-  FiCornerUpLeft,
-  FiInbox,
-  FiRefreshCw,
-  FiSearch,
-  FiSend,
-} from 'react-icons/fi';
+import { Button, Input, PageHeader, SectionCard, Tabs } from '@/components/ui';
+import type { DateRange } from '@/components/ui';
+import { FiAlertCircle, FiClock, FiInbox, FiRefreshCw, FiSearch, FiSend } from 'react-icons/fi';
 import { dayjs } from '@/utils/date';
 import { extractErrorMessage } from '@/utils/errors';
 import { isAiRoleAccount } from '@/utils/access';
 import { ROUTES } from '@/constants/routes';
 import {
-  EMAIL_INTELLIGENCE_INTENTS,
   emailIntelligenceService,
-  RELEVANT_EMAIL_INTENTS,
   type EmailInboxCounts,
   type EmailIntelligenceItem,
-  type EmailResponseStatus,
+  type InboxBox,
   type SyncPreviewResult,
 } from '@/services/emailIntelligenceService';
 import { EmailIntelligenceList } from './components/EmailIntelligenceList';
@@ -40,14 +29,14 @@ import { FollowUpsSection } from './components/FollowUpsSection';
 import { DRAFT_SUMMARY_KEY, ReplyAssistBar } from './components/ReplyAssistBar';
 import { MailboxHistorySection } from './components/MailboxHistorySection';
 import { InboxAgentPanel } from './components/InboxAgentPanel';
-import { RESPONSE_VIEW_LABEL } from './emailResponseLabels';
+import { InboxBoxes } from './components/InboxBoxes';
+import { ACTION_BOXES, BOX_META } from './inboxBoxes';
 import styles from './email-intelligence.module.css';
 
 const PROVIDER_LABEL: Record<string, string> = { anthropic: 'Anthropic', groq: 'Groq' };
 
 const PAGE_SIZE = 25;
 const QUERY_ROOT = 'email-intelligence-items';
-const VIEWS: EmailResponseStatus[] = ['needs_response', 'responded', 'resolved'];
 // How often an open inbox asks Outlook whether anything waiting has been answered.
 const REPLY_CHECK_MS = 60_000;
 
@@ -81,37 +70,6 @@ const SORT_OPTIONS: { value: SortKey; label: string }[] = [
   { value: 'oldest', label: 'Oldest first' },
 ];
 
-// What each queue card says about itself — so the three queues explain
-// the reply workflow without a paragraph of instructions.
-const VIEW_META: Record<EmailResponseStatus, Omit<ChoiceCardItem<EmailResponseStatus>, 'id' | 'label' | 'count'>> = {
-  needs_response: { icon: FiAlertCircle, tone: 'warning', description: 'Waiting on a reply from you' },
-  responded: { icon: FiCornerUpLeft, tone: 'success', description: 'Answered — here or in Outlook' },
-  resolved: { icon: FiCheckCircle, tone: 'neutral', description: 'No reply needed, or rejected' },
-};
-
-const EMPTY_MESSAGE: Record<EmailResponseStatus, string> = {
-  needs_response: "You're all caught up — no emails are waiting for a reply.",
-  responded: 'No replied emails yet. Once you reply — here or in Outlook — the email moves here.',
-  resolved: 'Nothing here. Rejected emails and mail that needs no reply appear in this tab.',
-};
-
-function intentOptionLabel(intent: string): string {
-  return intent
-    .split('_')
-    .map((w) => w[0].toUpperCase() + w.slice(1))
-    .join(' ');
-}
-
-// One real, visible filter control — same underlying allow-list as the previous
-// default (customer/enquiry/vendor-type mail), but user-adjustable per intent.
-// An empty selection means "no filter" (show everything), matching every other
-// MultiSelectDropdown filter in this app — never "show nothing". Now applied
-// server-side, so the tab counts, the list and paging all agree.
-const INTENT_FILTER_OPTIONS = EMAIL_INTELLIGENCE_INTENTS.map((intent) => ({
-  value: intent,
-  label: intentOptionLabel(intent),
-}));
-
 // AI Email Inbox. The tabs answer the question the inbox exists for — does this
 // email still need a reply — using a state the BACKEND derives from what
 // actually happened to the email (replied through the app, replied in Outlook,
@@ -123,8 +81,8 @@ export function EmailIntelligencePage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
   const currentUser = useAuthStore((state) => state.user);
-  const [view, setView] = useState<EmailResponseStatus>('needs_response');
-  const [intentFilter, setIntentFilter] = useState<string[]>([...RELEVANT_EMAIL_INTENTS]);
+  // null = "automatic": New enquiries, or Need to reply when there are no new enquiries — until the person picks a box.
+  const [boxChoice, setBoxChoice] = useState<InboxBox | null>(null);
   const [range, setRange] = useState<DateRange>({});
   const [datePreset, setDatePreset] = useState<DatePreset>('all');
   const [section, setSection] = useState<Section>('inbox');
@@ -181,14 +139,25 @@ export function EmailIntelligencePage() {
   }, [queryClient]);
 
   const debouncedSearch = useDebouncedValue(search.trim(), 300);
-  const sort: SortKey = sortChoice ?? (view === 'needs_response' ? 'urgency' : 'newest');
   const filters = useMemo(
-    () => ({ dateFrom: range.dateFrom, dateTo: range.dateTo, intents: intentFilter, search: debouncedSearch }),
-    [range.dateFrom, range.dateTo, intentFilter, debouncedSearch],
+    () => ({ dateFrom: range.dateFrom, dateTo: range.dateTo, search: debouncedSearch }),
+    [range.dateFrom, range.dateTo, debouncedSearch],
   );
 
-  // Every filter is applied server-side (real receivedAt/intent/text filtering,
-  // real paging), so what the tab badge counts is exactly what the list can show.
+  // How many emails are in each box, under the same date/search filters as the list.
+  const { data: counts, isPlaceholderData: countsStale } = useQuery({
+    queryKey: [QUERY_ROOT, 'counts', filters],
+    queryFn: () => emailIntelligenceService.counts(filters),
+    refetchInterval: 60_000,
+    placeholderData: keepPreviousData,
+  });
+  const box: InboxBox =
+    boxChoice ?? (counts?.boxes && counts.boxes.new_enquiries === 0 && counts.boxes.to_reply > 0 ? 'to_reply' : 'new_enquiries');
+  const actionBox = ACTION_BOXES.includes(box);
+  const sort: SortKey = sortChoice ?? (actionBox ? 'urgency' : 'newest');
+
+  // Every filter is applied server-side (real receivedAt/text filtering, real
+  // paging), so what the box counts is exactly what the list can show.
   const {
     data: pages,
     isLoading,
@@ -199,21 +168,13 @@ export function EmailIntelligencePage() {
     hasNextPage,
     isFetchingNextPage,
   } = useInfiniteQuery({
-    queryKey: [QUERY_ROOT, 'list', view, sort, filters],
-    queryFn: ({ pageParam }) =>
-      emailIntelligenceService.list({ ...filters, view, sort, limit: PAGE_SIZE, skip: pageParam }),
+    queryKey: [QUERY_ROOT, 'list', box, sort, filters],
+    queryFn: ({ pageParam }) => emailIntelligenceService.list({ ...filters, box, sort, limit: PAGE_SIZE, skip: pageParam }),
     initialPageParam: 0,
     getNextPageParam: (lastPage, allPages) => (lastPage.length === PAGE_SIZE ? allPages.length * PAGE_SIZE : undefined),
     refetchInterval: 60_000,
   });
   const items = useMemo(() => pages?.pages.flat(), [pages]);
-
-  const { data: counts, isPlaceholderData: countsStale } = useQuery({
-    queryKey: [QUERY_ROOT, 'counts', filters],
-    queryFn: () => emailIntelligenceService.counts(filters),
-    refetchInterval: 60_000,
-    placeholderData: keepPreviousData,
-  });
 
   // Phase 21 follow-up — surfaced before the user clicks Sync, so a real
   // Anthropic/Groq outage is visible up front rather than discovered only
@@ -253,33 +214,35 @@ export function EmailIntelligencePage() {
   // an email that has just been answered leaves Needs Response and its count
   // drops immediately; the refetch that follows then confirms it from the server.
   const applyUpdate = (updated: EmailIntelligenceItem) => {
-    const before = selected && selected._id === updated._id ? selected.responseStatus : undefined;
+    const before = selected && selected._id === updated._id ? selected.inboxBox : undefined;
+    const after = updated.inboxBox;
     setSelected(updated);
 
-    for (const query of queryClient.getQueryCache().findAll({ queryKey: [QUERY_ROOT, 'list'] })) {
-      const cachedView = query.queryKey[2] as EmailResponseStatus;
-      queryClient.setQueryData<InfiniteData<EmailIntelligenceItem[], number>>(
-        query.queryKey,
-        (old) =>
-          old && {
-            ...old,
-            pages: old.pages.map((page) =>
-              cachedView === updated.responseStatus
-                ? page.map((row) => (row._id === updated._id ? updated : row))
-                : page.filter((row) => row._id !== updated._id),
-            ),
-          },
-      );
-    }
-    if (before && before !== updated.responseStatus) {
-      for (const query of queryClient.getQueryCache().findAll({ queryKey: [QUERY_ROOT, 'counts'] })) {
-        queryClient.setQueryData<EmailInboxCounts>(
+    if (after) {
+      for (const query of queryClient.getQueryCache().findAll({ queryKey: [QUERY_ROOT, 'list'] })) {
+        const cachedBox = query.queryKey[2] as InboxBox;
+        queryClient.setQueryData<InfiniteData<EmailIntelligenceItem[], number>>(
           query.queryKey,
           (old) =>
             old && {
               ...old,
-              [before]: Math.max(0, old[before] - 1),
-              [updated.responseStatus]: old[updated.responseStatus] + 1,
+              pages: old.pages.map((page) =>
+                cachedBox === after
+                  ? page.map((row) => (row._id === updated._id ? updated : row))
+                  : page.filter((row) => row._id !== updated._id),
+              ),
+            },
+        );
+      }
+    }
+    if (before && after && before !== after) {
+      for (const query of queryClient.getQueryCache().findAll({ queryKey: [QUERY_ROOT, 'counts'] })) {
+        queryClient.setQueryData<EmailInboxCounts>(
+          query.queryKey,
+          (old) =>
+            old?.boxes && {
+              ...old,
+              boxes: { ...old.boxes, [before]: Math.max(0, old.boxes[before] - 1), [after]: old.boxes[after] + 1 },
             },
         );
       }
@@ -382,38 +345,10 @@ export function EmailIntelligencePage() {
     }
   };
 
-  // Each queue card says what is inside it in a few words (the finer
-  // categories the backend derives), so no separate breakdown line is needed.
-  const categories = counts?.categories;
-  const parts = (...items: [number | undefined, string][]) =>
-    items
-      .filter(([n]) => (n ?? 0) > 0)
-      .map(([n, label]) => `${n} ${label}`)
-      .join(' · ');
-  const queueDescription: Record<EmailResponseStatus, ChoiceCardItem<EmailResponseStatus>['description']> = {
-    needs_response: parts([categories?.urgent, 'urgent']) || VIEW_META.needs_response.description || '',
-    responded:
-      parts(
-        [categories?.waiting_for_customer, 'waiting on customer'],
-        [categories?.follow_up_required, 'need a follow-up'],
-      ) ||
-      VIEW_META.responded.description ||
-      '',
-    resolved:
-      parts([categories?.informational, 'no reply needed'], [categories?.completed, 'closed']) ||
-      VIEW_META.resolved.description ||
-      '',
-  };
-  const queueCards: ChoiceCardItem<EmailResponseStatus>[] = VIEWS.map((id) => ({
-    id,
-    label: RESPONSE_VIEW_LABEL[id],
-    count: counts?.[id],
-    ...VIEW_META[id],
-    description: queueDescription[id],
-  }));
   // Hidden while the counts still belong to the previous filters, so the line
   // never pairs a fresh list with a stale total.
-  const total = countsStale ? undefined : counts?.[view];
+  const total = countsStale ? undefined : counts?.boxes?.[box];
+  const allCaughtUp = ACTION_BOXES.every((b) => (counts?.boxes?.[b] ?? 0) === 0);
   const filtersActive = debouncedSearch !== '' || range.dateFrom !== undefined || range.dateTo !== undefined;
   const clearFilters = () => {
     setSearch('');
@@ -503,13 +438,13 @@ export function EmailIntelligencePage() {
             counts={countsStale ? undefined : counts}
             drafts={draftSummary}
             followUpsDue={followUpsDue}
-            onView={setView}
+            onOpenBox={setBoxChoice}
             onFollowUps={() => setSection('follow_ups')}
             onRetry={() => void handleConfirmSync()}
             retrying={syncing}
           />
 
-          <ChoiceCards ariaLabel="Email queue" items={queueCards} activeId={view} onChange={setView} />
+          <InboxBoxes counts={counts?.boxes} active={box} onChange={setBoxChoice} />
 
           <ReplyAssistBar onDrafted={refreshLists} />
 
@@ -560,12 +495,6 @@ export function EmailIntelligencePage() {
                 />
               </>
             )}
-            <MultiSelectDropdown
-              label="Mail Type"
-              options={INTENT_FILTER_OPTIONS}
-              selected={intentFilter}
-              onChange={setIntentFilter}
-            />
             <select
               className={styles.select}
               aria-label="Sort emails"
@@ -600,12 +529,12 @@ export function EmailIntelligencePage() {
                 emptyTitle={
                   filtersActive
                     ? 'No matching emails'
-                    : view === 'needs_response'
+                    : actionBox && allCaughtUp
                       ? "You're all caught up"
-                      : 'Nothing here yet'
+                      : `${BOX_META[box].label}: none`
                 }
-                emptyMessage={filtersActive ? 'No emails match your search or dates.' : EMPTY_MESSAGE[view]}
-                celebrate={!filtersActive && view === 'needs_response'}
+                emptyMessage={filtersActive ? 'No emails match your search or dates.' : BOX_META[box].empty}
+                celebrate={!filtersActive && actionBox && allCaughtUp}
                 onSelect={setSelected}
               />
               {filtersActive && items && items.length === 0 && (

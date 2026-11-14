@@ -2,7 +2,7 @@ import clsx from 'clsx';
 import { FiAlertTriangle, FiCheckCircle, FiCpu, FiEdit3, FiEye, FiInbox, FiRefreshCw, FiZap } from 'react-icons/fi';
 import { Button } from '@/components/ui';
 import { dayjs } from '@/utils/date';
-import type { EmailDraftSummary, EmailInboxCounts, EmailResponseStatus, EmailSyncState } from '@/services/emailIntelligenceService';
+import type { EmailDraftSummary, EmailInboxCounts, EmailSyncState, InboxBox } from '@/services/emailIntelligenceService';
 import styles from './InboxAgentPanel.module.css';
 
 const n = (value: number | undefined) => (value ?? 0).toLocaleString();
@@ -16,7 +16,7 @@ export function InboxAgentPanel({
   counts,
   drafts,
   followUpsDue,
-  onView,
+  onOpenBox,
   onFollowUps,
   onRetry,
   retrying,
@@ -25,7 +25,7 @@ export function InboxAgentPanel({
   counts?: EmailInboxCounts;
   drafts?: EmailDraftSummary;
   followUpsDue: number;
-  onView: (view: EmailResponseStatus) => void;
+  onOpenBox: (box: InboxBox) => void;
   onFollowUps: () => void;
   onRetry: () => void;
   retrying: boolean;
@@ -33,7 +33,10 @@ export function InboxAgentPanel({
   const health = syncState?.health;
   const failing = health?.status === 'failing';
   const lastRead = syncState?.lastSyncedAt ?? health?.lastSuccessAt;
-  const total = (counts?.needs_response ?? 0) + (counts?.responded ?? 0) + (counts?.resolved ?? 0);
+  const boxes = counts?.boxes;
+  const total = boxes ? Object.values(boxes).reduce((sum, n) => sum + n, 0) : 0;
+  const junk = boxes?.junk ?? 0;
+  const answered = (boxes?.replied ?? 0) + (boxes?.awaiting_customer ?? 0);
 
   return (
     <section className={styles.panel} aria-label="Inbox agent">
@@ -81,7 +84,11 @@ export function InboxAgentPanel({
             <span className={styles.stepLabel}>Reads & sorts your mail</span>
             <span className={styles.stepValue}>{n(total)} sorted</span>
             <span className={styles.stepSub}>
-              {(syncState?.awaitingAnalysis ?? 0) > 0 ? `${n(syncState?.awaitingAnalysis)} still to be read by the AI` : 'By what each one needs from you'}
+              {(syncState?.awaitingAnalysis ?? 0) > 0
+                ? `${n(syncState?.awaitingAnalysis)} still to be read by the AI`
+                : junk > 0
+                  ? `${n(junk)} junk & automated set aside`
+                  : 'By what each one needs from you'}
             </span>
           </span>
         </div>
@@ -103,13 +110,13 @@ export function InboxAgentPanel({
           </span>
         </div>
 
-        <button type="button" className={clsx(styles.step, styles.stepButton)} onClick={() => onView('responded')}>
+        <button type="button" className={clsx(styles.step, styles.stepButton)} onClick={() => onOpenBox('replied')}>
           <span className={styles.stepIcon} aria-hidden>
             <FiCheckCircle />
           </span>
           <span className={styles.stepText}>
             <span className={styles.stepLabel}>Spots your replies</span>
-            <span className={styles.stepValue}>{n(counts?.responded)} answered</span>
+            <span className={styles.stepValue}>{n(answered)} answered</span>
             <span className={styles.stepSub}>{failing ? 'Paused — mailbox can’t be read' : 'Here, in Outlook, or in the thread'}</span>
           </span>
         </button>

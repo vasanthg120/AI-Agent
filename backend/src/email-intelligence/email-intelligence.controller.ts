@@ -9,6 +9,7 @@ import { JwtPayload } from '../auth/jwt-payload.interface';
 import { EmailConversationService } from './email-conversation.service';
 import { EmailHistoryService } from './email-history.service';
 import { AUTO_DRAFT_BATCH, EmailIntelligenceSyncService, readableSyncFailure } from './email-intelligence-sync.service';
+import { INBOX_BOXES } from './email-inbox-boxes';
 import { EmailResponseStatus } from './email-response-state';
 import { AUTO_DRAFT_MAX_AGE_DAYS, EmailIntelligenceService, ListEmailsQuery } from './email-intelligence.service';
 import { Feature } from '../common/app-features';
@@ -41,6 +42,7 @@ function parseListQuery(raw: Record<string, string | undefined>): ListEmailsQuer
   return {
     status: oneOf(raw.status, APPROVAL_STATUSES, 'status'),
     view: oneOf(raw.view, RESPONSE_VIEWS, 'view'),
+    box: oneOf(raw.box, INBOX_BOXES, 'box'),
     sort: oneOf(raw.sort, SORTS, 'sort'),
     from: raw.from || undefined,
     to: raw.to || undefined,

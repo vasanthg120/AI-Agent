@@ -1,0 +1,136 @@
+.boxes {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: var(--space-2);
+}
+
+.tone_accent {
+  --tone: var(--color-accent);
+  --tone-soft: var(--color-bg-active);
+}
+.tone_warning {
+  --tone: var(--color-warning-ink);
+  --tone-soft: var(--color-warning-soft);
+}
+.tone_info {
+  --tone: var(--color-info-ink);
+  --tone-soft: var(--color-info-soft);
+}
+.tone_success {
+  --tone: var(--color-success-ink);
+  --tone-soft: var(--color-success-soft);
+}
+.tone_neutral {
+  --tone: var(--color-text-secondary);
+  --tone-soft: color-mix(in srgb, var(--color-text-primary) 6%, transparent);
+}
+.tone_muted {
+  --tone: var(--color-text-muted);
+  --tone-soft: color-mix(in srgb, var(--color-text-primary) 4%, transparent);
+}
+
+.box {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  padding: var(--space-3);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border);
+  background: var(--color-bg-surface);
+  font: inherit;
+  text-align: left;
+  color: inherit;
+  cursor: pointer;
+  transition:
+    border-color var(--duration-fast) var(--ease-out),
+    box-shadow var(--duration-fast) var(--ease-out),
+    background var(--duration-fast) var(--ease-out);
+}
+
+.box:hover {
+  border-color: var(--color-border-strong);
+  box-shadow: var(--shadow-sm);
+}
+
+.box:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+/* Junk is set aside: quieter until chosen. */
+.tone_muted:not(.active) {
+  border-style: dashed;
+  background: transparent;
+}
+
+.active,
+.active:hover {
+  border-color: color-mix(in srgb, var(--tone) 55%, transparent);
+  background: linear-gradient(180deg, var(--tone-soft) 0%, transparent 90%), var(--color-bg-surface);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--tone) 16%, transparent);
+}
+
+.top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.icon {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: var(--radius-sm);
+  background: var(--tone-soft);
+  color: var(--tone);
+  font-size: 14px;
+}
+
+.count {
+  font-size: var(--text-lg);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text-primary);
+}
+
+/* Something waiting on you: the number says so in the box's colour. */
+.waiting .count {
+  color: var(--tone);
+}
+
+.label {
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--color-text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hint {
+  font-size: var(--text-xs);
+  line-height: 1.3;
+  color: var(--color-text-muted);
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+@media (max-width: 1100px) {
+  .boxes {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 640px) {
+  .boxes {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .hint {
+    display: none;
+  }
+}

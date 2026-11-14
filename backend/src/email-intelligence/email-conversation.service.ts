@@ -130,7 +130,7 @@ export class EmailConversationService {
   async applyReplies(userId: string): Promise<number> {
     const open = await this.itemModel
       .find({ userId, ...unansweredOwedMatch() })
-      .select('_id organizationId conversationId internetMessageId fromAddress subject receivedAt')
+      .select('_id organizationId conversationId internetMessageId fromAddress replyToAddresses subject receivedAt')
       .lean()
       .exec();
     if (open.length === 0) return 0;
@@ -147,6 +147,7 @@ export class EmailConversationService {
         internetMessageId: item.internetMessageId,
         fromAddress: item.fromAddress,
         subject: item.subject,
+        replyTo: item.replyToAddresses,
       });
       if (match) found.push({ id: item._id, organizationId: item.organizationId, match });
     }

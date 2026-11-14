@@ -10,6 +10,7 @@ import { ReservationService } from '../billing/reservation.service';
 import { correlateSingleEmail, EmailCorrelationContext } from '../crm/customer-grouping.util';
 import { EmailSlaService } from '../email-sla/email-sla.service';
 import { periodToDateRange } from '../common/period.util';
+import { INBOX_BOXES, InboxBox, inboxBoxMatch, RELEVANT_EMAIL_INTENTS } from './email-inbox-boxes';
 import { bareAddress, classifyEmailDeterministically, DeterministicPreFilterMatch, UNMISTAKABLE_RULES } from './email-preclassification.util';
 import {
   deriveCategory,
@@ -78,10 +79,8 @@ const FOLLOW_UP_DEFAULT_DAYS = 3;
 // defaults to excluded from "business mail" analytics until deliberately
 // added here. Phase 19's email activity widget uses this to analyze real
 // business mail only, never every message a connected mailbox receives.
-export const RELEVANT_EMAIL_INTENTS = [
-  'vendor', 'existing_customer', 'new_enquiry', 'quotation_request', 'price_negotiation',
-  'complaint', 'technical_support', 'escalation', 'meeting_request',
-];
+// (Defined in email-inbox-boxes.ts, which decides the inbox's boxes from it.)
+export { RELEVANT_EMAIL_INTENTS };
 
 /** Team Performance's email figures (see teamEmailMatch). */
 export type TeamEmailMetric = 'received' | 'replied' | 'pending' | 'missed' | 'customer_replies' | 'awaiting_customer';
@@ -153,6 +152,8 @@ type RelationshipView = Awaited<ReturnType<CustomerActivityService['getRelations
 export interface ListEmailsQuery {
   status?: 'pending' | 'approved' | 'rejected';
   view?: EmailResponseStatus;
+  /** One of the inbox's boxes (see email-inbox-boxes.ts) — what the email needs from the person. */
+  box?: InboxBox;
   from?: string;
   to?: string;
   intents?: string[];
@@ -172,7 +173,7 @@ export interface IngestExtras {
   answered?: Record<string, unknown>;
 }
 
-export type EmailInboxCounts = Record<EmailResponseStatus, number> & { categories: Record<EmailCategory, number> };
+export type EmailInboxCounts = Record<EmailResponseStatus, number> & { categories: Record<EmailCategory, number>; boxes: Record<InboxBox, number> };
 
 const CATEGORIES: EmailCategory[] = ['urgent', 'needs_response', 'waiting_for_customer', 'follow_up_required', 'responded', 'informational', 'completed'];
 // An approved draft's send is given this long before another attempt may start.
@@ -1644,6 +1645,7 @@ export class EmailIntelligenceService {
     const clauses: Record<string, unknown>[] = [{ userId }, THREAD_HEAD_MATCH];
     if (q.status) clauses.push({ status: q.status });
     if (q.view) clauses.push(responseStatusMatch(q.view));
+    if (q.box) clauses.push(inboxBoxMatch(q.box));
     // Mail the AI has not read yet has no real type ("other" is only a placeholder), so a mail-type
     // filter must not hide it: mail that arrived while the AI was unavailable, and mail brought in
     // from mailbox history that is from someone outside and may be owed a reply.
@@ -1713,8 +1715,10 @@ export class EmailIntelligenceService {
     q: Pick<ListEmailsQuery, 'from' | 'to' | 'intents' | 'search'> = {},
   ): Promise<EmailInboxCounts> {
     const views: EmailResponseStatus[] = ['needs_response', 'responded', 'resolved'];
-    const [totals, groups] = await Promise.all([
+    const [totals, boxTotals, groups] = await Promise.all([
       Promise.all(views.map((view) => this.itemModel.countDocuments(this.buildListMatch(userId, { ...q, view })).exec())),
+      // The boxes replace the mail-type filter: every email is in exactly one of them.
+      Promise.all(INBOX_BOXES.map((box) => this.itemModel.countDocuments(this.buildListMatch(userId, { ...q, intents: undefined, box })).exec())),
       // The finer categories, counted with the very function that labels a row
       // (deriveCategory): rows are grouped by the handful of facts it reads.
       this.itemModel
@@ -1757,7 +1761,8 @@ export class EmailIntelligenceService {
       });
       categories[category] += group.count;
     }
-    return { needs_response: totals[0], responded: totals[1], resolved: totals[2], categories };
+    const boxes = Object.fromEntries(INBOX_BOXES.map((box, i) => [box, boxTotals[i]])) as Record<InboxBox, number>;
+    return { needs_response: totals[0], responded: totals[1], resolved: totals[2], categories, boxes };
   }
 
   // The stored messages of one conversation, oldest first — each with its own
