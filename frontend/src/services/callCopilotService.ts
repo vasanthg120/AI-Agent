@@ -326,9 +326,11 @@ export const callCopilotService = {
   // proxy holds one request open), so this waits on the session until the
   // report is saved or the run's failure is.
   async generateCoaching(sessionId: string): Promise<CoachingReport> {
-    const { data } = await axiosClient.post<{ status: 'generating'; startedAt: string }>(
+    const { data } = await axiosClient.post<{ status: 'generating'; startedAt: string } | CoachingReport>(
       `/call-copilot/sessions/${sessionId}/coach`,
     );
+    // A backend older than this answers with the finished report itself.
+    if (!('startedAt' in data)) return data;
     const startedAt = new Date(data.startedAt).getTime();
     const deadline = Date.now() + COACHING_WAIT_MS;
     let failedChecks = 0;

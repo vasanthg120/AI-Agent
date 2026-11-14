@@ -120,9 +120,8 @@ describe('AI Coach runs on long calls', () => {
   });
 
   it('a timeout is kept on the call in plain words, so the panel can say it', async () => {
-    http.post.mockReturnValueOnce(
-      throwError(() => new AxiosError('timeout of 300000ms exceeded', 'ECONNABORTED', { url: 'http://localhost:8000/call-copilot/coach', headers: new AxiosHeaders() })),
-    );
+    const config = { url: 'http://localhost:8000/call-copilot/coach', headers: new AxiosHeaders() };
+    http.post.mockReturnValueOnce(throwError(() => new AxiosError('timeout of 300000ms exceeded', 'ECONNABORTED', config)));
     const session = makeSession();
     await service.requestCoaching(session as never, 'words');
     await flush();
@@ -168,8 +167,8 @@ describe('coachingInProgress', () => {
 describe('describeCoachingFailure', () => {
   const axiosError = (options: { status?: number; code?: string; detail?: string }) => {
     const config = { url: 'http://localhost:8000/call-copilot/coach', headers: new AxiosHeaders() };
-    const response =
-      options.status === undefined ? undefined : { status: options.status, statusText: '', headers: {}, config, data: options.detail ? { detail: options.detail } : 'Internal Server Error' };
+    const data = options.detail ? { detail: options.detail } : 'Internal Server Error';
+    const response = options.status === undefined ? undefined : { status: options.status, statusText: '', headers: {}, config, data };
     return new AxiosError('Request failed', options.code, config, undefined, response as never);
   };
 
