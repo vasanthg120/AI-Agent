@@ -389,7 +389,7 @@ export function EmailIntelligenceDetailModal({
               onChange={(e) => setDraft(e.target.value)}
             />
             <p className={styles.replyHint}>
-              Goes to <strong>{item.fromAddress}</strong> from <strong>{item.mailboxEmail}</strong>, as a reply in the
+              Goes to <strong>{item.replyToAddresses?.join(', ') || item.fromAddress}</strong> from <strong>{item.mailboxEmail}</strong>, as a reply in the
               same conversation.
             </p>
           </section>

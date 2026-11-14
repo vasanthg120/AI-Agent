@@ -52,6 +52,8 @@ export interface TodaysEmail {
   // by the mailbox sync (see python-agent's routes/outlook.py); absent elsewhere.
   fromName?: string;
   cc?: string[];
+  // Reply-To addresses other than the sender (website enquiry forms put the customer there).
+  replyTo?: string[];
   internetMessageId?: string;
   inReplyTo?: string;
   references?: string[];

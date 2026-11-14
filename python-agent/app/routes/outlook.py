@@ -81,6 +81,8 @@ def _map_message(m: dict) -> dict:
         "fromName": sender.get("name", ""),
         "to": _addresses(m.get("toRecipients")),
         "cc": _addresses(m.get("ccRecipients")),
+        # Where an answer goes when not to the sender (website enquiry forms).
+        "replyTo": ms_graph.reply_to_addresses(m),
         **_threading(m),
         "receivedAt": m.get("receivedDateTime", ""),
         "preview": m.get("bodyPreview", ""),
@@ -113,7 +115,7 @@ def _map_sent_message(m: dict) -> dict:
     }
 
 
-_INBOX_SELECT = "id,subject,from,toRecipients,ccRecipients,receivedDateTime,bodyPreview,isRead,importance,conversationId,internetMessageId,parentFolderId,isDraft"
+_INBOX_SELECT = "id,subject,from,replyTo,toRecipients,ccRecipients,receivedDateTime,bodyPreview,isRead,importance,conversationId,internetMessageId,parentFolderId,isDraft"
 _SENT_SELECT = "id,conversationId,sentDateTime,subject,from,toRecipients,ccRecipients,bodyPreview,internetMessageId"
 
 
@@ -274,11 +276,17 @@ def messages_state(payload: MessagesStateRequest, user: dict = Depends(get_curre
 
     def describe(message: dict, original_id: str) -> dict:
         state = "deleted" if message.get("parentFolderId") in trash else ("present" if message.get("id") == original_id else "moved")
-        return {"id": original_id, "state": state, "newId": message.get("id") if state == "moved" else None, "isRead": message.get("isRead")}
+        return {
+            "id": original_id,
+            "state": state,
+            "newId": message.get("id") if state == "moved" else None,
+            "isRead": message.get("isRead"),
+            "replyTo": ms_graph.reply_to_addresses(message),
+        }
 
     states: list[dict] = []
     lookups: list[MessageRef] = []
-    found = ms_graph.graph_batch_get(token, [f"/me/messages/{ref.id}?$select=id,parentFolderId,isRead" for ref in refs])
+    found = ms_graph.graph_batch_get(token, [f"/me/messages/{ref.id}?$select=id,parentFolderId,isRead,from,replyTo" for ref in refs])
     for ref, (status, body) in zip(refs, found):
         if status == 200:
             states.append(describe(body, ref.id))
@@ -291,7 +299,7 @@ def messages_state(payload: MessagesStateRequest, user: dict = Depends(get_curre
         urls = []
         for ref in lookups:
             message_id = (ref.internetMessageId or "").replace("'", "''")
-            urls.append(f"/me/messages?$filter=internetMessageId eq '{quote(message_id, safe='')}'&$select=id,parentFolderId,isRead&$top=5")
+            urls.append(f"/me/messages?$filter=internetMessageId eq '{quote(message_id, safe='')}'&$select=id,parentFolderId,isRead,from,replyTo&$top=5")
         for ref, (status, body) in zip(lookups, ms_graph.graph_batch_get(token, urls)):
             matches = body.get("value") or [] if status == 200 else None
             if matches is None:
@@ -381,7 +389,7 @@ def send_reply(payload: SendReplyRequest, user: dict = Depends(get_current_user)
         raise HTTPException(400, "Outlook is not connected for this user")
 
     try:
-        ms_graph.reply_to_message(token, payload.messageId, payload.comment)
+        reply_to = ms_graph.reply_to_message(token, payload.messageId, payload.comment)
     except HTTPError as exc:
         # Surfaced honestly (e.g. insufficient scope on a not-yet-reconnected
         # account, or a message id that no longer exists) — never silently
@@ -390,4 +398,4 @@ def send_reply(payload: SendReplyRequest, user: dict = Depends(get_current_user)
         detail = exc.response.text if exc.response is not None else str(exc)
         raise HTTPException(status, f"Failed to send reply via Outlook: {detail}") from exc
 
-    return {"sent": True}
+    return {"sent": True, "replyTo": reply_to}

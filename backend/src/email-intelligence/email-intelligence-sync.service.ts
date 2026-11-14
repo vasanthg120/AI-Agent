@@ -429,6 +429,8 @@ export class EmailIntelligenceSyncService {
       const user = await this.usersService.findById(userId);
       const connection = await this.connectionModel.findOne({ userId, isActive: true }).exec();
       if (!user || !connection || connection.status === 'needs_reauth') return { connected: false, answered: 0, checked: true };
+      // Cheap (no Outlook, no AI): an open inbox sheds automated mail within a minute.
+      await this.emailIntelligenceService.quietAutomatedMail(userId).catch(() => 0);
       if (!(await this.pullSent(userId, user.organizationId, connection.email))) return { connected: false, answered: 0, checked: true };
       const { answered } = await this.conversations.reconcile(userId);
       if (answered > 0) await this.emailHistory.maintainFollowUps(userId).catch(() => undefined);
@@ -467,7 +469,7 @@ export class EmailIntelligenceSyncService {
     const open = await this.emailIntelligenceService.listOpenForMailboxCheck(userId, MAILBOX_CHECK_BATCH);
     if (open.length === 0) return;
     const { data } = await firstValueFrom(
-      this.http.post<{ connected: boolean; states: { id: string; state: string; newId?: string | null; isRead?: boolean | null }[] }>(
+      this.http.post<{ connected: boolean; states: { id: string; state: string; newId?: string | null; isRead?: boolean | null; replyTo?: string[] | null }[] }>(
         `${this.pythonAgentUrl}/outlook/messages-state`,
         { messages: open.map((o) => ({ id: o.externalMessageId, internetMessageId: o.internetMessageId ?? null })) },
         { headers: { Authorization: `Bearer ${this.graphToken(userId)}` } },
@@ -493,6 +495,9 @@ export class EmailIntelligenceSyncService {
     const user = await this.usersService.findById(userId);
     const connection = await this.connectionModel.findOne({ userId, isActive: true }).exec();
     if (!user || !connection) return { connected: false, scannedCount: 0, newItemsCount: 0 };
+
+    // Automated mail stored while the AI couldn't read it leaves Needs Response before any AI retry spends credits on it.
+    await this.emailIntelligenceService.quietAutomatedMail(userId).catch((err) => this.logger.warn(`Could not sort automated mail for user ${userId}: ${(err as Error).message}`));
 
     // The window is worked out before the lock is taken: the lock is itself a job document.
     const since = await this.resolveSyncSince(userId);

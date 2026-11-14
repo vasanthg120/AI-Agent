@@ -12,7 +12,7 @@ import { OutlookConnection, OutlookConnectionDocument } from '../outlook/schemas
 import { UsersService } from '../users/users.service';
 import { EmailConversationService } from './email-conversation.service';
 import { EmailIntelligenceService } from './email-intelligence.service';
-import { classifyEmailDeterministically } from './email-preclassification.util';
+import { bareAddress, classifyEmailDeterministically } from './email-preclassification.util';
 import { needsResponseMatch } from './email-response-state';
 import { PUBLIC_MAIL_DOMAINS } from './email-thread.util';
 import { EmailFollowUpReminder, EmailFollowUpReminderDocument } from './schemas/email-follow-up-reminder.schema';
@@ -103,6 +103,8 @@ const domainOf = (address: string) => address.trim().toLowerCase().split('@')[1]
 export class EmailHistoryService {
   private readonly logger = new Logger(EmailHistoryService.name);
   private readonly pythonAgentUrl: string;
+  // HaiVE's own sending addresses: its reports in an imported mailbox are not customer mail.
+  private readonly systemSenders: string[];
 
   constructor(
     @InjectModel(EmailIntelligenceItem.name) private itemModel: Model<EmailIntelligenceItemDocument>,
@@ -118,6 +120,9 @@ export class EmailHistoryService {
     config: ConfigService,
   ) {
     this.pythonAgentUrl = config.get<string>('pythonAgentUrl') ?? 'http://localhost:8000';
+    this.systemSenders = [config.get<string>('mail.from'), config.get<string>('mail.user')]
+      .filter((address): address is string => !!address && address.includes('@'))
+      .map(bareAddress);
   }
 
   // ---- sent mail ---------------------------------------------------------------
@@ -241,7 +246,7 @@ export class EmailHistoryService {
     // "Us" is every address of the mailbox and every (non-public) domain they are on.
     const own = new Set([mailbox, ...ownAddresses.map((a) => a.trim().toLowerCase())]);
     const ownDomains = new Set([...own].map(domainOf).filter((d) => d && !PUBLIC_MAIL_DOMAINS.has(d)));
-    const automated = classifyEmailDeterministically({ from: email.from, subject: email.subject ?? '', preview: email.preview ?? '' });
+    const automated = classifyEmailDeterministically({ from: email.from, subject: email.subject ?? '', preview: email.preview ?? '' }, { systemSenders: this.systemSenders });
     const internal = own.has(from) || ownDomains.has(domainOf(from));
     const noReply = NO_REPLY_SENDER.test(from);
 

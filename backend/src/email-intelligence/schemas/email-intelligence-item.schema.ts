@@ -85,6 +85,12 @@ export class EmailIntelligenceItem {
   @Prop({ type: [String], default: undefined })
   ccAddresses?: string[];
 
+  // Where a reply goes when not to the sender: the Reply-To a website enquiry
+  // form puts the customer in. Captured by the sync (and filled in for waiting
+  // mail by the mailbox check); the send itself reads it from Outlook.
+  @Prop({ type: [String], default: undefined })
+  replyToAddresses?: string[];
+
   @Prop({ default: '' })
   bodyPreview: string;
 

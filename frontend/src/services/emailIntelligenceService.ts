@@ -92,6 +92,8 @@ export interface EmailIntelligenceItem {
   receivedAt: string;
   subject: string;
   fromAddress: string;
+  // Where a reply goes when not to the sender (a website enquiry form's customer).
+  replyToAddresses?: string[];
   toAddresses: string[];
   bodyPreview: string;
   isRead: boolean;

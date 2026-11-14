@@ -10,7 +10,7 @@ import { ReservationService } from '../billing/reservation.service';
 import { correlateSingleEmail, EmailCorrelationContext } from '../crm/customer-grouping.util';
 import { EmailSlaService } from '../email-sla/email-sla.service';
 import { periodToDateRange } from '../common/period.util';
-import { classifyEmailDeterministically } from './email-preclassification.util';
+import { bareAddress, classifyEmailDeterministically, DeterministicPreFilterMatch, UNMISTAKABLE_RULES } from './email-preclassification.util';
 import {
   deriveCategory,
   deriveRespondedInfo,
@@ -239,6 +239,8 @@ const STALE_DRAFT_MS = 3 * 60 * 1000;
 export class EmailIntelligenceService {
   private readonly logger = new Logger(EmailIntelligenceService.name);
   private readonly pythonAgentUrl: string;
+  // HaiVE's own sending addresses: its reports and alerts land in connected mailboxes too.
+  private readonly systemSenders: string[];
 
   constructor(
     @InjectModel(EmailIntelligenceItem.name) private itemModel: Model<EmailIntelligenceItemDocument>,
@@ -254,6 +256,9 @@ export class EmailIntelligenceService {
     private reservations: ReservationService,
   ) {
     this.pythonAgentUrl = this.config.get<string>('pythonAgentUrl') ?? 'http://localhost:8000';
+    this.systemSenders = [this.config.get<string>('mail.from'), this.config.get<string>('mail.user')]
+      .filter((address): address is string => !!address && address.includes('@'))
+      .map(bareAddress);
   }
 
   async itemExists(userId: string, externalMessageId: string): Promise<boolean> {
@@ -316,13 +321,20 @@ export class EmailIntelligenceService {
   }
 
   /** Applies what Outlook says about where stored messages are now. Returns how many left the mailbox. */
-  async applyMailboxStates(userId: string, states: { id: string; state: string; newId?: string | null; isRead?: boolean | null }[]): Promise<number> {
+  async applyMailboxStates(
+    userId: string,
+    states: { id: string; state: string; newId?: string | null; isRead?: boolean | null; replyTo?: string[] | null }[],
+  ): Promise<number> {
     if (states.length === 0) return 0;
     const now = new Date();
     let removed = 0;
     const ops = states.flatMap((s) => {
       const filter = { userId, externalMessageId: s.id };
-      const read = typeof s.isRead === 'boolean' ? { isRead: s.isRead } : {};
+      const read = {
+        ...(typeof s.isRead === 'boolean' ? { isRead: s.isRead } : {}),
+        // Mail stored before the sync captured Reply-To learns where a reply goes.
+        ...(s.replyTo?.length ? { replyToAddresses: s.replyTo } : {}),
+      };
       if (s.state === 'deleted' || s.state === 'gone') {
         removed += 1;
         return [{ updateOne: { filter, update: { $set: { mailboxRemovedAt: now, mailboxState: s.state, mailboxCheckedAt: now, ...read } } } }];
@@ -435,7 +447,60 @@ export class EmailIntelligenceService {
   // restructuring production-critical branching logic.
   wouldSkipLlmAnalysis(email: { from: string; subject: string; preview: string }, mailboxEmail: string, ownAddresses: string[] = []): boolean {
     if (this.isOwnAddress(email.from, mailboxEmail, ownAddresses)) return true;
-    return !!classifyEmailDeterministically({ from: email.from, subject: email.subject, preview: email.preview });
+    return !!this.preFilter(email);
+  }
+
+  /** The deterministic rules (receipts, robots, HaiVE's own reports…) with this server's own sending addresses. */
+  preFilter(email: { from: string; subject?: string; preview?: string }): DeterministicPreFilterMatch | null {
+    return classifyEmailDeterministically({ from: email.from, subject: email.subject ?? '', preview: email.preview ?? '' }, { systemSenders: this.systemSenders });
+  }
+
+  /**
+   * Automated mail still sitting in "Needs Response" — stored while the AI
+   * couldn't read it (no credits), or before the rules knew it — leaves it:
+   * receipts, no-reply robots, HaiVE's own reports. Mail the AI did read is
+   * only overruled by the unmistakable rules (receipts, bounces, auto-replies,
+   * HaiVE's own mail); a no-reply sender the AI judged to need an answer keeps
+   * that judgement. Returns how many were moved out.
+   */
+  async quietAutomatedMail(userId: string): Promise<number> {
+    const waiting = await this.itemModel
+      .find({ userId, ...needsResponseMatch() })
+      .sort({ receivedAt: -1 })
+      .limit(1000)
+      .select('fromAddress subject bodyPreview analysisState')
+      .lean<{ _id: Types.ObjectId; fromAddress: string; subject?: string; bodyPreview?: string; analysisState?: string }[]>()
+      .exec();
+    let quieted = 0;
+    for (const row of waiting) {
+      const match = this.preFilter({ from: row.fromAddress ?? '', subject: row.subject, preview: row.bodyPreview });
+      if (!match) continue;
+      const unread = row.analysisState === 'pending';
+      if (!unread && !UNMISTAKABLE_RULES.has(match.ruleName)) continue;
+      const result = await this.itemModel
+        .updateOne(
+          { _id: row._id, ...needsResponseMatch() },
+          {
+            $set: {
+              intent: 'other',
+              priority: 'low',
+              urgency: 'low',
+              shouldDraft: false,
+              fromRole: 'external_other',
+              aiStatus: 'no_reply_needed',
+              expectedNextAction: 'no_action_required',
+              recommendedAction: match.reason,
+              reason: match.reason,
+              ...(unread ? { deterministicInput: { skippedLlmCall: true, reasonForSkip: `deterministic pre-filter: ${match.ruleName}` } } : {}),
+            },
+            $unset: { analysisState: '', analysisError: '' },
+          },
+        )
+        .exec();
+      quieted += result.modifiedCount ?? 0;
+    }
+    if (quieted > 0) this.logger.log(`Moved ${quieted} automated email(s) of user ${userId} out of Needs Response`);
+    return quieted;
   }
 
   /** Sent by the mailbox itself — under its sign-in address or any of its aliases. */
@@ -472,6 +537,7 @@ export class EmailIntelligenceService {
       fromAddress: email.from,
       fromName: email.fromName || undefined,
       ccAddresses: email.cc?.length ? email.cc : undefined,
+      replyToAddresses: email.replyTo?.length ? email.replyTo : undefined,
       toAddresses: email.to,
       bodyPreview: email.preview,
       isRead: email.isRead,
@@ -510,7 +576,7 @@ export class EmailIntelligenceService {
       // Deterministic pre-filter — bounce/auto-reply/marketing mail never
       // needs an LLM call to know it needs no reply. Skips straight to
       // persistence, same shape/reasoning as the Layer 1 gate above.
-      const preFilterMatch = classifyEmailDeterministically({ from: email.from, subject: email.subject, preview: email.preview });
+      const preFilterMatch = this.preFilter(email);
       if (preFilterMatch) {
         return await this.itemModel.create({
           ...baseFields,
@@ -2412,7 +2478,7 @@ export class EmailIntelligenceService {
     item.resolvedGroupKey = correlation?.resolvedGroupKey ?? undefined;
     item.matchedBusinessSummary = matchedBusinessSummary;
 
-    const preFilterMatch = classifyEmailDeterministically({ from: email.from, subject: email.subject, preview: email.preview });
+    const preFilterMatch = this.preFilter(email);
 
     // Phase 17, Layer 1 — same deterministic pre-gate as analyzeAndCreate.
     if (this.isOwnAddress(item.fromAddress, item.mailboxEmail, extras.ownAddresses)) {
