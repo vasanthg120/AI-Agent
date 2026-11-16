@@ -184,6 +184,32 @@ export interface Customer {
   salesDiscountPct?: number;
   profileNote?: string;
   addresses: CustomerAddress[];
+  // Real payment-gateway transactions (Square today) — deliberately
+  // separate from `payment` above (quote receivables, an unrelated
+  // concept the board already tracked). Always shown as "Gateway Payments"
+  // in the UI, never bare "Payment Status", to avoid confusing the two.
+  gatewayPaymentSummary: GatewayPaymentSummary;
+}
+
+export interface GatewayPaymentSummary {
+  totalPaid: number;
+  totalRefunded: number;
+  netPaid: number;
+  currency: string;
+  transactionCount: number;
+  lastPaymentAt?: string;
+  disputedCount: number;
+  status: 'unpaid' | 'partially_paid' | 'paid' | 'refunded' | 'failed_only';
+}
+
+export interface GatewayPaymentRecord {
+  id: string;
+  provider: string;
+  amount: number;
+  currency: string;
+  status: 'pending' | 'processing' | 'authorized' | 'completed' | 'failed' | 'cancelled' | 'partially_refunded' | 'refunded' | 'disputed';
+  date: string;
+  refundedAmount: number;
 }
 
 export type CustomerRecordType = 'business' | 'individual';
@@ -440,6 +466,8 @@ export interface CustomerDetail extends Customer {
   customerRepliesInDays: number | null;
   weReplyInHours: number | null;
   analysis: CustomerAnalysis | null;
+  // Every Gateway Payment transaction matched to this customer, newest first.
+  gatewayPayments: GatewayPaymentRecord[];
 }
 
 export interface CustomerSource {

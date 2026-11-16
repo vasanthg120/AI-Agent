@@ -74,6 +74,9 @@ declare const _default: () => {
             clientSecret: string;
             redirectUri: string;
         };
+        square: {
+            redirectUri: string;
+        };
         zohobooks: {
             clientId: string;
             clientSecret: string;

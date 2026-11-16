@@ -143,6 +143,8 @@ export interface CustomerRow extends CustomerSummary {
   profileNote?: string;
   /** Multiple, typed addresses (billing/shipping/other) — distinct from the single legacy `address` string an enquiry system may have recorded (CustomerDetail.address, unaffected). */
   addresses: CustomerAddress[];
+  /** Real payment-gateway transactions (Square today) — deliberately separate from the unrelated existing `payment`/`outstanding` quote-receivables stats above. See GatewayPaymentSummary's own comment. */
+  gatewayPaymentSummary: GatewayPaymentSummary;
 }
 
 export interface CustomerAddress {
@@ -220,6 +222,8 @@ export interface CustomerDetail extends CustomerRow {
   customerRepliesInDays: number | null;
   weReplyInHours: number | null;
   analysis: CustomerAnalysis | null;
+  /** Every Gateway Payment transaction matched to this customer, newest first — the detail view's own transaction history (spec's own requirement), distinct from gatewayPaymentSummary's totals. */
+  gatewayPayments: GatewayPaymentRecord[];
 }
 
 export interface CustomerStats {
@@ -309,6 +313,65 @@ interface Entry {
   salesDiscountPct?: number;
   profileNote?: string;
   addresses: CustomerAddress[];
+  gatewayPayments: GatewayPaymentRecord[];
+  gatewayPaymentSummary: GatewayPaymentSummary;
+}
+
+// A real payment-gateway transaction (Square today) matched to this
+// customer — deliberately separate from ProfilePayment above (quote
+// receivables, an unrelated concept — see square-payment-transaction.
+// schema.ts's own comment on the naming collision this avoids). Surfaced
+// to the frontend as "Gateway Payments" everywhere, never bare "Payments".
+export interface GatewayPaymentRecord {
+  id: string;
+  provider: string;
+  amount: number;
+  currency: string;
+  status: 'pending' | 'processing' | 'authorized' | 'completed' | 'failed' | 'cancelled' | 'partially_refunded' | 'refunded' | 'disputed';
+  date: Date;
+  refundedAmount: number;
+}
+
+export interface GatewayPaymentSummary {
+  totalPaid: number;
+  totalRefunded: number;
+  netPaid: number;
+  currency: string;
+  transactionCount: number;
+  lastPaymentAt?: Date;
+  // Counted separately from `status` below — never folded into "paid",
+  // since a dispute can be open against an otherwise-completed payment.
+  disputedCount: number;
+  // 'unpaid' when there are no completed/refunded transactions at all —
+  // distinct from 'failed_only' (every transaction failed/was cancelled,
+  // so there IS gateway activity, just none of it ever took money) and from
+  // genuinely having no gateway activity recorded for this customer.
+  status: 'unpaid' | 'partially_paid' | 'paid' | 'refunded' | 'failed_only';
+}
+
+function emptyGatewayPaymentSummary(currency: string): GatewayPaymentSummary {
+  return { totalPaid: 0, totalRefunded: 0, netPaid: 0, currency, transactionCount: 0, disputedCount: 0, status: 'unpaid' };
+}
+
+// Always recomputed fresh from the source rows — never incremented — the
+// same "duplicate events must not increase totals twice" rule quote-
+// payments.service.ts's recomputePaidAmount already follows for quote
+// payments. A pending/authorized/failed/cancelled transaction never counts
+// as paid revenue; a refund (full or partial) reduces net paid; disputed
+// transactions are counted separately, never folded into "paid".
+export function computeGatewayPaymentSummary(records: GatewayPaymentRecord[]): GatewayPaymentSummary {
+  if (records.length === 0) return emptyGatewayPaymentSummary('USD');
+  const currency = records[0].currency;
+  const countsAsRevenue = (r: GatewayPaymentRecord) => r.status === 'completed' || r.status === 'partially_refunded' || r.status === 'refunded';
+  const revenueRecords = records.filter(countsAsRevenue);
+  const totalPaid = revenueRecords.reduce((sum, r) => sum + r.amount, 0);
+  const totalRefunded = revenueRecords.reduce((sum, r) => sum + r.refundedAmount, 0);
+  const netPaid = totalPaid - totalRefunded;
+  const lastPaymentAt = revenueRecords.length ? revenueRecords.reduce((latest, r) => (r.date > latest ? r.date : latest), revenueRecords[0].date) : undefined;
+  const disputedCount = records.filter((r) => r.status === 'disputed').length;
+  const status: GatewayPaymentSummary['status'] =
+    revenueRecords.length === 0 ? 'failed_only' : netPaid <= 0 ? 'refunded' : totalRefunded > 0 ? 'partially_paid' : 'paid';
+  return { totalPaid, totalRefunded, netPaid, currency, transactionCount: records.length, lastPaymentAt, disputedCount, status };
 }
 
 interface Directory {
@@ -439,7 +502,7 @@ export class CustomerDirectoryService {
         .find({ organizationId, ...filter }, projection ? { projection } : undefined)
         .limit(MAX_RECORDS)
         .toArray();
-    const [sourceDocs, deals, quotes, invoices, contacts, payments, analyses, openTasks, statusDocs, jobDocs, profileDocs] = await Promise.all([
+    const [sourceDocs, deals, quotes, invoices, contacts, payments, analyses, openTasks, statusDocs, jobDocs, profileDocs, gatewayPaymentDocs] = await Promise.all([
       find('crm_data_sources', {}, { label: 1, provider: 1, status: 1, sync: 1, metadata: 1, isDefault: 1 }),
       find(
         'crm_deals',
@@ -514,6 +577,14 @@ export class CustomerDirectoryService {
       find(JOBS_COLLECTION, {}, { customerKeys: 1, number: 1, seq: 1, quotationId: 1, 'statuses.progress': 1 }),
       // What the team set by hand on the customer itself (Phase 3): archived, the assigned rep, corrections, manual contacts.
       find(PROFILES_COLLECTION, {}),
+      // Gateway Payments — real payment-gateway transactions (Square today;
+      // see square-payment-transaction.schema.ts), joined by the SAME
+      // normalized email/phone keys clusterCustomers() already groups
+      // everything else by, never a second matching algorithm. Deliberately
+      // distinct from `payments` above (quote receivables, an unrelated
+      // concept — see this collection's own schema comment on the naming
+      // collision this avoids).
+      find('square_payment_transactions', {}, { providerPaymentId: 1, matchedEmailKey: 1, matchedPhoneKey: 1, amount: 1, currency: 1, paymentStatus: 1, paymentDate: 1, refundedAmount: 1, provider: 1 }),
     ]);
 
     const sources = sourceDocs.map((s) => {
@@ -631,6 +702,34 @@ export class CustomerDirectoryService {
     const addressesOf = (members: number[]) => [...new Set(members.map((i) => emailKey(pieces[i].identity.email)).filter(Boolean))];
     const mailByAddress = await this.mail.emailSummaries(organizationId, groups.flatMap(addressesOf));
 
+    // ---- Gateway Payments (Square etc.) matched to this organization's customers by the same email/phone keys
+    const phonesOf = (members: number[]) => [...new Set(members.map((i) => phoneKey(pieces[i].identity.phone)).filter(Boolean))];
+    const gatewayPaymentsByEmailKey = new Map<string, GatewayPaymentRecord[]>();
+    const gatewayPaymentsByPhoneKey = new Map<string, GatewayPaymentRecord[]>();
+    for (const doc of gatewayPaymentDocs) {
+      const date = asDate(doc.paymentDate);
+      if (!date) continue;
+      const record: GatewayPaymentRecord = {
+        id: text(doc.providerPaymentId),
+        provider: text(doc.provider) || 'square',
+        amount: amount(doc.amount),
+        currency: text(doc.currency) || 'USD',
+        status: text(doc.paymentStatus) as GatewayPaymentRecord['status'],
+        date,
+        refundedAmount: amount(doc.refundedAmount),
+      };
+      const email = text(doc.matchedEmailKey);
+      const phone = text(doc.matchedPhoneKey);
+      if (email) {
+        if (!gatewayPaymentsByEmailKey.has(email)) gatewayPaymentsByEmailKey.set(email, []);
+        gatewayPaymentsByEmailKey.get(email)!.push(record);
+      }
+      if (phone) {
+        if (!gatewayPaymentsByPhoneKey.has(phone)) gatewayPaymentsByPhoneKey.set(phone, []);
+        gatewayPaymentsByPhoneKey.get(phone)!.push(record);
+      }
+    }
+
     const saved = new Map(analyses.map((a) => [text(a.customerId), a]));
     const tasksByKey = new Map<string, ProfileFollowUp[]>();
     for (const task of openTasks) {
@@ -676,6 +775,12 @@ export class CustomerDirectoryService {
       const email = emails.length ? emailKey(pick('email')) || emails[0] : undefined;
       const name = pick('name') ?? company ?? email ?? 'Unknown customer';
       const phone = pick('phone');
+      // Gateway Payments matched by the same email/phone keys as everything
+      // else — a payment can match on either, so de-dup by transaction id
+      // in case a customer's email AND phone both happen to be on file for
+      // the same payment.
+      const gatewayPayments = [...new Map([...emails.flatMap((e) => gatewayPaymentsByEmailKey.get(e) ?? []), ...phonesOf(members).flatMap((p) => gatewayPaymentsByPhoneKey.get(p) ?? [])].map((r) => [r.id, r])).values()];
+      const gatewayPaymentSummary = computeGatewayPaymentSummary(gatewayPayments);
       // The same person is on several records: one entry each, filled in from whichever record has the detail.
       const people: CustomerPerson[] = [];
       for (const { identity } of named) {
@@ -906,6 +1011,8 @@ export class CustomerDirectoryService {
         salesDiscountPct,
         profileNote,
         addresses,
+        gatewayPayments,
+        gatewayPaymentSummary,
         // A job found under two of their keys is still one job.
         jobs: [...new Set(keys.flatMap((key) => jobsByKey.get(key) ?? []))]
           .sort((a, b) => amount(b.seq) - amount(a.seq))
@@ -960,6 +1067,7 @@ export class CustomerDirectoryService {
       salesDiscountPct: entry.salesDiscountPct,
       profileNote: entry.profileNote,
       addresses: entry.addresses,
+      gatewayPaymentSummary: entry.gatewayPaymentSummary,
       ...summary,
     };
   }
@@ -1643,6 +1751,7 @@ export class CustomerDirectoryService {
       gaps: entry.profile.gaps,
       ...activity,
       analysis,
+      gatewayPayments: [...entry.gatewayPayments].sort((a, b) => b.date.getTime() - a.date.getTime()),
     };
   }
 

@@ -3,6 +3,8 @@ import type {
   CrmState,
   CustomerFlag,
   CustomerType,
+  GatewayPaymentRecord,
+  GatewayPaymentSummary,
   InvoiceStatus,
   MailState,
   OrderState,
@@ -39,6 +41,39 @@ export const PAYMENT_VARIANT: Record<PaymentState, BadgeVariant> = {
   overdue: 'danger',
   not_recorded: 'neutral',
   nothing_due: 'neutral',
+};
+
+// Real payment-gateway transactions (Square today) — kept visually and
+// semantically distinct from PAYMENT_VARIANT above (quote receivables, an
+// unrelated concept the board already tracked).
+export const GATEWAY_PAYMENT_VARIANT: Record<GatewayPaymentSummary['status'], BadgeVariant> = {
+  unpaid: 'neutral',
+  partially_paid: 'warning',
+  paid: 'success',
+  refunded: 'info',
+  failed_only: 'danger',
+};
+
+export const GATEWAY_PAYMENT_LABEL: Record<GatewayPaymentSummary['status'], string> = {
+  unpaid: 'Unpaid',
+  partially_paid: 'Partially paid',
+  paid: 'Paid',
+  refunded: 'Refunded',
+  failed_only: 'Failed',
+};
+
+// Per-transaction status (richer than the customer-level summary above —
+// see square-payment-matching.service.ts's own mapSquarePaymentStatus).
+export const GATEWAY_TRANSACTION_VARIANT: Record<GatewayPaymentRecord['status'], BadgeVariant> = {
+  pending: 'neutral',
+  processing: 'neutral',
+  authorized: 'info',
+  completed: 'success',
+  failed: 'danger',
+  cancelled: 'neutral',
+  partially_refunded: 'warning',
+  refunded: 'info',
+  disputed: 'danger',
 };
 
 export const ORDER_VARIANT: Record<OrderState, BadgeVariant> = {

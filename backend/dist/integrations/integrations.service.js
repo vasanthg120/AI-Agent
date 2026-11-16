@@ -119,14 +119,21 @@ let IntegrationsService = IntegrationsService_1 = class IntegrationsService {
                 oauthClientId: app.clientId,
                 oauthClientSecretEncrypted: this.encryption.encrypt(app.clientSecret),
                 ...(app.meta ? { oauthMeta: app.meta } : {}),
+                ...(app.webhookSecret ? { webhookSigningSecretEncrypted: this.encryption.encrypt(app.webhookSecret) } : {}),
             },
         }, { upsert: true });
     }
     async getOAuthAppCredentialsStatus(organizationId, provider) {
-        const doc = await this.credentialModel.findOne({ organizationId, provider }, { oauthClientId: 1, oauthClientSecretEncrypted: 1, oauthMeta: 1 });
+        const doc = await this.credentialModel.findOne({ organizationId, provider }, { oauthClientId: 1, oauthClientSecretEncrypted: 1, oauthMeta: 1, webhookSigningSecretEncrypted: 1 });
         if (!doc?.oauthClientId || !doc?.oauthClientSecretEncrypted)
             return { configured: false };
-        return { configured: true, clientId: doc.oauthClientId, clientSecretMasked: '••••••••••••', meta: doc.oauthMeta };
+        return { configured: true, clientId: doc.oauthClientId, clientSecretMasked: '••••••••••••', meta: doc.oauthMeta, webhookSecretConfigured: !!doc.webhookSigningSecretEncrypted };
+    }
+    async resolveWebhookSigningSecret(organizationId, provider) {
+        const doc = await this.credentialModel.findOne({ organizationId, provider }, { webhookSigningSecretEncrypted: 1 });
+        if (!doc?.webhookSigningSecretEncrypted)
+            return null;
+        return this.encryption.decrypt(doc.webhookSigningSecretEncrypted);
     }
     async resolveOAuthAppCredentials(organizationId, provider) {
         const doc = await this.credentialModel.findOne({ organizationId, provider }, { oauthClientId: 1, oauthClientSecretEncrypted: 1, oauthMeta: 1 });
@@ -221,6 +228,18 @@ let IntegrationsService = IntegrationsService_1 = class IntegrationsService {
                     expiresInSeconds: 7200,
                     oauthMeta: { ...oauthMeta, instanceUrl: data.instance_url ?? oauthMeta.instanceUrl ?? '' },
                 };
+            }
+            else if (doc.provider === 'square') {
+                const saved = await this.resolveOAuthAppCredentials(doc.organizationId, 'square');
+                if (!saved)
+                    return null;
+                const environment = oauthMeta.environment === 'production' ? 'production' : 'sandbox';
+                const base = environment === 'production' ? 'https://connect.squareup.com' : 'https://connect.squareupsandbox.com';
+                const { data } = await (0, rxjs_1.firstValueFrom)(this.http.post(`${base}/oauth2/token`, { grant_type: 'refresh_token', refresh_token: refreshToken, client_id: saved.clientId, client_secret: saved.clientSecret }, { headers: { 'Content-Type': 'application/json' } }));
+                if (!data.access_token)
+                    throw new Error(data.errors?.[0]?.detail ?? 'Square did not return an access token');
+                const expiresInSeconds = data.expires_at ? Math.max(60, (new Date(data.expires_at).getTime() - Date.now()) / 1000) : 2_592_000;
+                refreshed = { accessToken: data.access_token, expiresInSeconds, oauthMeta };
             }
             else if (doc.provider === 'xero') {
                 const saved = await this.resolveOAuthAppCredentials('platform', 'xero');
@@ -409,6 +428,10 @@ let IntegrationsService = IntegrationsService_1 = class IntegrationsService {
     async listConnected(organizationId) {
         const docs = await this.credentialModel.find({ organizationId }, { provider: 1 });
         return docs.map((doc) => ({ integrationId: doc._id, provider: doc.provider }));
+    }
+    async listConnectedOrganizationIds(provider) {
+        const docs = await this.credentialModel.find({ provider, organizationId: { $ne: 'platform' }, status: { $ne: 'needs_reauth' } }, { organizationId: 1 });
+        return docs.map((doc) => doc.organizationId);
     }
     friendlyErrorMessage(err) {
         const axiosErr = err;

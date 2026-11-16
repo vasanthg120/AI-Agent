@@ -223,7 +223,7 @@ export class IntegrationsService {
   async saveOAuthAppCredentials(
     organizationId: string,
     provider: string,
-    app: { clientId: string; clientSecret: string; meta?: Record<string, string> },
+    app: { clientId: string; clientSecret: string; meta?: Record<string, string>; webhookSecret?: string },
   ): Promise<void> {
     await this.credentialModel.findOneAndUpdate(
       { organizationId, provider },
@@ -234,6 +234,11 @@ export class IntegrationsService {
           oauthClientId: app.clientId,
           oauthClientSecretEncrypted: this.encryption.encrypt(app.clientSecret),
           ...(app.meta ? { oauthMeta: app.meta } : {}),
+          // Optional — only Square passes this today (see
+          // ../square/square.service.ts). Every other caller (Zoho/Xero/
+          // MYOB/Outlook/Gmail) omits it, so this $set is skipped for them
+          // exactly as before this field existed.
+          ...(app.webhookSecret ? { webhookSigningSecretEncrypted: this.encryption.encrypt(app.webhookSecret) } : {}),
         },
       },
       { upsert: true },
@@ -247,10 +252,26 @@ export class IntegrationsService {
   async getOAuthAppCredentialsStatus(
     organizationId: string,
     provider: string,
-  ): Promise<{ configured: boolean; clientId?: string; clientSecretMasked?: string; meta?: Record<string, string> }> {
-    const doc = await this.credentialModel.findOne({ organizationId, provider }, { oauthClientId: 1, oauthClientSecretEncrypted: 1, oauthMeta: 1 });
+  ): Promise<{ configured: boolean; clientId?: string; clientSecretMasked?: string; meta?: Record<string, string>; webhookSecretConfigured?: boolean }> {
+    const doc = await this.credentialModel.findOne(
+      { organizationId, provider },
+      { oauthClientId: 1, oauthClientSecretEncrypted: 1, oauthMeta: 1, webhookSigningSecretEncrypted: 1 },
+    );
     if (!doc?.oauthClientId || !doc?.oauthClientSecretEncrypted) return { configured: false };
-    return { configured: true, clientId: doc.oauthClientId, clientSecretMasked: '••••••••••••', meta: doc.oauthMeta };
+    return { configured: true, clientId: doc.oauthClientId, clientSecretMasked: '••••••••••••', meta: doc.oauthMeta, webhookSecretConfigured: !!doc.webhookSigningSecretEncrypted };
+  }
+
+  /** Decrypted per-organization app-level webhook signing secret — internal,
+   * server-side use only, same "never exposed over HTTP" rule as
+   * resolveOAuthAppCredentials below. Null if none is configured (e.g. a
+   * Personal-Access-Token connection, which has no app at all, or an org
+   * that hasn't set up a webhook subscription yet), so a webhook received
+   * before one exists fails signature verification cleanly instead of
+   * throwing. */
+  async resolveWebhookSigningSecret(organizationId: string, provider: string): Promise<string | null> {
+    const doc = await this.credentialModel.findOne({ organizationId, provider }, { webhookSigningSecretEncrypted: 1 });
+    if (!doc?.webhookSigningSecretEncrypted) return null;
+    return this.encryption.decrypt(doc.webhookSigningSecretEncrypted);
   }
 
   /** Decrypted app credentials for internal, server-side use ONLY (building
@@ -410,6 +431,34 @@ export class IntegrationsService {
           expiresInSeconds: 7200,
           oauthMeta: { ...oauthMeta, instanceUrl: data.instance_url ?? oauthMeta.instanceUrl ?? '' },
         };
+      } else if (doc.provider === 'square') {
+        // Per-organization app only (see square.service.ts's class comment
+        // — "bring your own app," like Zoho above, NOT Xero/MYOB's
+        // platform-wide shape below: there is no Haive-wide Square app).
+        // Only reached for the OAuth-connected path — a Personal-Access-
+        // Token connection's 10-year sentinel expiry never gets near enough
+        // to trigger a refresh at all, confirmed by its own dedicated test.
+        // Confirmed live against Square's own ObtainToken reference (not
+        // assumed): JSON body (not form-encoded, unlike every other branch
+        // here), response carries `expires_at` as an absolute ISO-8601
+        // timestamp (not `expires_in` seconds), and for the
+        // authorization_code/refresh_token grants used here (never PKCE)
+        // the SAME refresh_token value comes back — it never expires or
+        // rotates, so this never needs to overwrite refreshTokenEncrypted.
+        const saved = await this.resolveOAuthAppCredentials(doc.organizationId, 'square');
+        if (!saved) return null;
+        const environment = oauthMeta.environment === 'production' ? 'production' : 'sandbox';
+        const base = environment === 'production' ? 'https://connect.squareup.com' : 'https://connect.squareupsandbox.com';
+        const { data } = await firstValueFrom(
+          this.http.post<{ access_token?: string; expires_at?: string; errors?: { detail?: string }[] }>(
+            `${base}/oauth2/token`,
+            { grant_type: 'refresh_token', refresh_token: refreshToken, client_id: saved.clientId, client_secret: saved.clientSecret },
+            { headers: { 'Content-Type': 'application/json' } },
+          ),
+        );
+        if (!data.access_token) throw new Error(data.errors?.[0]?.detail ?? 'Square did not return an access token');
+        const expiresInSeconds = data.expires_at ? Math.max(60, (new Date(data.expires_at).getTime() - Date.now()) / 1000) : 2_592_000;
+        refreshed = { accessToken: data.access_token, expiresInSeconds, oauthMeta };
       } else if (doc.provider === 'xero') {
         // Platform-wide app only (see configuration.ts's integrations.xero
         // comment) — same DB-first, env-fallback precedence Gmail uses, no
@@ -701,6 +750,17 @@ export class IntegrationsService {
   async listConnected(organizationId: string): Promise<{ integrationId: Types.ObjectId; provider: string }[]> {
     const docs = await this.credentialModel.find({ organizationId }, { provider: 1 });
     return docs.map((doc) => ({ integrationId: doc._id, provider: doc.provider }));
+  }
+
+  /** The reverse of listConnected() above — every REAL organization (never
+   * the 'platform' sentinel row) currently connected for a given provider,
+   * not reauth-broken. Used by periodic reconciliation jobs (see
+   * square-reconciliation.service.ts) to know which organizations to
+   * re-sync, without that job needing its own direct query against this
+   * collection. */
+  async listConnectedOrganizationIds(provider: string): Promise<string[]> {
+    const docs = await this.credentialModel.find({ provider, organizationId: { $ne: 'platform' }, status: { $ne: 'needs_reauth' } }, { organizationId: 1 });
+    return docs.map((doc) => doc.organizationId);
   }
 
   private friendlyErrorMessage(err: unknown): string {

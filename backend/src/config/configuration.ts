@@ -142,6 +142,13 @@ export default () => ({
       clientSecret: process.env.XERO_CLIENT_SECRET ?? '',
       redirectUri: process.env.XERO_REDIRECT_URI ?? 'http://localhost:3000/xero/callback',
     },
+    // Square OAuth path — per-organization "bring your own app" like Zoho
+    // below (see square.service.ts's class comment), so there's no
+    // clientId/clientSecret fallback here, only the redirect URI every
+    // organization's own app registers the same callback route against.
+    square: {
+      redirectUri: process.env.SQUARE_REDIRECT_URI ?? 'http://localhost:3000/square/callback',
+    },
     // Zoho Books — same per-org "bring your own app" + regional data-center
     // pattern as integrations.zoho below (ZOHO_DATA_CENTERS is shared), but
     // a SEPARATE credential/app registration from Zoho CRM: an organization

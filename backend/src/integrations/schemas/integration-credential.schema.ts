@@ -125,6 +125,18 @@ export class IntegrationCredential {
   // its own.
   @Prop()
   secondaryCredentialsEncrypted?: string;
+
+  // This organization's own app-level webhook signing secret (currently
+  // only Square: see ../square/square-webhook.controller.ts) — a SEPARATE
+  // secret from oauthClientSecretEncrypted above (that one authenticates
+  // Haive to the provider when exchanging/refreshing a token; this one
+  // authenticates the provider to Haive when it calls back in). Only ever
+  // set on a per-organization "bring your own app" row, since a webhook
+  // subscription is application-level — never set on a Personal-Access-
+  // Token connection, which has no app of its own at all. Encrypted the
+  // same way as every other secret here.
+  @Prop()
+  webhookSigningSecretEncrypted?: string;
 }
 
 export const IntegrationCredentialSchema = SchemaFactory.createForClass(IntegrationCredential);

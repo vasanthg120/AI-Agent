@@ -35,6 +35,7 @@ import { CrmIntegrationsModule } from './crm-integrations/crm-integrations.modul
 import { ZohoModule } from './zoho/zoho.module';
 import { ZohoBooksModule } from './zohobooks/zohobooks.module';
 import { XeroModule } from './xero/xero.module';
+import { SquareModule } from './square/square.module';
 import { LangfuseModule } from './langfuse/langfuse.module';
 import { ZohoPayrollModule } from './zohopayroll/zohopayroll.module';
 import { MyobModule } from './myob/myob.module';
@@ -110,6 +111,7 @@ import { ModulePermissionInterceptor } from './common/permissions/module-permiss
     ZohoBooksModule,
     ZohoPayrollModule,
     XeroModule,
+    SquareModule,
     MyobModule,
     SalesforceModule,
     LangfuseModule,

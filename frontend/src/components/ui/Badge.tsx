@@ -9,11 +9,12 @@ export interface BadgeProps {
   variant?: BadgeVariant;
   dot?: boolean;
   className?: string;
+  title?: string;
 }
 
-export function Badge({ children, variant = 'neutral', dot, className }: BadgeProps) {
+export function Badge({ children, variant = 'neutral', dot, className, title }: BadgeProps) {
   return (
-    <span className={clsx(styles.badge, styles[variant], className)}>
+    <span className={clsx(styles.badge, styles[variant], className)} title={title}>
       {dot && <span className={styles.dot} aria-hidden />}
       {children}
     </span>

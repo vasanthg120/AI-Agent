@@ -29,7 +29,17 @@ import type {
 } from '@/services/customersService';
 import { formatRelativeTime } from '@/utils/date';
 import { formatDate, formatMoney } from '../format';
-import { CRM_VARIANT, FLAG_LABEL, FLAG_VARIANT, MAIL_VARIANT, PAYMENT_VARIANT, TYPE_VARIANT } from '../status';
+import {
+  CRM_VARIANT,
+  FLAG_LABEL,
+  FLAG_VARIANT,
+  GATEWAY_PAYMENT_LABEL,
+  GATEWAY_PAYMENT_VARIANT,
+  GATEWAY_TRANSACTION_VARIANT,
+  MAIL_VARIANT,
+  PAYMENT_VARIANT,
+  TYPE_VARIANT,
+} from '../status';
 import detailStyles from '../customer-detail.module.css';
 import styles from './panel.module.css';
 
@@ -62,7 +72,7 @@ export function DetailsTab({
   onOpenJob?: (jobId: string, number?: string) => void;
 }) {
   const money = (amount: number) => formatMoney(amount, detail.currency);
-  const { orders, quotes, invoices, payment, mail, inquiry } = detail;
+  const { orders, quotes, invoices, payment, mail, inquiry, gatewayPaymentSummary } = detail;
   const notRecorded = <span className={detailStyles.unknown}>Not recorded</span>;
   return (
     <>
@@ -151,7 +161,51 @@ export function DetailsTab({
             {mail.received} received · {mail.sent} sent
           </span>
         </div>
+        <div className={detailStyles.summaryCell}>
+          <dt>Gateway Payments</dt>
+          <dd>{gatewayPaymentSummary.transactionCount > 0 ? formatMoney(gatewayPaymentSummary.netPaid / 100, gatewayPaymentSummary.currency) : dash}</dd>
+          <span className={detailStyles.summaryNote}>
+            {gatewayPaymentSummary.transactionCount > 0 ? (
+              <>
+                <Badge variant={GATEWAY_PAYMENT_VARIANT[gatewayPaymentSummary.status]}>{GATEWAY_PAYMENT_LABEL[gatewayPaymentSummary.status]}</Badge>
+                {` · ${gatewayPaymentSummary.transactionCount} txn${gatewayPaymentSummary.transactionCount === 1 ? '' : 's'}`}
+              </>
+            ) : (
+              'No gateway payments yet'
+            )}
+          </span>
+        </div>
       </dl>
+
+      {detail.gatewayPayments.length > 0 && (
+        <section className={detailStyles.section}>
+          <h3>Gateway Payments</h3>
+          <table className={clsx(detailStyles.docTable, detailStyles.stackTable)}>
+            <thead>
+              <tr>
+                <th>Date</th>
+                <th>Provider</th>
+                <th>Amount</th>
+                <th>Status</th>
+                <th>Refunded</th>
+              </tr>
+            </thead>
+            <tbody>
+              {detail.gatewayPayments.map((p) => (
+                <tr key={p.id}>
+                  <td>{formatDate(p.date)}</td>
+                  <td style={{ textTransform: 'capitalize' }}>{p.provider}</td>
+                  <td>{formatMoney(p.amount / 100, p.currency)}</td>
+                  <td>
+                    <Badge variant={GATEWAY_TRANSACTION_VARIANT[p.status]}>{p.status.replace(/_/g, ' ')}</Badge>
+                  </td>
+                  <td>{p.refundedAmount > 0 ? formatMoney(p.refundedAmount / 100, p.currency) : dash}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </section>
+      )}
 
       {inquiry && (
         <section className={detailStyles.section}>

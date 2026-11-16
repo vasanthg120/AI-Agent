@@ -100,6 +100,28 @@ describe('IntegrationsService — oauth2 (Zoho/Salesforce)', () => {
     expect(http.post).not.toHaveBeenCalled();
   });
 
+  // Square (see ../square/square.service.ts) stores its personal access
+  // token through this same connectWithOAuth path purely for the storage
+  // shape — it's never actually refreshed (that token type doesn't expire,
+  // confirmed live against Square's own docs). This proves the far-future
+  // expiresInSeconds SquareService.connect() uses actually keeps
+  // resolveAuth on the "not near expiry" branch — no provider-specific
+  // refresh branch exists for 'square' at all, so reaching the refresh
+  // path here would throw, not just unnecessarily call out.
+  it('resolveAuth never attempts a refresh for a Square connection (no refresh branch exists for it)', async () => {
+    const tenYearsInSeconds = 10 * 365 * 24 * 60 * 60;
+    await service.connectWithOAuth(
+      org,
+      'square',
+      { accessToken: 'square-pat', refreshToken: 'PERSONAL_ACCESS_TOKEN_HAS_NO_REFRESH_TOKEN', expiresInSeconds: tenYearsInSeconds, oauthMeta: { environment: 'sandbox', merchantId: 'M1' } },
+      { skipSync: true },
+    );
+    const resolved = await service.resolveAuth(org, 'square');
+    expect(resolved?.credentials.accessToken).toBe('square-pat');
+    expect(resolved?.oauthMeta).toMatchObject({ merchantId: 'M1' });
+    expect(http.post).not.toHaveBeenCalled();
+  });
+
   it('resolveAuth refreshes a near-expiry Zoho token, persists the new one, and returns it', async () => {
     await service.connectWithOAuth(org, 'zoho', { accessToken: 'at-old', refreshToken: 'rt-1', expiresInSeconds: -10 }, { skipSync: true });
     http.post.mockReturnValueOnce(of({ data: { access_token: 'at-new', expires_in: 3600, api_domain: 'https://www.zohoapis.eu' } }));
@@ -169,7 +191,12 @@ describe('IntegrationsService — oauth2 (Zoho/Salesforce)', () => {
     it('getOAuthAppCredentialsStatus never returns the real secret, only a fixed mask', async () => {
       await service.saveOAuthAppCredentials(org, 'zoho', { clientId: 'org-client-id', clientSecret: 'org-super-secret' });
       const status = await service.getOAuthAppCredentialsStatus(org, 'zoho');
-      expect(status).toEqual({ configured: true, clientId: 'org-client-id', clientSecretMasked: expect.any(String), meta: undefined });
+      // toMatchObject, not toEqual: webhookSecretConfigured (added for
+      // Square's per-org webhook subscriptions — see square-webhook.
+      // controller.ts) is a harmless, always-present boolean on every
+      // provider's status now, and this test's real intent is "never
+      // returns the real secret," not "returns exactly this field set."
+      expect(status).toMatchObject({ configured: true, clientId: 'org-client-id', clientSecretMasked: expect.any(String), meta: undefined });
       expect(JSON.stringify(status)).not.toContain('org-super-secret');
     });
 
@@ -225,6 +252,96 @@ describe('IntegrationsService — oauth2 (Zoho/Salesforce)', () => {
       const otherResolved = await service.resolveOAuthAppCredentials(otherOrg, 'zoho');
       expect(otherResolved).toBeNull();
       await credentialModel.deleteOne({ organizationId: otherOrg, provider: 'zoho' });
+    });
+  });
+
+  // Square's OAuth path (see ../square/square.service.ts's class comment)
+  // is per-organization "bring your own app," same shape as Zoho above —
+  // but with NO platform-wide env-var fallback at all (unlike Zoho, which
+  // falls back to ZOHO_CLIENT_ID/SECRET): there is no Haive-wide Square
+  // app, since Square here is never Haive's own billing gateway. A
+  // Personal-Access-Token-connected row (no saved app at all, see
+  // square.service.spec.ts) never reaches this branch — its 10-year
+  // sentinel expiry is covered by its own dedicated test above.
+  describe('square (per-organization OAuth app, no platform-wide fallback)', () => {
+    it('refreshOAuthToken uses the organization\'s own saved app credentials', async () => {
+      await service.saveOAuthAppCredentials(org, 'square', { clientId: 'org-square-client', clientSecret: 'org-square-secret' });
+      await service.connectWithOAuth(org, 'square', { accessToken: 'sq-at-old', refreshToken: 'sq-rt-1', expiresInSeconds: -10, oauthMeta: { environment: 'sandbox', merchantId: 'M1' } }, { skipSync: true });
+      const futureIso = new Date(Date.now() + 2_592_000_000).toISOString();
+      http.post.mockReturnValueOnce(of({ data: { access_token: 'sq-at-new', expires_at: futureIso } }));
+
+      const resolved = await service.resolveAuth(org, 'square');
+      expect(resolved?.credentials.accessToken).toBe('sq-at-new');
+      expect(resolved?.oauthMeta).toMatchObject({ merchantId: 'M1' });
+      const [url, body] = http.post.mock.calls[0];
+      expect(url).toBe('https://connect.squareupsandbox.com/oauth2/token');
+      expect(body).toMatchObject({ grant_type: 'refresh_token', refresh_token: 'sq-rt-1', client_id: 'org-square-client', client_secret: 'org-square-secret' });
+    });
+
+    it('reuses the SAME refresh token on a second refresh — Square\'s code-flow refresh token never rotates', async () => {
+      await service.saveOAuthAppCredentials(org, 'square', { clientId: 'org-square-client', clientSecret: 'org-square-secret' });
+      await service.connectWithOAuth(org, 'square', { accessToken: 'sq-at-old', refreshToken: 'sq-rt-1', expiresInSeconds: -10, oauthMeta: { environment: 'sandbox' } }, { skipSync: true });
+      const futureIso = new Date(Date.now() + 2_592_000_000).toISOString();
+      http.post.mockReturnValueOnce(of({ data: { access_token: 'sq-at-new', expires_at: futureIso } }));
+      await service.resolveAuth(org, 'square');
+
+      http.post.mockClear();
+      http.post.mockReturnValueOnce(of({ data: { access_token: 'sq-at-newer', expires_at: futureIso } }));
+      await credentialModel.updateOne({ organizationId: org, provider: 'square' }, { $set: { tokenExpiresAt: new Date(Date.now() - 10_000) } });
+      await service.resolveAuth(org, 'square');
+      const [, secondBody] = http.post.mock.calls[0];
+      expect(secondBody).toMatchObject({ refresh_token: 'sq-rt-1' });
+    });
+
+    it('resolveAuth returns no usable token (never a platform fallback) when the organization has no saved Square app at all', async () => {
+      await service.connectWithOAuth(org, 'square', { accessToken: 'sq-at-old', refreshToken: 'sq-rt-1', expiresInSeconds: -10, oauthMeta: { environment: 'sandbox' } }, { skipSync: true });
+
+      const resolved = await service.resolveAuth(org, 'square');
+      expect(resolved?.credentials.accessToken).toBeUndefined();
+      expect(http.post).not.toHaveBeenCalled();
+    });
+
+    it('marks needs_reauth when Square refuses the refresh', async () => {
+      await service.saveOAuthAppCredentials(org, 'square', { clientId: 'org-square-client', clientSecret: 'org-square-secret' });
+      await service.connectWithOAuth(org, 'square', { accessToken: 'at', refreshToken: 'dead-rt', expiresInSeconds: -10, oauthMeta: { environment: 'sandbox' } }, { skipSync: true });
+      http.post.mockReturnValueOnce(throwError(() => new Error('invalid_grant')));
+
+      const resolved = await service.resolveAuth(org, 'square');
+      expect(resolved?.credentials.accessToken).toBeUndefined();
+      const doc = await credentialModel.findOne({ organizationId: org, provider: 'square' });
+      expect(doc?.status).toBe('needs_reauth');
+    });
+
+    it('one organization\'s saved Square app is never visible to another organization', async () => {
+      const otherOrg = `${PREFIX}-org-other-${seq}`;
+      await service.saveOAuthAppCredentials(org, 'square', { clientId: 'org-a-square-client', clientSecret: 'org-a-secret' });
+      const otherResolved = await service.resolveOAuthAppCredentials(otherOrg, 'square');
+      expect(otherResolved).toBeNull();
+      await credentialModel.deleteOne({ organizationId: otherOrg, provider: 'square' });
+    });
+
+    it('round-trips this organization\'s own webhook signing secret, encrypted, never clearing its OAuth connection', async () => {
+      await service.connectWithOAuth(org, 'square', { accessToken: 'at', refreshToken: 'rt', expiresInSeconds: 3600 }, { skipSync: true });
+      await service.saveOAuthAppCredentials(org, 'square', { clientId: 'wh-client', clientSecret: 'wh-secret', webhookSecret: 'super-secret-signing-key' });
+
+      const resolved = await service.resolveWebhookSigningSecret(org, 'square');
+      expect(resolved).toBe('super-secret-signing-key');
+
+      const appDoc = await credentialModel.findOne({ organizationId: org, provider: 'square' });
+      expect(appDoc?.webhookSigningSecretEncrypted).not.toContain('super-secret-signing-key');
+      expect(appDoc?.status).toBe('connected');
+    });
+
+    it('resolveWebhookSigningSecret returns null when none is configured (e.g. a Personal-Access-Token connection), rather than throwing', async () => {
+      await service.connectWithOAuth(org, 'square', { accessToken: 'at', refreshToken: 'PERSONAL_ACCESS_TOKEN_HAS_NO_REFRESH_TOKEN', expiresInSeconds: 315_360_000 }, { skipSync: true });
+      expect(await service.resolveWebhookSigningSecret(org, 'square')).toBeNull();
+    });
+
+    it('one organization\'s webhook signing secret is never visible to another organization', async () => {
+      const otherOrg = `${PREFIX}-org-other-${seq}`;
+      await service.saveOAuthAppCredentials(org, 'square', { clientId: 'id', clientSecret: 'secret', webhookSecret: 'org-a-webhook-secret' });
+      expect(await service.resolveWebhookSigningSecret(otherOrg, 'square')).toBeNull();
+      await credentialModel.deleteOne({ organizationId: otherOrg, provider: 'square' });
     });
   });
 

@@ -64,13 +64,16 @@ export declare class IntegrationsService {
         clientId: string;
         clientSecret: string;
         meta?: Record<string, string>;
+        webhookSecret?: string;
     }): Promise<void>;
     getOAuthAppCredentialsStatus(organizationId: string, provider: string): Promise<{
         configured: boolean;
         clientId?: string;
         clientSecretMasked?: string;
         meta?: Record<string, string>;
+        webhookSecretConfigured?: boolean;
     }>;
+    resolveWebhookSigningSecret(organizationId: string, provider: string): Promise<string | null>;
     resolveOAuthAppCredentials(organizationId: string, provider: string): Promise<{
         clientId: string;
         clientSecret: string;
@@ -117,6 +120,7 @@ export declare class IntegrationsService {
         integrationId: Types.ObjectId;
         provider: string;
     }[]>;
+    listConnectedOrganizationIds(provider: string): Promise<string[]>;
     private friendlyErrorMessage;
     getProviderRule(provider: string): ProviderRule;
     private assertAllowed;

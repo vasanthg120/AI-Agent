@@ -5,7 +5,9 @@ import toast from 'react-hot-toast';
 import {
   FiAlertCircle,
   FiClock,
+  FiCreditCard,
   FiDatabase,
+  FiEye,
   FiGlobe,
   FiKey,
   FiLink,
@@ -38,6 +40,7 @@ import {
 } from '@/services/integrationsService';
 import { crmIntegrationsService, integrationErrorOf, type CrmIntegration } from '@/services/crmIntegrationsService';
 import { xeroService, type XeroStatus, type XeroTenantOption } from '@/services/xeroService';
+import { squareService, type SquarePayment, type SquareStatus } from '@/services/squareService';
 import { zohoBooksService, type ZohoBooksAppStatus, type ZohoBooksOrgOption, type ZohoBooksStatus } from '@/services/zohoBooksService';
 import { zohoPayrollService, type ZohoPayrollAppStatus, type ZohoPayrollOrgOption, type ZohoPayrollStatus } from '@/services/zohoPayrollService';
 import { myobService, type MyobStatus } from '@/services/myobService';
@@ -195,6 +198,26 @@ export function IntegrationsPage() {
   const [selectingTenant, setSelectingTenant] = useState(false);
   const handledXeroResult = useRef<string | null>(null);
 
+  // Payments — Square. Connects via Application ID + Access Token (Square's
+  // "Personal Access Token" model — see squareService.ts's own comment),
+  // not an OAuth redirect — so there's a small inline Connect modal with a
+  // Test Connection step instead of a window.location redirect. The one
+  // wrinkle is a connected merchant whose country Square doesn't support
+  // for live payments yet (squareDetail.countrySupported === false) —
+  // shown as its own 'waiting' tone: the connection is real and honest
+  // about its data, but isn't usable for a real payment.
+  const [squareStatus, setSquareStatus] = useState<CardStatus>('loading');
+  const [squareConnecting, setSquareConnecting] = useState(false);
+  const [squareDetail, setSquareDetail] = useState<SquareStatus | null>(null);
+  const [squareConnectModalOpen, setSquareConnectModalOpen] = useState(false);
+  const [squareApplicationId, setSquareApplicationId] = useState('');
+  const [squareAccessToken, setSquareAccessToken] = useState('');
+  const [squareEnvironment, setSquareEnvironment] = useState<'sandbox' | 'production'>('sandbox');
+  const [squareTesting, setSquareTesting] = useState(false);
+  const [squareTestResult, setSquareTestResult] = useState<{ ok: boolean; message: string } | null>(null);
+  const [squarePaymentsModalOpen, setSquarePaymentsModalOpen] = useState(false);
+  const [squarePayments, setSquarePayments] = useState<SquarePayment[] | 'loading' | 'error' | null>(null);
+
   // Accounting — Zoho Books. Independent of the Zoho CRM card above (its
   // own app credentials, its own connection) — see zohobooks.service.ts's
   // own comment. "Bring your own Zoho app" form mirrors CrmSetupWizard's
@@ -331,6 +354,19 @@ export function IntegrationsPage() {
       });
   };
 
+  const loadSquareStatus = () => {
+    squareService
+      .getStatus()
+      .then((status) => {
+        setSquareDetail(status);
+        setSquareStatus(status.connected ? 'connected' : 'disconnected');
+      })
+      .catch((error) => {
+        setSquareStatus('error');
+        toast.error(`Couldn't load Square status: ${extractErrorMessage(error)}`);
+      });
+  };
+
   const loadZohoBooksStatus = () => {
     zohoBooksService
       .getStatus()
@@ -397,6 +433,7 @@ export function IntegrationsPage() {
     if (!canManageIntegrations) return;
     loadCustomIntegrations();
     loadXeroStatus();
+    loadSquareStatus();
     loadZohoBooksStatus();
     loadZohoBooksAppStatus();
     loadMyobStatus();
@@ -872,6 +909,81 @@ export function IntegrationsPage() {
     }
   };
 
+  const openSquareConnectModal = () => {
+    setSquareApplicationId('');
+    setSquareAccessToken('');
+    setSquareEnvironment('sandbox');
+    setSquareTestResult(null);
+    setSquareConnectModalOpen(true);
+  };
+
+  const squareFieldsValid = () => squareApplicationId.trim().length >= 5 && squareAccessToken.trim().length >= 10;
+
+  const handleTestSquareConnection = async () => {
+    if (!squareFieldsValid()) {
+      toast.error('Enter your Application ID and Access Token first.');
+      return;
+    }
+    setSquareTesting(true);
+    setSquareTestResult(null);
+    try {
+      const result = await squareService.testConnection(squareAccessToken.trim(), squareEnvironment);
+      setSquareTestResult(result);
+    } catch (error) {
+      setSquareTestResult({ ok: false, message: extractErrorMessage(error) });
+    } finally {
+      setSquareTesting(false);
+    }
+  };
+
+  const handleConnectSquare = async () => {
+    if (!squareFieldsValid()) {
+      toast.error('Enter your Application ID and Access Token first.');
+      return;
+    }
+    setSquareConnecting(true);
+    try {
+      const status = await squareService.connect(squareApplicationId.trim(), squareAccessToken.trim(), squareEnvironment);
+      setSquareDetail(status);
+      setSquareStatus('connected');
+      setSquareConnectModalOpen(false);
+      setSquareApplicationId('');
+      setSquareAccessToken('');
+      setSquareTestResult(null);
+      if (status.countrySupported === false) {
+        toast.error(`Square connected, but it doesn't process live payments in ${status.country} yet.`);
+      } else {
+        toast.success('Square connected');
+      }
+    } catch (error) {
+      toast.error(extractErrorMessage(error));
+    } finally {
+      setSquareConnecting(false);
+    }
+  };
+
+  const handleDisconnectSquare = async () => {
+    try {
+      await squareService.disconnect();
+      toast.success('Square disconnected');
+      loadSquareStatus();
+    } catch (error) {
+      toast.error(extractErrorMessage(error));
+    }
+  };
+
+  const handleViewSquarePayments = async () => {
+    setSquarePaymentsModalOpen(true);
+    setSquarePayments('loading');
+    try {
+      const { payments } = await squareService.listPayments();
+      setSquarePayments(payments);
+    } catch (error) {
+      setSquarePayments('error');
+      toast.error(`Couldn't load Square payments: ${extractErrorMessage(error)}`);
+    }
+  };
+
   // Mirrors CrmSetupWizard's connectOAuth() for Zoho CRM exactly: try the
   // redirect first, and only fall back to the credential-entry form if the
   // backend reports no app is configured yet (ZOHOBOOKS_APP_CREDENTIALS_REQUIRED)
@@ -1255,6 +1367,80 @@ export function IntegrationsPage() {
   // yet" (xeroDetail.needsSelection — see xero.service.ts's handleCallback),
   // shown as its own 'waiting' tone/status rather than folded into
   // 'connected', since the connection isn't actually usable until resolved.
+  // Payments — Square. Same IntegrationCard shape as the Xero card below;
+  // the one extra wrinkle is a connected merchant in a country Square
+  // doesn't yet process live payments for (squareDetail.countrySupported
+  // === false) — shown as its own 'waiting' tone rather than folded into
+  // 'connected', since the connection is real but can't take a live payment.
+  const squareCard = () => (
+    <IntegrationCard
+      key="square"
+      logo={<img src="/integrations/square.png" alt="" style={{ objectFit: 'contain', width: '100%', height: '100%' }} />}
+      name="Square"
+      tagline="Payments"
+      tone={
+        squareStatus === 'connected'
+          ? squareDetail?.countrySupported === false
+            ? 'waiting'
+            : 'connected'
+          : squareStatus === 'error'
+            ? 'attention'
+            : 'idle'
+      }
+      status={
+        squareStatus === 'connected'
+          ? squareDetail?.countrySupported === false
+            ? { label: 'Connected — unsupported country', variant: 'warning' }
+            : { label: 'Connected', variant: 'success' }
+          : squareStatus === 'error'
+            ? { label: 'Needs attention', variant: 'danger' }
+            : undefined
+      }
+      description={
+        squareStatus === 'connected' || squareStatus === 'error'
+          ? undefined
+          : 'Accept card payments through your own Square merchant account.'
+      }
+      highlights={squareStatus === 'connected' || squareStatus === 'error' ? undefined : ['Create and look up payments', 'Payment history', 'Sandbox and production']}
+      facts={
+        squareStatus === 'connected'
+          ? [
+              ...(squareDetail?.businessName ? [{ icon: FiGlobe, text: squareDetail.businessName }] : []),
+              ...(squareDetail?.environment ? [{ icon: FiSettings, text: squareDetail.environment === 'production' ? 'Production' : 'Sandbox' }] : []),
+              ...(squareDetail?.country
+                ? [
+                    {
+                      icon: FiAlertCircle,
+                      text:
+                        squareDetail.countrySupported === false
+                          ? `Square doesn't process live payments in ${squareDetail.country} yet`
+                          : `${squareDetail.country} · ${squareDetail.currency}`,
+                    },
+                  ]
+                : []),
+            ]
+          : undefined
+      }
+      problem={squareStatus === 'error' ? 'HaiVE couldn’t check this connection. Reconnect to restore it.' : undefined}
+      actions={
+        squareStatus === 'connected' ? (
+          <>
+            <Button size="sm" leftIcon={<FiEye />} onClick={() => void handleViewSquarePayments()}>
+              View Payments
+            </Button>
+            <Button size="sm" variant="ghost" leftIcon={<FiTrash2 />} onClick={() => void handleDisconnectSquare()}>
+              Disconnect
+            </Button>
+          </>
+        ) : (
+          <Button size="sm" leftIcon={<FiLink />} loading={squareStatus === 'loading'} onClick={openSquareConnectModal}>
+            {squareStatus === 'error' ? 'Reconnect' : 'Connect'}
+          </Button>
+        )
+      }
+    />
+  );
+
   const xeroCard = () => (
     <IntegrationCard
       key="xero"
@@ -1669,6 +1855,22 @@ export function IntegrationsPage() {
           {zohoBooksCard()}
           {myobCard()}
         </div>
+      </section>
+
+      <section className={ui.section} aria-labelledby="integrations-payments">
+        <div className={ui.sectionHead}>
+          <div className={ui.sectionTitle}>
+            <span className={ui.sectionIcon}>
+              <FiCreditCard aria-hidden />
+            </span>
+            <div>
+              <h2 id="integrations-payments">Payments</h2>
+              <span>Accept payments through your own connected merchant account.</span>
+            </div>
+          </div>
+          {squareStatus === 'connected' && <Badge variant="neutral">1 of 1 connected</Badge>}
+        </div>
+        <div className={ui.grid}>{squareCard()}</div>
       </section>
 
       <section className={ui.section} aria-labelledby="integrations-payroll">
@@ -2150,6 +2352,110 @@ export function IntegrationsPage() {
               </div>
             ))}
           </div>
+        </Modal>
+      )}
+
+      {squareConnectModalOpen && (
+        <Modal
+          open
+          onClose={() => setSquareConnectModalOpen(false)}
+          title="Connect Square"
+          description="From your Square Developer Dashboard (developer.squareup.com/apps -> your app -> Credentials): the Application ID, and the Sandbox Access Token (to test) or production personal access token (to accept real payments) for the environment selected below. The access token is encrypted at rest and never shown again after saving."
+        >
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
+            <div>
+              <span className={styles.fieldLabel}>Environment</span>
+              <select
+                className={styles.select}
+                value={squareEnvironment}
+                onChange={(e) => {
+                  setSquareEnvironment(e.target.value as 'sandbox' | 'production');
+                  setSquareTestResult(null);
+                }}
+              >
+                <option value="sandbox">Sandbox</option>
+                <option value="production">Production</option>
+              </select>
+            </div>
+            <Input
+              label="Application ID"
+              value={squareApplicationId}
+              onChange={(e) => {
+                setSquareApplicationId(e.target.value);
+                setSquareTestResult(null);
+              }}
+              autoFocus
+              autoComplete="off"
+            />
+            <Input
+              label="Access token"
+              type="password"
+              value={squareAccessToken}
+              onChange={(e) => {
+                setSquareAccessToken(e.target.value);
+                setSquareTestResult(null);
+              }}
+              leftIcon={<FiKey />}
+              autoComplete="off"
+            />
+            {squareTestResult && (
+              <p style={{ margin: 0, fontSize: 'var(--text-sm)', color: squareTestResult.ok ? 'var(--color-success)' : 'var(--color-danger)' }}>
+                {squareTestResult.ok ? '✓ ' : ''}
+                {squareTestResult.message}
+              </p>
+            )}
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 'var(--space-2)' }}>
+              <Button variant="ghost" onClick={() => setSquareConnectModalOpen(false)}>
+                Cancel
+              </Button>
+              <Button variant="secondary" loading={squareTesting} onClick={() => void handleTestSquareConnection()}>
+                Test Connection
+              </Button>
+              <Button loading={squareConnecting} onClick={() => void handleConnectSquare()}>
+                Connect
+              </Button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {squarePaymentsModalOpen && (
+        <Modal open onClose={() => setSquarePaymentsModalOpen(false)} title="Square payments" description={squareDetail?.businessName ? `Recent payments for ${squareDetail.businessName}` : 'Recent payments'}>
+          {squarePayments === 'loading' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
+              <Skeleton height={40} />
+              <Skeleton height={40} />
+              <Skeleton height={40} />
+            </div>
+          )}
+          {squarePayments === 'error' && <EmptyState title="Couldn't load payments" description="Something went wrong talking to Square. Try again." />}
+          {Array.isArray(squarePayments) && squarePayments.length === 0 && <EmptyState title="No payments yet" description="Payments created through this connection will show up here." />}
+          {Array.isArray(squarePayments) && squarePayments.length > 0 && (
+            <div style={{ overflowX: 'auto' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 'var(--text-sm)' }}>
+                <thead>
+                  <tr style={{ textAlign: 'left', color: 'var(--color-text-secondary)' }}>
+                    <th style={{ padding: 'var(--space-2)' }}>Date</th>
+                    <th style={{ padding: 'var(--space-2)' }}>Amount</th>
+                    <th style={{ padding: 'var(--space-2)' }}>Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {squarePayments.map((payment) => (
+                    <tr key={payment.id} style={{ borderTop: '1px solid var(--color-border)' }}>
+                      <td style={{ padding: 'var(--space-2)' }}>{payment.created_at ? formatRelativeTime(payment.created_at) : '—'}</td>
+                      <td style={{ padding: 'var(--space-2)', fontVariantNumeric: 'tabular-nums' }}>
+                        {payment.amount_money ? `${(payment.amount_money.amount / 100).toFixed(2)} ${payment.amount_money.currency}` : '—'}
+                      </td>
+                      <td style={{ padding: 'var(--space-2)' }}>
+                        <Badge variant={payment.status === 'COMPLETED' ? 'success' : payment.status === 'FAILED' ? 'danger' : 'neutral'}>{payment.status}</Badge>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </Modal>
       )}
 

@@ -1,0 +1,68 @@
+import { Injectable, Logger } from '@nestjs/common';
+import { Cron, CronExpression } from '@nestjs/schedule';
+import { IntegrationsService } from '../integrations/integrations.service';
+import { SquarePaymentLike, SquarePaymentMatchingService } from './square-payment-matching.service';
+import { SquareService } from './square.service';
+
+// Background reconciliation — the webhook controller's own safety net, not
+// an optional add-on (per the approved plan: "don't silently drop a
+// payment" covers a missed/failed webhook delivery too, not just
+// signature/dedup correctness). Re-lists each connected organization's
+// recent payments and upserts them the same way a webhook would, via the
+// SAME matching service — so a payment is never represented two different
+// ways depending on how Haive learned about it.
+//
+// Deliberately a plain NestJS @Cron (mirrors subscription-renewal.service.
+// ts's own shape), not python-agent's APScheduler-based CRM sync: this
+// job's scope (one provider, one straightforward List Payments call per
+// org) is far smaller than the multi-adapter CRM sync engine that pattern
+// exists for.
+@Injectable()
+export class SquareReconciliationService {
+  private readonly logger = new Logger(SquareReconciliationService.name);
+
+  // Generous overlap (not just "since the last run") — confirmed-safe
+  // because upsertFromPayment is fully idempotent on providerPaymentId: a
+  // payment this already saw gets recomputed to the same values, never
+  // double-counted. Wide enough to absorb a run that failed entirely
+  // without losing anything in the gap.
+  private readonly LOOKBACK_HOURS = 6;
+
+  constructor(
+    private integrations: IntegrationsService,
+    private square: SquareService,
+    private matching: SquarePaymentMatchingService,
+  ) {}
+
+  @Cron(CronExpression.EVERY_30_MINUTES)
+  async reconcileAll(): Promise<void> {
+    const organizationIds = await this.integrations.listConnectedOrganizationIds('square');
+    for (const organizationId of organizationIds) {
+      try {
+        await this.reconcileOrganization(organizationId);
+      } catch (err) {
+        this.logger.error(`Square reconciliation failed for org ${organizationId}: ${(err as Error).message}`);
+      }
+    }
+  }
+
+  async reconcileOrganization(organizationId: string): Promise<{ count: number }> {
+    const auth = await this.integrations.resolveAuth(organizationId, 'square');
+    if (!auth?.credentials.accessToken) return { count: 0 };
+    const environment = (auth.oauthMeta?.environment as 'sandbox' | 'production') || 'sandbox';
+    const beginTime = new Date(Date.now() - this.LOOKBACK_HOURS * 60 * 60 * 1000).toISOString();
+
+    let count = 0;
+    let cursor: string | undefined;
+    do {
+      const { payments, cursor: next } = await this.square.listPayments(organizationId, { beginTime, cursor });
+      for (const payment of payments as unknown as SquarePaymentLike[]) {
+        await this.matching.upsertFromPayment(organizationId, auth.credentials.accessToken!, environment, payment);
+        count += 1;
+      }
+      cursor = next;
+    } while (cursor);
+
+    return { count };
+  }
+}

@@ -89,6 +89,9 @@ exports.default = () => ({
             clientSecret: process.env.XERO_CLIENT_SECRET ?? '',
             redirectUri: process.env.XERO_REDIRECT_URI ?? 'http://localhost:3000/xero/callback',
         },
+        square: {
+            redirectUri: process.env.SQUARE_REDIRECT_URI ?? 'http://localhost:3000/square/callback',
+        },
         zohobooks: {
             clientId: process.env.ZOHO_BOOKS_CLIENT_ID ?? '',
             clientSecret: process.env.ZOHO_BOOKS_CLIENT_SECRET ?? '',

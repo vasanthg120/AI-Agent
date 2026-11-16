@@ -76,6 +76,7 @@ import {
   type StageKey,
 } from '@/services/customersService';
 import { formatRelativeTime } from '@/utils/date';
+import { formatCurrency } from '@/utils/currency';
 import { extractErrorMessage } from '@/utils/errors';
 import { AddCustomerModal } from './AddCustomerModal';
 import { ImportCustomersModal } from './ImportCustomersModal';
@@ -86,7 +87,7 @@ import { JobBoard } from './jobs/JobBoard';
 import { jobHeadline, JobPanel, type JobPreview } from './jobs/JobPanel';
 import { JobTag } from './jobs/JobTag';
 import { StageChip } from './StageChip';
-import { TYPE_VARIANT } from './status';
+import { GATEWAY_PAYMENT_LABEL, GATEWAY_PAYMENT_VARIANT, TYPE_VARIANT } from './status';
 import { CatalogTab } from './tabs/CatalogTab';
 import { PurchaseOrdersTab } from './tabs/PurchaseOrdersTab';
 import { SalesBoardTab } from './tabs/SalesBoardTab';
@@ -209,7 +210,7 @@ const VIEWS: { id: string; label: string }[] = [
 // what happened last · then the six steps of the work, each a coloured chip
 // (Inquiry → Quote → Order → Payment → Email → Follow-up) · what to do. The
 // customer is always the first column; any of the others can be hidden.
-type ColumnId = 'owner' | 'phone' | 'contacts' | 'type' | 'activity' | StageKey | 'next';
+type ColumnId = 'owner' | 'phone' | 'contacts' | 'type' | 'activity' | StageKey | 'next' | 'gatewayPayment';
 const STAGE_COLUMNS: StageKey[] = ['inquiry', 'quote', 'order', 'payment', 'email', 'followUp'];
 const COLUMNS: { id: ColumnId; label: string; hint: string; sort?: CustomerSort }[] = [
   {
@@ -231,6 +232,7 @@ const COLUMNS: { id: ColumnId; label: string; hint: string; sort?: CustomerSort 
   { id: 'quote', label: 'Quote', hint: 'Their latest quotation and where it stands', sort: 'quotes' },
   { id: 'order', label: 'Order', hint: 'Whether they have ordered, and how much', sort: 'orders' },
   { id: 'payment', label: 'Payment', hint: 'What is paid and what is still owed on their orders', sort: 'payment' },
+  { id: 'gatewayPayment', label: 'Gateway Payment', hint: 'Real payments received through a connected payment provider (e.g. Square) — separate from the Payment column above' },
   { id: 'email', label: 'Email', hint: 'Whether they answered you, or you owe them an answer' },
   {
     id: 'followUp',
@@ -1329,6 +1331,26 @@ function CustomerRow({
             <NextStep customer={customer} detailed={detailed} />
           </td>
         );
+      case 'gatewayPayment': {
+        const g = customer.gatewayPaymentSummary;
+        if (!g || g.transactionCount === 0) {
+          return (
+            <td key={id} className={styles.foldB}>
+              {NONE}
+            </td>
+          );
+        }
+        return (
+          <td key={id} className={styles.foldB}>
+            <Badge variant={GATEWAY_PAYMENT_VARIANT[g.status]}>{GATEWAY_PAYMENT_LABEL[g.status]}</Badge>
+            {detailed && (
+              <div className={styles.cellSub}>
+                {formatCurrency(g.netPaid / 100, g.currency)} · {g.transactionCount} txn{g.transactionCount === 1 ? '' : 's'}
+              </div>
+            )}
+          </td>
+        );
+      }
       default: {
         const step = stage(id);
         return (

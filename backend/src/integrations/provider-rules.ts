@@ -111,6 +111,16 @@ export const PROVIDER_RULES: Record<string, ProviderRule> = {
     allowedAuthTypes: ['oauth2'],
     note: 'Use the Xero card in the Accounting section above — it handles OAuth with automatic token refresh.',
   },
+  // Real dedicated OAuth now exists (see ../square/) — connect it from the
+  // Payments card on the Integrations page. Same shape/reasoning as xero
+  // above: Square's real connection goes through connectWithOAuth, so
+  // allowedAuthTypes alone (no dedicatedFlowPath) is enough to steer the
+  // generic Custom Integration modal away from it.
+  square: {
+    label: 'Square',
+    allowedAuthTypes: ['oauth2'],
+    note: 'Use the Square card in the Payments section above — it handles OAuth with automatic token refresh.',
+  },
   hubspot: {
     label: 'HubSpot',
     allowedAuthTypes: ['bearer'],

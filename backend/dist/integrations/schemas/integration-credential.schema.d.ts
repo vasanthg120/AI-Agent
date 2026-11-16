@@ -17,6 +17,7 @@ export declare class IntegrationCredential {
     budgetUsd?: number;
     budgetPeriod?: 'monthly' | 'total';
     secondaryCredentialsEncrypted?: string;
+    webhookSigningSecretEncrypted?: string;
 }
 export declare const IntegrationCredentialSchema: import("mongoose").Schema<IntegrationCredential, import("mongoose").Model<IntegrationCredential, any, any, any, Document<unknown, any, IntegrationCredential, any, {}> & IntegrationCredential & {
     _id: Types.ObjectId;
