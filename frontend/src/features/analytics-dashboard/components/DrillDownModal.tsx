@@ -4,7 +4,7 @@ import clsx from 'clsx';
 import { FiChevronRight, FiList, FiSearch } from 'react-icons/fi';
 import { EmptyState, Modal, Skeleton } from '@/components/ui';
 import { openDealDrawer } from '@/stores/dealDrawerStore';
-import { formatINR as money } from '@/utils/currency';
+import { formatAmountIn, formatINR as money } from '@/utils/currency';
 import styles from './DrillDownModal.module.css';
 
 export interface DrillDownRow {
@@ -13,6 +13,10 @@ export interface DrillDownRow {
   subtitle?: string;
   meta?: string;
   value?: number;
+  // The row's own currency, when a list spans businesses that use different ones (₹, A$).
+  currency?: string;
+  // A line of its own under the meta — e.g. the AI's reading of an email.
+  note?: string;
   // A deal: the row opens the deal panel (everything about it, and the AI brief).
   dealId?: string;
 }
@@ -54,7 +58,8 @@ export function DrillDownModal({
   // page of them: the summary then says "First 100 of 129", never "100".
   totalCount?: number;
 }) {
-  const renderValue = formatValue ?? money;
+  // A row in its own currency is written in it; a custom formatter (counts, percentages) wins.
+  const renderValue = (value: number, currency?: string) => (formatValue ? formatValue(value) : currency ? formatAmountIn(Math.round(value), currency) : money(value));
   const [query, setQuery] = useState('');
   const [sort, setSort] = useState<SortMode | null>(null);
 
@@ -69,14 +74,17 @@ export function DrillDownModal({
 
   const partial = totalCount !== undefined && totalCount > rows.length;
   const hasValues = rows.some((r) => r.value !== undefined);
-  // Summing is only meaningful for money — a custom formatter means counts/percentages.
-  const total = hasValues && !formatValue ? rows.reduce((s, r) => s + (r.value ?? 0), 0) : null;
+  // Summing is only meaningful for money — a custom formatter means counts/percentages —
+  // and only within one currency.
+  const currencies = new Set(rows.filter((r) => r.value !== undefined).map((r) => r.currency ?? ''));
+  const total = hasValues && !formatValue && currencies.size === 1 ? rows.reduce((s, r) => s + (r.value ?? 0), 0) : null;
+  const totalCurrency = [...currencies][0] || undefined;
   const max = Math.max(1, ...rows.map((r) => Math.abs(r.value ?? 0)));
 
   const visible = useMemo(() => {
     const q = query.trim().toLowerCase();
     const filtered = q
-      ? rows.filter((r) => [r.title, r.subtitle, r.meta].some((f) => f?.toLowerCase().includes(q)))
+      ? rows.filter((r) => [r.title, r.subtitle, r.meta, r.note].some((f) => f?.toLowerCase().includes(q)))
       : rows;
     // null = keep the caller's own order (often already meaningful, e.g. by date).
     if (sort === 'value') return [...filtered].sort((a, b) => (b.value ?? 0) - (a.value ?? 0));
@@ -101,7 +109,7 @@ export function DrillDownModal({
           </span>
           {total !== null && (
             <span className={styles.summaryStat}>
-              <strong>{money(total)}</strong> {partial ? 'total of these' : 'total'}
+              <strong>{renderValue(total, totalCurrency)}</strong> {partial ? 'total of these' : 'total'}
             </span>
           )}
           {hasValues && (
@@ -151,6 +159,7 @@ export function DrillDownModal({
                       {r.meta && <span>{r.meta}</span>}
                     </span>
                   )}
+                  {r.note && <span className={styles.note}>{r.note}</span>}
                   {r.value !== undefined && (
                     <span className={styles.track}>
                       <motion.span
@@ -162,7 +171,7 @@ export function DrillDownModal({
                     </span>
                   )}
                 </span>
-                {r.value !== undefined && <strong className={styles.value}>{renderValue(r.value)}</strong>}
+                {r.value !== undefined && <strong className={styles.value}>{renderValue(r.value, r.currency)}</strong>}
                 {(onRowClick || r.dealId) && <FiChevronRight className={styles.chevron} aria-hidden />}
               </>
             );

@@ -40,6 +40,14 @@ export interface EmailRecord {
   needsReply?: boolean;
   /** For a received email: when it was answered. */
   answeredAt?: Date;
+  /** The start of the message. */
+  preview?: string;
+  /** For a received email: the AI's one-line reading, what it asked for, and its tone. */
+  aiSummary?: string;
+  intent?: string;
+  sentiment?: string;
+  /** The connected mailbox it came into or went out from. */
+  mailbox?: string;
 }
 
 export interface FollowUpRecord {

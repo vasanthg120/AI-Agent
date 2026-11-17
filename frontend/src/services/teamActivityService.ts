@@ -37,8 +37,10 @@ export interface ActivityCounts {
   avgCallSeconds: number | null;
   scoredCalls: number;
   avgCallScore: number | null;
+  // Tasks & follow-ups: done in the period; open now, of which started and past their day.
   followUpsCompleted: number;
   followUpsPending: number;
+  followUpsInProgress: number;
   followUpsOverdue: number;
 }
 
@@ -49,9 +51,53 @@ export interface TeamActivityPerson extends ActivityCounts {
   role: string;
   active: boolean;
   mainAccountMember: boolean;
+  department?: string;
   businessId: string;
   businessName: string;
   currency: string;
+}
+
+/** Why someone may need a hand, in a line, with the list that shows it. */
+export interface TeamSupportItem {
+  personId: string;
+  personName: string;
+  businessId: string;
+  businessName: string;
+  severity: 'warning' | 'info';
+  text: string;
+  list?: TeamListKind;
+  callFilter?: CallFilter;
+}
+
+export interface TeamDepartment {
+  key: string;
+  name: string;
+  businessId: string;
+  businessName: string;
+  people: number;
+  activePeople: number;
+  followUpsCompleted: number;
+  followUpsPending: number;
+  followUpsInProgress: number;
+  followUpsOverdue: number;
+  emailsReplied: number;
+  emailsMissed: number;
+  calls: number;
+  callsMissed: number;
+  avgCallScore: number | null;
+  dealsWon: number;
+  needSupport: number;
+}
+
+export type TaskMove = 'todo' | 'in_progress' | 'done';
+
+export interface GiveTaskInput {
+  organizationId?: string;
+  assigneeId: string;
+  title: string;
+  note?: string;
+  dueDate?: string;
+  priority?: 'high' | 'normal';
 }
 
 export interface TeamActivityBusiness {
@@ -76,6 +122,8 @@ export interface TeamActivityOverview {
   summary: { employees: number; activeEmployees: number; responseRatePct: number | null; followUpCompletionPct: number | null; currency: string | null };
   people: TeamActivityPerson[];
   unattributedDeals: { total: number; byCrmOwner: { label: string; shared: boolean; count: number }[] };
+  attention: TeamSupportItem[];
+  departments: TeamDepartment[];
   generatedAt: string;
 }
 
@@ -175,6 +223,14 @@ export interface TeamFollowUpItem extends ListedBy {
   completedAt?: string;
   dealId?: string;
   at: string;
+  // Tasks only (not email follow-ups):
+  inProgress?: boolean;
+  note?: string;
+  priority?: 'high';
+  givenBy?: string;
+  origin?: 'team' | 'customer' | 'job' | 'deal';
+  // The person looking may move it along.
+  editable?: boolean;
 }
 
 export type TeamListItem = TeamCallItem | TeamSentEmailItem | TeamEmailItem | TeamDealItem | TeamFollowUpItem;
@@ -219,6 +275,23 @@ export const teamActivityService = {
 
   async trend(value: TeamPeriodValue, filters: { organizationId?: string; userId?: string } = {}): Promise<{ granularity: 'day' | 'week'; points: TeamTrendPoint[] }> {
     const { data } = await axiosClient.get<{ granularity: 'day' | 'week'; points: TeamTrendPoint[] }>('/team-activity/trend', { params: params(value, filters) });
+    return data;
+  },
+
+  /** Everything given to me: still to do, and what I finished in the last week. */
+  async myTasks(): Promise<{ items: TeamFollowUpItem[]; open: number; inProgress: number; overdue: number }> {
+    const { data } = await axiosClient.get<{ items: TeamFollowUpItem[]; open: number; inProgress: number; overdue: number }>('/team-tasks/mine');
+    return data;
+  },
+
+  async giveTask(input: GiveTaskInput): Promise<TeamFollowUpItem> {
+    const { data } = await axiosClient.post<TeamFollowUpItem>('/team-tasks', input);
+    return data;
+  },
+
+  /** To do → in progress → done (or back); a manager may also change the day (null clears it). */
+  async moveTask(id: string, change: { status?: TaskMove; dueDate?: string | null }): Promise<TeamFollowUpItem> {
+    const { data } = await axiosClient.patch<TeamFollowUpItem>(`/team-tasks/${id}`, change);
     return data;
   },
 

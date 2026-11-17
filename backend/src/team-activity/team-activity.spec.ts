@@ -1,4 +1,4 @@
-import { ForbiddenException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { getConnectionToken, getModelToken, MongooseModule } from '@nestjs/mongoose';
 import { Test } from '@nestjs/testing';
 import { Connection, Model, Types } from 'mongoose';
@@ -410,6 +410,97 @@ describe('team activity (real Mongo)', () => {
       await expect(activity.list(caller('subAdmin', org('sub'), ['admin']), 'calls', { period: 'today', organizationId: org('other') }, now)).rejects.toThrow(ForbiddenException);
       const other = await activity.list(caller('otherOwner', org('other'), ['owner']), 'calls', { period: 'today' }, now);
       expect(other.items.every((c) => c.businessName === 'jest-team Other')).toBe(true);
+    });
+  });
+
+  // Employee monitoring: tasks given to people (one task system — customer_tasks),
+  // moved along by the person or their manager, and who may need support.
+  describe('tasks given, moved along, and who may need support', () => {
+    const admin = () => caller('subAdmin', org('sub'), ['admin']);
+    const manager = () => caller('subManager', org('sub'), ['manager'], { storeId: 'store-1' });
+    const rep = () => caller('rep', org('sub'), ['agent_user']);
+    const rep2 = () => caller('rep2', org('sub'), ['consultant']);
+    const mainOwner = () => caller('mainOwner', org('main'), ['owner']);
+
+    afterAll(async () => {
+      await connection.collection('customer_tasks').deleteMany({ organizationId: org('sub'), source: 'team' });
+      await connection.collection('users').updateOne({ _id: people.rep }, { $unset: { department: '' } });
+    });
+
+    it('says who may need support, and why, in a line each', async () => {
+      const today = await activity.overview(mainOwner(), { period: 'today' }, now);
+      const lines = today.attention.map((a) => `${a.personName}: ${a.text}`);
+      expect(lines).toEqual(expect.arrayContaining(['Rep One: 1 task past the day it was due.', 'Rep One: 1 customer email went 24 hours without a reply.']));
+      expect(today.attention.find((a) => a.text.includes('without a reply'))).toMatchObject({ list: 'emails_missed', businessName: 'jest-team Branch', severity: 'warning' });
+      // "Today" may have barely begun: nobody is flagged for doing nothing yet.
+      expect(lines.some((l) => l.includes('Nothing recorded'))).toBe(false);
+      // Over a week, the branch admin did nothing at all.
+      const week = await activity.overview(mainOwner(), { period: 'last7' }, now);
+      expect(week.attention.map((a) => `${a.personName}: ${a.text}`)).toContain('Branch Admin: Nothing recorded in this period — no calls, emails, deals or finished tasks.');
+      // The Main Account owner's own record in the sub-account is never among them.
+      expect(week.attention.some((a) => a.personName === 'Main Owner')).toBe(false);
+      // Only for someone who sees the team.
+      expect((await activity.overview(rep(), { period: 'today' }, now)).attention).toEqual([]);
+    });
+
+    it('a manager gives a task; the person starts it and finishes it', async () => {
+      const given = await activity.giveTask(admin(), { assigneeId: who('rep2'), title: 'Call back the Diwali leads', dueDate: '2026-11-14', priority: 'high' }, now);
+      expect(given).toMatchObject({ title: 'Call back the Diwali leads', status: 'pending', inProgress: false, priority: 'high', origin: 'team', givenBy: 'Branch Admin', personName: 'Rep Two' });
+      expect((await activity.myTasks(rep2(), now)).items.map((t) => t.title)).toContain('Call back the Diwali leads');
+
+      const started = await activity.moveTask(rep2(), given.id, { status: 'in_progress' }, now);
+      expect(started).toMatchObject({ status: 'pending', inProgress: true });
+      expect((await activity.overview(admin(), { period: 'today', userId: who('rep2') }, now)).totals).toMatchObject({ followUpsPending: 1, followUpsInProgress: 1, followUpsOverdue: 0 });
+
+      // The day it is due is their manager's to change, not theirs.
+      await expect(activity.moveTask(rep2(), given.id, { dueDate: '2026-11-20' }, now)).rejects.toThrow(ForbiddenException);
+      expect((await activity.moveTask(admin(), given.id, { dueDate: '2026-11-10' }, now)).overdue).toBe(true);
+
+      expect(await activity.moveTask(rep2(), given.id, { status: 'done' }, now)).toMatchObject({ status: 'done', inProgress: false, overdue: false });
+      expect((await activity.overview(admin(), { period: 'today', userId: who('rep2') }, now)).totals).toMatchObject({ followUpsCompleted: 1, followUpsPending: 0, followUpsInProgress: 0 });
+      // Back to "to do" forgets that it was started.
+      expect(await activity.moveTask(admin(), given.id, { status: 'todo' }, now)).toMatchObject({ status: 'pending', inProgress: false });
+    });
+
+    it('only someone who sees that person may give or move their tasks', async () => {
+      // A team member gives no tasks; a manager only to the people of their store; another company never.
+      await expect(activity.giveTask(rep(), { assigneeId: who('rep2'), title: 'x' }, now)).rejects.toThrow(ForbiddenException);
+      await expect(activity.giveTask(manager(), { assigneeId: who('rep2'), title: 'x' }, now)).rejects.toThrow(ForbiddenException);
+      await expect(activity.giveTask(caller('otherOwner', org('other'), ['owner']), { organizationId: org('sub'), assigneeId: who('rep'), title: 'x' }, now)).rejects.toThrow(ForbiddenException);
+      await expect(activity.giveTask(admin(), { assigneeId: who('rep'), title: '   ' }, now)).rejects.toThrow(BadRequestException);
+
+      const forRep = await activity.giveTask(manager(), { assigneeId: who('rep'), title: 'Send the catalogue' }, now);
+      // A colleague can't move it, another company can't even find it; the person can.
+      await expect(activity.moveTask(rep2(), forRep.id, { status: 'done' }, now)).rejects.toThrow(ForbiddenException);
+      await expect(activity.moveTask(caller('otherOwner', org('other'), ['owner']), forRep.id, { status: 'done' }, now)).rejects.toThrow(NotFoundException);
+      expect((await activity.moveTask(rep(), forRep.id, { status: 'in_progress' }, now)).inProgress).toBe(true);
+    });
+
+    it('the Main Account owner gives a task in a sub-account, signed as their own record there', async () => {
+      const given = await activity.giveTask(mainOwner(), { organizationId: org('sub'), assigneeId: who('rep2'), title: 'Visit the Velachery client' }, now);
+      const stored = await connection.collection('customer_tasks').findOne({ _id: new Types.ObjectId(given.id) });
+      expect(stored).toMatchObject({ organizationId: org('sub'), createdBy: who('mainOwnerInSub'), source: 'team', customerKeys: [], assigneeId: who('rep2') });
+    });
+
+    it('a person’s own list: in progress first, then what is waiting, then what they finished this week', async () => {
+      const mine = await activity.myTasks(rep(), now);
+      expect(mine.items.map((t) => [t.title, t.status, t.inProgress])).toEqual([
+        ['Send the catalogue', 'pending', true],
+        ['Call Gamma back', 'pending', false],
+        ['Quote Delta', 'done', false],
+      ]);
+      expect(mine).toMatchObject({ open: 2, inProgress: 1, overdue: 0 });
+      // Every one of them is theirs to move along.
+      expect(mine.items.every((t) => t.editable)).toBe(true);
+    });
+
+    it('departments: each team of each business added up, once anyone has one', async () => {
+      expect((await activity.overview(admin(), { period: 'today' }, now)).departments).toEqual([]);
+      await connection.collection('users').updateOne({ _id: people.rep }, { $set: { department: 'Sales' } });
+      const result = await activity.overview(admin(), { period: 'today' }, now);
+      expect(result.departments.map((d) => d.name)).toEqual(['Sales', 'No department']);
+      expect(result.departments[0]).toMatchObject({ people: 1, businessName: 'jest-team Branch', calls: 3, emailsMissed: 1, needSupport: 1 });
+      expect(result.people.find((p) => p.name === 'Rep One')!.department).toBe('Sales');
     });
   });
 });

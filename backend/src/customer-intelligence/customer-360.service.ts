@@ -48,6 +48,19 @@ const asDate = (value: unknown): Date | undefined => {
 };
 const strings = (value: unknown): string[] => (Array.isArray(value) ? value.map((v) => text(typeof v === 'object' && v ? (v as Doc).text : v)).filter(Boolean) : []);
 const escapeRegex = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+/** Email addresses and phone numbers out of text the AI reads: it needs the story, not the address book. */
+const redact = (value: string) =>
+  value.replace(/[^\s@<>()"']+@[^\s@<>()"']+\.[a-z]{2,}/gi, '[email]').replace(/\+?\d[\d\s().-]{7,}\d/g, '[phone]');
+const CONTACT_FIELD = /^(e-?mail|phone|mobile|contact( number)?|number|whatsapp|first name|last name|name)$/i;
+const CRM_KIND: Record<string, string> = {
+  created: 'created',
+  sent: 'sent to the customer',
+  accepted: 'accepted',
+  rejected: 'rejected',
+  won: 'won',
+  lost: 'lost',
+  reopened: 'reopened',
+};
 
 /** One call with the customer, as the profile shows it. */
 export interface CustomerCall extends CallFact {
@@ -81,6 +94,31 @@ export type CustomerSnapshot =
       unansweredEmails: number;
       lastCall?: { at: Date; summary?: string };
       nextSteps: string[];
+      /** The AI's profile of the customer, read from all of the above (written when someone opens the details). */
+      ai: {
+        status: 'ready' | 'outdated' | 'none';
+        canRun: boolean;
+        generatedAt?: Date;
+        reads: { emails: number; calls: number; crm: number; quotations: number };
+        report?: Pick<IntelligenceReport, 'summary' | 'buyingIntent' | 'sentiment' | 'behaviours' | 'painPoints' | 'competitors' | 'insights' | 'recommendations' | 'preferences'>;
+        /** What each evidence id the report cites stands for (E3 → "Call of 6 Nov"). */
+        sources: Record<string, string>;
+      };
+      /** Behind "Show more": each list holds at most a few items. */
+      details: {
+        contact: { email?: string; phone?: string; owner?: string };
+        /** Why each badge applies. */
+        why: { label: string; reasons: string[] }[];
+        /** What they asked for and what they pushed back on, across their recent calls. */
+        needs: string[];
+        concerns: string[];
+        quotes: { id: string; number?: string; name?: string; amount: number; state: string; date?: Date }[];
+        deals: { id: string; name?: string; status: 'open' | 'won' | 'lost'; value: number; createdAt?: Date }[];
+        emails: { id: string; subject: string; direction: 'received' | 'sent'; at: Date; needsReply: boolean; preview?: string; aiSummary?: string; intent?: string; sentiment?: string; mailbox?: string }[];
+        /** The CRM side: their enquiry in their own words, and what happened to their deals and quotations. */
+        crm: { enquiry?: { at?: Date; source: string; lines: string[] }; history: { at: Date; text: string }[] };
+        calls: { id: string; at: Date; direction: string; missed: boolean; connected: boolean; durationSeconds?: number; employee?: string; summary?: string; score?: number; sessionId?: string }[];
+      };
     };
 
 const GROUP_OF: Record<string, TimelineGroup> = {
@@ -329,8 +367,51 @@ export class Customer360Service implements OnModuleInit {
     const { scope, businesses } = await this.businessesFor(caller, organizationId);
     const basis = await this.directory.intelligenceBasis(organizationId, customerId);
     const dealIds = [...new Set(basis.deals.flatMap((d) => [d.id, d.externalId]).filter((id): id is string => !!id))];
-    const [settings, calls] = await Promise.all([this.settings(organizationId), this.calls(caller, scope, organizationId, basis.phones, dealIds)]);
-    return { business: businesses[0], basis, settings, calls };
+    const recordIds = [...basis.deals.map((d) => d.id), ...basis.detail.quotations.map((q) => q.id)];
+    const [settings, calls, crmHistory] = await Promise.all([
+      this.settings(organizationId),
+      this.calls(caller, scope, organizationId, basis.phones, dealIds),
+      this.crmHistory(organizationId, recordIds),
+    ]);
+    return { business: businesses[0], basis, settings, calls, crmHistory };
+  }
+
+  /** What happened to their deals and quotations in the CRM (created, sent, accepted, won, lost…), newest first. */
+  private async crmHistory(organizationId: string, recordIds: string[]): Promise<{ at: Date; text: string; kind: string }[]> {
+    if (recordIds.length === 0) return [];
+    // Most history records were written by the CRM sync without a business id (only the CRM connection they
+    // came from): those count when the connection is one of this business's own — never another business's.
+    const ownSources = (await this.connection.collection('crm_data_sources').find({ organizationId }, { projection: { _id: 1 } }).toArray()).map((s) => s._id.toString());
+    const [events, quotes, deals] = await Promise.all([
+      this.connection
+        .collection('crm_activities')
+        .find(
+          {
+            entityId: { $in: recordIds },
+            $or: [{ organizationId }, { organizationId: { $in: [null, ''] }, dataSourceId: { $in: ownSources } }],
+          },
+          { projection: { entity: 1, entityId: 1, kind: 1, occurredAt: 1, value: 1, crmOwnerLabel: 1, ref: 1 } },
+        )
+        .sort({ occurredAt: -1 })
+        .limit(30)
+        .toArray(),
+      this.connection.collection('crm_quotes').find({ organizationId, _id: { $in: recordIds.filter(isValidObjectId).map((id) => new Types.ObjectId(id)) } }, { projection: { quoteNumber: 1 } }).toArray(),
+      this.connection.collection('crm_deals').find({ organizationId, _id: { $in: recordIds.filter(isValidObjectId).map((id) => new Types.ObjectId(id)) } }, { projection: { name: 1 } }).toArray(),
+    ]);
+    const nameOf = new Map<string, string>([
+      ...quotes.map((q): [string, string] => [q._id.toString(), `Quotation ${text(q.quoteNumber) || ''}`.trim()]),
+      ...deals.map((d): [string, string] => [d._id.toString(), `Deal “${text(d.name) || 'unnamed'}”`]),
+    ]);
+    return events
+      .map((e) => {
+        const at = asDate(e.occurredAt);
+        if (!at) return null;
+        const what = nameOf.get(text(e.entityId)) ?? (e.entity === 'quote' ? 'A quotation' : 'A deal');
+        const value = typeof e.value === 'number' && e.value > 0 ? ` · ${Math.round(e.value).toLocaleString('en-IN')}` : '';
+        const by = text(e.crmOwnerLabel) ? ` · by ${text(e.crmOwnerLabel)}` : '';
+        return { at, kind: text(e.kind), text: `${what} ${CRM_KIND[text(e.kind)] ?? text(e.kind)}${value}${by}` };
+      })
+      .filter((e): e is { at: Date; text: string; kind: string } => !!e);
   }
 
   private input(g: Awaited<ReturnType<Customer360Service['gather']>>, aiSentiment?: ThreeSixtyInput['aiSentiment']): ThreeSixtyInput {
@@ -391,7 +472,11 @@ export class Customer360Service implements OnModuleInit {
     const items: (EvidenceItem & { details: Doc })[] = [];
     const add = (kind: EvidenceItem['kind'], refId: string | undefined, label: string, at: Date | undefined, details: Doc) =>
       items.push({ id: `E${items.length + 1}`, kind, refId, label, at, details });
-    if (d.inquiry) add('inquiry', undefined, `Enquiry${d.inquiry.receivedAt ? ` of ${new Date(d.inquiry.receivedAt).toISOString().slice(0, 10)}` : ''}`, d.inquiry.receivedAt, { whatTheyWrote: d.inquiry.fields, channel: d.inquiry.channel });
+    if (d.inquiry)
+      add('inquiry', undefined, `Enquiry${d.inquiry.receivedAt ? ` of ${new Date(d.inquiry.receivedAt).toISOString().slice(0, 10)}` : ''}`, d.inquiry.receivedAt, {
+        whatTheyWrote: (d.inquiry.fields ?? []).filter((f) => !CONTACT_FIELD.test(text(f.name))).map((f) => `${text(f.name)}: ${redact(text(f.value))}`),
+        channel: d.inquiry.channel,
+      });
     for (const deal of g.basis.deals.slice(0, 15))
       add('deal', deal.id, deal.name ?? 'Deal', deal.createdAt, { status: deal.status, value: deal.value, lostReason: deal.lostReason, closedAt: deal.closedAt, expectedClosingDate: deal.expectedClosingDate });
     for (const q of d.quotations.slice(0, 15))
@@ -399,7 +484,13 @@ export class Customer360Service implements OnModuleInit {
     for (const i of d.invoiceList.slice(0, 15))
       add('invoice', i.id, `Invoice ${i.number ?? ''}`.trim(), i.date, { status: i.statusLabel, amount: i.amount, paid: i.paid, outstanding: i.outstanding, overdue: i.overdue });
     for (const e of d.emails.slice(0, 25))
-      add('email', e.id, e.subject || '(no subject)', new Date(e.at), { direction: e.direction === 'received' ? 'from the customer' : 'from us', waitingForOurReply: e.needsReply });
+      add('email', e.id, e.subject || '(no subject)', new Date(e.at), {
+        direction: e.direction === 'received' ? 'from the customer' : 'from us',
+        waitingForOurReply: e.needsReply,
+        ...(e.preview ? { text: redact(e.preview).slice(0, 400) } : {}),
+        ...(e.aiSummary ? { aiReading: redact(e.aiSummary), intent: e.intent, tone: e.sentiment } : {}),
+      });
+    for (const h of g.crmHistory.slice(0, 15)) add('deal', undefined, h.text, h.at, { crmEvent: h.kind });
     for (const c of g.calls.slice(0, 15))
       add('call', c.sessionId ?? c.id, c.headline ?? `Call of ${c.at.toISOString().slice(0, 10)}`, c.at, {
         direction: c.direction,
@@ -689,10 +780,14 @@ export class Customer360Service implements OnModuleInit {
    * things to do. Found by the call's deal, else the number dialled. Same rule as
    * the Dialer's contact search: owners, admins, managers and anyone given
    * Customers see every customer; everyone else only the customers they are rep of.
+   * From a call in the library (`sessionId`), the customer is the one that call was
+   * with, and that call itself is left out of their history.
    */
-  async snapshot(caller: JwtPayload, ref: { dealId?: string; phone?: string }): Promise<CustomerSnapshot> {
+  async snapshot(caller: JwtPayload, ref: { dealId?: string; phone?: string; sessionId?: string }): Promise<CustomerSnapshot> {
     const organizationId = caller.organizationId;
-    const found = await this.directory.customerForCall(organizationId, ref);
+    const lookup = ref.sessionId ? await this.callRef(organizationId, ref.sessionId) : { dealId: ref.dealId, phone: ref.phone };
+    if (!lookup.dealId && !lookup.phone) return { found: false };
+    const found = await this.directory.customerForCall(organizationId, lookup);
     if (!found) return { found: false };
     const seesEveryone =
       caller.roles.some((role) => role === 'owner' || role === 'admin' || role === 'manager') ||
@@ -705,8 +800,24 @@ export class Customer360Service implements OnModuleInit {
     const health = scoreHealth(input);
     const steps = nextBestActions(input, relationship);
     const d = g.basis.detail;
-    const lastCall = g.calls.find((c) => c.connected && (c.headline || c.summaryPoints.length));
+    const otherCalls = ref.sessionId ? g.calls.filter((c) => c.sessionId !== ref.sessionId) : g.calls;
+    const { items: evidenceItems, hash } = this.evidence(g);
+    const saved = await this.savedReport(organizationId, found.id, hash);
+    const usedIds = new Set(
+      saved
+        ? [
+            ...saved.report.buyingIntent.evidence,
+            ...saved.report.sentiment.evidence,
+            ...[...saved.report.insights, ...saved.report.recommendations, ...saved.report.behaviours, ...saved.report.painPoints, ...saved.report.competitors, ...saved.report.preferences].flatMap(
+              (x) => x.evidence,
+            ),
+          ]
+        : [],
+    );
+    const lastCall = otherCalls.find((c) => c.connected && (c.headline || c.summaryPoints.length));
     const [stage, ...flags] = relationship.badges;
+    const few = <T,>(items: T[], n = 3) => [...new Set(items)].slice(0, n);
+    const recent = otherCalls.slice(0, 5);
     return {
       found: true,
       customer: { id: d.id, name: d.name, company: d.company },
@@ -722,7 +833,103 @@ export class Customer360Service implements OnModuleInit {
       unansweredEmails: d.mail.unanswered,
       lastCall: lastCall ? { at: lastCall.at, summary: lastCall.headline ?? lastCall.summaryPoints[0] } : undefined,
       nextSteps: steps.slice(0, 2).map((a) => a.action),
+      ai: {
+        status: saved ? (saved.stale ? 'outdated' : 'ready') : 'none',
+        canRun: caller.aiAccessEnabled !== false && evidenceItems.length > 0,
+        generatedAt: saved?.generatedAt,
+        reads: { emails: d.emails.length, calls: g.calls.length, crm: g.crmHistory.length + (d.inquiry ? 1 : 0), quotations: d.quotations.length },
+        report: saved
+          ? {
+              summary: saved.report.summary,
+              buyingIntent: saved.report.buyingIntent,
+              sentiment: saved.report.sentiment,
+              behaviours: saved.report.behaviours.slice(0, 4),
+              painPoints: saved.report.painPoints.slice(0, 3),
+              competitors: saved.report.competitors.slice(0, 3),
+              insights: saved.report.insights.slice(0, 5),
+              recommendations: saved.report.recommendations.slice(0, 3),
+              preferences: saved.report.preferences.slice(0, 4),
+            }
+          : undefined,
+        sources: Object.fromEntries((saved?.evidence ?? []).filter((e) => usedIds.has(e.id)).map((e) => [e.id, e.label])),
+      },
+      details: {
+        contact: { email: d.email, phone: d.phone, owner: d.repName ?? d.owner },
+        why: relationship.badges.map((b) => ({ label: b.label, reasons: b.reasons })),
+        needs: few(recent.flatMap((c) => c.customerNeeds)),
+        concerns: few(recent.flatMap((c) => c.concerns)),
+        quotes: d.quotations.slice(0, 3).map((q) => ({ id: q.id, number: q.number, name: q.name, amount: q.amount, state: q.stateLabel, date: q.date })),
+        deals: [...g.basis.deals]
+          .sort((a, b) => Number(a.status !== 'open') - Number(b.status !== 'open'))
+          .slice(0, 3)
+          .map((x) => ({ id: x.id, name: x.name, status: x.status, value: x.value, createdAt: x.createdAt })),
+        emails: d.emails.slice(0, 20).map((e) => ({
+          id: e.id,
+          subject: e.subject,
+          direction: e.direction,
+          at: new Date(e.at),
+          needsReply: !!e.needsReply,
+          preview: e.preview,
+          aiSummary: e.aiSummary,
+          intent: e.intent,
+          sentiment: e.sentiment,
+          mailbox: e.mailbox,
+        })),
+        crm: {
+          enquiry: d.inquiry
+            ? {
+                at: d.inquiry.receivedAt ? new Date(d.inquiry.receivedAt) : undefined,
+                source: d.inquiry.source,
+                lines: (d.inquiry.fields ?? []).filter((f) => text(f.value)).map((f) => `${text(f.name)}: ${text(f.value)}`),
+              }
+            : undefined,
+          history: g.crmHistory.slice(0, 8).map(({ at, text: line }) => ({ at, text: line })),
+        },
+        calls: otherCalls.slice(0, 3).map((c) => ({
+          id: c.id,
+          at: c.at,
+          direction: c.direction,
+          missed: c.missed,
+          connected: c.connected,
+          durationSeconds: c.durationSeconds,
+          employee: c.employee,
+          summary: c.headline ?? c.summaryPoints[0],
+          score: c.score,
+          sessionId: c.sessionId,
+        })),
+      },
     };
+  }
+
+  /**
+   * Writes (or reuses) the AI profile of the customer on a call — from Call Copilot,
+   * when someone opens the customer's details. Same rule for who may see whom as the
+   * snapshot; billed like every AI action; reused until something new happens.
+   */
+  async analyzeForCall(caller: JwtPayload, ref: { dealId?: string; phone?: string; sessionId?: string }, refresh: boolean) {
+    const organizationId = caller.organizationId;
+    const lookup = ref.sessionId ? await this.callRef(organizationId, ref.sessionId) : { dealId: ref.dealId, phone: ref.phone };
+    const found = lookup.dealId || lookup.phone ? await this.directory.customerForCall(organizationId, lookup) : null;
+    if (!found) throw new BadRequestException('No customer is known for this call.');
+    const seesEveryone =
+      caller.roles.some((role) => role === 'owner' || role === 'admin' || role === 'manager') ||
+      (isPermissionManaged(caller) && !!caller.permissions?.includes('customers:view'));
+    if (!seesEveryone && found.repUserId !== caller.sub) throw new ForbiddenException('That isn’t one of your customers.');
+    await this.analyze(caller, organizationId, found.id, refresh);
+    return this.snapshot(caller, ref);
+  }
+
+  /** The deal or number a recorded call was for: its phone-call record, else the deal the call was linked to. */
+  private async callRef(organizationId: string, sessionId: string): Promise<{ dealId?: string; phone?: string }> {
+    for (const name of ['plivo_calls', 'twilio_calls']) {
+      const call = await this.connection.collection(name).findOne({ organizationId, sessionId }, { projection: { customerNumber: 1, dealId: 1 } });
+      if (call) return { dealId: text(call.dealId) || undefined, phone: text(call.customerNumber) || undefined };
+    }
+    if (!isValidObjectId(sessionId)) return {};
+    const session = await this.connection
+      .collection('call_sessions')
+      .findOne({ _id: new Types.ObjectId(sessionId), organizationId }, { projection: { dealId: 1, contactId: 1 } });
+    return { dealId: text(session?.dealId) || text(session?.contactId) || undefined };
   }
 
   /** Health snapshots, oldest first (also used by tests). */

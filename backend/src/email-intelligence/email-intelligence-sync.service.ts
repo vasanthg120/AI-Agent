@@ -458,7 +458,8 @@ export class EmailIntelligenceSyncService {
         if (!(await this.emailIntelligenceService.getEarliestPendingReceivedAt(connection.userId))) continue;
         await this.refreshReplies(connection.userId);
       } catch (err) {
-        this.logger.warn(`Reply check failed for user ${connection.userId}: ${(err as Error).message}`);
+        // The AI service's own reason ("couldn't reach Microsoft 365…"), not just "status code 500".
+        this.logger.warn(`Reply check failed for user ${connection.userId}: ${readableSyncFailure(err).message}`);
       }
     }
   }
@@ -752,7 +753,7 @@ export class EmailIntelligenceSyncService {
       try {
         await this.syncMyMailbox(connection.userId, 'scheduled');
       } catch (err) {
-        this.logger.error(`Scheduled sync failed for user ${connection.userId}: ${(err as Error).message}`);
+        this.logger.error(`Scheduled sync failed for user ${connection.userId}: ${readableSyncFailure(err).message}`);
       }
     }
   }

@@ -25,6 +25,8 @@ export interface TeamPerson {
   roles: string[];
   active: boolean;
   storeId?: string;
+  // Their team (Settings → Users → Department); free text, unset for most.
+  department?: string;
   // The Main Account owner's own record in a sub-account (see sub-accounts):
   // not one of that business's staff, listed only when they did something there.
   mainAccountMember: boolean;
@@ -62,6 +64,7 @@ function toPerson(user: Doc): TeamPerson {
     roles: user.roles ?? [],
     active: user.active !== false,
     storeId: user.storeId,
+    department: typeof user.department === 'string' && user.department.trim() ? user.department.trim() : undefined,
     mainAccountMember: !!user.linkedLoginUserId,
   };
 }
@@ -136,7 +139,7 @@ export class TeamScopeService {
 
   /** The people of one business the caller may see (deactivated ones included: their past work still counts). */
   async people(scope: TeamScope, business: ScopedBusiness): Promise<TeamPerson[]> {
-    const projection = { name: 1, email: 1, roles: 1, active: 1, storeId: 1, linkedLoginUserId: 1 };
+    const projection = { name: 1, email: 1, roles: 1, active: 1, storeId: 1, department: 1, linkedLoginUserId: 1 };
     if (!scope.team) {
       if (!isValidObjectId(scope.selfId)) return [];
       const me = await this.users.findOne({ _id: new Types.ObjectId(scope.selfId), organizationId: business.id }, { projection });

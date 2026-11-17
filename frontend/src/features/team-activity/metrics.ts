@@ -40,7 +40,8 @@ export type MetricKey =
   | 'avgCallSeconds'
   | 'avgCallScore'
   | 'followUpsCompleted'
-  | 'followUpsPending';
+  | 'followUpsPending'
+  | 'followUpsOverdue';
 
 export type MetricGroup = 'sales' | 'email' | 'calls' | 'followups';
 
@@ -48,7 +49,7 @@ export const GROUP_LABELS: Record<MetricGroup, string> = {
   sales: 'Deals',
   email: 'Email',
   calls: 'Calls',
-  followups: 'Follow-ups',
+  followups: 'Tasks',
 };
 
 export interface MetricDef {
@@ -285,26 +286,37 @@ export const METRICS: MetricDef[] = [
   {
     key: 'followUpsCompleted',
     group: 'followups',
-    label: 'Follow-ups done',
+    label: 'Tasks done',
     column: 'Done',
     icon: FiCheckSquare,
     list: 'follow_ups',
-    meaning: 'Email follow-ups and customer tasks completed in the period.',
+    meaning: 'Tasks finished in the period — given by a manager, on a customer, a job or a deal — and email follow-ups done.',
     value: (c) => String(c.followUpsCompleted),
     sortValue: (c) => c.followUpsCompleted,
   },
   {
     key: 'followUpsPending',
     group: 'followups',
-    label: 'Follow-ups pending',
-    column: 'Pending',
+    label: 'Tasks open',
+    column: 'Open',
     icon: FiClock,
     list: 'follow_ups',
-    meaning: 'Email follow-ups and customer tasks still open now; the overdue ones are past their due date.',
-    alert: 'warning',
+    meaning: 'Tasks and email follow-ups not done yet, now; in progress = the person has started it.',
     value: (c) => String(c.followUpsPending),
     sortValue: (c) => c.followUpsPending,
-    sub: (c) => (c.followUpsOverdue ? `${c.followUpsOverdue} overdue` : undefined),
+    sub: (c) => (c.followUpsInProgress ? `${c.followUpsInProgress} in progress` : undefined),
+  },
+  {
+    key: 'followUpsOverdue',
+    group: 'followups',
+    label: 'Tasks overdue',
+    column: 'Overdue',
+    icon: FiAlertCircle,
+    list: 'follow_ups',
+    meaning: 'Open tasks and follow-ups whose day has passed, now.',
+    alert: 'danger',
+    value: (c) => String(c.followUpsOverdue),
+    sortValue: (c) => c.followUpsOverdue,
   },
 ];
 
@@ -312,11 +324,11 @@ export const METRIC_BY_KEY = Object.fromEntries(METRICS.map((m) => [m.key, m])) 
 
 /** The people table's column sets: a short overview, then every figure of one kind. */
 export const COLUMN_SETS: { id: 'overview' | MetricGroup; label: string; keys: MetricKey[] }[] = [
-  { id: 'overview', label: 'Overview', keys: ['dealsCreated', 'dealsWon', 'emailsSent', 'emailsReplied', 'emailsMissed', 'calls', 'talkSeconds', 'avgCallScore'] },
+  { id: 'overview', label: 'Overview', keys: ['dealsCreated', 'dealsWon', 'emailsSent', 'emailsReplied', 'emailsMissed', 'calls', 'talkSeconds', 'avgCallScore', 'followUpsOverdue'] },
   { id: 'sales', label: 'Deals', keys: ['dealsCreated', 'dealsWon', 'dealsLost', 'pipelineValue'] },
   { id: 'email', label: 'Email', keys: ['emailsSent', 'emailsReplied', 'emailsNotReplied', 'emailsMissed', 'customerReplies', 'awaitingCustomer'] },
   { id: 'calls', label: 'Calls', keys: ['calls', 'callsMade', 'callsReceived', 'callsMissed', 'talkSeconds', 'avgCallSeconds', 'avgCallScore'] },
-  { id: 'followups', label: 'Follow-ups', keys: ['followUpsCompleted', 'followUpsPending'] },
+  { id: 'followups', label: 'Tasks', keys: ['followUpsCompleted', 'followUpsPending', 'followUpsOverdue'] },
 ];
 
 export const LIST_TITLES: Record<TeamListKind, string> = {
@@ -332,7 +344,7 @@ export const LIST_TITLES: Record<TeamListKind, string> = {
   deals_won: 'Deals won',
   deals_lost: 'Deals lost',
   pipeline: 'Open pipeline',
-  follow_ups: 'Follow-ups',
+  follow_ups: 'Tasks & follow-ups',
 };
 
 export const CALL_FILTER_TITLES: Record<CallFilter, string> = {

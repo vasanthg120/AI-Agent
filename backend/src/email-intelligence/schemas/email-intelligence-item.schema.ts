@@ -369,6 +369,8 @@ EmailIntelligenceItemSchema.set('toJSON', {
 EmailIntelligenceItemSchema.index({ userId: 1, externalMessageId: 1 }, { unique: true });
 EmailIntelligenceItemSchema.index({ userId: 1, status: 1, receivedAt: -1 });
 EmailIntelligenceItemSchema.index({ organizationId: 1, createdAt: -1 });
+// A whole business's mail by arrival: what is waiting for a reply across its mailboxes, and the dashboard's period counts.
+EmailIntelligenceItemSchema.index({ organizationId: 1, receivedAt: -1 });
 // External-reply detection's own lookup — every still-pending item with a
 // captured thread id, for one user, each sync run.
 EmailIntelligenceItemSchema.index({ userId: 1, status: 1, conversationId: 1 });

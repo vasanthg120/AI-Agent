@@ -47,8 +47,11 @@ export function BusinessesTable({ businesses, onSelect }: { businesses: TeamActi
             <th>Business</th>
             <th className={styles.num}>People</th>
             <th className={styles.num}>Deals created</th>
-            <th className={styles.num}>Won</th>
-            <th className={styles.num}>Pipeline</th>
+            <th className={styles.num} title="Deals won, credited to these people (Settings → Deal Assignment).">Won</th>
+            {/* Per person, as everything here; the whole business’s open pipeline is on the Dashboard’s All businesses tab. */}
+            <th className={styles.num} title="Open deals these people own. Every open deal of each business is on the Dashboard → All businesses.">
+              Owned pipeline
+            </th>
             <th className={styles.num}>Emails sent</th>
             <th className={styles.num}>Missed</th>
             <th className={styles.num}>Calls</th>

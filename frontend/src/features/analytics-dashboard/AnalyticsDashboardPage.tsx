@@ -4,7 +4,7 @@ import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { motion } from 'framer-motion';
 import clsx from 'clsx';
 import dayjs from 'dayjs';
-import { FiAward, FiGrid, FiLayers, FiMail, FiPieChart, FiTarget, FiTruck, FiUsers } from 'react-icons/fi';
+import { FiAward, FiGrid, FiHome, FiLayers, FiMail, FiPieChart, FiTarget, FiTruck, FiUsers } from 'react-icons/fi';
 import { Avatar, EmptyState, SectionCard, Skeleton, Tabs } from '@/components/ui';
 import type { DateRange } from '@/components/ui';
 import { useAuthStore } from '@/stores/authStore';
@@ -15,8 +15,10 @@ import { organizationsService } from '@/services/organizationsService';
 import { analyticsDashboardService, type AnalyticsDashboardOverview } from '@/services/analyticsDashboardService';
 import { dealsService } from '@/services/dealsService';
 import { quotesService } from '@/services/quotesService';
+import { teamActivityService } from '@/services/teamActivityService';
 import { DealSplitDonut } from './components/DealSplitDonut'; 
 import { DashboardHeroHeader } from './components/DashboardHeroHeader';
+import { BusinessesOverview } from './components/BusinessesOverview';
 import { AiBriefingCard } from './components/AiBriefingCard';
 import { CustomersAndEmailSection } from './components/CustomersAndEmailSection';
 import { DrillDownModal, type DrillDownRow } from './components/DrillDownModal';
@@ -88,6 +90,7 @@ const TAB_ITEMS = [
 // One line per tab saying which question it answers, shown under the tab bar
 // so nobody has to click through all five to find the right one.
 const TAB_INTRO: Record<string, string> = {
+  businesses: 'Every business at once — Main Account and sub-accounts — each in its own currency; Open goes into one to work there.',
   overview: 'How the month is going — revenue against target, momentum, and what needs a decision today.',
   pipeline: 'Where every deal stands — how they move from opportunity to won, and which quotes got accepted.',
   team: 'Who is closing what — revenue per person, workload, and how fast emails get answered.',
@@ -150,14 +153,29 @@ export function AnalyticsDashboardPage() {
   const dateFrom = range.dateFrom ?? defaultRange().dateFrom!;
   const dateTo = range.dateTo ?? defaultRange().dateTo!;
   const counted = countedMonths(dateFrom, dateTo);
-  const [activeTab, setActiveTab] = useState('overview');
+  // The Main Account owner (signed in to the Main Account itself) first sees every
+  // business at once; the server decides who that is (TeamScopeService).
+  const { data: teamScope } = useQuery({
+    queryKey: ['team-activity-scope'],
+    queryFn: teamActivityService.scope,
+    // Only an owner can be the Main Account owner; nobody else need ask.
+    enabled: hasRole(user, 'owner'),
+    staleTime: 5 * 60_000,
+  });
+  const acrossBusinesses = !!teamScope?.acrossBusinesses;
+  const [chosenTab, setActiveTab] = useState<string | null>(null);
+  const activeTab = chosenTab ?? (acrossBusinesses ? 'businesses' : 'overview');
   const [stores, setStores] = useState<{ id: string; name: string }[]>([]);
   const [drillDown, setDrillDown] = useState<DrillDownTarget | null>(null);
 
   // Someone with their own permission list sees a role-limited tab when they were given its page.
-  const visibleTabs = TAB_ITEMS.filter(
-    (t) => !t.requireRoles || t.requireRoles.some((r) => hasRole(user, r)) || (!!t.module && isPermissionManaged(user) && can(user, t.module)),
-  );
+  const visibleTabs = [
+    ...(acrossBusinesses ? [{ id: 'businesses', label: 'All businesses', icon: <FiHome /> }] : []),
+    ...TAB_ITEMS.filter(
+      (t) => !t.requireRoles || t.requireRoles.some((r) => hasRole(user, r)) || (!!t.module && isPermissionManaged(user) && can(user, t.module)),
+    ),
+  ];
+  const ownName = teamScope?.businesses.find((b) => b.isCurrent)?.name;
 
   useEffect(() => {
     if (!canOverrideStore) return;
@@ -174,7 +192,8 @@ export function AnalyticsDashboardPage() {
   const { data, isLoading, dataUpdatedAt } = useQuery({
     queryKey: ['analytics-dashboard-overview', dateFrom, dateTo, storeId],
     queryFn: () => analyticsDashboardService.getOverview(dateFrom, dateTo, storeId),
-    refetchInterval: 60_000,
+    // Not refreshed behind the All businesses tab, which has its own figures.
+    refetchInterval: activeTab === 'businesses' ? false : 60_000,
     placeholderData: keepPreviousData,
   });
 
@@ -264,11 +283,16 @@ export function AnalyticsDashboardPage() {
           animate={{ opacity: 1 }}
           transition={{ duration: 0.18 }}
         >
-          {TAB_INTRO[activeTab]} <span className={styles.tabHint}>{CLICK_HINT}</span>
+          {TAB_INTRO[activeTab]}
+          {acrossBusinesses && activeTab !== 'businesses' && ownName ? ` These figures are ${ownName}’s own.` : ''} <span className={styles.tabHint}>{CLICK_HINT}</span>
         </motion.p>
       </div>
 
-      {isLoading || !data ? (
+      {activeTab === 'businesses' ? (
+        <div className={styles.tabContent}>
+          <BusinessesOverview dateFrom={dateFrom} dateTo={dateTo} onOpenCurrent={() => setActiveTab('overview')} />
+        </div>
+      ) : isLoading || !data ? (
         <div className={styles.tabContent}>
           <Skeleton height={110} />
           <div className={styles.statsGrid}>

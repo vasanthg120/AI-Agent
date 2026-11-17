@@ -85,18 +85,27 @@ async def _microsoft_graph_error(_request, exc: requests.HTTPError):
 @app.exception_handler(requests.ConnectionError)
 async def _microsoft_graph_unreachable(_request, exc: requests.RequestException):
     url = str(getattr(getattr(exc, "request", None), "url", "") or "")
-    if "graph.microsoft.com" not in url:
+    host = urlsplit(url).hostname or ""
+    microsoft = host.endswith("microsoft.com") or host.endswith("microsoftonline.com")
+    if not microsoft:
         _log.error("Outside service unreachable", exc_info=exc)
-        where = f" ({urlsplit(url).hostname})" if url else ""
+        where = f" ({host})" if host else ""
         return JSONResponse(status_code=500, content={"detail": f"An outside service{where} didn't answer."})
-    _log.warning("Microsoft Graph didn't answer for %s: %s", url.split("?")[0], type(exc).__name__)
-    return JSONResponse(
-        status_code=503,
-        content={
-            "detail": "Microsoft 365's mail service took too long to answer for this mailbox. "
-            "It's on Microsoft's side; HaiVE tries again on the next sync and catches up on everything missed."
-        },
-    )
+    _log.warning("Microsoft 365 unreachable at %s: %s", host, type(exc).__name__)
+    again = " HaiVE tries again on the next sync and catches up on everything missed."
+    text = str(exc)
+    if "NameResolution" in text or "getaddrinfo" in text or "Failed to resolve" in text:
+        # The address couldn't even be looked up: this computer was offline, or its DNS was.
+        detail = f"This computer couldn't reach Microsoft 365 ({host}): its internet connection or DNS was down." + again
+    elif isinstance(exc, requests.Timeout):
+        detail = (
+            "Microsoft 365's mail service took too long to answer for this mailbox. It's on Microsoft's side;" + again
+            if host == "graph.microsoft.com"
+            else f"Microsoft's sign-in service ({host}) took too long to answer." + again
+        )
+    else:
+        detail = f"This computer couldn't connect to Microsoft 365 ({host}) — check its internet connection." + again
+    return JSONResponse(status_code=503, content={"detail": detail})
 
 app.include_router(health.router)
 app.include_router(chat.router)

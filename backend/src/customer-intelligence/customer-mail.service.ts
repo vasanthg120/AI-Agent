@@ -32,6 +32,28 @@ const asDate = (value: unknown): Date | undefined => {
 };
 
 const MAX_EMAILS = 300;
+
+/**
+ * Mongo: received mail from one of these addresses — as the sender, or named in
+ * Reply-To (a website enquiry form sends from its own address with the customer in
+ * Reply-To, and the reply goes to the customer).
+ */
+const fromCustomer = (wanted: string[]) => ({
+  $or: [
+    { $expr: { $in: [{ $toLower: '$fromAddress' }, wanted] } },
+    {
+      $expr: {
+        $gt: [{ $size: { $setIntersection: [{ $map: { input: { $ifNull: ['$replyToAddresses', []] }, as: 'a', in: { $toLower: '$$a' } } }, wanted] } }, 0],
+      },
+    },
+  ],
+});
+/** Which of the wanted addresses a received email belongs to: its sender, else the Reply-To. */
+const customerAddressOf = (item: Record<string, unknown>, wanted: Set<string>) => {
+  const from = lower(item.fromAddress);
+  if (wanted.has(from)) return from;
+  return (Array.isArray(item.replyToAddresses) ? item.replyToAddresses : []).map(lower).find((a) => wanted.has(a)) ?? from;
+};
 const MAX_REMINDERS = 2000;
 
 // The mail exchanged with customers, read from HaiVE's own mailbox collections
@@ -63,10 +85,11 @@ export class CustomerMailService {
         .collection('email_intelligence_items')
         .find(
           // Addresses are compared case-insensitively (mail clients keep whatever case was typed).
-          { organizationId, $expr: { $in: [{ $toLower: '$fromAddress' }, wanted] } },
+          { organizationId, ...fromCustomer(wanted) },
           {
             projection: {
               fromAddress: 1,
+              replyToAddresses: 1,
               receivedAt: 1,
               status: 1,
               shouldDraft: 1,
@@ -98,14 +121,15 @@ export class CustomerMailService {
         .limit(MAX_REMINDERS)
         .toArray(),
     ]);
-    const senderOf = new Map(received.map((item) => [item._id.toString(), lower(item.fromAddress)]));
+    const wantedSet = new Set(wanted);
+    const senderOf = new Map(received.map((item) => [item._id.toString(), customerAddressOf(item, wantedSet)]));
     for (const reminder of reminders) {
       const address = senderOf.get(text(reminder.emailIntelligenceItemId));
       const dueDate = asDate(reminder.dueDate);
       if (address && dueDate) summaryFor(address).followUps.push({ title: text(reminder.title) || 'Follow-up', dueDate });
     }
     for (const item of received) {
-      const summary = summaryFor(lower(item.fromAddress));
+      const summary = summaryFor(customerAddressOf(item, wantedSet));
       summary.received += 1;
       const at = asDate(item.receivedAt);
       if (deriveResponseStatus(item as ResponseStateFields) === 'needs_response') {
@@ -139,7 +163,7 @@ export class CustomerMailService {
     const [receivedDocs, sentDocs] = await Promise.all([
       this.connection
         .collection('email_intelligence_items')
-        .find({ organizationId, $expr: { $in: [{ $toLower: '$fromAddress' }, wanted] } })
+        .find({ organizationId, ...fromCustomer(wanted) })
         .sort({ receivedAt: -1 })
         .limit(MAX_EMAILS)
         .toArray(),
@@ -174,6 +198,12 @@ export class CustomerMailService {
         conversationId: text(m.conversationId) || undefined,
         needsReply: state === 'needs_response',
         answeredAt: asDate(m.sentAt) ?? asDate(m.externalReplyDetectedAt) ?? asDate(m.threadRespondedAt),
+        preview: text(m.bodyPreview) || undefined,
+        // The AI's reading — only once it really read it (a placeholder reason says "not read yet").
+        aiSummary: m.analysisState === 'pending' ? undefined : text(m.reason) || undefined,
+        intent: m.analysisState === 'pending' ? undefined : text(m.intent) || undefined,
+        sentiment: m.analysisState === 'pending' ? undefined : text(m.sentiment) || undefined,
+        mailbox: text(m.mailboxEmail) || undefined,
       });
     }
     for (const m of sentDocs) {
@@ -185,6 +215,8 @@ export class CustomerMailService {
         at,
         subject: text(m.subject) || '(no subject)',
         conversationId: text(m.conversationId) || undefined,
+        preview: text(m.bodyPreview) || undefined,
+        mailbox: text(m.mailboxEmail) || undefined,
       });
     }
 

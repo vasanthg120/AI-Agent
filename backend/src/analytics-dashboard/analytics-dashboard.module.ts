@@ -7,8 +7,11 @@ import { Quote, QuoteSchema } from '../crm/schemas/quote.schema';
 import { DashboardModule } from '../dashboard/dashboard.module';
 import { EmailIntelligenceModule } from '../email-intelligence/email-intelligence.module';
 import { OrganizationsModule } from '../organizations/organizations.module';
+import { TeamActivityModule } from '../team-activity/team-activity.module';
+import { TeamScopeModule } from '../team-activity/team-scope.module';
 import { AnalyticsDashboardController } from './analytics-dashboard.controller';
 import { AnalyticsDashboardService } from './analytics-dashboard.service';
+import { BusinessesOverviewService } from './businesses-overview.service';
 import { PreviousMonthClosuresService } from './previous-month-closures.service';
 
 // Phase 19 — sits above CrmModule/DashboardModule/EmailIntelligenceModule
@@ -27,8 +30,10 @@ import { PreviousMonthClosuresService } from './previous-month-closures.service'
     CrmModule,
     DashboardModule,
     EmailIntelligenceModule,
+    TeamActivityModule,
+    TeamScopeModule,
   ],
   controllers: [AnalyticsDashboardController],
-  providers: [AnalyticsDashboardService, PreviousMonthClosuresService],
+  providers: [AnalyticsDashboardService, PreviousMonthClosuresService, BusinessesOverviewService],
 })
 export class AnalyticsDashboardModule {}

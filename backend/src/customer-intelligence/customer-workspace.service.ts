@@ -425,7 +425,9 @@ export class CustomerWorkspaceService {
    * assigned; omitted shows the org's shared board, same convention as /tasks's own `mine` flag. */
   async listAllTasks(caller: JwtPayload, options: { status?: 'open' | 'done'; mine?: boolean } = {}): Promise<CrossCustomerTask[]> {
     const organizationId = caller.organizationId;
-    const filter: Doc = { organizationId };
+    // Customers' and jobs' tasks only: a task given to someone in Agent Activity, or by the deal AI,
+    // has no customer to open (and is moved along on the To-Do page or in the deal panel).
+    const filter: Doc = { organizationId, customerId: { $exists: true, $nin: [null, ''] } };
     if (options.status) filter.status = options.status;
     if (options.mine) filter.$or = [{ createdBy: caller.sub }, { assigneeId: caller.sub }];
     const docs = await this.connection.collection(TASKS_COLLECTION).find(filter).sort({ createdAt: -1 }).limit(LIST_LIMIT).toArray();

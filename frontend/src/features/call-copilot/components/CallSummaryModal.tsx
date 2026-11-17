@@ -17,6 +17,7 @@ import {
   FiSearch,
   FiTarget,
   FiUploadCloud,
+  FiUser,
 } from 'react-icons/fi';
 import { Modal, Spinner } from '@/components/ui';
 import {
@@ -29,6 +30,7 @@ import {
 import { OUTCOME_META, describeSource, formatCallDate, type CallKind } from '../callMeta';
 import { EASE_OUT, FADE_UP, ROW_IN, staggerChildren } from '../motion';
 import { AiCoachPanel } from './AiCoachPanel';
+import { CustomerSnapshotCard, useCustomerSnapshot } from './CustomerSnapshotCard';
 import { PillTabs, type PillTabItem } from './PillTabs';
 import { SentimentIndicator } from './SentimentIndicator';
 import styles from './CallSummaryModal.module.css';
@@ -126,13 +128,18 @@ export function CallSummaryModal({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, sessionId]);
 
+  // Who the call was with, when HaiVE knows the customer (by the call's number or deal).
+  const snapshot = useCustomerSnapshot({ sessionId: open ? sessionId : undefined });
+  const hasCustomer = snapshot.data?.found === true && !('restricted' in snapshot.data && snapshot.data.restricted);
+
   const tabs: PillTabItem[] = useMemo(() => {
     const items: PillTabItem[] = [];
     if (hasOverview) items.push({ id: 'overview', label: 'Overview', icon: <FiFileText aria-hidden /> });
+    if (hasCustomer) items.push({ id: 'customer', label: 'Customer', icon: <FiUser aria-hidden /> });
     items.push({ id: 'coach', label: 'AI Coach', icon: <FiAward aria-hidden />, busy: !!coachingPending && !coaching });
     if (hasTranscript) items.push({ id: 'transcript', label: 'Transcript', icon: <FiMessageSquare aria-hidden /> });
     return items;
-  }, [hasOverview, hasTranscript, coachingPending, coaching]);
+  }, [hasOverview, hasCustomer, hasTranscript, coachingPending, coaching]);
 
   const activeTab = tabs.some((t) => t.id === tab) ? tab : tabs[0].id;
   const kind = describeSource(source, originalFilename);
@@ -180,6 +187,8 @@ export function CallSummaryModal({
             transition={{ duration: 0.2, ease: EASE_OUT }}
           >
             {activeTab === 'overview' && summaryResult && <OverviewTab result={summaryResult} />}
+
+            {activeTab === 'customer' && sessionId && <CustomerSnapshotCard sessionId={sessionId} defaultExpanded />}
 
             {activeTab === 'coach' && (
               <AiCoachPanel

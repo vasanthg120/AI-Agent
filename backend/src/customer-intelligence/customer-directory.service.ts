@@ -187,6 +187,12 @@ export interface CustomerEmail {
   subject: string;
   /** A received email nobody has answered yet. */
   needsReply: boolean;
+  preview?: string;
+  /** Received: the AI's reading of it. */
+  aiSummary?: string;
+  intent?: string;
+  sentiment?: string;
+  mailbox?: string;
 }
 
 export interface CustomerFollowUp {
@@ -1691,7 +1697,18 @@ export class CustomerDirectoryService {
       emails: [...emails]
         .sort((a, b) => b.at.getTime() - a.at.getTime())
         .slice(0, EMAIL_LIST_LIMIT)
-        .map(({ id, direction, at, subject, needsReply }): CustomerEmail => ({ id, direction, at, subject, needsReply: !!needsReply })),
+        .map(({ id, direction, at, subject, needsReply, preview, aiSummary, intent, sentiment, mailbox }): CustomerEmail => ({
+          id,
+          direction,
+          at,
+          subject,
+          needsReply: !!needsReply,
+          ...(preview ? { preview } : {}),
+          ...(aiSummary ? { aiSummary } : {}),
+          ...(intent ? { intent } : {}),
+          ...(sentiment ? { sentiment } : {}),
+          ...(mailbox ? { mailbox } : {}),
+        })),
       followUps: [...followUps]
         .sort((a, b) => a.dueDate.getTime() - b.dueDate.getTime())
         .map((f): CustomerFollowUp => ({ ...f, due: f.status === 'pending' && f.dueDate.getTime() <= now.getTime() })),

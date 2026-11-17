@@ -5,6 +5,8 @@ import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { JwtPayload } from '../auth/jwt-payload.interface';
 import { AnalyticsDashboardService } from './analytics-dashboard.service';
+import { BusinessesOverviewService } from './businesses-overview.service';
+import { GetBusinessesListQueryDto, GetBusinessesOverviewQueryDto } from './dto/get-businesses-overview-query.dto';
 import { ScopeInfo } from './analytics-dashboard.types';
 import { GetAnalyticsOverviewQueryDto } from './dto/get-analytics-overview-query.dto';
 import { GetPipelineByMonthQueryDto } from './dto/get-pipeline-by-month-query.dto';
@@ -29,7 +31,26 @@ import { holdsPermission, isPermissionManaged, Permission } from '../common/perm
 @Permission(['analytics', 'dashboard'])
 @Controller('analytics-dashboard')
 export class AnalyticsDashboardController {
-  constructor(private analyticsDashboardService: AnalyticsDashboardService) {}
+  constructor(
+    private analyticsDashboardService: AnalyticsDashboardService,
+    private businessesOverview: BusinessesOverviewService,
+  ) {}
+
+  // The Main Account owner's Dashboard: every business side by side, each in its own
+  // currency, without switching into any. BusinessesOverviewService refuses anyone
+  // else (TeamScopeService's rule: the Main Account owner, in the Main Account).
+  @Get('businesses')
+  @Roles('owner')
+  businesses(@CurrentUser() user: JwtPayload, @Query() query: GetBusinessesOverviewQueryDto) {
+    return this.businessesOverview.overview(user, query.dateFrom, query.dateTo);
+  }
+
+  /** The deals, quotations or waiting emails behind one of those numbers — one business, or all of them. */
+  @Get('businesses/list')
+  @Roles('owner')
+  businessesList(@CurrentUser() user: JwtPayload, @Query() query: GetBusinessesListQueryDto) {
+    return this.businessesOverview.list(user, query.kind, query);
+  }
 
   @Get('overview')
   // agent_user added for Agent Activity's team-wide view — self-scoped only

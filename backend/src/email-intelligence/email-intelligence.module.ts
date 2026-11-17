@@ -69,6 +69,6 @@ import { EmailIntelligenceService } from './email-intelligence.service';
   // the new HomeDashboardModule, which sits above both this module and
   // CrmModule — safe since HomeDashboardModule imports both but neither of
   // them imports it back.
-  exports: [EmailIntelligenceService],
+  exports: [EmailIntelligenceService, EmailIntelligenceSyncService],
 })
 export class EmailIntelligenceModule {}

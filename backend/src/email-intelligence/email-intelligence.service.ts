@@ -10,7 +10,7 @@ import { ReservationService } from '../billing/reservation.service';
 import { correlateSingleEmail, EmailCorrelationContext } from '../crm/customer-grouping.util';
 import { EmailSlaService } from '../email-sla/email-sla.service';
 import { periodToDateRange } from '../common/period.util';
-import { INBOX_BOXES, InboxBox, inboxBoxMatch, RELEVANT_EMAIL_INTENTS } from './email-inbox-boxes';
+import { ENQUIRY_INTENTS, INBOX_BOXES, InboxBox, inboxBoxMatch, RELEVANT_EMAIL_INTENTS } from './email-inbox-boxes';
 import { bareAddress, classifyEmailDeterministically, DeterministicPreFilterMatch, UNMISTAKABLE_RULES } from './email-preclassification.util';
 import {
   deriveCategory,
@@ -235,6 +235,22 @@ function intentLabel(intent: string): string {
 
 // A follow-up draft still "generating" after this long was interrupted, not slow.
 const STALE_DRAFT_MS = 3 * 60 * 1000;
+
+/** The Main Account's view of one business's inbox (see businessInboxCounts). */
+export type BusinessInboxView = 'waiting' | 'overdue' | 'new_enquiries';
+
+export interface BusinessInboxRow {
+  id: string;
+  subject: string;
+  // The customer: the Reply-To of a website form, else the sender.
+  from: string;
+  receivedAt: Date;
+  mailbox: string;
+  intent: string;
+  // The AI's reading of it, once it has read it.
+  reason?: string;
+  urgent: boolean;
+}
 
 @Injectable()
 export class EmailIntelligenceService {
@@ -1071,6 +1087,75 @@ export class EmailIntelligenceService {
       ...userFilter,
       intent: intent && RELEVANT_EMAIL_INTENTS.includes(intent) ? intent : { $in: RELEVANT_EMAIL_INTENTS },
       receivedAt: { $gte: start, $lt: end },
+    };
+  }
+
+  // ---- Main Account: every business at a glance (analytics-dashboard/businesses-overview) ----
+  //
+  // A whole business's inbox as it stands now, every mailbox of it: the emails
+  // still owed a reply (needsResponseMatch — the Inbox's "New enquiries" and
+  // "To reply" boxes together), those waiting over 24 hours, and the new
+  // enquiries among them. Not tied to a period: what is waiting is waiting.
+
+  private businessInboxMatch(organizationId: string, which: BusinessInboxView, now: Date): Record<string, unknown> {
+    const dayAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+    return {
+      organizationId,
+      ...(which === 'overdue' ? { receivedAt: { $lte: dayAgo } } : {}),
+      ...(which === 'new_enquiries' ? { intent: { $in: ENQUIRY_INTENTS } } : {}),
+      ...needsResponseMatch(),
+    };
+  }
+
+  /** One query: waiting for a reply, of which over 24 hours, of which new enquiries. */
+  async businessInboxCounts(organizationId: string, now = new Date()): Promise<{ waiting: number; overdue: number; newEnquiries: number }> {
+    const dayAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+    const [row] = await this.itemModel
+      .aggregate<{ waiting: number; overdue: number; newEnquiries: number }>([
+        { $match: this.businessInboxMatch(organizationId, 'waiting', now) },
+        {
+          $group: {
+            _id: null,
+            waiting: { $sum: 1 },
+            overdue: { $sum: { $cond: [{ $lte: ['$receivedAt', dayAgo] }, 1, 0] } },
+            newEnquiries: { $sum: { $cond: [{ $in: ['$intent', ENQUIRY_INTENTS] }, 1, 0] } },
+          },
+        },
+      ])
+      .exec();
+    return { waiting: row?.waiting ?? 0, overdue: row?.overdue ?? 0, newEnquiries: row?.newEnquiries ?? 0 };
+  }
+
+  /** The emails behind those numbers, longest waiting first. */
+  async businessInboxList(organizationId: string, which: BusinessInboxView, limit: number, now = new Date()): Promise<{ items: BusinessInboxRow[]; total: number }> {
+    const match = this.businessInboxMatch(organizationId, which, now);
+    const [docs, total] = await Promise.all([
+      this.itemModel
+        .find(match)
+        .sort({ receivedAt: 1 })
+        .limit(limit)
+        .select({ subject: 1, fromAddress: 1, fromName: 1, replyToAddresses: 1, receivedAt: 1, mailboxEmail: 1, intent: 1, reason: 1, analysisState: 1, urgency: 1 })
+        .lean<Record<string, any>[]>()
+        .exec(),
+      this.itemModel.countDocuments(match).exec(),
+    ]);
+    return {
+      total,
+      items: docs.map((d) => {
+        const from = String(d.fromAddress ?? '').toLowerCase();
+        // A website form sends from a relay address; the customer is in Reply-To.
+        const replyTo = (d.replyToAddresses as string[] | undefined)?.find((a) => a && a.toLowerCase() !== from);
+        return {
+          id: d._id.toString(),
+          subject: d.subject || '(no subject)',
+          from: replyTo ?? (d.fromName?.trim() || d.fromAddress || 'Unknown sender'),
+          receivedAt: d.receivedAt,
+          mailbox: d.mailboxEmail,
+          intent: d.intent,
+          reason: d.analysisState === 'pending' ? undefined : d.reason,
+          urgent: d.urgency === 'high' || d.urgency === 'critical',
+        };
+      }),
     };
   }
 

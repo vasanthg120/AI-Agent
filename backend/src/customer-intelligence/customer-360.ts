@@ -288,8 +288,7 @@ export function classifyRelationship(input: ThreeSixtyInput): Relationship {
   if (missedRecent.length) risk.push(`${plural(missedRecent.length, 'missed call')} from them in the last two weeks.`);
   const lastScored = [...input.calls].filter((c) => c.sentiment).sort((a, b) => b.at.getTime() - a.at.getTime())[0];
   if (lastScored?.sentiment && /neg/i.test(lastScored.sentiment)) risk.push(`Their latest call (${shortDate(lastScored.at)}) was negative in tone.`);
-  const riskSignals = input.calls.filter((c) => days(c.at, now) <= 60).flatMap((c) => c.riskSignals);
-  if (riskSignals.length) risk.push(`Risk on a recent call: “${riskSignals[0]}”.`);
+  // Not the AI Coach's "risk moments": those grade the salesperson's handling of the call, not the customer.
   const atRisk = risk.length > 0 && stage !== 'lost';
   if (atRisk) badges.push({ key: 'at_risk', label: 'At risk', tone: 'danger', reasons: risk });
 

@@ -90,6 +90,8 @@ describe('Customer 360° rules', () => {
     expect(reasons).toMatch(/1 missed call/);
     expect(reasons).toMatch(/negative in tone/);
     expect(classifyRelationship(base()).atRisk).toBe(false);
+    // The AI Coach's "risk moments" grade the salesperson, not the customer: they never make a customer at risk.
+    expect(classifyRelationship(base({ calls: [call({ riskSignals: ['Salesperson trailed off mid-sentence'] })] })).atRisk).toBe(false);
   });
 
   it('high value by real revenue among the business’s paying customers, never by quotations', () => {
@@ -242,7 +244,46 @@ describe('Customer 360° (real Mongo)', () => {
         clientDetails: client,
         createdAt: at,
       });
-      await connection.collection('crm_quotes').insertMany([quote(`${PREFIX}-Q1`, 50000, daysAgo(200, new Date()), 'approved'), quote(`${PREFIX}-Q2`, 70000, daysAgo(40, new Date()), 'approved'), quote(`${PREFIX}-Q3`, 30000, daysAgo(6, new Date()), 'awaiting_response')]);
+      const quoteIds = (
+        await connection
+          .collection('crm_quotes')
+          .insertMany([quote(`${PREFIX}-Q1`, 50000, daysAgo(200, new Date()), 'approved'), quote(`${PREFIX}-Q2`, 70000, daysAgo(40, new Date()), 'approved'), quote(`${PREFIX}-Q3`, 30000, daysAgo(6, new Date()), 'awaiting_response')])
+      ).insertedIds;
+      // The CRM's history of their quotations.
+      await connection.collection('crm_activities').insertMany([
+        { organizationId: orgId, entity: 'quote', entityId: quoteIds[2].toString(), kind: 'sent', occurredAt: daysAgo(5, new Date()), value: 30000, crmOwnerLabel: 'Priya (sales)', dedupeKey: `${PREFIX}-${orgId}-a1` },
+        { organizationId: orgId, entity: 'quote', entityId: quoteIds[0].toString(), kind: 'accepted', occurredAt: daysAgo(190, new Date()), value: 50000, dedupeKey: `${PREFIX}-${orgId}-a2` },
+        // Written by the CRM sync without a business id — only the CRM connection it came from (most real records are).
+        { entity: 'quote', entityId: quoteIds[1].toString(), kind: 'created', occurredAt: daysAgo(41, new Date()), value: 70000, dataSourceId: source, dedupeKey: `${PREFIX}-${orgId}-a3` },
+      ]);
+      // A website enquiry form's email: from the form's own address, the customer only in Reply-To — read by the AI.
+      await connection.collection('email_intelligence_items').insertOne({
+        organizationId: orgId,
+        userId: ownerId,
+        mailboxEmail: 'enquiry@acme-test.in',
+        externalMessageId: `${PREFIX}-${orgId}-mail`,
+        receivedAt: daysAgo(2, new Date()),
+        subject: 'New Website Enquiry | Uniforms',
+        fromAddress: 'forms@relay-test.in',
+        replyToAddresses: [email],
+        toAddresses: ['enquiry@acme-test.in'],
+        bodyPreview: `Need 300 polos before Diwali, call me on ${phone} or write to ${email}`,
+        isRead: false,
+        importance: 'normal',
+        matchConfidence: 'none',
+        intent: 'quotation_request',
+        priority: 'high',
+        urgency: 'high',
+        sentiment: 'positive',
+        reason: 'Wants a quote for 300 polos before Diwali.',
+        recommendedAction: 'Send the quote',
+        shouldDraft: true,
+        fromRole: 'customer',
+        expectedNextAction: 'company_reply',
+        status: 'pending',
+        deterministicInput: { source: 'test' },
+        result: { source: 'test' },
+      });
       const session = (await connection.collection('call_sessions').insertOne({ organizationId: orgId, userId: ownerId, status: 'ended', source: 'live', creditRequestId: `${PREFIX}-${orgId}`, createdAt: daysAgo(3, new Date()), headline: 'Wants 300 polos, price higher than current supplier', sentiment: 'positive', overallScore: 7.5, summaryPoints: ['Asked for 300 polos'], keyMoments: [{ momentType: 'buying_signal', text: 'Ready to order this month' }], followUpActions: [{ text: 'Send revised quote', priority: 'high', owner: 'salesperson' }] })).insertedId.toString();
       await connection.collection('plivo_calls').insertMany([
         { organizationId: orgId, userId: ownerId, direction: 'outbound', customerNumber: `+91${phone.replace(/\D/g, '').slice(-10)}`, status: 'completed', durationSeconds: 420, answeredAt: daysAgo(3, new Date()), sessionId: session, createdAt: daysAgo(3, new Date()) },
@@ -281,9 +322,10 @@ describe('Customer 360° (real Mongo)', () => {
 
   afterAll(async () => {
     const orgIds = [main, sub, stranger].map((o) => o.toString());
-    for (const name of ['crm_data_sources', 'crm_quotes', 'call_sessions', 'plivo_calls', 'customer_intelligence_actions', 'customer_health_snapshots', 'customer_intelligence_reports', 'customer_intelligence_settings']) {
+    for (const name of ['crm_data_sources', 'crm_quotes', 'crm_activities', 'email_intelligence_items', 'call_sessions', 'plivo_calls', 'customer_intelligence_actions', 'customer_health_snapshots', 'customer_intelligence_reports', 'customer_intelligence_settings']) {
       await connection.collection(name).deleteMany({ organizationId: { $in: orgIds } });
     }
+    await connection.collection('crm_activities').deleteMany({ dedupeKey: { $regex: `^${PREFIX}` } });
     await connection.collection('organizations').deleteMany({ prefix: PREFIX });
     await connection.close();
   });
@@ -359,6 +401,33 @@ describe('Customer 360° (real Mongo)', () => {
     if (!snap.found || snap.restricted) throw new Error('expected a full snapshot');
     expect(snap.nextSteps.length).toBeGreaterThan(0);
     expect(snap.nextSteps.length).toBeLessThanOrEqual(2);
+    // "Show more": a few items each — quotations, past calls, why the badges apply.
+    expect(snap.details.quotes.map((q) => q.number)).toEqual(expect.arrayContaining([`${PREFIX}-Q3`]));
+    expect(snap.details.quotes.length).toBeLessThanOrEqual(3);
+    expect(snap.details.calls.length).toBe(2);
+    expect(snap.details.why[0]).toMatchObject({ label: 'Repeat customer', reasons: [expect.stringMatching(/2 completed orders/), expect.any(String)] });
+    expect(snap.details.contact.email).toBe('ravi@acme-uniforms-test.in');
+    // The website form's email reaches them through Reply-To, with the AI's reading of it.
+    expect(snap.details.emails).toEqual([
+      expect.objectContaining({ subject: 'New Website Enquiry | Uniforms', aiSummary: 'Wants a quote for 300 polos before Diwali.', intent: 'quotation_request', mailbox: 'enquiry@acme-test.in' }),
+    ]);
+    expect(snap.unansweredEmails).toBe(1);
+    // The CRM side: what happened to their quotations.
+    expect(snap.details.crm.history.map((h) => h.text)).toEqual([
+      expect.stringMatching(/Quotation .*-Q3 sent to the customer · 30,000 · by Priya/),
+      expect.stringMatching(/-Q2 created/),
+      expect.stringMatching(/-Q1 accepted/),
+    ]);
+    expect(snap.ai).toMatchObject({ status: 'none', canRun: true, reads: { emails: 1, calls: 2, crm: 3 } });
+
+    // Opened from that recorded call in the library: the same customer, without the call itself in their history.
+    const session = await connection.collection('call_sessions').findOne({ organizationId: sub.toString() });
+    const fromCall = await service.snapshot(ownerOf(sub), { sessionId: session!._id.toString() });
+    if (!fromCall.found || fromCall.restricted) throw new Error('expected a full snapshot from the call');
+    expect(fromCall.customer.name).toBe('Ravi Kumar');
+    expect(fromCall.lastCall).toBeUndefined();
+    expect(fromCall.details.calls.map((c) => c.sessionId)).not.toContain(session!._id.toString());
+    expect(fromCall.details.calls).toHaveLength(1);
     // A number nobody has: nothing to show.
     expect(await service.snapshot(ownerOf(sub), { phone: '+91 90000 00001' })).toEqual({ found: false });
     // A salesperson who isn't this customer's rep sees that a customer exists, nothing more (the Dialer's rule).
@@ -366,7 +435,44 @@ describe('Customer 360° (real Mongo)', () => {
     expect(await service.snapshot(salesperson, { phone: '9840012345' })).toEqual({ found: true, restricted: true });
   });
 
+  it('Call Copilot writes the AI profile when the details open — reading emails and CRM history, never contact details — once', async () => {
+    http.post.mockReturnValue(
+      of({
+        data: {
+          summary: 'Repeat buyer asking for 300 polos before Diwali.',
+          buyingIntent: { level: 'high', reason: 'Asked for a quote on the website form.', evidence: ['E1'] },
+          sentiment: { overall: 'positive', trend: 'stable', reason: 'Warm.', evidence: ['E1'] },
+          behaviours: [],
+          preferences: [],
+          painPoints: [],
+          competitors: [],
+          insights: [{ text: 'Wants 300 polos before Diwali.', basis: 'fact', evidence: ['E1'] }],
+          recommendations: [],
+        },
+      }),
+    );
+    const snap = await service.analyzeForCall(ownerOf(sub), { phone: '+91 98400 12345' }, false);
+    if (!snap.found || snap.restricted) throw new Error('expected a snapshot');
+    expect(snap.ai.status).toBe('ready');
+    expect(snap.ai.report?.summary).toMatch(/300 polos/);
+    expect(Object.values(snap.ai.sources).length).toBeGreaterThan(0);
+    // What the AI read: the email's text and the AI's reading of it, the CRM history — and no phone number or address.
+    const sent = JSON.stringify(http.post.mock.calls[0][1]);
+    expect(sent).toMatch(/Wants a quote for 300 polos/);
+    expect(sent).toMatch(/sent to the customer/);
+    expect(sent).not.toMatch(/acme-uniforms-test\.in|98400/);
+    expect(sent).toMatch(/\[phone\]/);
+    // Opened again with nothing new: the saved profile, no second charge.
+    await service.analyzeForCall(ownerOf(sub), { phone: '+91 98400 12345' }, false);
+    expect(reservations.reserve).toHaveBeenCalledTimes(1);
+    // A salesperson who isn't their rep can't have it written.
+    const salesperson = { sub: new Types.ObjectId().toString(), email: 's@example.com', organizationId: sub.toString(), roles: ['user'] } as never;
+    await expect(service.analyzeForCall(salesperson, { phone: '9840012345' }, false)).rejects.toThrow(ForbiddenException);
+  });
+
   it('the AI report: billed, checked against its evidence, and not re-run while nothing changed', async () => {
+    // Start without a saved report (the test before this one wrote one for this customer).
+    await connection.collection('customer_intelligence_reports').deleteMany({ organizationId: sub.toString() });
     const { results } = await service.search(ownerOf(main), 'ravi@acme-uniforms-test.in');
     const id = results[0].id;
     http.post.mockReturnValue(

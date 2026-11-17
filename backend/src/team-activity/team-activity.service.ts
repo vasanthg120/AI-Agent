@@ -1,9 +1,10 @@
-import { Injectable } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, NotFoundException, Optional } from '@nestjs/common';
 import { InjectConnection } from '@nestjs/mongoose';
 import { Connection, Types, isValidObjectId } from 'mongoose';
 import { JwtPayload } from '../auth/jwt-payload.interface';
 import { businessDayOf } from '../common/business-day';
 import { EmailIntelligenceService, TeamEmailMetric } from '../email-intelligence/email-intelligence.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import { PeriodRange, TeamPeriod, periodRange, shiftDay } from './team-period';
 import { ScopedBusiness, TeamPerson, TeamScope, TeamScopeService } from './team-scope.service';
 
@@ -43,9 +44,12 @@ export interface ActivityCounts {
   scoredCalls: number;
   // Mean AI Coach score (out of 10) of the scored calls; null when none was scored.
   avgCallScore: number | null;
-  // Follow-ups: email follow-up reminders and customer tasks given to them.
+  // Tasks & follow-ups: email follow-up reminders and tasks given to them
+  // (on a customer, a job, a deal, or straight from Agent Activity).
   followUpsCompleted: number;
+  // Not done yet, now; of which started (a task they marked "In progress") and past their day.
   followUpsPending: number;
+  followUpsInProgress: number;
   followUpsOverdue: number;
 }
 
@@ -58,6 +62,7 @@ export interface TeamActivityPersonRow extends ActivityCounts {
   role: string;
   active: boolean;
   mainAccountMember: boolean;
+  department?: string;
   businessId: string;
   businessName: string;
   currency: string;
@@ -98,7 +103,188 @@ export interface TeamActivityOverview {
   };
   people: TeamActivityPersonRow[];
   unattributedDeals: UnattributedDeals;
+  // Who may need a hand, and why — for someone who sees the team (empty otherwise).
+  attention: SupportItem[];
+  // Each team (Settings → Users → Department) of each business, once anyone has one.
+  departments: TeamDepartment[];
   generatedAt: Date;
+}
+
+/** One reason someone may need support, in a line, with the list that shows it. */
+export interface SupportItem {
+  personId: string;
+  personName: string;
+  businessId: string;
+  businessName: string;
+  severity: 'warning' | 'info';
+  text: string;
+  list?: TeamListKind;
+  callFilter?: CallFilter;
+}
+
+/** A department's people added up (a business's people with no department form "No department"). */
+export interface TeamDepartment {
+  key: string;
+  name: string;
+  businessId: string;
+  businessName: string;
+  people: number;
+  activePeople: number;
+  followUpsCompleted: number;
+  followUpsPending: number;
+  followUpsInProgress: number;
+  followUpsOverdue: number;
+  emailsReplied: number;
+  emailsMissed: number;
+  calls: number;
+  callsMissed: number;
+  avgCallScore: number | null;
+  dealsWon: number;
+  // People needing support (see SupportItem).
+  needSupport: number;
+}
+
+/** A task as the lists and the To-Do page show it. */
+export interface TeamTaskItem {
+  id: string;
+  source: 'task';
+  employeeId: string;
+  title: string;
+  note?: string;
+  dueDate?: Date;
+  status: 'pending' | 'done';
+  // Pending and started by its person.
+  inProgress: boolean;
+  startedAt?: Date;
+  overdue: boolean;
+  completedAt?: Date;
+  dealId?: string;
+  priority?: 'high';
+  // Who gave it (a manager in Agent Activity, the person who added it to a customer, or the deal AI).
+  givenBy?: string;
+  // Where it was given: straight to the person, on a customer, a job, or by the deal AI.
+  origin: 'team' | 'customer' | 'job' | 'deal';
+  // Whether the person looking may move it along.
+  editable: boolean;
+  at: Date;
+  personId?: string;
+  personName?: string;
+  businessId?: string;
+  businessName?: string;
+}
+
+export interface GiveTaskInput {
+  organizationId?: string;
+  assigneeId: string;
+  title: string;
+  note?: string;
+  dueDate?: string;
+  priority?: 'high' | 'normal';
+}
+
+export interface TaskChange {
+  status?: 'todo' | 'in_progress' | 'done';
+  // A manager only; null clears it.
+  dueDate?: string | null;
+}
+
+function toTaskItem(t: Doc, now: Date, editable: boolean): TeamTaskItem {
+  const due: Date | undefined = t.dueDate instanceof Date ? t.dueDate : undefined;
+  const done = t.status === 'done';
+  const createdAt: Date = t.createdAt instanceof Date ? t.createdAt : now;
+  return {
+    id: t._id.toString(),
+    source: 'task',
+    employeeId: String(t.assigneeId ?? ''),
+    title: t.title ?? 'Task',
+    ...(typeof t.note === 'string' && t.note ? { note: t.note } : {}),
+    dueDate: due,
+    status: done ? 'done' : 'pending',
+    inProgress: !done && t.startedAt instanceof Date,
+    startedAt: !done && t.startedAt instanceof Date ? t.startedAt : undefined,
+    overdue: !done && !!due && due.getTime() < now.getTime(),
+    completedAt: t.completedAt instanceof Date ? t.completedAt : undefined,
+    dealId: typeof t.dealId === 'string' ? t.dealId : undefined,
+    ...(t.priority === 'high' ? { priority: 'high' as const } : {}),
+    givenBy: t.source === 'deal-ai' ? 'Deal AI' : typeof t.createdByName === 'string' ? t.createdByName : undefined,
+    origin: t.source === 'team' ? 'team' : t.source === 'deal-ai' ? 'deal' : t.jobId ? 'job' : t.customerId ? 'customer' : 'team',
+    editable,
+    at: done ? (t.completedAt ?? createdAt) : (due ?? createdAt),
+  };
+}
+
+const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
+
+// Who may need a hand, and why, in a line each — counted from the same figures as
+// the table, never guessed. Only people of the business's own staff with a login
+// switched on; the Main Account owner's own records, and the person looking, are left out.
+function needsSupport(people: TeamActivityPersonRow[], period: TeamPeriod, viewer: { id: string; businessId: string }): SupportItem[] {
+  const staff = people.filter((p) => !p.mainAccountMember && p.active && !(p.userId === viewer.id && p.businessId === viewer.businessId));
+  const items: SupportItem[] = [];
+  for (const p of staff) {
+    const push = (severity: SupportItem['severity'], text: string, list?: TeamListKind, callFilter?: CallFilter) =>
+      items.push({ personId: p.userId, personName: p.name, businessId: p.businessId, businessName: p.businessName, severity, text, list, callFilter });
+    if (p.followUpsOverdue > 0) push('warning', `${plural(p.followUpsOverdue, 'task')} past the day it was due.`, 'follow_ups');
+    if (p.emailsMissed > 0) push('warning', `${plural(p.emailsMissed, 'customer email')} went 24 hours without a reply.`, 'emails_missed');
+    if (p.scoredCalls >= 3 && p.avgCallScore !== null && p.avgCallScore < 5)
+      push('warning', `Calls score ${p.avgCallScore}/10 on average over ${p.scoredCalls} — a coaching session could help.`, 'calls', 'scored');
+    if (p.callsMissed >= 3) push('info', `${plural(p.callsMissed, 'missed call')}.`, 'calls', 'missed');
+    // Much more open work than the others (twice their average, and at least five things).
+    const others = staff.filter((o) => o !== p);
+    const othersAverage = others.length ? others.reduce((s, o) => s + o.followUpsPending, 0) / others.length : null;
+    if (othersAverage !== null && p.followUpsPending >= 5 && p.followUpsPending >= 2 * Math.max(othersAverage, 1))
+      push('info', `${p.followUpsPending} open tasks — more than twice the others’ average; may need help or a hand-over.`, 'follow_ups');
+    // Nothing at all (not judged on "today", which may have barely begun).
+    if (period !== 'today' && !ACTIVITY_FIELDS.some((f) => (p as unknown as RawCounts)[f] > 0))
+      push('info', 'Nothing recorded in this period — no calls, emails, deals or finished tasks.');
+  }
+  const rank = { warning: 0, info: 1 } as const;
+  return items.sort((a, b) => rank[a.severity] - rank[b.severity] || a.personName.localeCompare(b.personName));
+}
+
+function departmentTotals(people: TeamActivityPersonRow[], support: SupportItem[]): TeamDepartment[] {
+  const staff = people.filter((p) => !p.mainAccountMember);
+  if (!staff.some((p) => p.department)) return [];
+  const needing = new Set(support.map((s) => `${s.businessId}|${s.personId}`));
+  const groups = new Map<string, TeamDepartment & { scoreSum: number; scored: number }>();
+  for (const p of staff) {
+    const key = `${p.businessId}|${p.department ?? ''}`;
+    const g =
+      groups.get(key) ??
+      ({
+        key,
+        name: p.department ?? 'No department',
+        businessId: p.businessId,
+        businessName: p.businessName,
+        people: 0,
+        activePeople: 0,
+        followUpsCompleted: 0,
+        followUpsPending: 0,
+        followUpsInProgress: 0,
+        followUpsOverdue: 0,
+        emailsReplied: 0,
+        emailsMissed: 0,
+        calls: 0,
+        callsMissed: 0,
+        avgCallScore: null,
+        dealsWon: 0,
+        needSupport: 0,
+        scoreSum: 0,
+        scored: 0,
+      } as TeamDepartment & { scoreSum: number; scored: number });
+    g.people += 1;
+    if (ACTIVITY_FIELDS.some((f) => (p as unknown as RawCounts)[f] > 0)) g.activePeople += 1;
+    for (const f of ['followUpsCompleted', 'followUpsPending', 'followUpsInProgress', 'followUpsOverdue', 'emailsReplied', 'emailsMissed', 'calls', 'callsMissed', 'dealsWon'] as const) g[f] += p[f];
+    if (p.avgCallScore !== null) {
+      g.scoreSum += p.avgCallScore * p.scoredCalls;
+      g.scored += p.scoredCalls;
+    }
+    if (needing.has(`${p.businessId}|${p.userId}`)) g.needSupport += 1;
+    groups.set(key, g);
+  }
+  return [...groups.values()]
+    .map(({ scoreSum, scored, ...g }) => ({ ...g, avgCallScore: scored ? Math.round((scoreSum / scored) * 10) / 10 : null }))
+    .sort((a, b) => a.businessName.localeCompare(b.businessName) || Number(a.name === 'No department') - Number(b.name === 'No department') || a.name.localeCompare(b.name));
 }
 
 export const TEAM_LIST_KINDS = [
@@ -165,6 +351,9 @@ export interface TeamCallRow {
 }
 
 const LIST_LIMIT = 200;
+// The tasks people are given: on a customer, a job or a deal (customer-intelligence, deal-insight), or straight
+// from Agent Activity (giveTask). One collection, one task system.
+const TASKS = 'customer_tasks';
 /** A live call left open by a closed browser tab would otherwise count for days. */
 const MAX_LIVE_CALL_SECONDS = 4 * 60 * 60;
 /** Daily trend points at most; a longer range is grouped by week. */
@@ -208,6 +397,7 @@ function emptyRaw(): RawCounts {
     scoredCalls: 0,
     followUpsCompleted: 0,
     followUpsPending: 0,
+    followUpsInProgress: 0,
     followUpsOverdue: 0,
     scoreSum: 0,
     timedCalls: 0,
@@ -272,6 +462,8 @@ export class TeamActivityService {
     @InjectConnection() private connection: Connection,
     private scopes: TeamScopeService,
     private emails: EmailIntelligenceService,
+    // Tells someone they were given a task (the bell). Optional so the figures can be built without it.
+    @Optional() private notifications?: NotificationsService,
   ) {}
 
   private col(name: string) {
@@ -304,6 +496,7 @@ export class TeamActivityService {
     const owed = counts.emailsReplied + counts.emailsNotReplied + counts.emailsMissed;
     const followUps = counts.followUpsCompleted + counts.followUpsPending;
     const currencies = new Set(results.map((r) => r.business.currency));
+    const attention = scope.team && !query.userId ? needsSupport(people, query.period, { id: caller.sub, businessId: caller.organizationId }) : [];
     return {
       team: scope.team,
       acrossBusinesses: scope.acrossBusinesses,
@@ -330,6 +523,8 @@ export class TeamActivityService {
       },
       people,
       unattributedDeals: { total: byCrmOwner.reduce((sum, r) => sum + r.count, 0), byCrmOwner },
+      attention,
+      departments: scope.team && !query.userId ? departmentTotals(people, attention) : [],
       generatedAt: now,
     };
   }
@@ -378,6 +573,8 @@ export class TeamActivityService {
       for (const [userId, c] of source) {
         add(userId, 'followUpsCompleted', c.completed);
         add(userId, 'followUpsPending', c.pending);
+        // Only a task can be started; an email reminder is pending or done.
+        add(userId, 'followUpsInProgress', (c as { inProgress?: number }).inProgress ?? 0);
         add(userId, 'followUpsOverdue', c.overdue);
       }
     }
@@ -407,6 +604,7 @@ export class TeamActivityService {
         role: roleOf(person),
         active: person.active,
         mainAccountMember: person.mainAccountMember,
+        department: person.department,
         businessId: business.id,
         businessName: business.name,
         currency: business.currency,
@@ -491,22 +689,24 @@ export class TeamActivityService {
   // ---- follow-ups (customer tasks; email reminders are EmailIntelligenceService's) ----------
 
   private async taskCounts(organizationId: string, range: PeriodRange, ids: string[], now: Date) {
-    const counts = new Map<string, { completed: number; pending: number; overdue: number }>();
+    const counts = new Map<string, { completed: number; pending: number; inProgress: number; overdue: number }>();
     if (ids.length === 0) return counts;
-    const rows = await this.col('customer_tasks')
-      .aggregate<{ _id: string; completed: number; pending: number; overdue: number }>([
+    const rows = await this.col(TASKS)
+      .aggregate<{ _id: string; completed: number; pending: number; inProgress: number; overdue: number }>([
         { $match: { organizationId, assigneeId: { $in: ids }, $or: [{ status: 'open' }, { status: 'done', completedAt: { $gte: range.start, $lt: range.end } }] } },
         {
           $group: {
             _id: '$assigneeId',
             completed: { $sum: { $cond: [{ $eq: ['$status', 'done'] }, 1, 0] } },
             pending: { $sum: { $cond: [{ $eq: ['$status', 'open'] }, 1, 0] } },
+            // Started: an open task its person marked "In progress" (startedAt).
+            inProgress: { $sum: { $cond: [{ $and: [{ $eq: ['$status', 'open'] }, { $gt: ['$startedAt', null] }] }, 1, 0] } },
             overdue: { $sum: { $cond: [{ $and: [{ $eq: ['$status', 'open'] }, { $lt: [{ $ifNull: ['$dueDate', now] }, now] }] }, 1, 0] } },
           },
         },
       ])
       .toArray();
-    for (const r of rows) counts.set(String(r._id), { completed: r.completed, pending: r.pending, overdue: r.overdue });
+    for (const r of rows) counts.set(String(r._id), { completed: r.completed, pending: r.pending, inProgress: r.inProgress, overdue: r.overdue });
     return counts;
   }
 
@@ -691,7 +891,7 @@ export class TeamActivityService {
         items.push(...deals.items);
         total += deals.total;
       } else if (kind === 'follow_ups') {
-        const [reminders, tasks] = await Promise.all([this.emails.teamFollowUpList(business.id, range.start, range.end, ids, LIST_LIMIT, now), this.taskList(business, range, ids, now)]);
+        const [reminders, tasks] = await Promise.all([this.emails.teamFollowUpList(business.id, range.start, range.end, ids, LIST_LIMIT, now), this.taskList(business, range, ids, now, (assignee) => scope.team || assignee === scope.selfId)]);
         items.push(
           ...reminders.items.map((r) => ({ ...r, source: 'email', at: r.status === 'done' ? (r.completedAt ?? r.dueDate) : r.dueDate, ...who(r.employeeId) })),
           ...tasks.map((t) => ({ ...t, ...who(t.employeeId) })),
@@ -798,32 +998,157 @@ export class TeamActivityService {
     };
   }
 
-  private async taskList(business: ScopedBusiness, range: PeriodRange, ids: string[], now: Date) {
+  private async taskList(business: ScopedBusiness, range: PeriodRange, ids: string[], now: Date, canChange: (assigneeId: string) => boolean) {
     if (ids.length === 0) return [];
-    const docs = await this.col('customer_tasks')
+    const docs = await this.col(TASKS)
       .find(
         { organizationId: business.id, assigneeId: { $in: ids }, $or: [{ status: 'open' }, { status: 'done', completedAt: { $gte: range.start, $lt: range.end } }] },
-        { projection: { title: 1, dueDate: 1, status: 1, assigneeId: 1, completedAt: 1, createdAt: 1, dealId: 1 } },
+        {
+          projection: {
+            title: 1,
+            dueDate: 1,
+            status: 1,
+            assigneeId: 1,
+            completedAt: 1,
+            createdAt: 1,
+            startedAt: 1,
+            dealId: 1,
+            customerId: 1,
+            jobId: 1,
+            source: 1,
+            priority: 1,
+            note: 1,
+            createdByName: 1,
+          },
+        },
       )
       .sort({ dueDate: 1 })
       .limit(LIST_LIMIT)
       .toArray();
-    return docs.map((t) => {
-      const due: Date | undefined = t.dueDate instanceof Date ? t.dueDate : undefined;
-      const done = t.status === 'done';
-      return {
-        id: t._id.toString(),
-        source: 'task',
-        employeeId: String(t.assigneeId),
-        title: t.title ?? 'Task',
-        dueDate: due,
-        status: done ? 'done' : 'pending',
-        overdue: !done && !!due && due.getTime() < now.getTime(),
-        completedAt: t.completedAt,
-        dealId: typeof t.dealId === 'string' ? t.dealId : undefined,
-        at: done ? (t.completedAt ?? t.createdAt) : (due ?? t.createdAt),
-      };
-    });
+    return docs.map((t) => toTaskItem(t, now, canChange(String(t.assigneeId))));
+  }
+
+  // ---- giving and moving tasks ---------------------------------------------------------------
+
+  /**
+   * Gives someone a task straight from Agent Activity — the same task records as a
+   * customer's or a deal's (one task system), with no customer attached. Only someone
+   * who sees that person's work may: an owner or admin of their business, their store's
+   * manager, or the Main Account owner.
+   */
+  async giveTask(caller: JwtPayload, input: GiveTaskInput, now = new Date()): Promise<TeamTaskItem> {
+    const title = input.title?.trim();
+    if (!title) throw new BadRequestException('Give the task a title.');
+    const scope = await this.scopes.resolve(caller);
+    const organizationId = input.organizationId && input.organizationId !== 'all' ? input.organizationId : caller.organizationId;
+    const [business] = this.scopes.pick(scope, organizationId);
+    if (!scope.team || !(await this.scopes.canSee(caller, business.id, input.assigneeId))) throw new ForbiddenException('You can’t give tasks to that person.');
+    const person = isValidObjectId(input.assigneeId) ? await this.col('users').findOne({ _id: new Types.ObjectId(input.assigneeId), organizationId: business.id }, { projection: { name: 1, email: 1, active: 1 } }) : null;
+    if (!person) throw new BadRequestException('That person isn’t part of this business.');
+    if (person.active === false) throw new BadRequestException('That person’s login is switched off.');
+    const due = input.dueDate ? new Date(input.dueDate) : undefined;
+    if (due && Number.isNaN(due.getTime())) throw new BadRequestException('That due date isn’t a date.');
+    const giver = await this.callerIn(caller, business.id);
+    const doc = {
+      organizationId: business.id,
+      // No customer: a task of the team's own (customer-intelligence reads only tasks with keys).
+      customerKeys: [],
+      title,
+      ...(input.note?.trim() ? { note: input.note.trim() } : {}),
+      ...(due ? { dueDate: due } : {}),
+      priority: input.priority === 'high' ? 'high' : 'normal',
+      assigneeId: person._id.toString(),
+      assigneeName: person.name || person.email,
+      status: 'open',
+      source: 'team',
+      createdBy: giver.id,
+      createdByName: giver.name,
+      createdAt: now,
+    };
+    const { insertedId } = await this.col(TASKS).insertOne(doc);
+    if (doc.assigneeId !== giver.id) {
+      const day = due ? ` — due ${new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short', timeZone: business.timeZone }).format(due)}` : '';
+      await this.notifications
+        ?.create(doc.assigneeId, { title: `New task from ${giver.name}`, description: `${title}${day}`, kind: 'system', source: 'team-tasks' }, business.id)
+        .catch(() => undefined); // the task is given either way
+    }
+    return { ...toTaskItem({ ...doc, _id: insertedId }, now, true), personId: doc.assigneeId, personName: doc.assigneeName, businessId: business.id, businessName: business.name };
+  }
+
+  /**
+   * Moves a task along: to do → in progress → done (or back). The person it is given to
+   * may, and so may anyone who sees their work; a manager may also change its day.
+   */
+  async moveTask(caller: JwtPayload, taskId: string, change: TaskChange, now = new Date()): Promise<TeamTaskItem> {
+    if (!isValidObjectId(taskId)) throw new NotFoundException('Task not found.');
+    const scope = await this.scopes.resolve(caller);
+    const task = await this.col(TASKS).findOne({ _id: new Types.ObjectId(taskId), organizationId: { $in: scope.businesses.map((b) => b.id) } });
+    if (!task) throw new NotFoundException('Task not found.');
+    const assigneeId = String(task.assigneeId ?? '');
+    const own = task.organizationId === caller.organizationId && assigneeId === caller.sub;
+    const manages = scope.team && !!assigneeId && (await this.scopes.canSee(caller, task.organizationId, assigneeId));
+    if (!own && !manages) throw new ForbiddenException('Only the person it’s given to, or their manager, can change this task.');
+
+    const set: Doc = {};
+    const unset: Doc = {};
+    if (change.status === 'done') Object.assign(set, { status: 'done', completedAt: now, completedBy: caller.sub });
+    else if (change.status === 'in_progress') {
+      Object.assign(set, { status: 'open', startedAt: task.status === 'open' && task.startedAt instanceof Date ? task.startedAt : now });
+      Object.assign(unset, { completedAt: '', completedBy: '' });
+    } else if (change.status === 'todo') {
+      set.status = 'open';
+      Object.assign(unset, { startedAt: '', completedAt: '', completedBy: '' });
+    }
+    if (change.dueDate !== undefined) {
+      if (!manages) throw new ForbiddenException('Only their manager can change the day a task is due.');
+      if (change.dueDate === null) unset.dueDate = '';
+      else {
+        const due = new Date(change.dueDate);
+        if (Number.isNaN(due.getTime())) throw new BadRequestException('That due date isn’t a date.');
+        set.dueDate = due;
+      }
+    }
+    if (Object.keys(set).length + Object.keys(unset).length === 0) throw new BadRequestException('Nothing to change.');
+    const updated = await this.col(TASKS).findOneAndUpdate(
+      { _id: task._id },
+      { ...(Object.keys(set).length ? { $set: set } : {}), ...(Object.keys(unset).length ? { $unset: unset } : {}) },
+      { returnDocument: 'after' },
+    );
+    if (!updated) throw new NotFoundException('Task not found.');
+    const business = scope.businesses.find((b) => b.id === updated.organizationId);
+    return {
+      ...toTaskItem(updated, now, true),
+      personId: assigneeId,
+      personName: String(updated.assigneeName ?? ''),
+      businessId: String(updated.organizationId),
+      businessName: business?.name ?? '',
+    };
+  }
+
+  /** Everything given to the caller: what is still to do (in progress first, then by day), and what they finished in the last week. */
+  async myTasks(caller: JwtPayload, now = new Date()): Promise<{ items: TeamTaskItem[]; open: number; inProgress: number; overdue: number }> {
+    const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+    const docs = await this.col(TASKS)
+      .find({ organizationId: caller.organizationId, assigneeId: caller.sub, $or: [{ status: 'open' }, { status: 'done', completedAt: { $gte: weekAgo } }] })
+      .sort({ dueDate: 1, createdAt: 1 })
+      .limit(LIST_LIMIT)
+      .toArray();
+    const items = docs.map((t) => ({ ...toTaskItem(t, now, true), personId: caller.sub, personName: String(t.assigneeName ?? ''), businessId: caller.organizationId, businessName: '' }));
+    const rank = (t: TeamTaskItem) => (t.status === 'done' ? 3 : t.inProgress ? 0 : t.overdue ? 1 : 2);
+    items.sort((a, b) => rank(a) - rank(b));
+    const open = items.filter((t) => t.status !== 'done');
+    return { items, open: open.length, inProgress: open.filter((t) => t.inProgress).length, overdue: open.filter((t) => t.overdue).length };
+  }
+
+  /** The caller's own record in a business (the Main Account owner has one in each sub-account), to sign a task with. */
+  private async callerIn(caller: JwtPayload, organizationId: string): Promise<{ id: string; name: string }> {
+    const self =
+      organizationId === caller.organizationId
+        ? isValidObjectId(caller.sub)
+          ? await this.col('users').findOne({ _id: new Types.ObjectId(caller.sub) }, { projection: { name: 1, email: 1 } })
+          : null
+        : await this.col('users').findOne({ organizationId, linkedLoginUserId: caller.sub }, { projection: { name: 1, email: 1 } });
+    return { id: self?._id.toString() ?? caller.sub, name: self?.name || self?.email || caller.email || 'Manager' };
   }
 
   private async callList(business: ScopedBusiness, range: PeriodRange, ids: string[], nameOf: Map<string, string>): Promise<TeamCallRow[]> {

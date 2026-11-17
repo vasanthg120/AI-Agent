@@ -175,6 +175,8 @@ export class Deal {
 export const DealSchema = SchemaFactory.createForClass(Deal);
 DealSchema.plugin(dataSourceScopePlugin);
 DealSchema.index({ organizationId: 1, dataSourceId: 1 });
+// Dashboard figures: a business's deals by status and expected closing month (revenue, pipeline, past due).
+DealSchema.index({ organizationId: 1, dealStatus: 1, expectedClosingDate: 1 });
 // One native Mongo doc per external deal per org. `sparse` alone does NOT
 // achieve this for a COMPOUND index — Mongo only excludes a document from a
 // sparse compound index when ALL of its fields are missing, and

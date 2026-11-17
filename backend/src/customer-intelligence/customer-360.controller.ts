@@ -129,7 +129,29 @@ export class CallCustomerSnapshotController {
 
   @Get()
   @Throttle({ default: { limit: 120, ttl: 60_000 } })
-  snapshot(@CurrentUser() user: JwtPayload, @Query('dealId') dealId?: string, @Query('phone') phone?: string) {
-    return this.service.snapshot(user, { dealId: (dealId ?? '').slice(0, 64) || undefined, phone: (phone ?? '').slice(0, 32) || undefined });
+  snapshot(@CurrentUser() user: JwtPayload, @Query('dealId') dealId?: string, @Query('phone') phone?: string, @Query('sessionId') sessionId?: string) {
+    return this.service.snapshot(user, {
+      dealId: (dealId ?? '').slice(0, 64) || undefined,
+      phone: (phone ?? '').slice(0, 32) || undefined,
+      sessionId: (sessionId ?? '').slice(0, 64) || undefined,
+    });
+  }
+
+  // The AI's profile of the customer, written when someone opens their details (billed; reused until something new happens).
+  @Post('analyze')
+  @Throttle({ default: { limit: 20, ttl: 60_000 } })
+  analyze(
+    @CurrentUser() user: JwtPayload,
+    @Query('dealId') dealId?: string,
+    @Query('phone') phone?: string,
+    @Query('sessionId') sessionId?: string,
+    @Query('refresh') refresh?: string,
+  ) {
+    if (user.aiAccessEnabled === false) throw new ForbiddenException('AI access has been disabled for your account by an administrator.');
+    return this.service.analyzeForCall(
+      user,
+      { dealId: (dealId ?? '').slice(0, 64) || undefined, phone: (phone ?? '').slice(0, 32) || undefined, sessionId: (sessionId ?? '').slice(0, 64) || undefined },
+      refresh === 'true',
+    );
   }
 }
