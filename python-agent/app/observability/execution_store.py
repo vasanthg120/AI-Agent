@@ -36,6 +36,9 @@ def record_llm_execution(
     langfuse_trace_id: str | None = None,
     langfuse_trace_url: str | None = None,
     reasoning_tokens: int | None = None,
+    agent_instance_id: str | None = None,
+    parent_agent_id: str | None = None,
+    delegation_depth: int | None = None,
 ) -> None:
     now = datetime.now(timezone.utc)
     get_db().agent_executions.insert_one(
@@ -84,6 +87,16 @@ def record_llm_execution(
             # (see groq_client.py) — None for every other provider/call site,
             # which don't expose an equivalent field in this codebase today.
             "reasoningTokens": reasoning_tokens,
+            # Delegation-tree identity (app.agent.dynamic, Phase 4) — None
+            # for every call that doesn't belong to a dynamic agent's own
+            # execution (the fixed-specialist path, the plain single-loop
+            # path, crew_reports.py, ...), same "never fabricated" rule
+            # every other optional field here follows. Lets the NestJS
+            # Command Center reconstruct a request's full delegation tree
+            # from this collection's own requestId-grouped rows.
+            "agentInstanceId": agent_instance_id,
+            "parentAgentId": parent_agent_id,
+            "delegationDepth": delegation_depth,
         }
     )
 
@@ -96,6 +109,11 @@ def record_tool_execution(
     name: str,
     latency_ms: float,
     success: bool,
+    agent_instance_id: str | None = None,
+    parent_agent_id: str | None = None,
+    delegation_depth: int | None = None,
+    blocked: bool = False,
+    block_reason: str | None = None,
 ) -> None:
     now = datetime.now(timezone.utc)
     get_db().agent_executions.insert_one(
@@ -105,9 +123,20 @@ def record_tool_execution(
             "conversationId": conversation_id,
             "kind": "tool",
             "name": name,
+            # Set only when app.agent.dynamic.tool_policy refused a dynamic
+            # sub-agent's write/irreversible tool call outright — a
+            # queryable audit trail of what was attempted and blocked,
+            # reusing this collection rather than a new one (Phase 2.5,
+            # Sub-step A). False/None for every ordinary successful or
+            # failed call, dynamic or not.
+            "blocked": blocked,
+            "blockReason": block_reason,
             "latencyMs": latency_ms,
             "success": success,
             "occurredAt": now,
             "createdAt": now,
+            "agentInstanceId": agent_instance_id,
+            "parentAgentId": parent_agent_id,
+            "delegationDepth": delegation_depth,
         }
     )

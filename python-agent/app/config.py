@@ -142,6 +142,43 @@ class Settings:
     # in fewer.
     max_tool_rounds: int = int(os.environ.get("MAX_TOOL_ROUNDS", "8"))
 
+    # Dynamic recursive multi-agent delegation (app/agent/dynamic/) — an
+    # isolated, feature-flagged capability (see app/agent/dynamic/limits.py's
+    # own comment): how many levels a sub-agent may itself delegate further
+    # (0 = this agent only, never decomposes), and the hard ceiling on total
+    # dynamic agents created for one request, regardless of how the tree
+    # branches. These are the PLATFORM ceiling — an organization may tighten
+    # them further via its own Organization.dynamicAgentsSettings (see
+    # app/agent/dynamic/org_limits.py), never loosen past them. Small,
+    # conservative defaults so a first real run can never fan out unboundedly.
+    dynamic_agents_max_depth: int = int(os.environ.get("DYNAMIC_AGENTS_MAX_DEPTH", "2"))
+    dynamic_agents_max_per_request: int = int(os.environ.get("DYNAMIC_AGENTS_MAX_PER_REQUEST", "6"))
+    dynamic_agents_max_execution_seconds: int = int(os.environ.get("DYNAMIC_AGENTS_MAX_EXECUTION_SECONDS", "180"))
+    # How many times a failed leaf's OWN execution (not a re-decomposition —
+    # see master_agent._execute_leaf_with_retry) may be retried before its
+    # failure is treated as final. Only ever applied to a genuine transient
+    # failure (an exception from get_graph().invoke() itself) — never to a
+    # structural "skipped" result (budget/circular/cancelled/deadline), which
+    # retrying can't fix. Safe to retry the whole leaf from scratch
+    # specifically because app.agent.dynamic.tool_policy already guarantees a
+    # dynamic leaf can never have completed an irreversible action on an
+    # earlier attempt.
+    dynamic_agents_max_retries: int = int(os.environ.get("DYNAMIC_AGENTS_MAX_RETRIES", "2"))
+    # The remaining execution-limit dimensions (Phase 2.5, Sub-step C) —
+    # model_calls/tool_calls are tracked as a running IN-MEMORY total across
+    # the whole recursion tree (app.agent.dynamic.master_agent._RunningTotal);
+    # tokens/cost_usd are read back from the real agent_executions rows this
+    # request has already produced (app.agent.dynamic.usage_tracker) rather
+    # than re-deriving the same cost math app.observability.tracing already
+    # does. All four stop the tree from starting any NEW agent/branch once
+    # already-completed work has reached the ceiling — never a mid-call cutoff
+    # for whichever single leaf is already running, same honesty rule
+    # MAX_EXECUTION_SECONDS above already documents for itself.
+    dynamic_agents_max_model_calls: int = int(os.environ.get("DYNAMIC_AGENTS_MAX_MODEL_CALLS", "40"))
+    dynamic_agents_max_tool_calls: int = int(os.environ.get("DYNAMIC_AGENTS_MAX_TOOL_CALLS", "60"))
+    dynamic_agents_max_tokens: int = int(os.environ.get("DYNAMIC_AGENTS_MAX_TOKENS", "500000"))
+    dynamic_agents_max_cost_usd: float = float(os.environ.get("DYNAMIC_AGENTS_MAX_COST_USD", "2.00"))
+
     # Was a hardcoded default (limit=20) in conversation_store.get_recent_messages.
     # Same default kept — raising this grows every prompt's size regardless
     # of whether a given conversation needs the extra history, so it's made

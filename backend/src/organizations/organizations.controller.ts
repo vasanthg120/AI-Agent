@@ -5,6 +5,7 @@ import { Roles } from '../common/decorators/roles.decorator';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { JwtPayload } from '../auth/jwt-payload.interface';
 import { CreateStoreDto } from './dto/create-store.dto';
+import { UpdateDynamicAgentsSettingsDto } from './dto/update-dynamic-agents-settings.dto';
 import { UpdateNotificationPolicyDto } from './dto/update-notification-policy.dto';
 import { OrganizationsService } from './organizations.service';
 import { Permission, PermissionExempt } from '../common/permissions/permission.decorator';
@@ -51,5 +52,21 @@ export class OrganizationsController {
   @Permission('settings', 'manage')
   updateNotificationPolicy(@CurrentUser() user: JwtPayload, @Body() dto: UpdateNotificationPolicyDto) {
     return this.organizationsService.updateNotificationPolicy(user.organizationId, dto);
+  }
+
+  // Any org member can read it (so an AI Usage/settings page can show the
+  // effective limits) — only owner/admin can change it, same sensitivity
+  // class as the other business-wide mutations above.
+  @Get('dynamic-agents-settings')
+  getDynamicAgentsSettings(@CurrentUser() user: JwtPayload) {
+    return this.organizationsService.getDynamicAgentsSettings(user.organizationId);
+  }
+
+  @Put('dynamic-agents-settings')
+  @UseGuards(RolesGuard)
+  @Roles('owner', 'admin')
+  @Permission('settings', 'manage')
+  updateDynamicAgentsSettings(@CurrentUser() user: JwtPayload, @Body() dto: UpdateDynamicAgentsSettingsDto) {
+    return this.organizationsService.updateDynamicAgentsSettings(user.organizationId, dto, user.sub);
   }
 }

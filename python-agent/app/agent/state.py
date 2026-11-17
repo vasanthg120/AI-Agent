@@ -45,3 +45,15 @@ class AgentState(TypedDict):
     # "stop" actually halts further generation, not just the UI. None for
     # non-streaming callers and anything that never registered cancellation.
     cancel_event: threading.Event | None
+    # Delegation-tree identity (Phase 4 of app.agent.dynamic — see
+    # master_agent._execute_leaf, the only place these are ever set) —
+    # threaded through planner_node/tools_node into every
+    # traced_llm_call/traced_tool_call site touched during this leaf's own
+    # execution, persisted onto its agent_executions rows so the NestJS
+    # Command Center can reconstruct a request's full delegation tree later.
+    # None for every non-dynamic-agent caller (the fixed-specialist path,
+    # the plain single-loop path, crew_reports.py, ...) — unset, not "0"/"",
+    # since those calls have no delegation tree to belong to at all.
+    agent_instance_id: str | None
+    parent_agent_id: str | None
+    delegation_depth: int | None

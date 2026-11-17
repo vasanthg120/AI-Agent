@@ -128,6 +128,9 @@ def traced_llm_call(
     provider: str = "anthropic",
     model: str = "",
     request_id: str = "",
+    agent_instance_id: str | None = None,
+    parent_agent_id: str | None = None,
+    delegation_depth: int | None = None,
     **attributes,
 ):
     """Wraps one LLM API call. Usage: `with traced_llm_call("classify",
@@ -150,6 +153,12 @@ def traced_llm_call(
         span.set_attribute("provider", provider)
         if model:
             span.set_attribute("model", model)
+        if agent_instance_id:
+            span.set_attribute("agent_instance_id", agent_instance_id)
+        if parent_agent_id:
+            span.set_attribute("parent_agent_id", parent_agent_id)
+        if delegation_depth is not None:
+            span.set_attribute("delegation_depth", delegation_depth)
         for key, value in attributes.items():
             span.set_attribute(key, value)
         usage: dict = {}
@@ -236,6 +245,9 @@ def traced_llm_call(
                     success=success,
                     error=error,
                     request_id=request_id,
+                    agent_instance_id=agent_instance_id,
+                    parent_agent_id=parent_agent_id,
+                    delegation_depth=delegation_depth,
                     langfuse_trace_id=langfuse_trace_id,
                     langfuse_trace_url=langfuse_trace_url,
                 )
@@ -250,19 +262,32 @@ def traced_tool_call(
     *,
     organization_id: str | None = None,
     conversation_id: str = "",
+    agent_instance_id: str | None = None,
+    parent_agent_id: str | None = None,
+    delegation_depth: int | None = None,
 ):
     start = time.monotonic()
     with tracer.start_as_current_span(f"tool.{name}") as span:
         span.set_attribute("tool.name", name)
         span.set_attribute("user_id", user_id)
+        if agent_instance_id:
+            span.set_attribute("agent_instance_id", agent_instance_id)
+        if parent_agent_id:
+            span.set_attribute("parent_agent_id", parent_agent_id)
+        if delegation_depth is not None:
+            span.set_attribute("delegation_depth", delegation_depth)
         outcome: dict = {}
         try:
             yield outcome
         finally:
             latency_ms = (time.monotonic() - start) * 1000
             success = outcome.get("success", True)
+            blocked = outcome.get("blocked", False)
+            block_reason = outcome.get("block_reason")
             span.set_attribute("latency_ms", latency_ms)
             span.set_attribute("success", success)
+            if blocked:
+                span.set_attribute("blocked", True)
             try:
                 langfuse_config.record_tool_span(
                     name,
@@ -281,6 +306,11 @@ def traced_tool_call(
                     name=name,
                     latency_ms=latency_ms,
                     success=success,
+                    agent_instance_id=agent_instance_id,
+                    parent_agent_id=parent_agent_id,
+                    delegation_depth=delegation_depth,
+                    blocked=blocked,
+                    block_reason=block_reason,
                 )
             except Exception:
                 pass  # persistence must never break the actual tool call

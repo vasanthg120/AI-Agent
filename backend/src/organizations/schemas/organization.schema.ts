@@ -72,6 +72,17 @@ export class Organization {
   // any dependency on it.
   @Prop({ type: Object, default: {} })
   voiceSettings: OrganizationVoiceSettings;
+
+  // Dynamic Recursive Multi-Agent System (python-agent/app/agent/dynamic) —
+  // per-organization overrides of the platform's own env-configured ceiling
+  // (DYNAMIC_AGENTS_MAX_DEPTH/_MAX_PER_REQUEST/_MAX_EXECUTION_SECONDS, see
+  // python-agent/app/agent/dynamic/limits.py). An org can only ever tighten
+  // these, never loosen past the platform ceiling — enforced again, as the
+  // real authority, by python-agent/app/agent/dynamic/org_limits.py, not
+  // just by this schema's own DTO-level bounds. {} (the default) means "use
+  // the platform default unmodified."
+  @Prop({ type: Object, default: {} })
+  dynamicAgentsSettings: OrganizationDynamicAgentsSettings;
 }
 
 export type OrganizationStatus = 'active' | 'suspended' | 'archived';
@@ -107,6 +118,29 @@ export interface OrganizationVoiceSettings {
   // explicit false blocks (a saved personal choice is kept, just not applied,
   // so turning this back on restores it).
   allowUserOverride?: boolean;
+  updatedBy?: string;
+  updatedAt?: Date;
+}
+
+export interface OrganizationDynamicAgentsSettings {
+  // The per-organization rollout gate — see
+  // UpdateDynamicAgentsSettingsDto's own comment: required ALONGSIDE
+  // python-agent's deployment-wide DYNAMIC_AGENTS_ENABLED env flag, not
+  // instead of it. Absent/false means off.
+  enabled?: boolean;
+  // How many levels a sub-agent may itself delegate further.
+  maxDepth?: number;
+  // The hard ceiling on total dynamic agents created for one request,
+  // regardless of how the delegation tree branches.
+  maxAgentsPerRequest?: number;
+  maxExecutionSeconds?: number;
+  // Phase 2.5, Sub-step C's remaining execution-limit dimensions — see
+  // UpdateDynamicAgentsSettingsDto's own field comments.
+  maxRetries?: number;
+  maxModelCalls?: number;
+  maxToolCalls?: number;
+  maxTokens?: number;
+  maxCostUsd?: number;
   updatedBy?: string;
   updatedAt?: Date;
 }

@@ -20,6 +20,9 @@ def call_llm(
     user_id: str = "",
     conversation_id: str = "",
     request_id: str = "",
+    agent_instance_id: str | None = None,
+    parent_agent_id: str | None = None,
+    delegation_depth: int | None = None,
 ) -> tuple[list[dict], str]:
     """Returns (output_items, provider_actually_used). This app's main
     planner/tool-calling graph is Anthropic-only regardless of `provider` —
@@ -44,4 +47,7 @@ def call_llm(
         user_id=user_id,
         conversation_id=conversation_id,
         request_id=request_id,
+        agent_instance_id=agent_instance_id,
+        parent_agent_id=parent_agent_id,
+        delegation_depth=delegation_depth,
     ), "anthropic"

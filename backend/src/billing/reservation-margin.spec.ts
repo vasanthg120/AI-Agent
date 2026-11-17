@@ -214,6 +214,50 @@ describe('ReservationService.settle — dynamic margin (real Mongo)', () => {
     expect(result.creditsCharged).toBeCloseTo(5.3333333333, 2);
   });
 
+  // Phase 2.5, Sub-step D — proves settle()'s existing aggregation (it
+  // groups by {requestId, kind:'llm'} only — see summarizeUsage above,
+  // which never references agentInstanceId/parentAgentId/delegationDepth
+  // at all) already settles a dynamic multi-agent request's many rows
+  // exactly once, correctly summed — confirmed with real rows carrying
+  // those Phase 4 fields, not just asserted from reading the aggregation
+  // pipeline. No production code change expected from this sub-step.
+  it('a request with several dynamic sub-agents\' own agent_executions rows settles to one correct aggregate charge, exactly once', async () => {
+    const org = `${TEST_PREFIX}-dynagents`;
+    const requestId = `${TEST_PREFIX}-dynagents-req`;
+    const provider = `${TEST_PREFIX}-dynagents-provider`; // fake, never-seeded — see TEST 8's comment
+    const wallet = await seedReservation(org, requestId);
+
+    // Three dynamic agents under one request: the root's own planning call,
+    // plus two leaf sub-agents it delegated to — exactly the shape
+    // master_agent.run_task() produces (see python-agent's
+    // app/agent/dynamic/master_agent.py).
+    await executionModel.create({ organizationId: org, requestId, kind: 'llm', name: 'dynamic_plan', provider, model: 'claude-x', costUsd: 0.2, occurredAt: new Date(), agentInstanceId: null, parentAgentId: null, delegationDepth: null });
+    await executionModel.create({ organizationId: org, requestId, kind: 'llm', name: 'planner', provider, model: 'claude-x', costUsd: 0.5, occurredAt: new Date(), agentInstanceId: 'dyn-a', parentAgentId: 'dyn-root', delegationDepth: 1 });
+    await executionModel.create({ organizationId: org, requestId, kind: 'llm', name: 'planner', provider, model: 'claude-x', costUsd: 0.3, occurredAt: new Date(), agentInstanceId: 'dyn-b', parentAgentId: 'dyn-root', delegationDepth: 1 });
+    // A tool-kind row must never be mistaken for LLM cost — summarizeUsage
+    // only ever matches kind:'llm' (see the $match stage above).
+    await executionModel.create({ organizationId: org, requestId, kind: 'tool', name: 'crm_deal', latencyMs: 120, success: true, occurredAt: new Date(), agentInstanceId: 'dyn-a', parentAgentId: 'dyn-root', delegationDepth: 1 });
+
+    const first = await reservationService.settle(requestId);
+    // Total provider cost $1 (0.2+0.5+0.3) at the 50% default margin -> $2.
+    expect(first.creditsCharged).toBeCloseTo(2, 10);
+
+    const reservation = await reservationModel.findOne({ requestId }).exec();
+    expect(reservation?.status).toBe('settled');
+
+    // Retrying (e.g. python-agent's own retry-on-transient-failure path —
+    // see master_agent._execute_leaf_with_retry — calling settle() again
+    // for the same turn) must hit the idempotent 'settled' check, never
+    // re-aggregate or re-debit.
+    const second = await reservationService.settle(requestId);
+    expect(second.creditsCharged).toBe(first.creditsCharged);
+
+    const finalWallet = await walletModel.findById(wallet._id).exec();
+    expect(finalWallet!.balanceCredits).toBe(10_000 - first.creditsCharged);
+    const transactionCount = await transactionModel.countDocuments({ organizationId: org, reservationId: requestId });
+    expect(transactionCount).toBe(1); // exactly one ledger row despite 4 execution rows and 2 settle() calls
+  });
+
   it('settle() is idempotent — retrying returns the same already-settled amount, never double-charges', async () => {
     const org = `${TEST_PREFIX}-idem`;
     const requestId = `${TEST_PREFIX}-idem-req`;

@@ -35,6 +35,9 @@ def planner_node(state: AgentState) -> dict:
         user_id=state["user_id"],
         conversation_id=state["conversation_id"],
         request_id=state.get("request_id", ""),
+        agent_instance_id=state.get("agent_instance_id"),
+        parent_agent_id=state.get("parent_agent_id"),
+        delegation_depth=state.get("delegation_depth"),
     )
     pending_calls = [item for item in output_items if item.get("type") == "function_call"]
     return {"messages": output_items, "pending_calls": pending_calls, "provider": used_provider}
@@ -45,6 +48,12 @@ def tools_node(state: AgentState) -> dict:
         "user_id": state["user_id"],
         "organization_id": state.get("organization_id"),
         "conversation_id": state["conversation_id"],
+        # Delegation-tree identity (see AgentState's own field comments) —
+        # execute_tool reads these straight off context, no signature change
+        # needed there; None for every non-dynamic-agent caller.
+        "agent_instance_id": state.get("agent_instance_id"),
+        "parent_agent_id": state.get("parent_agent_id"),
+        "delegation_depth": state.get("delegation_depth"),
     }
     pending_calls = state["pending_calls"]
     allowed_tools = state.get("allowed_tools")

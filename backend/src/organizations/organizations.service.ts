@@ -1,7 +1,13 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
-import { Organization, OrganizationDocument, OrganizationProfile, OrganizationVoiceSettings } from './schemas/organization.schema';
+import {
+  Organization,
+  OrganizationDocument,
+  OrganizationDynamicAgentsSettings,
+  OrganizationProfile,
+  OrganizationVoiceSettings,
+} from './schemas/organization.schema';
 import { archivedOrganizationIds } from '../common/archived-organizations';
 import { Store, StoreDocument } from './schemas/store.schema';
 
@@ -177,6 +183,48 @@ export class OrganizationsService {
       .lean()
       .exec();
     return org?.voiceSettings ?? {};
+  }
+
+  // --- Dynamic Recursive Multi-Agent System (persistence only — the
+  // platform-ceiling clamp lives in python-agent/app/agent/dynamic/
+  // org_limits.py, which reads this same field) ---
+
+  async getDynamicAgentsSettings(organizationId: string): Promise<OrganizationDynamicAgentsSettings> {
+    const org = await this.orgModel.findById(organizationId).select({ dynamicAgentsSettings: 1 }).lean().exec();
+    return org?.dynamicAgentsSettings ?? {};
+  }
+
+  async updateDynamicAgentsSettings(
+    organizationId: string,
+    patch: {
+      enabled?: boolean;
+      maxDepth?: number;
+      maxAgentsPerRequest?: number;
+      maxExecutionSeconds?: number;
+      maxRetries?: number;
+      maxModelCalls?: number;
+      maxToolCalls?: number;
+      maxTokens?: number;
+      maxCostUsd?: number;
+    },
+    updatedBy: string,
+  ): Promise<OrganizationDynamicAgentsSettings> {
+    const set: Record<string, unknown> = {
+      'dynamicAgentsSettings.updatedBy': updatedBy,
+      'dynamicAgentsSettings.updatedAt': new Date(),
+    };
+    for (const key of [
+      'enabled', 'maxDepth', 'maxAgentsPerRequest', 'maxExecutionSeconds',
+      'maxRetries', 'maxModelCalls', 'maxToolCalls', 'maxTokens', 'maxCostUsd',
+    ] as const) {
+      if (patch[key] !== undefined) set[`dynamicAgentsSettings.${key}`] = patch[key];
+    }
+    const org = await this.orgModel
+      .findByIdAndUpdate(organizationId, { $set: set }, { new: true })
+      .select({ dynamicAgentsSettings: 1 })
+      .lean()
+      .exec();
+    return org?.dynamicAgentsSettings ?? {};
   }
 
   private async uniqueSlug(name: string): Promise<string> {

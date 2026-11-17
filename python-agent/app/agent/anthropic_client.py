@@ -1033,6 +1033,138 @@ def classify_request(
     return block.input
 
 
+def _dynamic_plan_tool() -> dict:
+    """Built fresh from the REAL tool registry (TOOL_DEFINITIONS), not a
+    hardcoded list — so a sub-agent's tools enum can never drift out of sync
+    with app.tools.registry, and a tool added/removed there is picked up
+    automatically. Unlike PLAN_TOOL's fixed SPECIALISTS enum above, this
+    lets the planner assemble an arbitrary, task-specific toolset per
+    dynamic agent — app.agent.dynamic's whole reason for existing."""
+    tool_names = sorted(d["name"] for d in TOOL_DEFINITIONS)
+    return {
+        "name": "plan_dynamic_delegation",
+        "description": (
+            "Decide whether this task needs to be decomposed into separate, task-specific "
+            "sub-agents to be handled well, or can be handled directly by one agent. Only "
+            "decompose when the task genuinely spans distinct sub-tasks that benefit from "
+            "being tackled separately — never create sub-agents for a simple task."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "reasoning": {
+                    "type": "string",
+                    "description": "One sentence explaining why this was (or wasn't) decomposed, and into what.",
+                },
+                "decompose": {
+                    "type": "boolean",
+                    "description": "true to create the sub_agents listed below; false to handle the whole task directly with the tools in direct_tools.",
+                },
+                "direct_tools": {
+                    "type": "array",
+                    "description": "Only populated when decompose is false — the tools this single agent needs for the whole task.",
+                    "items": {"type": "string", "enum": tool_names},
+                },
+                "sub_agents": {
+                    "type": "array",
+                    "description": "Only populated when decompose is true. Create the minimum number that genuinely helps — never pad with unnecessary agents.",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "name": {"type": "string", "description": "A short, human-readable label for this sub-agent, e.g. 'CRM follow-up analysis'."},
+                            "task_description": {"type": "string", "description": "The specific sub-task this agent is responsible for."},
+                            "tools": {
+                                "type": "array",
+                                "description": "The tools this sub-agent needs for its sub-task — only what it needs, not the full catalog.",
+                                "items": {"type": "string", "enum": tool_names},
+                            },
+                            "output_schema": {
+                                "type": "object",
+                                "description": (
+                                    "Only set this when the sub-task's result needs to be machine-consumed in a "
+                                    "specific structure (e.g. a report another agent will merge) — a JSON Schema "
+                                    "(type/properties/required) the sub-agent's final reply must validate against. "
+                                    "Omit entirely for a normal prose/text answer — most sub-agents need no schema at all."
+                                ),
+                            },
+                            "provider": {
+                                "type": "string",
+                                "description": "Which model provider should run this sub-agent. Only one is supported today.",
+                                "enum": ["anthropic"],
+                            },
+                        },
+                        "required": ["name", "task_description", "tools"],
+                    },
+                },
+            },
+            "required": ["reasoning", "decompose", "direct_tools", "sub_agents"],
+        },
+    }
+
+
+_DYNAMIC_PLAN_SYSTEM_PROMPT = (
+    "You are a task-decomposition planner for an enterprise AI assistant. Given a task "
+    "(which may itself be a sub-task handed to you by a parent planner), decide whether it "
+    "should be handled directly by one agent, or decomposed into separate task-specific "
+    "sub-agents that each handle one distinct part.\n\n"
+    "Decompose only when the task clearly has multiple distinct, separable parts where "
+    "handling them as independent sub-tasks would genuinely help (e.g. gathering several "
+    "unrelated kinds of information, or a multi-step task where one part's output doesn't "
+    "depend on another's). Do not decompose a task that is really just one coherent piece "
+    "of work, even if it needs several tool calls to complete — that is normal direct work, "
+    "not a reason to create a sub-agent."
+)
+
+
+def plan_dynamic_delegation(
+    task_description: str,
+    *,
+    organization_id: str | None = None,
+    user_id: str = "",
+    conversation_id: str = "",
+    request_id: str = "",
+) -> dict:
+    """One-shot forced-tool-choice planning pass for app.agent.dynamic — the
+    same mechanics as classify_request above (forced tool_choice, one
+    traced_llm_call), but deciding task decomposition into dynamically
+    assembled sub-agents rather than routing among the fixed SPECIALISTS.
+    Raises rather than guessing on failure; the caller (app.agent.dynamic.
+    master_agent) treats any exception as "handle directly, full registry"
+    and never blocks the task on this planning step."""
+    api_key = _resolve_api_key()
+    if not api_key:
+        raise RuntimeError("No Anthropic API key configured")
+
+    plan_tool = _dynamic_plan_tool()
+    with traced_llm_call(
+        "dynamic_plan",
+        organization_id=organization_id,
+        user_id=user_id,
+        conversation_id=conversation_id,
+        provider="anthropic",
+        model=settings.anthropic_routing_model,
+        request_id=request_id,
+    ) as usage:
+        response = _client(api_key).messages.create(
+            model=settings.anthropic_routing_model,
+            max_tokens=1536,
+            system=[{"type": "text", "text": _DYNAMIC_PLAN_SYSTEM_PROMPT, "cache_control": {"type": "ephemeral"}}],
+            tools=[plan_tool],
+            tool_choice={"type": "tool", "name": "plan_dynamic_delegation"},
+            messages=[{"role": "user", "content": task_description}],
+        )
+        usage["input_tokens"] = response.usage.input_tokens
+        usage["output_tokens"] = response.usage.output_tokens
+        usage["cache_creation_input_tokens"] = getattr(response.usage, "cache_creation_input_tokens", 0) or 0
+        usage["cache_read_input_tokens"] = getattr(response.usage, "cache_read_input_tokens", 0) or 0
+        usage["input"] = task_description
+        usage["output"] = [b.model_dump() for b in response.content]
+    block = next((b for b in response.content if b.type == "tool_use"), None)
+    if block is None:
+        raise ValueError("Dynamic planner did not return a tool_use block")
+    return block.input
+
+
 CRITIQUE_TOOL = {
     "name": "critique_response",
     "description": "Judge whether a draft reply fully addresses every part of the user's request.",
@@ -1266,6 +1398,9 @@ def call(
     user_id: str = "",
     conversation_id: str = "",
     request_id: str = "",
+    agent_instance_id: str | None = None,
+    parent_agent_id: str | None = None,
+    delegation_depth: int | None = None,
     _continuation_depth: int = 0,
 ) -> list[dict]:
     """Runs one planner round. If on_event is given, streams two kinds of
@@ -1316,6 +1451,9 @@ def call(
         provider="anthropic",
         model=resolved_model,
         request_id=request_id,
+        agent_instance_id=agent_instance_id,
+        parent_agent_id=parent_agent_id,
+        delegation_depth=delegation_depth,
     ) as usage:
         for attempt in range(_MAX_CALL_ATTEMPTS):
             emitted_any = False
@@ -1413,6 +1551,9 @@ def call(
         user_id=user_id,
         conversation_id=conversation_id,
         request_id=request_id,
+        agent_instance_id=agent_instance_id,
+        parent_agent_id=parent_agent_id,
+        delegation_depth=delegation_depth,
         _continuation_depth=_continuation_depth + 1,
     )
     return _merge_continuation(normalized, continuation)

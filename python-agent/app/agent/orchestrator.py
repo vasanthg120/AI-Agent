@@ -18,11 +18,21 @@ returning. Never loops more than once, so a bad critique can't run away.
 Any failure in classification, delegation, or reflection falls back to the
 unchanged single-loop path / draft reply, so a request never fails solely
 because of this layer.
+
+Phase 3 (app.agent.dynamic): when DYNAMIC_AGENTS_ENABLED is set, a
+'delegate'-classified request tries the dynamic recursive engine FIRST,
+in place of the fixed 5-specialist fan-out — a real planning call decides
+how many/which dynamically-named sub-agents the task actually needs,
+rather than always picking from app.agent.specialists.SPECIALISTS. Any
+failure there (including the flag being off, the default) falls straight
+through to the unchanged fixed-specialist/single-loop path below, so this
+is strictly additive — see _run_dynamic_delegation.
 """
 
 from concurrent.futures import ThreadPoolExecutor
 
 from app.agent import anthropic_client, cancellation, groq_client, trivial_router
+from app.agent.dynamic import runner as dynamic_runner
 from app.agent.graph import final_text, get_graph
 from app.agent.llm_client import SYSTEM_PROMPT
 from app.agent.specialists import SPECIALISTS
@@ -149,6 +159,115 @@ voice — don't mention the sub-agents or that work was delegated, just answer a
 gathered this yourself."""
 
 
+def _synthesize_and_finish(state_input: dict, on_event, cancel_event, findings: list[dict]) -> dict:
+    """Shared tail for every delegation path in this module (fixed-specialist
+    below, and the dynamic engine in _run_dynamic_delegation): merge 2+
+    sub-agent findings into one final-voice reply via the same synthesis
+    call, then the same bounded reflection + suggestions pass every path in
+    this module already goes through. `findings` entries are
+    {"agent", "task", "output", "tools_used"} — the shape _run_specialist
+    already returns, reused as-is rather than invented twice.
+    """
+    findings_text = "\n\n".join(f"[{f['agent']} agent — task: {f['task']}]\n{f['output']}" for f in findings)
+    synthesis_input = state_input["messages"] + [
+        {
+            "role": "user",
+            "content": f"Sub-agent findings:\n\n{findings_text}\n\nSynthesize these into your final response.",
+        }
+    ]
+    system_prompt = (state_input.get("system_prompt") or SYSTEM_PROMPT) + SYNTHESIS_PROMPT_SUFFIX
+    output_items = anthropic_client.call(
+        synthesis_input,
+        on_event=on_event,
+        system_prompt=system_prompt,
+        tools=[],
+        cancel_event=cancel_event,
+        organization_id=state_input.get("organization_id"),
+        user_id=state_input.get("user_id", ""),
+        conversation_id=state_input.get("conversation_id", ""),
+        request_id=state_input.get("request_id", ""),
+    )
+    tools_used = [tool for f in findings for tool in f["tools_used"]]
+    return _attach_suggestions(state_input, _reflect(state_input, output_items, tools_used))
+
+
+def _dynamic_event_adapter(on_event):
+    """Wraps the real on_event so app.agent.dynamic's own event types
+    (delegation_started/agent_created/agent_progress/understanding/
+    tool_execution/agent_completed/validation — Phases 3 and 2.5's
+    Sub-step E) keep flowing through unchanged (future frontend work can
+    render them directly) while ALSO translating the ones that have a
+    direct existing-UI equivalent into the plan/agent_done/reasoning/
+    progress shapes the existing single-agent and fixed-specialist paths
+    already emit — so this path renders using the SAME, already-working
+    frontend handling, with no frontend change needed for this phase."""
+    if on_event is None:
+        return None
+
+    def adapter(event: dict) -> None:
+        on_event(event)
+        event_type = event.get("type")
+        if event_type == "delegation_started":
+            on_event({"type": "plan", "agents": event.get("agents", [])})
+        elif event_type == "agent_progress" and event.get("status") == "done":
+            on_event({"type": "agent_done", "agent": event.get("agent")})
+        elif event_type == "understanding":
+            # Same shape classify_request's own "reasoning" event already
+            # uses (see run() below) — the frontend already renders it.
+            on_event({"type": "reasoning", "text": event.get("text")})
+        elif event_type == "tool_execution":
+            # Same shape anthropic_client.call's own "progress" event
+            # already uses for the single-agent path.
+            on_event({"type": "progress", "tool": event.get("tool")})
+
+    return adapter
+
+
+def _run_dynamic_delegation(state_input: dict, on_event, cancel_event) -> dict | None:
+    """Tries the Phase 2 dynamic recursive engine (app.agent.dynamic) for a
+    request classify_request already judged complex enough to delegate.
+    Returns None (never raises) on any failure — including the feature
+    simply being disabled, the default — so the caller falls straight
+    through to the unchanged fixed-specialist path below with zero
+    behavior change, matching this module's own "any failure in
+    delegation falls back" contract.
+    """
+    if not dynamic_runner.ENABLED:
+        return None
+    try:
+        result = dynamic_runner.run(
+            _last_user_text(state_input["messages"]),
+            organization_id=state_input.get("organization_id"),
+            user_id=state_input.get("user_id", ""),
+            conversation_id=state_input.get("conversation_id", ""),
+            request_id=state_input.get("request_id", ""),
+            base_messages=state_input["messages"],
+            cancel_event=cancel_event,
+            on_event=_dynamic_event_adapter(on_event),
+        )
+        agents_run = result["agents"]
+        if not agents_run:
+            return None
+
+        if len(agents_run) == 1:
+            # The dynamic planner itself decided this task didn't need
+            # decomposition after all — same shape as the plain
+            # single-loop path, no synthesis call needed for one finding.
+            only = agents_run[0]
+            output_items = [
+                {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": only.result or ""}]}
+            ]
+            return _attach_suggestions(state_input, _reflect(state_input, output_items, only.tools_used))
+
+        findings = [
+            {"agent": a.name, "task": a.task_description, "output": a.result or "", "tools_used": a.tools_used}
+            for a in agents_run
+        ]
+        return _synthesize_and_finish(state_input, on_event, cancel_event, findings)
+    except Exception:
+        return None
+
+
 def _run_specialist(
     agent_key: str,
     task: str,
@@ -252,6 +371,11 @@ def run(state_input: dict) -> dict:
                 except Exception:
                     pass
 
+        if plan.get("mode") == "delegate":
+            dynamic_result = _run_dynamic_delegation(state_input, on_event, cancel_event)
+            if dynamic_result is not None:
+                return dynamic_result
+
         assignments = [a for a in plan.get("assignments", []) if a.get("agent") in SPECIALISTS][:MAX_ASSIGNMENTS]
         if plan.get("mode") != "delegate" or not assignments:
             result = get_graph().invoke(state_input)
@@ -281,28 +405,7 @@ def run(state_input: dict) -> dict:
             if on_event:
                 on_event({"type": "agent_done", "agent": finding["agent"]})
 
-        findings_text = "\n\n".join(f"[{f['agent']} agent — task: {f['task']}]\n{f['output']}" for f in findings)
-        synthesis_input = state_input["messages"] + [
-            {
-                "role": "user",
-                "content": f"Sub-agent findings:\n\n{findings_text}\n\nSynthesize these into your final response.",
-            }
-        ]
-        system_prompt = (state_input.get("system_prompt") or SYSTEM_PROMPT) + SYNTHESIS_PROMPT_SUFFIX
-        output_items = anthropic_client.call(
-            synthesis_input,
-            on_event=on_event,
-            system_prompt=system_prompt,
-            tools=[],
-            cancel_event=cancel_event,
-            organization_id=state_input.get("organization_id"),
-            user_id=state_input.get("user_id", ""),
-            conversation_id=state_input.get("conversation_id", ""),
-            request_id=state_input.get("request_id", ""),
-        )
-        tools_used = [tool for f in findings for tool in f["tools_used"]]
-
-        return _attach_suggestions(state_input, _reflect(state_input, output_items, tools_used))
+        return _synthesize_and_finish(state_input, on_event, cancel_event, findings)
     finally:
         if conversation_id:
             cancellation.finish(conversation_id)

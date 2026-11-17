@@ -113,7 +113,25 @@ def execute_tool(name: str, tool_input: dict, context: dict, allowed_tools: list
         user_id=context.get("user_id", ""),
         organization_id=context.get("organization_id"),
         conversation_id=context.get("conversation_id", ""),
+        agent_instance_id=context.get("agent_instance_id"),
+        parent_agent_id=context.get("parent_agent_id"),
+        delegation_depth=context.get("delegation_depth"),
     ) as outcome:
+        if context.get("agent_instance_id"):
+            # A dynamically-created sub-agent (see app.agent.dynamic) — the
+            # one real execution boundary for its own write-action lockdown
+            # (Phase 2.5, Sub-step A), checked here so it applies no matter
+            # which caller reaches execute_tool, never bypassable by a
+            # sub-agent's own tool choice.
+            from app.agent.dynamic import tool_policy
+
+            safe_input, block_reason = tool_policy.check(name, tool_input)
+            if block_reason is not None:
+                outcome["success"] = False
+                outcome["blocked"] = True
+                outcome["block_reason"] = block_reason
+                return f"Tool '{name}' is not permitted for an autonomous sub-agent: {block_reason}"
+            tool_input = safe_input
         try:
             result = handler(tool_input, context)
         except requests.RequestException:
