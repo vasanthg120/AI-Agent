@@ -200,6 +200,7 @@ export function CallCopilotPage() {
                   contextBlob={contextBlob}
                   warning={warning}
                   customerLabel={customer?.label}
+                  dealId={customer?.dealId}
                   languageLabel={languageLabel}
                   stream={recording.stream}
                   onEnd={handleEnd}

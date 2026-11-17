@@ -126,6 +126,7 @@ export function TeamPerformanceSummaryCards({ data, dateFrom, dateTo, storeId }:
 
   const wonDealRows: DrillDownRow[] = (wonDealsList?.items ?? []).map((d) => ({
     id: d._id,
+    dealId: d._id,
     title: d.name,
     subtitle: d.expectedClosingDate,
     value: d.monetaryValue,

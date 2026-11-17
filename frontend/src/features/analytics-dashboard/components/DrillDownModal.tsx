@@ -3,6 +3,7 @@ import { motion } from 'framer-motion';
 import clsx from 'clsx';
 import { FiChevronRight, FiList, FiSearch } from 'react-icons/fi';
 import { EmptyState, Modal, Skeleton } from '@/components/ui';
+import { openDealDrawer } from '@/stores/dealDrawerStore';
 import { formatINR as money } from '@/utils/currency';
 import styles from './DrillDownModal.module.css';
 
@@ -12,6 +13,8 @@ export interface DrillDownRow {
   subtitle?: string;
   meta?: string;
   value?: number;
+  // A deal: the row opens the deal panel (everything about it, and the AI brief).
+  dealId?: string;
 }
 
 type SortMode = 'value' | 'name';
@@ -160,7 +163,7 @@ export function DrillDownModal({
                   )}
                 </span>
                 {r.value !== undefined && <strong className={styles.value}>{renderValue(r.value)}</strong>}
-                {onRowClick && <FiChevronRight className={styles.chevron} aria-hidden />}
+                {(onRowClick || r.dealId) && <FiChevronRight className={styles.chevron} aria-hidden />}
               </>
             );
             const motionProps = {
@@ -168,12 +171,14 @@ export function DrillDownModal({
               animate: { opacity: 1 },
               transition: { duration: 0.22, delay: Math.min(i, 12) * 0.025 },
             };
-            return onRowClick ? (
+            const open = onRowClick ? () => onRowClick(r) : r.dealId ? () => openDealDrawer(r.dealId!) : undefined;
+            return open ? (
               <motion.button
                 key={r.id}
                 type="button"
                 className={clsx(styles.row, styles.rowClickable)}
-                onClick={() => onRowClick(r)}
+                onClick={open}
+                title={!onRowClick && r.dealId ? 'Open this deal' : undefined}
                 {...motionProps}
               >
                 {content}

@@ -10,11 +10,15 @@ import { ReservationService } from '../billing/reservation.service';
 import { correlateSingleEmail, EmailCorrelationContext } from '../crm/customer-grouping.util';
 import { EmailSlaService } from '../email-sla/email-sla.service';
 import { periodToDateRange } from '../common/period.util';
-import { classifyEmailDeterministically } from './email-preclassification.util';
+import { INBOX_BOXES, InboxBox, inboxBoxMatch, RELEVANT_EMAIL_INTENTS } from './email-inbox-boxes';
+import { bareAddress, classifyEmailDeterministically, DeterministicPreFilterMatch, UNMISTAKABLE_RULES } from './email-preclassification.util';
 import {
   deriveCategory,
   deriveRespondedInfo,
+  deriveResponseStatus,
+  MANUAL_REPLY,
   EmailCategory,
+  EmailRespondedVia,
   EmailResponseStatus,
   needsResponseMatch,
   responseStatusMatch,
@@ -75,13 +79,26 @@ const FOLLOW_UP_DEFAULT_DAYS = 3;
 // defaults to excluded from "business mail" analytics until deliberately
 // added here. Phase 19's email activity widget uses this to analyze real
 // business mail only, never every message a connected mailbox receives.
-export const RELEVANT_EMAIL_INTENTS = [
-  'vendor', 'existing_customer', 'new_enquiry', 'quotation_request', 'price_negotiation',
-  'complaint', 'technical_support', 'escalation', 'meeting_request',
-];
+// (Defined in email-inbox-boxes.ts, which decides the inbox's boxes from it.)
+export { RELEVANT_EMAIL_INTENTS };
 
 /** Team Performance's email figures (see teamEmailMatch). */
-export type TeamEmailMetric = 'received' | 'replied' | 'pending' | 'missed';
+export type TeamEmailMetric = 'received' | 'replied' | 'pending' | 'missed' | 'customer_replies' | 'awaiting_customer';
+
+export const TEAM_EMAIL_METRICS: TeamEmailMetric[] = ['received', 'replied', 'pending', 'missed', 'customer_replies', 'awaiting_customer'];
+
+/** One follow-up reminder in a Team Performance list. */
+export interface TeamFollowUpRow {
+  id: string;
+  employeeId: string;
+  title: string;
+  business?: string;
+  dueDate: Date;
+  status: 'pending' | 'done';
+  overdue: boolean;
+  completedAt?: Date;
+  completedVia?: string;
+}
 
 /** One email in a Team Performance list. */
 export interface TeamEmailRow {
@@ -93,13 +110,25 @@ export interface TeamEmailRow {
   fromAddress: string;
   business?: string;
   respondedAt?: Date;
-  respondedVia?: 'app' | 'outlook' | 'thread';
+  respondedVia?: EmailRespondedVia;
   // Who approved the reply sent through HaiVE (a HaiVE user id).
   approvedBy?: string;
   category: EmailCategory;
   intent?: string;
   summary?: string;
   nextAction?: string;
+}
+
+/** One message from a mailbox's Sent Items, in a Team Performance list. */
+export interface TeamSentEmailRow {
+  id: string;
+  employeeId: string;
+  sentAt: Date;
+  subject: string;
+  to: string;
+  preview: string;
+  // Sent as an answer to another message (it has an In-Reply-To).
+  isReply: boolean;
 }
 
 const RELEVANT_INTENT_LABELS: Record<string, string> = {
@@ -123,6 +152,8 @@ type RelationshipView = Awaited<ReturnType<CustomerActivityService['getRelations
 export interface ListEmailsQuery {
   status?: 'pending' | 'approved' | 'rejected';
   view?: EmailResponseStatus;
+  /** One of the inbox's boxes (see email-inbox-boxes.ts) — what the email needs from the person. */
+  box?: InboxBox;
   from?: string;
   to?: string;
   intents?: string[];
@@ -142,7 +173,7 @@ export interface IngestExtras {
   answered?: Record<string, unknown>;
 }
 
-export type EmailInboxCounts = Record<EmailResponseStatus, number> & { categories: Record<EmailCategory, number> };
+export type EmailInboxCounts = Record<EmailResponseStatus, number> & { categories: Record<EmailCategory, number>; boxes: Record<InboxBox, number> };
 
 const CATEGORIES: EmailCategory[] = ['urgent', 'needs_response', 'waiting_for_customer', 'follow_up_required', 'responded', 'informational', 'completed'];
 // An approved draft's send is given this long before another attempt may start.
@@ -209,6 +240,8 @@ const STALE_DRAFT_MS = 3 * 60 * 1000;
 export class EmailIntelligenceService {
   private readonly logger = new Logger(EmailIntelligenceService.name);
   private readonly pythonAgentUrl: string;
+  // HaiVE's own sending addresses: its reports and alerts land in connected mailboxes too.
+  private readonly systemSenders: string[];
 
   constructor(
     @InjectModel(EmailIntelligenceItem.name) private itemModel: Model<EmailIntelligenceItemDocument>,
@@ -224,6 +257,9 @@ export class EmailIntelligenceService {
     private reservations: ReservationService,
   ) {
     this.pythonAgentUrl = this.config.get<string>('pythonAgentUrl') ?? 'http://localhost:8000';
+    this.systemSenders = [this.config.get<string>('mail.from'), this.config.get<string>('mail.user')]
+      .filter((address): address is string => !!address && address.includes('@'))
+      .map(bareAddress);
   }
 
   async itemExists(userId: string, externalMessageId: string): Promise<boolean> {
@@ -286,13 +322,20 @@ export class EmailIntelligenceService {
   }
 
   /** Applies what Outlook says about where stored messages are now. Returns how many left the mailbox. */
-  async applyMailboxStates(userId: string, states: { id: string; state: string; newId?: string | null; isRead?: boolean | null }[]): Promise<number> {
+  async applyMailboxStates(
+    userId: string,
+    states: { id: string; state: string; newId?: string | null; isRead?: boolean | null; replyTo?: string[] | null }[],
+  ): Promise<number> {
     if (states.length === 0) return 0;
     const now = new Date();
     let removed = 0;
     const ops = states.flatMap((s) => {
       const filter = { userId, externalMessageId: s.id };
-      const read = typeof s.isRead === 'boolean' ? { isRead: s.isRead } : {};
+      const read = {
+        ...(typeof s.isRead === 'boolean' ? { isRead: s.isRead } : {}),
+        // Mail stored before the sync captured Reply-To learns where a reply goes.
+        ...(s.replyTo?.length ? { replyToAddresses: s.replyTo } : {}),
+      };
       if (s.state === 'deleted' || s.state === 'gone') {
         removed += 1;
         return [{ updateOne: { filter, update: { $set: { mailboxRemovedAt: now, mailboxState: s.state, mailboxCheckedAt: now, ...read } } } }];
@@ -405,7 +448,60 @@ export class EmailIntelligenceService {
   // restructuring production-critical branching logic.
   wouldSkipLlmAnalysis(email: { from: string; subject: string; preview: string }, mailboxEmail: string, ownAddresses: string[] = []): boolean {
     if (this.isOwnAddress(email.from, mailboxEmail, ownAddresses)) return true;
-    return !!classifyEmailDeterministically({ from: email.from, subject: email.subject, preview: email.preview });
+    return !!this.preFilter(email);
+  }
+
+  /** The deterministic rules (receipts, robots, HaiVE's own reports…) with this server's own sending addresses. */
+  preFilter(email: { from: string; subject?: string; preview?: string }): DeterministicPreFilterMatch | null {
+    return classifyEmailDeterministically({ from: email.from, subject: email.subject ?? '', preview: email.preview ?? '' }, { systemSenders: this.systemSenders });
+  }
+
+  /**
+   * Automated mail still sitting in "Needs Response" — stored while the AI
+   * couldn't read it (no credits), or before the rules knew it — leaves it:
+   * receipts, no-reply robots, HaiVE's own reports. Mail the AI did read is
+   * only overruled by the unmistakable rules (receipts, bounces, auto-replies,
+   * HaiVE's own mail); a no-reply sender the AI judged to need an answer keeps
+   * that judgement. Returns how many were moved out.
+   */
+  async quietAutomatedMail(userId: string): Promise<number> {
+    const waiting = await this.itemModel
+      .find({ userId, ...needsResponseMatch() })
+      .sort({ receivedAt: -1 })
+      .limit(1000)
+      .select('fromAddress subject bodyPreview analysisState')
+      .lean<{ _id: Types.ObjectId; fromAddress: string; subject?: string; bodyPreview?: string; analysisState?: string }[]>()
+      .exec();
+    let quieted = 0;
+    for (const row of waiting) {
+      const match = this.preFilter({ from: row.fromAddress ?? '', subject: row.subject, preview: row.bodyPreview });
+      if (!match) continue;
+      const unread = row.analysisState === 'pending';
+      if (!unread && !UNMISTAKABLE_RULES.has(match.ruleName)) continue;
+      const result = await this.itemModel
+        .updateOne(
+          { _id: row._id, ...needsResponseMatch() },
+          {
+            $set: {
+              intent: 'other',
+              priority: 'low',
+              urgency: 'low',
+              shouldDraft: false,
+              fromRole: 'external_other',
+              aiStatus: 'no_reply_needed',
+              expectedNextAction: 'no_action_required',
+              recommendedAction: match.reason,
+              reason: match.reason,
+              ...(unread ? { deterministicInput: { skippedLlmCall: true, reasonForSkip: `deterministic pre-filter: ${match.ruleName}` } } : {}),
+            },
+            $unset: { analysisState: '', analysisError: '' },
+          },
+        )
+        .exec();
+      quieted += result.modifiedCount ?? 0;
+    }
+    if (quieted > 0) this.logger.log(`Moved ${quieted} automated email(s) of user ${userId} out of Needs Response`);
+    return quieted;
   }
 
   /** Sent by the mailbox itself — under its sign-in address or any of its aliases. */
@@ -442,6 +538,7 @@ export class EmailIntelligenceService {
       fromAddress: email.from,
       fromName: email.fromName || undefined,
       ccAddresses: email.cc?.length ? email.cc : undefined,
+      replyToAddresses: email.replyTo?.length ? email.replyTo : undefined,
       toAddresses: email.to,
       bodyPreview: email.preview,
       isRead: email.isRead,
@@ -480,7 +577,7 @@ export class EmailIntelligenceService {
       // Deterministic pre-filter — bounce/auto-reply/marketing mail never
       // needs an LLM call to know it needs no reply. Skips straight to
       // persistence, same shape/reasoning as the Layer 1 gate above.
-      const preFilterMatch = classifyEmailDeterministically({ from: email.from, subject: email.subject, preview: email.preview });
+      const preFilterMatch = this.preFilter(email);
       if (preFilterMatch) {
         return await this.itemModel.create({
           ...baseFields,
@@ -987,7 +1084,11 @@ export class EmailIntelligenceService {
   //    message of the same conversation (threadRespondedAt) is not a second reply;
   //  - pending: owed and unanswered (needsResponseMatch), still inside its 24 hours;
   //  - missed: owed and unanswered, its 24 hours ran out inside the period — so
-  //    "missed today" is what became overdue today, not always zero.
+  //    "missed today" is what became overdue today, not always zero;
+  //  - customer_replies: customers writing back in a conversation (the message
+  //    answers an earlier one) that arrived in the period;
+  //  - awaiting_customer: we replied in the period and asked the customer
+  //    something, and they have not written back since.
   // Mailboxes handled by someone else count for that person (mailboxAttribution).
   private teamEmailMatch(organizationId: string, metric: TeamEmailMetric, start: Date, end: Date, owners: string[], now: Date): Record<string, unknown> {
     const day = 24 * 60 * 60 * 1000;
@@ -997,6 +1098,15 @@ export class EmailIntelligenceService {
       return {
         ...base,
         intent: { $nin: ['internal', 'spam'] },
+        $or: [{ sentAt: { $gte: start, $lt: end } }, { externalReplyDetectedAt: { $gte: start, $lt: end } }],
+      };
+    if (metric === 'customer_replies')
+      return { ...base, intent: { $in: RELEVANT_EMAIL_INTENTS }, receivedAt: { $gte: start, $lt: end }, inReplyTo: { $exists: true, $nin: [null, ''] } };
+    if (metric === 'awaiting_customer')
+      return {
+        ...base,
+        threadHead: { $ne: false },
+        replyAwaitsCustomer: true,
         $or: [{ sentAt: { $gte: start, $lt: end } }, { externalReplyDetectedAt: { $gte: start, $lt: end } }],
       };
     if (metric === 'pending')
@@ -1010,13 +1120,13 @@ export class EmailIntelligenceService {
     };
   }
 
-  /** Per employee: received, replied, pending and missed in the period. */
+  /** Per employee: every TEAM_EMAIL_METRICS figure in the period. */
   async teamEmailCounts(organizationId: string, start: Date, end: Date, employeeIds: string[], now = new Date()): Promise<Map<string, Record<TeamEmailMetric, number>>> {
     const counts = new Map<string, Record<TeamEmailMetric, number>>();
     if (employeeIds.length === 0) return counts;
     const attribution = await this.mailboxAttribution(employeeIds);
     if (attribution.mailboxOwnerIds.length === 0) return counts;
-    const metrics: TeamEmailMetric[] = ['received', 'replied', 'pending', 'missed'];
+    const metrics = TEAM_EMAIL_METRICS;
     const grouped = await Promise.all(
       metrics.map((metric) =>
         this.itemModel
@@ -1030,12 +1140,130 @@ export class EmailIntelligenceService {
     metrics.forEach((metric, i) => {
       for (const row of grouped[i]) {
         const employee = attribution.employeeOf(String(row._id));
-        const entry = counts.get(employee) ?? { received: 0, replied: 0, pending: 0, missed: 0 };
+        const entry = counts.get(employee) ?? { received: 0, replied: 0, pending: 0, missed: 0, customer_replies: 0, awaiting_customer: 0 };
         entry[metric] += row.count;
         counts.set(employee, entry);
       }
     });
     return counts;
+  }
+
+  /**
+   * Per employee: every message that left their mailbox in the period (its Sent
+   * Items — written in HaiVE or in Outlook, replies and new mail alike). The
+   * mailbox counts for whoever handles it, as for the figures above.
+   */
+  async teamSentCounts(organizationId: string, start: Date, end: Date, employeeIds: string[]): Promise<Map<string, number>> {
+    if (employeeIds.length === 0) return new Map();
+    const attribution = await this.mailboxAttribution(employeeIds);
+    if (attribution.mailboxOwnerIds.length === 0) return new Map();
+    const rows = await this.itemModel.db
+      .collection('email_sent_items')
+      .aggregate<{ _id: string; count: number }>([
+        { $match: { organizationId, userId: { $in: attribution.mailboxOwnerIds }, sentAt: { $gte: start, $lt: end } } },
+        { $group: { _id: '$userId', count: { $sum: 1 } } },
+      ])
+      .toArray();
+    return attribution.countsByEmployee(rows);
+  }
+
+  /**
+   * Per employee: email follow-ups (the reminders HaiVE keeps for promised or
+   * owed replies) completed in the period, still pending now, and of those the
+   * ones past their due date. A mailbox counts for whoever handles it.
+   */
+  async teamFollowUpCounts(
+    organizationId: string,
+    start: Date,
+    end: Date,
+    employeeIds: string[],
+    now = new Date(),
+  ): Promise<Map<string, { completed: number; pending: number; overdue: number }>> {
+    const counts = new Map<string, { completed: number; pending: number; overdue: number }>();
+    if (employeeIds.length === 0) return counts;
+    const attribution = await this.mailboxAttribution(employeeIds);
+    if (attribution.mailboxOwnerIds.length === 0) return counts;
+    const owners = { organizationId, userId: { $in: attribution.mailboxOwnerIds } };
+    const rows = await this.followUpModel
+      .aggregate<{ _id: string; completed: number; pending: number; overdue: number }>([
+        { $match: { ...owners, $or: [{ status: 'pending' }, { status: 'done', completedAt: { $gte: start, $lt: end } }] } },
+        {
+          $group: {
+            _id: '$userId',
+            completed: { $sum: { $cond: [{ $eq: ['$status', 'done'] }, 1, 0] } },
+            pending: { $sum: { $cond: [{ $eq: ['$status', 'pending'] }, 1, 0] } },
+            overdue: { $sum: { $cond: [{ $and: [{ $eq: ['$status', 'pending'] }, { $lt: ['$dueDate', now] }] }, 1, 0] } },
+          },
+        },
+      ])
+      .exec();
+    for (const row of rows) {
+      const employee = attribution.employeeOf(String(row._id));
+      const entry = counts.get(employee) ?? { completed: 0, pending: 0, overdue: 0 };
+      entry.completed += row.completed;
+      entry.pending += row.pending;
+      entry.overdue += row.overdue;
+      counts.set(employee, entry);
+    }
+    return counts;
+  }
+
+  /** The reminders behind teamFollowUpCounts: still pending (soonest due first), then completed in the period. */
+  async teamFollowUpList(organizationId: string, start: Date, end: Date, employeeIds: string[], limit = 200, now = new Date()): Promise<{ items: TeamFollowUpRow[]; total: number }> {
+    if (employeeIds.length === 0) return { items: [], total: 0 };
+    const attribution = await this.mailboxAttribution(employeeIds);
+    if (attribution.mailboxOwnerIds.length === 0) return { items: [], total: 0 };
+    const match = { organizationId, userId: { $in: attribution.mailboxOwnerIds }, $or: [{ status: 'pending' }, { status: 'done', completedAt: { $gte: start, $lt: end } }] };
+    const [docs, total] = await Promise.all([this.followUpModel.find(match).sort({ status: -1, dueDate: 1 }).limit(limit).lean().exec(), this.followUpModel.countDocuments(match).exec()]);
+    return {
+      items: docs.map((d) => ({
+        id: String(d._id),
+        employeeId: attribution.employeeOf(String(d.userId)),
+        title: d.title,
+        business: d.businessName,
+        dueDate: d.dueDate,
+        status: d.status === 'done' ? 'done' : 'pending',
+        overdue: d.status === 'pending' && new Date(d.dueDate).getTime() < now.getTime(),
+        completedAt: d.completedAt,
+        completedVia: d.completedVia,
+      })),
+      total,
+    };
+  }
+
+  /** The messages behind teamSentCounts, newest first. */
+  async teamSentList(
+    organizationId: string,
+    start: Date,
+    end: Date,
+    employeeIds: string[],
+    limit = 200,
+  ): Promise<{ items: TeamSentEmailRow[]; total: number }> {
+    if (employeeIds.length === 0) return { items: [], total: 0 };
+    const attribution = await this.mailboxAttribution(employeeIds);
+    if (attribution.mailboxOwnerIds.length === 0) return { items: [], total: 0 };
+    const collection = this.itemModel.db.collection('email_sent_items');
+    const match = { organizationId, userId: { $in: attribution.mailboxOwnerIds }, sentAt: { $gte: start, $lt: end } };
+    const [docs, total] = await Promise.all([
+      collection
+        .find(match, { projection: { userId: 1, sentAt: 1, subject: 1, toAddresses: 1, bodyPreview: 1, inReplyTo: 1 } })
+        .sort({ sentAt: -1 })
+        .limit(limit)
+        .toArray(),
+      collection.countDocuments(match),
+    ]);
+    return {
+      items: docs.map((d) => ({
+        id: String(d._id),
+        employeeId: attribution.employeeOf(String(d.userId)),
+        sentAt: d.sentAt as Date,
+        subject: (d.subject as string) || '(no subject)',
+        to: ((d.toAddresses as string[] | undefined) ?? []).join(', '),
+        preview: (d.bodyPreview as string | undefined) ?? '',
+        isReply: !!d.inReplyTo,
+      })),
+      total,
+    };
   }
 
   /** The emails behind one of those numbers, newest first. */
@@ -1417,6 +1645,7 @@ export class EmailIntelligenceService {
     const clauses: Record<string, unknown>[] = [{ userId }, THREAD_HEAD_MATCH];
     if (q.status) clauses.push({ status: q.status });
     if (q.view) clauses.push(responseStatusMatch(q.view));
+    if (q.box) clauses.push(inboxBoxMatch(q.box));
     // Mail the AI has not read yet has no real type ("other" is only a placeholder), so a mail-type
     // filter must not hide it: mail that arrived while the AI was unavailable, and mail brought in
     // from mailbox history that is from someone outside and may be owed a reply.
@@ -1486,8 +1715,10 @@ export class EmailIntelligenceService {
     q: Pick<ListEmailsQuery, 'from' | 'to' | 'intents' | 'search'> = {},
   ): Promise<EmailInboxCounts> {
     const views: EmailResponseStatus[] = ['needs_response', 'responded', 'resolved'];
-    const [totals, groups] = await Promise.all([
+    const [totals, boxTotals, groups] = await Promise.all([
       Promise.all(views.map((view) => this.itemModel.countDocuments(this.buildListMatch(userId, { ...q, view })).exec())),
+      // The boxes replace the mail-type filter: every email is in exactly one of them.
+      Promise.all(INBOX_BOXES.map((box) => this.itemModel.countDocuments(this.buildListMatch(userId, { ...q, intents: undefined, box })).exec())),
       // The finer categories, counted with the very function that labels a row
       // (deriveCategory): rows are grouped by the handful of facts it reads.
       this.itemModel
@@ -1530,7 +1761,8 @@ export class EmailIntelligenceService {
       });
       categories[category] += group.count;
     }
-    return { needs_response: totals[0], responded: totals[1], resolved: totals[2], categories };
+    const boxes = Object.fromEntries(INBOX_BOXES.map((box, i) => [box, boxTotals[i]])) as Record<InboxBox, number>;
+    return { needs_response: totals[0], responded: totals[1], resolved: totals[2], categories, boxes };
   }
 
   // The stored messages of one conversation, oldest first — each with its own
@@ -2188,6 +2420,36 @@ export class EmailIntelligenceService {
     return reminder;
   }
 
+  /**
+   * "I already replied": the person answered this email where HaiVE can't see it
+   * (on the phone, from another mailbox) or before HaiVE could read their Sent
+   * Items. Recorded as a reply made outside HaiVE — so it counts as answered
+   * everywhere (the queues, missed-email figures, Team Performance, response
+   * times) — marked as the person's own word, which they can take back.
+   */
+  async markReplied(userId: string, id: string): Promise<EmailIntelligenceItemDocument> {
+    const item = await this.getOne(userId, id);
+    if (deriveResponseStatus(item) === 'responded') return item;
+    const at = new Date();
+    item.externalReplyDetectedAt = at;
+    item.replyMatchedVia = MANUAL_REPLY;
+    await item.save();
+    await this.emailSla.recordFirstResponse(item.organizationId, item._id.toString(), at).catch((err: Error) => this.logger.warn(`SLA first response: ${err.message}`));
+    return item;
+  }
+
+  /** Takes back markReplied — only a reply the person marked; one HaiVE found or sent stays. */
+  async unmarkReplied(userId: string, id: string): Promise<EmailIntelligenceItemDocument> {
+    const item = await this.getOne(userId, id);
+    if (item.replyMatchedVia !== MANUAL_REPLY) {
+      throw new BadRequestException('This reply was sent from HaiVE or found in your Sent Items, so it can’t be undone here.');
+    }
+    item.set('externalReplyDetectedAt', undefined);
+    item.set('replyMatchedVia', undefined);
+    await item.save();
+    return item;
+  }
+
   async reject(userId: string, id: string, reason?: string): Promise<EmailIntelligenceItemDocument> {
     const item = await this.getOne(userId, id);
     if (item.status === 'approved') throw new BadRequestException('Cannot reject an already-approved item');
@@ -2221,7 +2483,7 @@ export class EmailIntelligenceService {
     item.resolvedGroupKey = correlation?.resolvedGroupKey ?? undefined;
     item.matchedBusinessSummary = matchedBusinessSummary;
 
-    const preFilterMatch = classifyEmailDeterministically({ from: email.from, subject: email.subject, preview: email.preview });
+    const preFilterMatch = this.preFilter(email);
 
     // Phase 17, Layer 1 — same deterministic pre-gate as analyzeAndCreate.
     if (this.isOwnAddress(item.fromAddress, item.mailboxEmail, extras.ownAddresses)) {

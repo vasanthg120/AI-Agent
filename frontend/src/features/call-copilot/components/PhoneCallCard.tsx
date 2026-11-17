@@ -30,6 +30,7 @@ import { plivoService, isCallActive } from '@/services/plivoService';
 import { useAuthStore } from '@/stores/authStore';
 import { extractErrorMessage } from '@/utils/errors';
 import { ROW_IN, staggerChildren } from '../motion';
+import { CustomerSnapshotCard } from './CustomerSnapshotCard';
 import { CustomerPicker, type SelectedCustomer } from './CustomerPicker';
 import { LinkLineToMe } from './LinkLineToMe';
 import styles from './PhoneCallCard.module.css';
@@ -397,6 +398,8 @@ export function PhoneCallCard({ onOpenLibrary }: { onOpenLibrary: () => void }) 
           </AnimatePresence>
 
           <CustomerPicker value={customer} onChange={setCustomer} disabled={calling} />
+          {/* Who you are about to call: by the picked deal, else the number typed. */}
+          <CustomerSnapshotCard dealId={customer?.dealId} phone={number} />
           <div className={styles.actions}>
             <Button type="submit" size="lg" leftIcon={<FiPhoneCall />} loading={calling} disabled={!number || !route}>
               {number && destination

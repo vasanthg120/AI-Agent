@@ -192,17 +192,28 @@ def _comment_html(text: str) -> str:
     return '<div style="font-family:Calibri,Arial,Helvetica,sans-serif; font-size:11pt; line-height:1.4; color:#000000">' + "".join(rows) + "</div>"
 
 
-def _body_content_type(access_token: str, message_id: str) -> str:
-    """"html" or "text": the format of the message being replied to. Defaults to
-    html (nearly all mail) when it cannot be read; the reply itself would then
-    report the real problem."""
-    response = _get_with_retry(f"{GRAPH_BASE}/me/messages/{message_id}", access_token, {"$select": "body"}, timeout=15)
+def reply_to_addresses(message: dict) -> list[str]:
+    """The Reply-To addresses of a message that name someone other than its
+    sender. Website and enquiry forms send from their own (or a colleague's)
+    address and put the customer in Reply-To - an answer belongs there."""
+    sender = (((message.get("from") or {}).get("emailAddress") or {}).get("address") or "").strip().lower()
+    addresses = [((r.get("emailAddress") or {}).get("address") or "").strip() for r in message.get("replyTo") or []]
+    return [a for a in addresses if a and a.lower() != sender]
+
+
+def _reply_basis(access_token: str, message_id: str) -> tuple[str, list[str]]:
+    """The format of the message being replied to ("html" or "text") and who an
+    answer goes to when that is not its sender (see reply_to_addresses).
+    Defaults to html and the sender when the message cannot be read; the reply
+    itself would then report the real problem."""
+    response = _get_with_retry(f"{GRAPH_BASE}/me/messages/{message_id}", access_token, {"$select": "body,from,replyTo"}, timeout=15)
     if response.status_code != 200:
-        return "html"
-    return str((response.json().get("body") or {}).get("contentType") or "html").lower()
+        return "html", []
+    message = response.json()
+    return str((message.get("body") or {}).get("contentType") or "html").lower(), reply_to_addresses(message)
 
 
-def reply_to_message(access_token: str, message_id: str, comment: str) -> None:
+def reply_to_message(access_token: str, message_id: str, comment: str) -> list[str]:
     """Phase 14d — sends a reply to the ORIGINAL SENDER ONLY (Graph's own
     /reply endpoint, not /replyAll) with the given comment as the reply body.
     Graph handles recipient resolution, the "RE:" subject prefix, and
@@ -222,8 +233,15 @@ def reply_to_message(access_token: str, message_id: str, comment: str) -> None:
     `comment` is the reply as written, in plain text. It is sent as HTML
     (_comment_html) unless the original is a plain-text email, whose reply is
     plain text too and keeps its line breaks as they are."""
-    if _body_content_type(access_token, message_id) != "text":
+    content_type, reply_to = _reply_basis(access_token, message_id)
+    if content_type != "text":
         comment = _comment_html(comment)
+    payload: dict = {"comment": comment}
+    if reply_to:
+        # A website form's "New Website Enquiry" comes from the form; the
+        # customer is in Reply-To. Graph's /reply is told so explicitly rather
+        # than trusted to work it out - the answer must reach the customer.
+        payload["message"] = {"toRecipients": [{"emailAddress": {"address": a}} for a in reply_to]}
     # Only a throttled request (429) is repeated: Graph refused it outright, so
     # nothing was sent. A timeout or 5xx is NOT retried - the reply may already
     # have gone out, and sending it twice is worse than reporting a failure.
@@ -231,7 +249,7 @@ def reply_to_message(access_token: str, message_id: str, comment: str) -> None:
         response = requests.post(
             f"{GRAPH_BASE}/me/messages/{message_id}/reply",
             headers={"Authorization": f"Bearer {access_token}"},
-            json={"comment": comment},
+            json=payload,
             timeout=30,
         )
         if response.status_code == 429 and attempt < 2:
@@ -239,6 +257,8 @@ def reply_to_message(access_token: str, message_id: str, comment: str) -> None:
             continue
         break
     response.raise_for_status()
+    # Who it went to, when that was not simply the sender.
+    return reply_to
 
 
 def list_conversation_messages(access_token: str, conversation_id: str, top: int = 20) -> list[dict]:

@@ -73,6 +73,11 @@ export interface CallSummaryModalProps {
   coachingPending?: boolean;
   coaching?: CoachingReport | null;
   onCoachingGenerated?: (report: CoachingReport) => void;
+  // Someone else's call, opened from the team view: shown to read. Coaching and
+  // the spoken coach stay with the person who made it (they bill their business).
+  readOnly?: boolean;
+  ownerName?: string;
+  businessName?: string;
 }
 
 function hasSummaryContent(result: CallSummaryResult | null): boolean {
@@ -105,6 +110,9 @@ export function CallSummaryModal({
   coachingPending,
   coaching,
   onCoachingGenerated,
+  readOnly,
+  ownerName,
+  businessName,
 }: CallSummaryModalProps) {
   const hasOverview = hasSummaryContent(summaryResult);
   const hasTranscript = !!(transcript || segments?.length);
@@ -131,7 +139,13 @@ export function CallSummaryModal({
   const outcome = summaryResult?.outcome ? OUTCOME_META[summaryResult.outcome] : undefined;
 
   return (
-    <Modal open={open} onClose={onClose} title="Call Summary" maxWidth={860}>
+    <Modal
+      open={open}
+      onClose={onClose}
+      title={ownerName ? `Call by ${ownerName}` : 'Call Summary'}
+      description={businessName}
+      maxWidth={860}
+    >
       <div className={styles.body}>
         {(source || outcome || sentiment) && (
           <div className={styles.header}>
@@ -174,6 +188,8 @@ export function CallSummaryModal({
                 pending={coachingPending}
                 coaching={coaching}
                 onGenerated={onCoachingGenerated}
+                readOnly={readOnly}
+                ownerName={ownerName}
               />
             )}
 

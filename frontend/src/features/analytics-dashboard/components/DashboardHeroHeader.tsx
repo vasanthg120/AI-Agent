@@ -30,7 +30,8 @@ function isFullMonthRange(dateFrom: string, dateTo: string): boolean {
 }
 
 export interface DashboardHeroHeaderProps {
-  firstName?: string;
+  // The signed-in person's whole name, as written on their account.
+  name?: string;
   range: DateRange;
   onRangeChange: (range: DateRange) => void;
   dateFrom: string;
@@ -42,7 +43,7 @@ export interface DashboardHeroHeaderProps {
 }
 
 export function DashboardHeroHeader({
-  firstName,
+  name,
   range,
   onRangeChange,
   dateFrom,
@@ -123,7 +124,7 @@ export function DashboardHeroHeader({
         <div>
           <h1 className={styles.title}>
             {greeting()}
-            {firstName ? `, ${firstName}` : ''}
+            {name ? `, ${name}` : ''}
           </h1>
           <p className={styles.subtitle}>Here's what's happening across your business today.</p>
         </div>

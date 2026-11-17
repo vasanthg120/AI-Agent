@@ -9,6 +9,7 @@ import { callingService } from '@/services/callingService';
 import { VOICE_LANGUAGES } from '@/services/voiceService';
 import { EASE_OUT, FADE_UP, ROW_IN, SPRING_SNAPPY, staggerChildren } from '../motion';
 import { CustomerPicker, type SelectedCustomer } from './CustomerPicker';
+import { CustomerSnapshotCard } from './CustomerSnapshotCard';
 import { PhoneCallCard } from './PhoneCallCard';
 import styles from './StartHub.module.css';
 
@@ -214,6 +215,7 @@ function RecordPanel({
     <div className={styles.record}>
       <div className={styles.setup}>
         <CustomerPicker value={customer} onChange={onCustomerChange} />
+        {customer && <CustomerSnapshotCard dealId={customer.dealId} />}
 
         <div className={styles.field}>
           <label htmlFor={languageId} className={styles.fieldLabel}>

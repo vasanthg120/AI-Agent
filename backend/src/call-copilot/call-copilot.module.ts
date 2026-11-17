@@ -11,6 +11,7 @@ import { CallCopilotGateway } from './call-copilot.gateway';
 import { CallCopilotService } from './call-copilot.service';
 import { CallCopilotUploadService } from './call-copilot-upload.service';
 import { CallSession, CallSessionSchema } from './schemas/call-session.schema';
+import { TeamScopeModule } from '../team-activity/team-scope.module';
 
 @Module({
   imports: [
@@ -31,6 +32,8 @@ import { CallSession, CallSessionSchema } from './schemas/call-session.schema';
     BillingModule,
     // "Your call report is ready" on the HaiVE Dialer (NotificationsService.pushToDialer).
     NotificationsModule,
+    // Team calls: whose calls an admin, manager or the Main Account owner may open.
+    TeamScopeModule,
   ],
   controllers: [CallCopilotController],
   providers: [CallCopilotService, CallCopilotUploadService, CallCopilotGateway, GridFsService],

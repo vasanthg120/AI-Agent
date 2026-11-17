@@ -76,6 +76,7 @@ export function KeyStatsGrid({ deals, businessHealthScore, revenueTrend, dateFro
 
   const closedDealRows: DrillDownRow[] = (closedDealsResult?.items ?? []).map((d) => ({
     id: d._id,
+    dealId: d._id,
     title: d.name,
     subtitle: d.dealStatus,
     meta: d.expectedClosingDate,
@@ -84,6 +85,7 @@ export function KeyStatsGrid({ deals, businessHealthScore, revenueTrend, dateFro
 
   const pipelineRows: DrillDownRow[] = (openDeals?.items ?? []).map((d) => ({
     id: d._id,
+    dealId: d._id,
     title: d.name,
     subtitle: d.dealStatus,
     meta: d.expectedClosingDate,

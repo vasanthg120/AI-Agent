@@ -1,6 +1,7 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { Document, Types } from 'mongoose';
 import { deriveCategory, deriveRespondedInfo, deriveResponseStatus, EmailCategory, EmailRespondedVia, EmailResponseStatus } from '../email-response-state';
+import { inboxBoxOf } from '../email-inbox-boxes';
 
 export type EmailIntelligenceItemDocument = EmailIntelligenceItem & Document<Types.ObjectId>;
 
@@ -84,6 +85,12 @@ export class EmailIntelligenceItem {
 
   @Prop({ type: [String], default: undefined })
   ccAddresses?: string[];
+
+  // Where a reply goes when not to the sender: the Reply-To a website enquiry
+  // form puts the customer in. Captured by the sync (and filled in for waiting
+  // mail by the mailbox check); the send itself reads it from Outlook.
+  @Prop({ type: [String], default: undefined })
+  replyToAddresses?: string[];
 
   @Prop({ default: '' })
   bodyPreview: string;
@@ -336,6 +343,10 @@ EmailIntelligenceItemSchema.virtual('respondedAt').get(function (this: EmailInte
 });
 EmailIntelligenceItemSchema.virtual('respondedVia').get(function (this: EmailIntelligenceItemDocument) {
   return deriveRespondedInfo(this).respondedVia;
+});
+// Which inbox box it is in (email-inbox-boxes.ts) — so the page can move a row the moment it changes.
+EmailIntelligenceItemSchema.virtual('inboxBox').get(function (this: EmailIntelligenceItemDocument) {
+  return inboxBoxOf(this);
 });
 EmailIntelligenceItemSchema.virtual('category').get(function (this: EmailIntelligenceItemDocument) {
   return deriveCategory(this);

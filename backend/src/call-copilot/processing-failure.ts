@@ -15,6 +15,16 @@ export const TRANSCRIPTION_MAX_WAIT_MS = 60 * 60_000;
  * pipeline doesn't save the session. */
 export const PROCESSING_ABANDONED_AFTER_MS = TRANSCRIPTION_MAX_WAIT_MS + 10 * 60_000;
 
+/** How long the end-of-call summary and the AI Coach may take. Both are one
+ * Claude call over the whole transcript: the coach took 37–63 s even for short
+ * calls (logs, Nov 2026), so the module's 60 s default cut off every call longer
+ * than a few minutes. Room for python-agent's one retry included. */
+export const AI_REPORT_TIMEOUT_MS = 5 * 60_000;
+
+/** A coaching run older than this, with no report and no error, is assumed dead
+ * (the server restarted part-way), so a new one may start. */
+export const COACHING_ABANDONED_AFTER_MS = AI_REPORT_TIMEOUT_MS + 60_000;
+
 export class TranscriptionTimedOutError extends Error {
   constructor() {
     super('Sarvam batch job still running after the polling deadline');
@@ -108,4 +118,25 @@ export function describeProcessingFailure(err: unknown): ProcessingFailure {
     return { message: 'HaiVE’s AI service isn’t running, so this call couldn’t be transcribed. Try again once it’s back.', technical };
   }
   return { message: 'Something went wrong while processing this call.', technical };
+}
+
+/** Why the AI Coach couldn't review a call — stored on the session, shown by the coach panel. */
+export function describeCoachingFailure(err: unknown): ProcessingFailure {
+  const axiosErr = err as AxiosError;
+  const code = axiosErr?.code ?? (err as { code?: string })?.code ?? '';
+  const status = axiosErr?.isAxiosError ? axiosErr.response?.status : undefined;
+  const technical = axiosErr?.isAxiosError
+    ? `${status ? `HTTP ${status}` : code || 'no response'} from ${axiosErr.config?.url?.replace(/\?.*$/, '') ?? 'python-agent'}`
+    : err instanceof Error
+      ? err.message
+      : String(err);
+  const detail = agentDetail(err);
+  if (detail) return { message: sentence(detail), technical: `${technical}: ${detail}` };
+  if (status === undefined && NETWORK_SLOW.has(code)) {
+    return { message: 'The AI Coach took too long to review this call. Try again in a minute.', technical };
+  }
+  if (status === undefined && (axiosErr?.isAxiosError || NETWORK_DOWN.has(code))) {
+    return { message: 'HaiVE’s AI service isn’t running, so the AI Coach couldn’t review this call. Try again once it’s back.', technical };
+  }
+  return { message: 'The AI Coach couldn’t review this call right now. Try again in a minute.', technical };
 }

@@ -92,6 +92,8 @@ export interface EmailIntelligenceItem {
   receivedAt: string;
   subject: string;
   fromAddress: string;
+  // Where a reply goes when not to the sender (a website enquiry form's customer).
+  replyToAddresses?: string[];
   toAddresses: string[];
   bodyPreview: string;
   isRead: boolean;
@@ -145,6 +147,8 @@ export interface EmailIntelligenceItem {
   // AI-draft approval lifecycle, so an email answered directly in Outlook is
   // still status:'pending' but is 'responded' here.
   responseStatus: EmailResponseStatus;
+  // Which inbox box it is in (derived on the server).
+  inboxBox?: InboxBox;
   respondedAt?: string;
   respondedVia?: EmailRespondedVia;
   // The conversation's single category, derived by the backend from the same facts.
@@ -166,7 +170,8 @@ export interface EmailIntelligenceItem {
 }
 
 export type EmailResponseStatus = 'needs_response' | 'responded' | 'resolved';
-export type EmailRespondedVia = 'app' | 'outlook' | 'thread';
+// 'manual': the person marked it replied themselves (answered by phone, from another mailbox…).
+export type EmailRespondedVia = 'app' | 'outlook' | 'thread' | 'manual';
 export type EmailCategory =
   | 'urgent'
   | 'needs_response'
@@ -176,7 +181,14 @@ export type EmailCategory =
   | 'informational'
   | 'completed';
 
-export type EmailInboxCounts = Record<EmailResponseStatus, number> & { categories?: Record<EmailCategory, number> };
+/** The inbox's boxes — every email is in exactly one, by what it needs from you (backend email-inbox-boxes.ts). */
+export const INBOX_BOXES = ['new_enquiries', 'to_reply', 'awaiting_customer', 'replied', 'no_reply', 'junk'] as const;
+export type InboxBox = (typeof INBOX_BOXES)[number];
+
+export type EmailInboxCounts = Record<EmailResponseStatus, number> & {
+  categories?: Record<EmailCategory, number>;
+  boxes?: Record<InboxBox, number>;
+};
 
 export interface ReplyRefreshResult {
   connected: boolean;
@@ -184,10 +196,20 @@ export interface ReplyRefreshResult {
   checked: boolean;
 }
 
+/** Is the mailbox being read — and if not, since when and why (in words). */
+export interface MailboxHealth {
+  status: 'ok' | 'failing' | 'never_synced';
+  lastSuccessAt?: string;
+  failingSince?: string;
+  failedRuns?: number;
+  reason?: string;
+}
+
 export interface EmailSyncState {
   lastSyncedAt: string | null;
   running: boolean;
   awaitingAnalysis: number;
+  health?: MailboxHealth;
 }
 
 export interface EmailThreadSentMessage {
@@ -201,6 +223,8 @@ export interface EmailThreadSentMessage {
 export interface EmailListParams {
   // The inbox question: still needs a reply / already answered / nothing to do.
   view?: EmailResponseStatus;
+  // One of the inbox's boxes ("New enquiries", "Need to reply", …).
+  box?: InboxBox;
   // The AI-draft approval lifecycle, for callers that mean exactly that.
   status?: 'pending' | 'approved' | 'rejected';
   dateFrom?: string;
@@ -325,6 +349,7 @@ export interface ProviderHealthStatus {
 function toQueryParams(params: EmailListParams): Record<string, string | number> {
   const query: Record<string, string | number> = {};
   if (params.view) query.view = params.view;
+  if (params.box) query.box = params.box;
   if (params.status) query.status = params.status;
   if (params.dateFrom) query.from = params.dateFrom;
   if (params.dateTo) query.to = params.dateTo;
@@ -477,6 +502,17 @@ export const emailIntelligenceService = {
     const { data } = await axiosClient.post<EmailIntelligenceItem>(`/email-intelligence/${id}/approve`, {
       finalDraftReply,
     });
+    return data;
+  },
+
+  /** "I already replied" — answered somewhere HaiVE can't see (phone, another mailbox). */
+  async markReplied(id: string): Promise<EmailIntelligenceItem> {
+    const { data } = await axiosClient.post<EmailIntelligenceItem>(`/email-intelligence/${id}/mark-replied`);
+    return data;
+  },
+
+  async unmarkReplied(id: string): Promise<EmailIntelligenceItem> {
+    const { data } = await axiosClient.post<EmailIntelligenceItem>(`/email-intelligence/${id}/unmark-replied`);
     return data;
   },
 

@@ -154,6 +154,8 @@ export interface AssignmentDealRow {
   ownershipStatus: 'assigned' | 'pending_mapping' | 'unassigned';
   customerName?: string;
   customerNameSource?: 'account' | 'quote_client_details' | 'deal_name_heuristic';
+  // The latest change of owner made in HaiVE.
+  lastAssignment?: { at: string; byName?: string; reason?: string };
 }
 
 export interface ListAssignmentDealsResult {
@@ -215,13 +217,13 @@ export const dealsService = {
   },
 
   // Many deals to one person (or to nobody) in a single request.
-  async assignMany(dealIds: string[], ownerId: string | null): Promise<{ requested: number; assigned: number }> {
-    const { data } = await axiosClient.post<{ requested: number; assigned: number }>('/crm/deals/assign-bulk', { dealIds, ownerId });
+  async assignMany(dealIds: string[], ownerId: string | null, reason?: string): Promise<{ requested: number; assigned: number }> {
+    const { data } = await axiosClient.post<{ requested: number; assigned: number }>('/crm/deals/assign-bulk', { dealIds, ownerId, ...(reason?.trim() ? { reason: reason.trim() } : {}) });
     return data;
   },
 
-  async assign(dealId: string, ownerId: string | null): Promise<Deal> {
-    const { data } = await axiosClient.patch<Deal>(`/crm/deals/${dealId}/assign`, { ownerId });
+  async assign(dealId: string, ownerId: string | null, reason?: string): Promise<Deal> {
+    const { data } = await axiosClient.patch<Deal>(`/crm/deals/${dealId}/assign`, { ownerId, ...(reason?.trim() ? { reason: reason.trim() } : {}) });
     return data;
   },
 

@@ -7,7 +7,7 @@ import { Account, AccountDocument } from './schemas/account.schema';
 import { Quote, QuoteDocument } from './schemas/quote.schema';
 import { UsersService } from '../users/users.service';
 import { UserDocument } from '../users/schemas/user.schema';
-import { DealsService } from './deals.service';
+import { ASSIGNMENT_HISTORY_COLLECTION, DealsService } from './deals.service';
 import { ListDealsQueryDto } from './dto/list-deals-query.dto';
 import { buildBusinessGroups, groupKeyFor, BusinessNameSource } from './customer-grouping.util';
 
@@ -64,6 +64,8 @@ export interface AssignmentDealRow {
   externalOwnerLabel?: string;
   externalOwnerProvider?: string;
   ownershipStatus: 'assigned' | 'pending_mapping' | 'unassigned';
+  // The latest change of owner made in HaiVE: when, by whom, and why.
+  lastAssignment?: { at: Date; byName?: string; reason?: string };
   // Best-effort customer/account label — an Account name when the deal is
   // actually linked to one, else whatever customer-grouping.util.ts's
   // established resolution (already used by Customer Activity/Relationships)
@@ -129,8 +131,8 @@ export class DealOwnerMappingService {
     const dealIds = deals.map((d) => d._id.toString());
     const accountIds = [...new Set(deals.map((d) => d.accountId).filter((id): id is string => !!id))];
 
-    const [users, accounts, quotes] = await Promise.all([
-      this.usersService.findAll(organizationId),
+    const [users, accounts, quotes, history] = await Promise.all([
+      this.usersService.findAllWithLinkedMembers(organizationId),
       accountIds.length ? this.accountModel.find({ organizationId, _id: { $in: accountIds } }).exec() : Promise.resolve([]),
       // Deals synced from an external CRM never carry accountId/contactId
       // (crm_mongo_sync.py's _to_native_update never sets them — confirmed,
@@ -139,7 +141,18 @@ export class DealOwnerMappingService {
       // those, same reasoning quotes.service.ts and the royalty invoice
       // draft flow already rely on.
       dealIds.length ? this.quoteModel.find({ organizationId, dealId: { $in: dealIds } }).exec() : Promise.resolve([]),
+      dealIds.length
+        ? this.dealModel.db
+            .collection(ASSIGNMENT_HISTORY_COLLECTION)
+            .aggregate<{ _id: string; at: Date; by: string; reason?: string }>([
+              { $match: { organizationId, dealId: { $in: dealIds } } },
+              { $sort: { at: -1 } },
+              { $group: { _id: '$dealId', at: { $first: '$at' }, by: { $first: '$assignedBy' }, reason: { $first: '$reason' } } },
+            ])
+            .toArray()
+        : Promise.resolve([]),
     ]);
+    const lastAssignmentByDeal = new Map(history.map((h) => [h._id, h]));
 
     const userNameById = new Map(users.map((u): [string, string] => [u._id.toString(), u.name]));
     const accountNameById = new Map(accounts.map((a): [string, string] => [a._id.toString(), a.name]));
@@ -170,6 +183,10 @@ export class DealOwnerMappingService {
         ownershipStatus,
         customerName: group?.businessName,
         customerNameSource: group?.businessNameSource,
+        lastAssignment: (() => {
+          const last = lastAssignmentByDeal.get(d._id.toString());
+          return last ? { at: last.at, byName: userNameById.get(last.by), reason: last.reason } : undefined;
+        })(),
       };
     });
 

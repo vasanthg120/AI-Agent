@@ -7,16 +7,20 @@ import clsx from 'clsx';
 import {
   FiChevronLeft,
   FiChevronRight,
+  FiAward,
   FiClock,
   FiFolder,
+  FiHome,
   FiInbox,
   FiMic,
   FiPhoneCall,
   FiSearch,
   FiUploadCloud,
+  FiUser,
+  FiUsers,
   FiX,
 } from 'react-icons/fi';
-import { Button, DateRangeControl, Input, Skeleton, Spinner } from '@/components/ui';
+import { Button, DateRangeControl, Input, SelectMenu, Skeleton, Spinner } from '@/components/ui';
 import type { DateRange } from '@/components/ui';
 import {
   callCopilotService,
@@ -24,9 +28,11 @@ import {
   type CallLibraryStats,
   type CallSessionDetail,
   type CallSessionSummary,
+  type CallTeamInfo,
 } from '@/services/callCopilotService';
 import { OUTCOME_META, describeSource, failureReason, formatCallDate, type CallKind } from '../callMeta';
 import { FADE_UP, staggerChildren } from '../motion';
+import { CallSessionViewer } from './CallSessionViewer';
 import { CallSummaryModal } from './CallSummaryModal';
 import { CountUp } from './CountUp';
 import { FailedCallDialog } from './FailedCallDialog';
@@ -89,13 +95,37 @@ export function CallLibraryListView({ onStartCall }: { onStartCall?: () => void 
   const [openingId, setOpeningId] = useState<string | null>(null);
   // Bumped to reload the current page in place (e.g. after "Try again").
   const [reloadKey, setReloadKey] = useState(0);
+  // Whose calls: your own, or — for an owner, admin, manager or the Main Account
+  // owner — the team's (every sub-account's too for the Main Account owner).
+  const [team, setTeam] = useState<CallTeamInfo | null>(null);
+  const [scope, setScope] = useState<'mine' | 'team'>('mine');
+  const [teamBusiness, setTeamBusiness] = useState('all');
+  const [teamPerson, setTeamPerson] = useState('');
+  // Which calls: by how far processing got, and by the AI Coach's score.
+  const [status, setStatus] = useState<'' | 'ended' | 'processing' | 'error'>('');
+  const [score, setScore] = useState<'' | 'good' | 'fair' | 'low' | 'none'>('');
+  // A teammate's call: opened read-only by CallSessionViewer.
+  const [viewing, setViewing] = useState<string | null>(null);
 
   useEffect(() => {
     callCopilotService
-      .getStats()
+      .getTeam()
+      .then(setTeam)
+      .catch(() => setTeam(null));
+  }, []);
+
+  const teamFilter =
+    scope === 'team' ? { scope: 'team' as const, organizationId: teamBusiness === 'all' ? undefined : teamBusiness, userId: teamPerson || undefined } : {};
+  const teamKey = `${scope}|${teamBusiness}|${teamPerson}`;
+
+  useEffect(() => {
+    callCopilotService
+      .getStats(teamFilter)
       .then(setStats)
       .catch(() => setStats(null));
-  }, []);
+    // teamKey stands for teamFilter.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [teamKey]);
 
   const searching = query.trim() !== '';
 
@@ -111,6 +141,9 @@ export function CallLibraryListView({ onStartCall }: { onStartCall?: () => void 
             // Searching by words looks across every call — the server's text search doesn't take a date range —
             // so the dates only apply when browsing (see the dimmed date control below).
             ...(searching ? {} : toQueryRange(dateRange)),
+            ...teamFilter,
+            ...(status ? { status } : {}),
+            ...(score ? { score } : {}),
             page,
             pageSize: PAGE_SIZE,
           })
@@ -138,11 +171,15 @@ export function CallLibraryListView({ onStartCall }: { onStartCall?: () => void 
     };
     // `searching` is derived from `query`, which is already a dependency.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [query, dateRange, page, reloadKey]);
+  }, [query, dateRange, page, reloadKey, teamKey, status, score]);
 
   // The dialog opens once the call has loaded — not before, when it would show
   // an empty "not coached yet" state for a call that simply hasn't arrived.
   const openSession = async (id: string) => {
+    if (items.find((i) => i._id === id)?.readOnly) {
+      setViewing(id);
+      return;
+    }
     setOpeningId(id);
     try {
       setSelected(await callCopilotService.getSession(id));
@@ -178,19 +215,91 @@ export function CallLibraryListView({ onStartCall }: { onStartCall?: () => void 
             reset: 'Show all calls',
           }
       : {
-          title: 'Your Call Library is empty',
+          title: scope === 'team' ? 'No calls from the team yet' : 'Your Call Library is empty',
           text: 'Every call you record, make or upload shows up here with a summary and AI coaching.',
           reset: null,
         };
 
+  const businessOptions = [{ value: 'all', label: 'All businesses' }, ...(team?.businesses ?? []).map((b) => ({ value: b.id, label: b.name }))];
+  const personOptions = (team?.people ?? [])
+    .filter((p) => teamBusiness === 'all' || p.businessId === teamBusiness)
+    .map((p) => ({ value: p.id, label: p.name, hint: team?.acrossBusinesses ? team.businesses.find((b) => b.id === p.businessId)?.name : undefined }));
+
   return (
     <div className={styles.wrapper}>
+      {team?.team && (
+        <div className={styles.teamBar}>
+          <div className={styles.scopeToggle} role="radiogroup" aria-label="Whose calls">
+            {(['mine', 'team'] as const).map((value) => (
+              <button
+                key={value}
+                type="button"
+                role="radio"
+                aria-checked={scope === value}
+                className={clsx(styles.scopeOption, scope === value && styles.scopeOptionActive)}
+                onClick={() => {
+                  setScope(value);
+                  setPage(1);
+                }}
+              >
+                {value === 'mine' ? <FiUser aria-hidden /> : <FiUsers aria-hidden />}
+                {value === 'mine' ? 'My calls' : team.acrossBusinesses ? 'All businesses' : 'Team calls'}
+              </button>
+            ))}
+          </div>
+          {scope === 'team' && (
+            <div className={styles.teamFilters}>
+              {team.acrossBusinesses && (
+                <SelectMenu
+                  value={teamBusiness}
+                  options={businessOptions}
+                  onChange={(value) => {
+                    setTeamBusiness(value);
+                    setTeamPerson('');
+                    setPage(1);
+                  }}
+                  ariaLabel="Business"
+                  icon={<FiHome aria-hidden />}
+                  className={styles.teamPicker}
+                />
+              )}
+              <SelectMenu
+                value={teamPerson}
+                options={personOptions}
+                emptyOption="Everyone"
+                onChange={(value) => {
+                  setTeamPerson(value);
+                  setPage(1);
+                }}
+                ariaLabel="Person"
+                avatars
+                className={styles.teamPicker}
+              />
+            </div>
+          )}
+        </div>
+      )}
+
       {stats && (
         <motion.div className={styles.kpis} variants={staggerChildren(0.06)} initial="hidden" animate="show">
           <Kpi icon={<FiFolder />} label="Total calls" value={stats.total} />
           <Kpi icon={<FiClock />} label="Last 7 days" value={stats.last7Days} />
-          <Kpi icon={<FiMic />} label="Recorded live" value={stats.live} />
-          <Kpi icon={<FiUploadCloud />} label="Uploaded & phone" value={stats.uploaded} />
+          {scope === 'team' ? (
+            <>
+              <Kpi
+                icon={<FiAward />}
+                label="Average coach score"
+                value={stats.avgScore ?? 0}
+                display={stats.avgScore === null || stats.avgScore === undefined ? '—' : `${stats.avgScore}/10`}
+              />
+              <Kpi icon={<FiMic />} label="Calls scored" value={stats.scored ?? 0} />
+            </>
+          ) : (
+            <>
+              <Kpi icon={<FiMic />} label="Recorded live" value={stats.live} />
+              <Kpi icon={<FiUploadCloud />} label="Uploaded & phone" value={stats.uploaded} />
+            </>
+          )}
         </motion.div>
       )}
 
@@ -232,6 +341,55 @@ export function CallLibraryListView({ onStartCall }: { onStartCall?: () => void 
             }}
           />
         </div>
+      </div>
+
+      <div className={styles.callFilters}>
+        <SelectMenu
+          value={status}
+          options={[
+            { value: 'ended', label: 'Summarised' },
+            { value: 'processing', label: 'Transcribing' },
+            { value: 'error', label: 'Transcription failed' },
+          ]}
+          emptyOption="Any status"
+          onChange={(value) => {
+            setStatus(value as typeof status);
+            setPage(1);
+          }}
+          ariaLabel="Call status"
+          size="sm"
+          className={styles.callFilter}
+        />
+        <SelectMenu
+          value={score}
+          options={[
+            { value: 'good', label: 'Score 7 or more' },
+            { value: 'fair', label: 'Score 5 to 7' },
+            { value: 'low', label: 'Score under 5' },
+            { value: 'none', label: 'Not scored' },
+          ]}
+          emptyOption="Any score"
+          onChange={(value) => {
+            setScore(value as typeof score);
+            setPage(1);
+          }}
+          ariaLabel="Call score"
+          size="sm"
+          className={styles.callFilter}
+        />
+        {(status || score) && (
+          <button
+            type="button"
+            className={styles.clearFilters}
+            onClick={() => {
+              setStatus('');
+              setScore('');
+              setPage(1);
+            }}
+          >
+            Clear filters
+          </button>
+        )}
       </div>
 
       {mode === 'search' && searching && (
@@ -292,6 +450,7 @@ export function CallLibraryListView({ onStartCall }: { onStartCall?: () => void 
               key={item._id}
               item={item}
               opening={openingId === item._id}
+              showOwner={scope === 'team'}
               onOpen={() => void openSession(item._id)}
             />
           ))}
@@ -311,6 +470,8 @@ export function CallLibraryListView({ onStartCall }: { onStartCall?: () => void 
           </button>
         </nav>
       )}
+
+      <CallSessionViewer sessionId={viewing} onClose={() => setViewing(null)} />
 
       {selected?.status === 'error' && (
         <FailedCallDialog
@@ -346,7 +507,7 @@ export function CallLibraryListView({ onStartCall }: { onStartCall?: () => void 
   );
 }
 
-function Kpi({ icon, label, value }: { icon: ReactNode; label: string; value: number }) {
+function Kpi({ icon, label, value, display }: { icon: ReactNode; label: string; value: number; display?: string }) {
   return (
     <motion.div className={styles.kpi} variants={FADE_UP}>
       <span className={styles.kpiIcon} aria-hidden>
@@ -354,7 +515,7 @@ function Kpi({ icon, label, value }: { icon: ReactNode; label: string; value: nu
       </span>
       <span className={styles.kpiText}>
         <span className={styles.kpiValue}>
-          <CountUp value={value} />
+          {display ?? <CountUp value={value} />}
         </span>
         <span className={styles.kpiLabel}>{label}</span>
       </span>
@@ -362,7 +523,7 @@ function Kpi({ icon, label, value }: { icon: ReactNode; label: string; value: nu
   );
 }
 
-function CallRow({ item, opening, onOpen }: { item: CallSessionSummary; opening: boolean; onOpen: () => void }) {
+function CallRow({ item, opening, showOwner, onOpen }: { item: CallSessionSummary; opening: boolean; showOwner?: boolean; onOpen: () => void }) {
   const kind = describeSource(item.source, item.originalFilename);
   const outcome = item.outcome ? OUTCOME_META[item.outcome] : undefined;
   const coached = hasCoachingReport(item);
@@ -384,6 +545,13 @@ function CallRow({ item, opening, onOpen }: { item: CallSessionSummary; opening:
           <span className={styles.rowTitle}>{title}</span>
           {snippet && <span className={styles.rowSnippet}>{snippet}</span>}
           <span className={styles.rowMeta}>
+            {showOwner && (
+              <>
+                <span className={styles.owner}>{item.readOnly ? item.ownerName : 'You'}</span>
+                {item.businessName && <span className={styles.metaText}>{item.businessName}</span>}
+                <span className={styles.sep} aria-hidden />
+              </>
+            )}
             <span className={styles.metaText}>{kind.label}</span>
             <span className={styles.sep} aria-hidden />
             <span className={styles.metaText}>{formatCallDate(item.createdAt)}</span>

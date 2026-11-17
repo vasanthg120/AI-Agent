@@ -25,6 +25,9 @@ import { CustomerMailService } from './customer-mail.service';
 import { CustomerWorkspaceController } from './customer-workspace.controller';
 import { CustomerWorkspaceService } from './customer-workspace.service';
 import { CustomersController } from './customers.controller';
+import { CallCustomerSnapshotController, Customer360Controller } from './customer-360.controller';
+import { Customer360Service } from './customer-360.service';
+import { TeamScopeModule } from '../team-activity/team-scope.module';
 
 // The Customers view: every customer of the organization across its connected
 // CRMs and mailbox, each one seen whole (customer-directory.service.ts), and
@@ -45,6 +48,7 @@ import { CustomersController } from './customers.controller';
     // use of both; see customer-jobs.service.ts's getXeroInvoiceStatus.
     XeroModule,
     IntegrationsModule,
+    TeamScopeModule,
     // Decoration's own schema, registered a second time (NOT via CrmModule
     // itself — that would be a real cycle, since CrmModule already imports
     // this module for CustomerJobsService) — Mongoose allows the same
@@ -55,7 +59,7 @@ import { CustomersController } from './customers.controller';
     // soft-reference check in this app.
     MongooseModule.forFeature([{ name: Decoration.name, schema: DecorationSchema }]),
   ],
-  controllers: [CustomersController, CustomerWorkspaceController, CustomerJobsController, CustomerCloudController, CustomerCloudSyncController],
+  controllers: [CustomersController, CustomerWorkspaceController, CustomerJobsController, CustomerCloudController, CustomerCloudSyncController, Customer360Controller, CallCustomerSnapshotController],
   providers: [
     CustomerMailService,
     CustomerDirectoryService,
@@ -67,6 +71,7 @@ import { CustomersController } from './customers.controller';
     CustomerJobDocumentsService,
     GridFsService,
     JobGridFsService,
+    Customer360Service,
   ],
   // CustomerJobsService: CrmModule's QuotesController reads it for the
   // SalesBoard's "Job #" column / "View Linked Job" action (one-directional

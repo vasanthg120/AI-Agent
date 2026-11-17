@@ -42,6 +42,43 @@ describe('subject and id normalisation', () => {
   });
 });
 
+describe('ReplyIndex — a website form enquiry (customer in Reply-To)', () => {
+  const enquiry = {
+    receivedAt: at('2026-11-14T03:53:00Z'),
+    conversationId: 'conv-form',
+    internetMessageId: '<form-2164106@forms.example.in>',
+    fromAddress: 'suresh@forms.example.in',
+    subject: 'New Website Enquiry | Dentist | ID:2164106',
+    replyTo: ['Swetha@Gmail.com'],
+  };
+
+  it('is answered by any later email to the customer — a new email with its own subject', () => {
+    const index = new ReplyIndex([sentTo(['swetha@gmail.com'], '2026-11-14T04:53:00Z', { subject: 'Thank you for reaching out to Fully Promoted T. Nagar!' })], OWN);
+    expect(index.findReply(enquiry)).toMatchObject({ via: 'reply_to_address', at: at('2026-11-14T04:53:00Z') });
+  });
+
+  it('is not answered by mail to the customer from before it arrived, or to someone else', () => {
+    const index = new ReplyIndex(
+      [
+        sentTo(['swetha@gmail.com'], '2026-11-13T10:00:00Z', { subject: 'Earlier note' }),
+        sentTo(['someone.else@gmail.com'], '2026-11-14T05:00:00Z', { subject: 'Thank you for reaching out' }),
+      ],
+      OWN,
+    );
+    expect(index.findReply(enquiry)).toBeNull();
+  });
+
+  it('ignores a Reply-To that names us or a colleague', () => {
+    const index = new ReplyIndex([sentTo(['sam@fullypromoted.in'], '2026-11-14T05:00:00Z', { subject: 'Note' })], OWN);
+    expect(index.findReply({ ...enquiry, replyTo: ['sam@fullypromoted.in'] })).toBeNull();
+  });
+
+  it('ordinary mail (no Reply-To) still needs the same subject when written as a new email', () => {
+    const index = new ReplyIndex([sentTo(['priya@customer.com'], '2026-10-01T11:00:00Z', { subject: 'Something else entirely' })], OWN);
+    expect(index.findReply(question)).toBeNull();
+  });
+});
+
 describe('ReplyIndex — which sent message answers a received one', () => {
   it('finds a reply in the same conversation sent after the question', () => {
     const index = new ReplyIndex([sentTo(['priya@customer.com'], '2026-10-01T10:15:00Z', { conversationId: 'conv-1' })], OWN);

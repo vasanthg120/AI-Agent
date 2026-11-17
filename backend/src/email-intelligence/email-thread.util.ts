@@ -13,6 +13,12 @@
 //                     the same subject once "Re:" / "Fwd:" style prefixes (in
 //                     any language) are removed. Catches a reply written as a
 //                     new email.
+//   4. reply-to address — the message names someone other than its sender in
+//                     Reply-To (a website enquiry form: sent by the form, the
+//                     customer in Reply-To) and we wrote to that address after
+//                     it arrived, about anything ("Thank you for reaching out…").
+//                     That address belongs to this one enquiry, so any message
+//                     to it is the answer.
 // Anything else — a message to someone else, or to the same customer about
 // something else — answers nothing.
 
@@ -94,9 +100,11 @@ export interface InboundMessage {
   internetMessageId?: string;
   fromAddress: string;
   subject?: string;
+  /** Reply-To addresses other than the sender: who an answer goes to (a website form's customer). */
+  replyTo?: string[];
 }
 
-export type ReplyMatchVia = 'reference' | 'conversation' | 'recipient_subject';
+export type ReplyMatchVia = 'reference' | 'conversation' | 'recipient_subject' | 'reply_to_address';
 
 export interface ReplyMatch {
   /** When the first answering message was sent. */
@@ -124,6 +132,7 @@ export class ReplyIndex {
   private readonly byConversation = new Map<string, OutboundMessage[]>();
   private readonly byReference = new Map<string, OutboundMessage[]>();
   private readonly byRecipientSubject = new Map<string, OutboundMessage[]>();
+  private readonly byRecipient = new Map<string, OutboundMessage[]>();
   private readonly ownAddresses: Set<string>;
   private readonly ownDomains: Set<string>;
 
@@ -140,10 +149,11 @@ export class ReplyIndex {
       const referenced = new Set([message.inReplyTo, ...(message.references ?? [])].map(normalizeMessageId).filter(Boolean));
       for (const id of referenced) push(this.byReference, id, message);
       const subject = normalizeSubject(message.subject);
+      const recipients = new Set(message.recipients.map(normalizeAddress).filter(Boolean));
       if (subject.length >= MIN_SUBJECT_LENGTH) {
-        for (const recipient of new Set(message.recipients.map(normalizeAddress).filter(Boolean)))
-          push(this.byRecipientSubject, `${recipient}\n${subject}`, message);
+        for (const recipient of recipients) push(this.byRecipientSubject, `${recipient}\n${subject}`, message);
       }
+      for (const recipient of recipients) push(this.byRecipient, recipient, message);
     }
   }
 
@@ -182,9 +192,18 @@ export class ReplyIndex {
         if (sent > received && sent - received <= RECIPIENT_SUBJECT_WINDOW_MS) found.push({ message, via: 'recipient_subject' });
       }
     }
+    // A form enquiry's customer: any later message to them answers it. Never our own
+    // addresses or colleagues (a form that puts "us" in Reply-To proves nothing).
+    const customers = new Set((inbound.replyTo ?? []).map(normalizeAddress).filter((a) => a && a !== sender && !this.isInternal(a)));
+    for (const customer of customers) {
+      for (const message of this.byRecipient.get(customer) ?? []) {
+        const sent = message.sentAt.getTime();
+        if (sent > received && sent - received <= RECIPIENT_SUBJECT_WINDOW_MS) found.push({ message, via: 'reply_to_address' });
+      }
+    }
     if (found.length === 0) return null;
 
-    const rank: Record<ReplyMatchVia, number> = { reference: 0, conversation: 1, recipient_subject: 2 };
+    const rank: Record<ReplyMatchVia, number> = { reference: 0, conversation: 1, recipient_subject: 2, reply_to_address: 3 };
     const first = found.reduce((a, b) => (b.message.sentAt.getTime() < a.message.sentAt.getTime() ? b : a));
     const latest = found.reduce((a, b) => (b.message.sentAt.getTime() > a.message.sentAt.getTime() ? b : a));
     // Report the strongest evidence there is for the answer, not merely the first one found.

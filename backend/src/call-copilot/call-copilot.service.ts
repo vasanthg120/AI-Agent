@@ -3,7 +3,7 @@ import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { InjectModel } from '@nestjs/mongoose';
-import { Model } from 'mongoose';
+import { Model, isValidObjectId } from 'mongoose';
 import { firstValueFrom } from 'rxjs';
 import { randomUUID } from 'crypto';
 import FormData from 'form-data';
@@ -11,8 +11,31 @@ import { GridFsService } from '../common/gridfs/gridfs.service';
 import { ReservationService } from '../billing/reservation.service';
 import { CallSession, CallSessionDocument } from './schemas/call-session.schema';
 import { sessionRangeEnd, sessionRangeStart } from './session-date-range';
+import { AI_REPORT_TIMEOUT_MS, COACHING_ABANDONED_AFTER_MS, describeCoachingFailure } from './processing-failure';
 
 const AUDIO_BUCKET = 'call_recordings';
+
+/** The Call Library's status and score filters, as a Mongo condition. */
+export function callFilterMatch(options: { status?: string; score?: string }): Record<string, unknown>[] {
+  const and: Record<string, unknown>[] = [];
+  if (options.status) and.push({ status: options.status });
+  if (options.score === 'good') and.push({ overallScore: { $gte: 7 } });
+  else if (options.score === 'fair') and.push({ overallScore: { $gte: 5, $lt: 7 } });
+  else if (options.score === 'low') and.push({ overallScore: { $gt: 0, $lt: 5 } });
+  else if (options.score === 'none') and.push({ $or: [{ overallScore: { $exists: false } }, { overallScore: 0 }] });
+  return and;
+}
+
+/** An AI Coach run has started for this call and hasn't finished, failed or been abandoned. */
+export function coachingInProgress(
+  session: Pick<CallSession, 'coachingStartedAt' | 'coachingGeneratedAt' | 'coachingError'>,
+  now = Date.now(),
+): boolean {
+  const started = session.coachingStartedAt?.getTime();
+  if (!started || session.coachingError) return false;
+  if (session.coachingGeneratedAt && session.coachingGeneratedAt.getTime() >= started) return false;
+  return now - started < COACHING_ABANDONED_AFTER_MS;
+}
 
 export interface AnalyzeResult {
   skipped: boolean;
@@ -69,7 +92,7 @@ export class CallCopilotService {
   async searchSessions(
     organizationId: string,
     userId: string,
-    options: { q?: string; dealId?: string; dateFrom?: string; dateTo?: string; page?: number; pageSize?: number },
+    options: { q?: string; dealId?: string; dateFrom?: string; dateTo?: string; page?: number; pageSize?: number; status?: string; score?: string },
   ): Promise<{ items: CallSessionDocument[]; total: number; page: number; pageSize: number; mode: 'browse' | 'search' }> {
     const query = options.q?.trim();
     if (query) {
@@ -96,6 +119,8 @@ export class CallCopilotService {
     const pageSize = options.pageSize ?? 25;
     const match: Record<string, unknown> = { organizationId, userId };
     if (options.dealId) match.dealId = options.dealId;
+    const filters = callFilterMatch(options);
+    if (filters.length) match.$and = filters;
     if (options.dateFrom || options.dateTo) {
       const range: Record<string, Date> = {};
       if (options.dateFrom) range.$gte = sessionRangeStart(options.dateFrom);
@@ -114,6 +139,69 @@ export class CallCopilotService {
       this.sessionModel.countDocuments(match).exec(),
     ]);
     return { items, total, page, pageSize, mode: 'browse' };
+  }
+
+  /** Any session by id, whoever made it — the caller decides whether it may be shown (TeamScopeService.canSee). */
+  async findSessionById(sessionId: string): Promise<CallSessionDocument | null> {
+    if (!isValidObjectId(sessionId)) return null;
+    return this.sessionModel.findById(sessionId).exec();
+  }
+
+  /**
+   * The Call Library across a team. `owners` is a filter TeamScopeService's
+   * scope was turned into (which businesses, which people) — never the
+   * client's. Words are matched in the summary and the transcript (the
+   * semantic search only covers the caller's own calls), page by page.
+   */
+  async browseTeamSessions(
+    owners: Record<string, unknown>,
+    options: { q?: string; dateFrom?: string; dateTo?: string; page?: number; pageSize?: number; status?: string; score?: string },
+  ): Promise<{ items: CallSessionDocument[]; total: number; page: number; pageSize: number; mode: 'browse' }> {
+    const page = options.page ?? 1;
+    const pageSize = options.pageSize ?? 25;
+    const and: Record<string, unknown>[] = [owners, ...callFilterMatch(options)];
+    if (options.dateFrom || options.dateTo) {
+      const range: Record<string, Date> = {};
+      if (options.dateFrom) range.$gte = sessionRangeStart(options.dateFrom);
+      if (options.dateTo) range.$lte = sessionRangeEnd(options.dateTo);
+      and.push({ createdAt: range });
+    }
+    const words = options.q?.trim();
+    if (words) {
+      const pattern = new RegExp(words.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
+      and.push({
+        $or: [{ headline: pattern }, { summary: pattern }, { summaryPoints: pattern }, { keyTakeaways: pattern }, { originalFilename: pattern }, { 'transcript.text': pattern }],
+      });
+    }
+    const match = { $and: and };
+    const [items, total] = await Promise.all([
+      this.sessionModel
+        .find(match)
+        .select({ transcript: 0 })
+        .sort({ createdAt: -1 })
+        .skip((page - 1) * pageSize)
+        .limit(pageSize)
+        .exec(),
+      this.sessionModel.countDocuments(match).exec(),
+    ]);
+    return { items, total, page, pageSize, mode: 'browse' };
+  }
+
+  /** getStats across a team (see browseTeamSessions). */
+  async getTeamStats(owners: Record<string, unknown>): Promise<{ total: number; last7Days: number; live: number; uploaded: number; avgScore: number | null; scored: number }> {
+    const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60_000);
+    const within = (extra: Record<string, unknown>) => ({ $and: [owners, extra] });
+    const [total, last7Days, live, uploaded, scores] = await Promise.all([
+      this.sessionModel.countDocuments(owners).exec(),
+      this.sessionModel.countDocuments(within({ createdAt: { $gte: sevenDaysAgo } })).exec(),
+      this.sessionModel.countDocuments(within({ $or: [{ source: 'live' }, { source: { $exists: false } }] })).exec(),
+      this.sessionModel.countDocuments(within({ source: 'upload' })).exec(),
+      this.sessionModel
+        .aggregate<{ _id: null; avg: number; n: number }>([{ $match: within({ overallScore: { $gt: 0 } }) }, { $group: { _id: null, avg: { $avg: '$overallScore' }, n: { $sum: 1 } } }])
+        .exec(),
+    ]);
+    const avg = scores[0]?.avg;
+    return { total, last7Days, live, uploaded, avgScore: typeof avg === 'number' ? Math.round(avg * 10) / 10 : null, scored: scores[0]?.n ?? 0 };
   }
 
   /** Backs the Call Library's StatTile summary row — computed independently
@@ -392,7 +480,7 @@ export class CallCopilotService {
             fullTranscript,
             detectedEvents: session.events.map((e) => e.text),
           },
-          { headers: { Authorization: `Bearer ${token}` } },
+          { headers: { Authorization: `Bearer ${token}` }, timeout: AI_REPORT_TIMEOUT_MS },
         ),
       );
       session.headline = data.headline;
@@ -457,12 +545,50 @@ export class CallCopilotService {
    * after their own existing summarize step, then emit 'call:coaching'
    * themselves once it resolves — this service is deliberately NOT given a
    * reference to the gateway, since call-copilot.gateway.ts already imports
-   * CallCopilotService and the reverse import would be circular. Also the
-   * target of the on-demand POST sessions/:id/coach route, for a call that
-   * ended before this feature existed. */
+   * CallCopilotService and the reverse import would be circular. A run
+   * already going for this call (the coach button) is left to finish instead. */
   async generateCoaching(session: CallSessionDocument, fullTranscript: string): Promise<CallSessionDocument> {
     if (!fullTranscript.trim()) return session;
+    if (!(await this.claimCoachingRun(session))) return session;
+    return this.runCoaching(session, fullTranscript);
+  }
 
+  /** The "Generate coaching report" button. Starts the review in the
+   * background and answers at once: on a long call the review takes over a
+   * minute, longer than a proxy keeps a request open (the old synchronous
+   * route 502'd on every 10-minute call). A run already going is joined, not
+   * paid for twice. The caller waits for coachingGeneratedAt or coachingError
+   * to pass `startedAt` on the session. */
+  async requestCoaching(session: CallSessionDocument, fullTranscript: string): Promise<{ status: 'generating'; startedAt: Date }> {
+    if (coachingInProgress(session)) return { status: 'generating', startedAt: session.coachingStartedAt! };
+    if (!(await this.claimCoachingRun(session))) {
+      // Someone else (a double click, the automatic run) started one just now.
+      const current = await this.sessionModel.findById(session._id).select({ coachingStartedAt: 1 }).exec();
+      return { status: 'generating', startedAt: current?.coachingStartedAt ?? new Date() };
+    }
+    void this.runCoaching(session, fullTranscript).catch((err: Error) =>
+      this.logger.warn(`Call copilot coaching crashed for session ${session._id}: ${err.message}`),
+    );
+    return { status: 'generating', startedAt: session.coachingStartedAt! };
+  }
+
+  /** Marks a new coaching run as started — only if nobody else did since this
+   * document was read, so two runs never start for the same call. */
+  private async claimCoachingRun(session: CallSessionDocument): Promise<boolean> {
+    const startedAt = new Date();
+    const { modifiedCount } = await this.sessionModel
+      .updateOne({ _id: session._id, coachingStartedAt: session.coachingStartedAt ?? null }, { $set: { coachingStartedAt: startedAt }, $unset: { coachingError: '' } })
+      .exec();
+    if (!modifiedCount) return false;
+    // Mirrored on the document, so its own save() later writes the same values.
+    session.coachingStartedAt = startedAt;
+    session.coachingError = undefined;
+    return true;
+  }
+
+  /** The review itself. Never throws: a failure is logged and kept on the
+   * session in words the coach panel can show. */
+  private async runCoaching(session: CallSessionDocument, fullTranscript: string): Promise<CallSessionDocument> {
     try {
       const token = this.bridgeToken(session.userId, session.organizationId);
       const summaryText = [session.headline, ...session.summaryPoints, ...session.keyTakeaways].filter(Boolean).join('\n');
@@ -485,7 +611,7 @@ export class CallCopilotService {
             detectedEvents: session.events.map((e) => e.text),
             summary: summaryText,
           },
-          { headers: { Authorization: `Bearer ${token}` } },
+          { headers: { Authorization: `Bearer ${token}` }, timeout: AI_REPORT_TIMEOUT_MS },
         ),
       );
 
@@ -515,7 +641,10 @@ export class CallCopilotService {
       session.coachingGeneratedAt = new Date();
       await session.save();
     } catch (err) {
-      this.logger.warn(`Call copilot coaching failed for session ${session._id}: ${(err as Error).message}`);
+      const failure = describeCoachingFailure(err);
+      this.logger.warn(`Call copilot coaching failed for session ${session._id}: ${failure.technical}`);
+      session.coachingError = failure.message;
+      await session.save().catch((saveErr: Error) => this.logger.warn(`Call copilot coaching failure not saved for session ${session._id}: ${saveErr.message}`));
     }
     return session;
   }

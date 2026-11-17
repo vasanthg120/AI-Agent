@@ -307,6 +307,16 @@ export class CallSession {
   @Prop()
   coachingGeneratedAt?: Date;
 
+  // When the latest AI Coach run started, and why it failed if it did. A run
+  // that started after coachingGeneratedAt with no error is still going — the
+  // on-demand button joins it instead of paying for a second one, and the
+  // panel waits on these (the review takes a minute or more on a long call).
+  @Prop()
+  coachingStartedAt?: Date;
+
+  @Prop()
+  coachingError?: string;
+
   // Reservation.requestId for ReservationService.reserve/settle/release —
   // one reservation covers the whole call session (no lightweight per-
   // analysis-tick metering primitive exists; see the plan's own note on
