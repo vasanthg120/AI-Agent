@@ -24,6 +24,8 @@ import { CallSessionViewer } from '@/features/call-copilot/components/CallSessio
 import { OUTCOME_META } from '@/features/call-copilot/callMeta';
 import { CALL_FILTER_TITLES, LIST_TITLES, scoreTone } from './metrics';
 import { describePeriod } from './PeriodPicker';
+import { TaskButtons } from './TaskButtons';
+import taskStyles from './TeamTasks.module.css';
 import styles from './TeamActivity.module.css';
 
 dayjs.extend(relativeTime);
@@ -80,7 +82,7 @@ export function ActivityList({ kind, period, filters, showPerson }: { kind: Team
       <EmptyState
         compact
         icon={FiInbox}
-        title={kind === 'pipeline' ? 'No open deals owned' : kind === 'follow_ups' ? 'No follow-ups' : `No ${listTitle(kind, filters.callFilter).toLowerCase()} ${describePeriod(period)}`}
+        title={kind === 'pipeline' ? 'No open deals owned' : kind === 'follow_ups' ? 'No tasks or follow-ups' : `No ${listTitle(kind, filters.callFilter).toLowerCase()} ${describePeriod(period)}`}
       />
     );
 
@@ -213,8 +215,19 @@ function DealRow({ deal, showPerson, pipeline }: { deal: TeamDealItem; showPerso
   );
 }
 
+/** Where a task came from, in a word or two. */
+function taskOrigin(item: TeamFollowUpItem): string {
+  if (item.source === 'email') return 'Email follow-up';
+  if (item.origin === 'deal') return 'Deal task';
+  if (item.origin === 'job') return 'Job task';
+  if (item.origin === 'customer') return 'Customer task';
+  return item.givenBy ? `Given by ${item.givenBy}` : 'Task';
+}
+
 function FollowUpRow({ item, showPerson }: { item: TeamFollowUpItem; showPerson: boolean }) {
   const done = item.status === 'done';
+  // A task its viewer may move along gets Start / Done; the deal (if any) opens from its own link.
+  const movable = item.source === 'task' && !!item.editable;
   const content = (
     <>
       <span className={clsx(styles.recordIcon, done ? styles.recordIconOut : item.overdue ? styles.recordIconDanger : styles.recordIconWarning)} aria-hidden>
@@ -223,28 +236,37 @@ function FollowUpRow({ item, showPerson }: { item: TeamFollowUpItem; showPerson:
       <span className={styles.recordMain}>
         <span className={styles.recordTitle}>{item.title}</span>
         <span className={styles.recordMeta}>
-          {[
-            item.source === 'email' ? 'Email follow-up' : 'Customer task',
-            item.business,
-            done ? `done ${item.completedAt ? at(item.completedAt) : ''}` : item.dueDate ? `due ${at(item.dueDate)}` : 'no due date',
-          ]
+          {[taskOrigin(item), item.business, done ? `done ${item.completedAt ? at(item.completedAt) : ''}` : item.dueDate ? `due ${at(item.dueDate)}` : 'no due date']
             .filter(Boolean)
             .join(' · ')}
         </span>
+        {item.note && <span className={taskStyles.note}>{item.note}</span>}
         <span className={styles.recordChips}>
           <Who item={item} showPerson={showPerson} />
+          {!done && item.inProgress && <span className={clsx(styles.chip, styles.chip_info)}>In progress</span>}
+          {!done && item.priority === 'high' && <span className={clsx(styles.chip, styles.chip_warning)}>High priority</span>}
           {!done && item.overdue && <span className={clsx(styles.chip, styles.chip_danger)}>Overdue</span>}
           {done && <span className={clsx(styles.chip, styles.chip_success)}>Done</span>}
         </span>
+        {movable && (
+          <span className={taskStyles.taskButtons}>
+            <TaskButtons task={item} />
+            {item.dealId && (
+              <button type="button" className={taskStyles.taskButton} onClick={() => openDealDrawer(item.dealId!)}>
+                Open the deal
+              </button>
+            )}
+          </span>
+        )}
       </span>
-      {item.dealId && (
+      {item.dealId && !movable && (
         <span className={styles.recordEnd}>
           <FiChevronRight className={styles.recordChevron} aria-hidden />
         </span>
       )}
     </>
   );
-  return item.dealId ? (
+  return item.dealId && !movable ? (
     <button type="button" className={clsx(styles.record, styles.recordClickable)} onClick={() => openDealDrawer(item.dealId!)} title="Open the deal">
       {content}
     </button>
@@ -322,7 +344,7 @@ export function ActivityListModal({
     <Modal
       open={!!kind}
       onClose={onClose}
-      title={kind ? (kind === 'pipeline' ? 'Open pipeline now' : kind === 'follow_ups' ? 'Follow-ups: pending now, and done ' + describePeriod(period) : `${listTitle(kind, filters.callFilter)} ${describePeriod(period)}`) : ''}
+      title={kind ? (kind === 'pipeline' ? 'Open pipeline now' : kind === 'follow_ups' ? 'Tasks & follow-ups: open now, and done ' + describePeriod(period) : `${listTitle(kind, filters.callFilter)} ${describePeriod(period)}`) : ''}
       description={subtitle}
       maxWidth={720}
     >

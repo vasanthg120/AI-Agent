@@ -3,11 +3,11 @@ import { Link, useLocation } from 'react-router-dom';
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import clsx from 'clsx';
 import dayjs from 'dayjs';
-import { FiActivity, FiAlertTriangle, FiBarChart2, FiGrid, FiHome, FiTrendingUp, FiUsers } from 'react-icons/fi';
+import { FiActivity, FiAlertTriangle, FiBarChart2, FiGrid, FiHome, FiLifeBuoy, FiTrendingUp, FiUsers, FiX } from 'react-icons/fi';
 import { EmptyState, PageHeader, SectionCard, SelectMenu, Skeleton } from '@/components/ui';
 import { ROUTES } from '@/constants/routes';
 import { analyticsDashboardService } from '@/services/analyticsDashboardService';
-import { teamActivityService, type TeamActivityPerson, type TeamPeriodValue } from '@/services/teamActivityService';
+import { teamActivityService, type TeamActivityPerson, type TeamPeriodValue, type TeamSupportItem } from '@/services/teamActivityService';
 import { ActivityListModal } from '@/features/team-activity/ActivityList';
 import { PersonActivityView } from '@/features/team-activity/PersonActivityView';
 import { PeriodPicker, describePeriod } from '@/features/team-activity/PeriodPicker';
@@ -15,6 +15,8 @@ import { TeamActivityKpis } from '@/features/team-activity/TeamActivityKpis';
 import { TeamActivityTable } from '@/features/team-activity/TeamActivityTable';
 import { TeamTrendChart } from '@/features/team-activity/TeamTrendChart';
 import { TeamSummaryStrip, BusinessesTable } from '@/features/team-activity/TeamOverviewParts';
+import { DepartmentsTable, SupportList } from '@/features/team-activity/TeamSupportParts';
+import taskStyles from '@/features/team-activity/TeamTasks.module.css';
 import type { AgentActivityLinkState } from '@/features/team-activity/TeamActivityPanel';
 import type { MetricDef } from '@/features/team-activity/metrics';
 import teamStyles from '@/features/team-activity/TeamActivity.module.css';
@@ -38,6 +40,9 @@ export function DashboardPage() {
   const [business, setBusiness] = useState('all');
   const [selected, setSelected] = useState<TeamActivityPerson | null>(linked.person ?? null);
   const [openList, setOpenList] = useState<MetricDef | null>(null);
+  // The records behind one "Needs support" line (that person only), and the team the people list is narrowed to.
+  const [supportList, setSupportList] = useState<TeamSupportItem | null>(null);
+  const [department, setDepartment] = useState<string | null>(null);
 
   const { data, isLoading, isError, isFetching, dataUpdatedAt } = useQuery({
     queryKey: ['team-activity', period, business],
@@ -47,6 +52,12 @@ export function DashboardPage() {
   });
 
   const current = data?.businesses.find((b) => b.isCurrent);
+  const departmentOf = (p: TeamActivityPerson) => `${p.businessId}|${p.department ?? ''}`;
+  const shownDepartment = department ? data?.departments.find((d) => d.key === department) : undefined;
+  const openPerson = (personId: string, businessId: string) => {
+    const person = data?.people.find((p) => p.userId === personId && p.businessId === businessId);
+    if (person) setSelected(person);
+  };
   const showBusiness = !!data?.acrossBusinesses && business === 'all';
   const month = thisMonth();
   const salesForCurrent = !!data?.team && (business === 'all' || business === current?.id);
@@ -169,9 +180,29 @@ export function DashboardPage() {
         </div>
       )}
 
+      {data.team && data.attention.length > 0 && (
+        <SectionCard title={`Needs support · ${data.attention.length}`} icon={FiLifeBuoy}>
+          <SupportList items={data.attention} showBusiness={showBusiness} onOpenPerson={(item) => openPerson(item.personId, item.businessId)} onOpenList={setSupportList} />
+        </SectionCard>
+      )}
+
+      {data.team && data.departments.length > 0 && (
+        <SectionCard title={`Teams ${periodWords}`} icon={FiUsers}>
+          <DepartmentsTable departments={data.departments} activeKey={department} showBusiness={showBusiness} onSelect={setDepartment} />
+        </SectionCard>
+      )}
+
       {data.team && (
-        <SectionCard title="People" icon={FiUsers}>
-          <TeamActivityTable people={data.people} onSelect={setSelected} showBusiness={showBusiness} />
+        <SectionCard title={shownDepartment ? `People · ${shownDepartment.name}` : 'People'} icon={FiUsers}>
+          {shownDepartment && (
+            <div className={taskStyles.filterNote}>
+              Showing {shownDepartment.name} only.
+              <button type="button" className={taskStyles.more} onClick={() => setDepartment(null)}>
+                <FiX aria-hidden /> Show everyone
+              </button>
+            </div>
+          )}
+          <TeamActivityTable people={shownDepartment ? data.people.filter((p) => departmentOf(p) === shownDepartment.key) : data.people} onSelect={setSelected} showBusiness={showBusiness} />
         </SectionCard>
       )}
 
@@ -200,6 +231,14 @@ export function DashboardPage() {
         filters={{ organizationId: business, callFilter: openList?.callFilter }}
         showPerson={data.team}
         subtitle={openList?.meaning}
+      />
+      <ActivityListModal
+        kind={supportList?.list ?? null}
+        onClose={() => setSupportList(null)}
+        period={period}
+        filters={{ organizationId: supportList?.businessId, userId: supportList?.personId, callFilter: supportList?.callFilter }}
+        showPerson={false}
+        subtitle={supportList ? `${supportList.personName} — ${supportList.text}` : undefined}
       />
     </div>
   );

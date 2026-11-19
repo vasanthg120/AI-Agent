@@ -1,0 +1,326 @@
+/* Tasks given to people: the "Give a task" form, a task's actions in the lists,
+   "Needs support", departments, and the To-Do page's "Given to you".
+   Measured at 1366×768 (sidebar open) and 390px. */
+
+/* ---------- give a task ---------- */
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.fieldLabel {
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--color-text-secondary);
+}
+
+.dueRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.choice {
+  padding: 6px var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-full);
+  background: var(--color-bg-surface);
+  font: inherit;
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+}
+
+.choice:hover,
+.choice:focus-visible {
+  border-color: var(--color-accent);
+  outline: none;
+}
+
+.choiceOn {
+  border-color: var(--color-accent);
+  background: var(--color-bg-active);
+  color: var(--color-accent-hover);
+  font-weight: 600;
+}
+
+.date {
+  padding: 5px var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-full);
+  background: var(--color-bg-surface);
+  font: inherit;
+  font-size: var(--text-sm);
+  color: var(--color-text-primary);
+}
+
+.check {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-sm);
+  color: var(--color-text-primary);
+  cursor: pointer;
+}
+
+.textarea {
+  width: 100%;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-surface);
+  font: inherit;
+  font-size: var(--text-sm);
+  color: var(--color-text-primary);
+  resize: vertical;
+}
+
+.textarea:focus {
+  border-color: var(--color-accent);
+  outline: none;
+}
+
+.actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+}
+
+/* ---------- a task's buttons in a list ---------- */
+
+.taskButtons {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.taskButton {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-full);
+  background: var(--color-bg-surface);
+  font: inherit;
+  font-size: var(--text-xs);
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.taskButton:hover:not(:disabled),
+.taskButton:focus-visible {
+  border-color: var(--color-accent);
+  color: var(--color-accent-hover);
+  outline: none;
+}
+
+.taskButton:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+
+.taskButtonDone {
+  border-color: color-mix(in srgb, var(--color-success) 50%, transparent);
+  color: var(--color-success-ink);
+}
+
+.note {
+  font-size: var(--text-xs);
+  line-height: 1.45;
+  color: var(--color-text-secondary);
+}
+
+/* ---------- needs support ---------- */
+
+.support {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.supportRow {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  padding: 6px var(--space-2);
+  border-radius: var(--radius-md);
+  font-size: var(--text-sm);
+  line-height: 1.45;
+  color: var(--color-text-secondary);
+}
+
+.supportIcon {
+  flex-shrink: 0;
+  margin-top: 3px;
+}
+
+.sev_warning {
+  color: var(--color-warning-ink);
+}
+
+.sev_info {
+  color: var(--color-accent);
+}
+
+.supportText {
+  flex: 1;
+  min-width: 0;
+}
+
+.linkButton {
+  padding: 0;
+  border: none;
+  background: none;
+  font: inherit;
+  font-weight: 700;
+  color: var(--color-text-primary);
+  cursor: pointer;
+}
+
+.linkButton:hover,
+.linkButton:focus-visible {
+  color: var(--color-accent);
+  text-decoration: underline;
+  outline: none;
+}
+
+.supportGo {
+  flex-shrink: 0;
+  padding: 0 var(--space-2);
+  border: none;
+  background: none;
+  font: inherit;
+  font-size: var(--text-xs);
+  font-weight: 600;
+  color: var(--color-accent);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.more {
+  margin-top: var(--space-1);
+  padding: 0 var(--space-2);
+  border: none;
+  background: none;
+  font: inherit;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--color-accent);
+  cursor: pointer;
+}
+
+/* ---------- departments ---------- */
+
+.deptActive {
+  background: var(--color-bg-active);
+}
+
+.filterNote {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+}
+
+/* ---------- To-Do: given to you ---------- */
+
+.mine {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.mineRow {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-surface);
+}
+
+.mineRowDone {
+  opacity: 0.65;
+}
+
+.mineMain {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.mineTitle {
+  font-weight: 600;
+  color: var(--color-text-primary);
+  overflow-wrap: anywhere;
+}
+
+.mineTitleDone {
+  text-decoration: line-through;
+}
+
+.mineMeta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+}
+
+.chip {
+  padding: 1px 8px;
+  border-radius: var(--radius-full);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.chip_progress {
+  background: var(--color-bg-active);
+  color: var(--color-accent-hover);
+}
+
+.chip_danger {
+  background: var(--color-danger-soft);
+  color: var(--color-danger-ink);
+}
+
+.chip_high {
+  background: var(--color-warning-soft);
+  color: var(--color-warning-ink);
+}
+
+.chip_done {
+  background: var(--color-success-soft);
+  color: var(--color-success-ink);
+}
+
+@media (max-width: 760px) {
+  .mineRow {
+    flex-direction: column;
+  }
+}

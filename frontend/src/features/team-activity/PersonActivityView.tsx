@@ -1,12 +1,14 @@
 import { useState } from 'react';
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import clsx from 'clsx';
-import { FiArrowLeft, FiBriefcase, FiCheckSquare, FiMail, FiPhone, FiTrendingUp } from 'react-icons/fi';
+import { FiArrowLeft, FiBriefcase, FiCheckSquare, FiMail, FiPhone, FiPlus, FiTrendingUp } from 'react-icons/fi';
 import { Avatar, Button, Skeleton, StatTile } from '@/components/ui';
 import { formatINR as money } from '@/utils/currency';
 import { analyticsDashboardService } from '@/services/analyticsDashboardService';
 import { teamActivityService, type TeamActivityPerson, type TeamListKind, type TeamPeriodValue } from '@/services/teamActivityService';
+import { useAuthStore } from '@/stores/authStore';
 import { ActivityList, ActivityListModal } from './ActivityList';
+import { GiveTaskModal } from './GiveTaskModal';
 import { TeamActivityKpis } from './TeamActivityKpis';
 import { TeamTrendChart } from './TeamTrendChart';
 import { PeriodPicker, describePeriod } from './PeriodPicker';
@@ -64,6 +66,10 @@ export function PersonActivityView({
   const [emailView, setEmailView] = useState<EmailView>('emails_sent');
   const [dealView, setDealView] = useState<DealView>('deals_created');
   const [openList, setOpenList] = useState<MetricDef | null>(null);
+  const [giving, setGiving] = useState(false);
+  const me = useAuthStore((s) => s.user);
+  // Someone who sees the team (they came from "Everyone") may give this person a task — not themselves, nor the Main Account's own record.
+  const canGive = !!onBack && person.active && !person.mainAccountMember && person.userId !== me?.id;
   const filters = { organizationId: person.businessId, userId: person.userId };
 
   const { data, isFetching } = useQuery({
@@ -87,7 +93,7 @@ export function PersonActivityView({
     { id: 'calls', label: 'Calls', icon: FiPhone, count: counts.calls },
     { id: 'emails', label: 'Emails', icon: FiMail, count: counts.emailsSent + counts.emailsReceived },
     { id: 'deals', label: 'Deals', icon: FiBriefcase, count: counts.dealsCreated + counts.dealsWon + counts.dealsLost },
-    { id: 'followups', label: 'Follow-ups', icon: FiCheckSquare, count: counts.followUpsPending },
+    { id: 'followups', label: 'Tasks', icon: FiCheckSquare, count: counts.followUpsPending },
     ...(isCurrentBusiness ? [{ id: 'sales' as Section, label: 'Sales this month', icon: FiTrendingUp }] : []),
   ];
 
@@ -106,7 +112,14 @@ export function PersonActivityView({
             <span>{[person.role, person.businessName, person.email].filter(Boolean).join(' · ')}</span>
           </div>
         </div>
-        <PeriodPicker value={period} onChange={onPeriodChange} id="person-period" />
+        <div className={styles.headerActions}>
+          {canGive && (
+            <Button type="button" size="sm" leftIcon={<FiPlus aria-hidden />} onClick={() => setGiving(true)}>
+              Give a task
+            </Button>
+          )}
+          <PeriodPicker value={period} onChange={onPeriodChange} id="person-period" />
+        </div>
       </div>
 
       <div className={clsx(styles.fade, isFetching && styles.fading)}>
@@ -190,6 +203,7 @@ export function PersonActivityView({
         showPerson={false}
         subtitle={openList ? `${person.name} — ${openList.meaning}` : undefined}
       />
+      <GiveTaskModal person={giving ? person : null} onClose={() => setGiving(false)} />
       <span className={styles.srOnly}>{describePeriod(period)}</span>
     </div>
   );

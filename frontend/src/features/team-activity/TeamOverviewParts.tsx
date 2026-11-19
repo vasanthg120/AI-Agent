@@ -16,8 +16,8 @@ export function TeamSummaryStrip({ overview }: { overview: TeamActivityOverview 
     },
     {
       value: summary.followUpCompletionPct === null ? '—' : `${summary.followUpCompletionPct}%`,
-      label: 'Follow-ups completed',
-      title: 'Follow-ups done in the period ÷ (done + still pending).',
+      label: 'Tasks completed',
+      title: 'Tasks and email follow-ups done in the period ÷ (done + still open).',
     },
     {
       value: summary.currency ? formatAmountIn(totals.wonValue, summary.currency) : '—',

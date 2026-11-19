@@ -17,6 +17,7 @@ import {
 import { extractErrorMessage } from '@/utils/errors';
 import { dayjs, todayUtc } from '@/utils/date';
 import { todoEodService } from '@/services/todoEodService';
+import { GivenToYou } from '@/features/team-activity/GivenToYou';
 import { Board } from './components/Board';
 import { DateStepper } from './components/DateStepper';
 import { DayProgress } from './components/DayProgress';
@@ -137,6 +138,8 @@ export function TodoEodPage() {
       >
         {view === 'board' ? (
           <>
+            {/* Tasks a manager (or a customer, job or deal) gave this person — beside the AI's daily list. */}
+            <GivenToYou />
             <div className={styles.toolbar}>
               <DateStepper date={boardDate} onChange={setBoardDate} />
               <div className={styles.boardFilterRow}>

@@ -243,8 +243,10 @@ function needsSupport(people: TeamActivityPersonRow[], period: TeamPeriod, viewe
 }
 
 function departmentTotals(people: TeamActivityPersonRow[], support: SupportItem[]): TeamDepartment[] {
-  const staff = people.filter((p) => !p.mainAccountMember);
-  if (!staff.some((p) => p.department)) return [];
+  // Only businesses that use departments: elsewhere "No department" would be everyone, and say nothing.
+  const using = new Set(people.filter((p) => !p.mainAccountMember && p.department).map((p) => p.businessId));
+  const staff = people.filter((p) => !p.mainAccountMember && using.has(p.businessId));
+  if (staff.length === 0) return [];
   const needing = new Set(support.map((s) => `${s.businessId}|${s.personId}`));
   const groups = new Map<string, TeamDepartment & { scoreSum: number; scored: number }>();
   for (const p of staff) {

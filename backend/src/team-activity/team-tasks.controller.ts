@@ -3,6 +3,7 @@ import { IsDateString, IsIn, IsOptional, IsString, MaxLength, MinLength } from '
 import { JwtPayload } from '../auth/jwt-payload.interface';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
+import { PermissionExempt } from '../common/permissions/permission.decorator';
 import { TeamActivityService } from './team-activity.service';
 
 export class GiveTaskDto {
@@ -50,6 +51,9 @@ export class MoveTaskDto {
 // permissions open; giving a task, or moving someone else's, is checked against
 // whose work the caller sees (TeamScopeService) inside TeamActivityService.
 @UseGuards(JwtAuthGuard)
+// The person's own to-do: no permission list takes it away. Giving or moving someone
+// else's task is TeamScopeService's decision inside TeamActivityService.
+@PermissionExempt('personal')
 @Controller('team-tasks')
 export class TeamTasksController {
   constructor(private activity: TeamActivityService) {}
