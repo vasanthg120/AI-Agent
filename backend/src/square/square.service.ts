@@ -2,9 +2,12 @@ import { HttpService } from '@nestjs/axios';
 import { BadRequestException, Injectable, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
+import { InjectModel } from '@nestjs/mongoose';
 import { randomUUID } from 'crypto';
+import { Model } from 'mongoose';
 import { firstValueFrom } from 'rxjs';
 import { IntegrationsService } from '../integrations/integrations.service';
+import { SquarePaymentTransaction, SquarePaymentTransactionDocument } from './schemas/square-payment-transaction.schema';
 
 // Pinned, not "latest" — confirmed live against Square's own API reference
 // (never guessed): an unpinned version would silently pick up Square's
@@ -78,6 +81,24 @@ export interface SquareConnectionStatus {
   currency?: string;
   countrySupported?: boolean;
   needsReauth?: boolean;
+  // Only set by handleCallback (the OAuth path) — the controller needs it
+  // to kick off this org's initial payment sync; connect()'s caller already
+  // knows the organizationId (it's their own JWT), so that path omits it.
+  organizationId?: string;
+  // Which connect path produced this connection — webhooks are
+  // application-level in Square (confirmed live against its own docs), so
+  // only an 'oauth' (per-org app) connection can ever receive one;
+  // 'personal_access_token' connections rely entirely on reconciliation
+  // (square-reconciliation.service.ts) and that's expected, not a gap.
+  connectionType?: 'personal_access_token' | 'oauth';
+  // This org's own saved webhook signing secret is on file (square-webhook.
+  // controller.ts needs it to verify deliveries) — only meaningful when
+  // connectionType is 'oauth'.
+  webhookConfigured?: boolean;
+  // The newest square_payment_transactions row's lastSyncedAt for this org —
+  // a webhook delivery or a reconciliation pass, whichever happened last.
+  // Undefined means not one payment has ever been synced yet.
+  lastPaymentSyncAt?: Date;
 }
 
 export interface CreateSquarePaymentInput {
@@ -136,6 +157,7 @@ export class SquareService {
     private http: HttpService,
     private jwt: JwtService,
     private integrations: IntegrationsService,
+    @InjectModel(SquarePaymentTransaction.name) private transactionModel: Model<SquarePaymentTransactionDocument>,
   ) {}
 
   private apiBaseUrl(environment: 'sandbox' | 'production'): string {
@@ -261,6 +283,7 @@ export class SquareService {
       country: merchant.country,
       currency: merchant.currency,
       countrySupported,
+      organizationId,
     };
   }
 
@@ -357,6 +380,14 @@ export class SquareService {
   async getStatus(organizationId: string): Promise<SquareConnectionStatus> {
     const auth = await this.integrations.resolveAuth(organizationId, 'square');
     if (!auth) return { connected: false };
+    // connect()'s own oauthMeta is the only one that ever sets
+    // applicationId (see its own call site above) — handleCallback's never
+    // does, so its presence/absence is exactly which path produced this row.
+    const connectionType: 'personal_access_token' | 'oauth' = auth.oauthMeta?.applicationId ? 'personal_access_token' : 'oauth';
+    const [webhookStatus, latestSync] = await Promise.all([
+      connectionType === 'oauth' ? this.integrations.getOAuthAppCredentialsStatus(organizationId, 'square') : Promise.resolve(undefined),
+      this.transactionModel.findOne({ organizationId, provider: 'square' }).sort({ lastSyncedAt: -1 }).select({ lastSyncedAt: 1 }).lean(),
+    ]);
     return {
       connected: true,
       environment: auth.oauthMeta?.environment as 'sandbox' | 'production' | undefined,
@@ -367,6 +398,9 @@ export class SquareService {
       currency: auth.oauthMeta?.currency,
       countrySupported: auth.oauthMeta?.countrySupported === 'true',
       needsReauth: !auth.credentials.accessToken,
+      connectionType,
+      webhookConfigured: webhookStatus?.webhookSecretConfigured,
+      lastPaymentSyncAt: latestSync?.lastSyncedAt,
     };
   }
 

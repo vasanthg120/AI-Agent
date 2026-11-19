@@ -124,6 +124,7 @@ export class DataSourcesService implements OnApplicationBootstrap {
     await this.renameProviders();
     await this.fillEmptyMappings();
     await this.upgradeLegacyHoops();
+    await this.addHoopsWindowTimezone();
     const orgIds = (
       await this.connection
         .collection('organizations')
@@ -156,6 +157,26 @@ export class DataSourcesService implements OnApplicationBootstrap {
     for (const source of legacy) {
       await this.applyProviderSetup(source, CRM_PROVIDERS.hoops);
       this.logger.log(`Hoops source ${source._id.toString()} now uses the Hoops API settings (nightly sync, quotes, AUD).`);
+    }
+  }
+
+  /** One-off, idempotent: a Hoops source already has `sync.window` (so
+   * upgradeLegacyHoops above doesn't touch it) but it predates `timezone`
+   * being added to the window shape — it's still running on the old fixed
+   * UTC+10 "AEST, no DST" offset, which during AEDT (Sydney's daylight
+   * saving, roughly Oct-Apr) reads the window as opening/closing an hour
+   * later than the real Sydney clock. A targeted $set, not
+   * applyProviderSetup — this must NOT touch fieldMappings/modules/
+   * lastSyncAt/lastSuccessAt, only add the one missing field. */
+  private async addHoopsWindowTimezone(): Promise<void> {
+    const result = await this.sourceModel
+      .updateMany(
+        { provider: 'hoops', 'sync.window': { $exists: true }, 'sync.window.timezone': { $exists: false } },
+        { $set: { 'sync.window.timezone': 'Australia/Sydney' } },
+      )
+      .exec();
+    if (result.modifiedCount > 0) {
+      this.logger.log(`${result.modifiedCount} Hoops source(s) now use Australia/Sydney's real (DST-aware) clock for the nightly sync window.`);
     }
   }
 

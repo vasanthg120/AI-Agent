@@ -87,20 +87,21 @@ describe('Gateway Payments on the Customers directory (real Mongo)', () => {
     expect(items[0].gatewayPaymentSummary.transactionCount).toBe(1);
   });
 
-  it('a payment with no matched identity never attaches to any customer — never guessed by name', async () => {
+  it('a payment with no matched identity never attaches to any customer — never guessed by name — but is surfaced separately for manual review, never silently dropped', async () => {
     await contact(org, 'akash@example.com');
     await transaction(org, 'pay_3', { amount: 100, paymentStatus: 'completed' }); // no matchedEmailKey/matchedPhoneKey at all
 
-    const { items } = await service.list(org, {});
-    expect(items[0].gatewayPaymentSummary.transactionCount).toBe(0);
+    const result = await service.list(org, {});
+    expect(result.items[0].gatewayPaymentSummary.transactionCount).toBe(0);
+    expect(result.unmatchedGatewayPayments.map((p) => p.id)).toEqual(['pay_3']);
   });
 
-  it('a pending payment never counts as revenue', async () => {
+  it('a pending payment never counts as revenue, and reads as "pending" (still in flight) rather than "failed_only"', async () => {
     await contact(org, 'akash@example.com');
     await transaction(org, 'pay_4', { matchedEmailKey: 'akash@example.com', amount: 100, paymentStatus: 'pending' });
 
     const { items } = await service.list(org, {});
-    expect(items[0].gatewayPaymentSummary).toMatchObject({ totalPaid: 0, netPaid: 0, status: 'failed_only' });
+    expect(items[0].gatewayPaymentSummary).toMatchObject({ totalPaid: 0, netPaid: 0, status: 'pending' });
   });
 
   it('a partial refund reduces net paid without reducing totalPaid, and a full refund brings net paid to zero', async () => {
@@ -166,5 +167,21 @@ describe('computeGatewayPaymentSummary (pure)', () => {
     const summary = computeGatewayPaymentSummary([record({ status: 'disputed', amount: 100 })]);
     expect(summary.disputedCount).toBe(1);
     expect(summary.totalPaid).toBe(0);
+  });
+
+  it('only pending/authorized/processing transactions (nothing has resolved yet) reads as "pending", not "failed_only"', () => {
+    expect(computeGatewayPaymentSummary([record({ status: 'pending' })]).status).toBe('pending');
+    expect(computeGatewayPaymentSummary([record({ status: 'authorized' })]).status).toBe('pending');
+    expect(computeGatewayPaymentSummary([record({ status: 'processing' })]).status).toBe('pending');
+  });
+
+  it('only failed/cancelled transactions — nothing ever resolved AND nothing is still in flight — is the real "failed_only"', () => {
+    expect(computeGatewayPaymentSummary([record({ status: 'failed' })]).status).toBe('failed_only');
+    expect(computeGatewayPaymentSummary([record({ id: 'a', status: 'failed' }), record({ id: 'b', status: 'cancelled' })]).status).toBe('failed_only');
+  });
+
+  it('a failed attempt alongside a still-pending retry reads as "pending", not "failed_only" — there is still a live attempt', () => {
+    const summary = computeGatewayPaymentSummary([record({ id: 'a', status: 'failed' }), record({ id: 'b', status: 'pending' })]);
+    expect(summary.status).toBe('pending');
   });
 });

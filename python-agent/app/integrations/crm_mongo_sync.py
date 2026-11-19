@@ -44,7 +44,9 @@ the customised CRM):
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timedelta, timezone
+import time
+from datetime import datetime, timedelta, timezone, tzinfo
+from zoneinfo import ZoneInfo
 
 from bson import ObjectId
 from pymongo import ReturnDocument, UpdateOne
@@ -778,12 +780,13 @@ def _record_run(source: dict, started: datetime, trigger: str, status_: str, cou
 
 # ---- nightly sync window (Hoops) -------------------------------------------------
 #
-# A source with sync.window — Hoops: {"utcOffsetMinutes": 600, "start": "19:00",
-# "end": "05:00", "label": "AEST"}, set by the backend's provider catalog — is
-# read at most once a night, inside that window, whoever asks: the scheduler,
-# "Sync now", or a just-connected CRM. A night whose sync failed is retried an
-# hour later, at most three tries a night. The backend shows the same schedule
-# (backend/src/data-sources/sync-window.ts) — a change here needs the same there.
+# A source with sync.window — Hoops: {"timezone": "Australia/Sydney",
+# "start": "19:00", "end": "05:00", "label": "AEST"}, set by the backend's
+# provider catalog — is read at most once a night, inside that window,
+# whoever asks: the scheduler, "Sync now", or a just-connected CRM. A night
+# whose sync failed is retried an hour later, at most three tries a night.
+# The backend shows the same schedule (backend/src/data-sources/sync-window.ts)
+# — a change here needs the same there.
 
 _WINDOW_RETRY_AFTER = timedelta(minutes=60)
 _WINDOW_MAX_TRIES = 3
@@ -799,7 +802,19 @@ def _minutes(hhmm: str) -> int:
     return int(hours) * 60 + int(minutes)
 
 
-def _window_tz(window: dict) -> timezone:
+def _window_tz(window: dict) -> tzinfo:
+    """A real IANA zone (DST-aware) when the window carries one — e.g.
+    Hoops's "Australia/Sydney", which observes AEDT (UTC+11) roughly
+    Oct-Apr, not AEST (UTC+10) year-round, matching hoops.py's own
+    business_zone() exactly. Falls back to the fixed utcOffsetMinutes only
+    for a window saved before `timezone` existed (see provider-catalog.ts's
+    own comment — both sides must stay in lockstep)."""
+    name = window.get("timezone")
+    if name:
+        try:
+            return ZoneInfo(name)
+        except Exception:
+            logger.warning("Unknown timezone %r on a sync window; falling back to utcOffsetMinutes", name)
     return timezone(timedelta(minutes=int(window.get("utcOffsetMinutes") or 0)))
 
 
@@ -868,6 +883,25 @@ def _window_due(source: dict, now: datetime) -> bool:
     return tries < _WINDOW_MAX_TRIES and now - last >= _WINDOW_RETRY_AFTER
 
 
+# A "running" flag left behind by a crash (or, now, by a slow discover —
+# see _sync_in_progress below) stops counting as in-progress after this long.
+# One named constant so sync_source()'s own claim and discover_source()'s
+# read-only check can never drift apart.
+_RUNNING_STALE_AFTER = timedelta(minutes=45)
+
+
+def _sync_in_progress(source: dict, now: datetime) -> bool:
+    """Read-only mirror of sync_source()'s own atomic claim condition below —
+    never writes anything, so discover_source() can check "is a sync already
+    using this account's one-request-at-a-time budget" without disturbing
+    sync_source()'s own run-tracking fields."""
+    sync = source.get("sync") or {}
+    if sync.get("lastStatus") != "running":
+        return False
+    running_since = _parse_date(sync.get("runningSince"))
+    return running_since is None or now - running_since < _RUNNING_STALE_AFTER
+
+
 def sync_source(source: dict, modules: tuple[str, ...] | None = None, trigger: str = "scheduled") -> dict:
     """Syncs one data source and records the outcome on it (last sync time,
     status, counts, error) and in its history (crm_sync_runs)."""
@@ -879,11 +913,11 @@ def sync_source(source: dict, modules: tuple[str, ...] | None = None, trigger: s
         if blocked:
             return {"status": "deferred", "message": blocked, "nextRunAt": next_window_opening(window, _now()).isoformat()}
         # One sync at a time (Hoops refuses a second request while one runs); a
-        # "running" left behind by a crash stops counting after 45 minutes.
+        # "running" left behind by a crash stops counting after _RUNNING_STALE_AFTER.
         claimed = db.crm_data_sources.find_one_and_update(
             {
                 "_id": source["_id"],
-                "$or": [{"sync.lastStatus": {"$ne": "running"}}, {"sync.runningSince": {"$lt": _now() - timedelta(minutes=45)}}],
+                "$or": [{"sync.lastStatus": {"$ne": "running"}}, {"sync.runningSince": {"$lt": _now() - _RUNNING_STALE_AFTER}}],
             },
             {"$set": {"sync.lastStatus": "running", "sync.runningSince": _now()}},
         )
@@ -964,11 +998,56 @@ def discover_source(source: dict) -> dict:
     """The first look at a newly connected CRM, before anything is synced:
     proves the connection really reads data, and brings back a first page of
     each kind of record — how many, which fields they carry, and a few
-    samples for the mapping screen. Writes no CRM records."""
+    samples for the mapping screen. Writes no CRM records.
+
+    For a one-request-at-a-time provider (a source with sync.window set —
+    Hoops today), this politely steps aside if a sync is already using that
+    budget rather than contending with it. Confirmed root cause of a real
+    "HaiVE couldn't check the connection right now" report on a genuinely
+    valid key: discover_source() and sync_source() share the same Hoops API
+    key but, before this check, had no awareness of each other at all, so a
+    connection check started while the scheduled nightly sync was mid-flight
+    made Hoops' OWN 429 ("one request at a time per account" — hoops.py's
+    own module comment) land on the discover call, which then retried for
+    up to ~110s per list (hoops.py's _RETRY_WAITS) — twice over, once per
+    list this function reads (transactions, customers) — easily exceeding
+    even a generous external timeout. Failing fast here, before any Hoops
+    request is attempted, avoids both the wasted wait and the needless extra
+    load on the same rate limit the running sync is already using."""
+    provider = source.get("provider") or "unknown"
+    organization_id = source.get("organizationId")
+    started = time.monotonic()
+
+    def _done(result: dict, adapter_obj: object | None = None) -> dict:
+        # requests_made only exists on HoopsAdapter's client today — a
+        # structured "retry/request count" hint for the one provider this
+        # actually matters for, never assumed to exist for any other.
+        requests_made = getattr(getattr(adapter_obj, "client", None), "requests_made", None)
+        logger.info(
+            "CRM discover: provider=%s org=%s status=%s duration_ms=%d requests_made=%s",
+            provider,
+            organization_id,
+            result.get("status"),
+            round((time.monotonic() - started) * 1000),
+            requests_made if requests_made is not None else "n/a",
+        )
+        return result
+
+    window = _window(source)
+    if window and _sync_in_progress(source, _now()):
+        label = source.get("label") or "This CRM"
+        return _done(
+            {
+                "status": "error",
+                "kind": "busy",
+                "message": f"{label} is already syncing right now — try the connection check again in a minute.",
+                "detail": "A sync for this data source is currently running; Hoops allows only one request at a time per account.",
+            }
+        )
     try:
         adapter = adapter_for(source)
     except Exception as exc:  # noqa: BLE001
-        return {"status": "error", **describe_failure(exc)}
+        return _done({"status": "error", **describe_failure(exc)})
     adapter.sample_only = True
     found: dict[str, dict] = {}
     samples: dict[str, list[dict]] = {}
@@ -979,7 +1058,7 @@ def discover_source(source: dict) -> dict:
         try:
             rows = next(iter(adapter.pages(module)), [])
         except Exception as exc:  # noqa: BLE001
-            return {"status": "error", "module": module, **describe_failure(exc)}
+            return _done({"status": "error", "module": module, **describe_failure(exc)}, adapter)
         paths: set[str] = set()
         for raw in rows[:_MAX_FIELD_SAMPLES]:
             paths |= field_paths(raw)
@@ -990,7 +1069,7 @@ def discover_source(source: dict) -> dict:
     _save_samples(source, samples)
     if update:
         get_db().crm_data_sources.update_one({"_id": source["_id"]}, {"$set": update})
-    return {"status": "ok", "modules": found}
+    return _done({"status": "ok", "modules": found}, adapter)
 
 
 def _syncable_sources(organization_id: str | None = None) -> list[dict]:

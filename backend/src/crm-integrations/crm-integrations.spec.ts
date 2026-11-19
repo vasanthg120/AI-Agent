@@ -1,7 +1,7 @@
 import { getConnectionToken, getModelToken, MongooseModule } from '@nestjs/mongoose';
 import { Test } from '@nestjs/testing';
 import { Connection, Model } from 'mongoose';
-import { of } from 'rxjs';
+import { of, throwError } from 'rxjs';
 import { nameScore } from '../data-sources/canonical-mapping';
 import { DataSourcesService } from '../data-sources/data-sources.service';
 import { MappingIntelligenceService } from '../data-sources/mapping-intelligence.service';
@@ -17,7 +17,8 @@ describe('provider catalog', () => {
     expect(CRM_PROVIDERS.prospectconnect.label).toBe('Pantheras CRM');
     expect(CRM_PROVIDERS.hoops).toMatchObject({ label: 'Hoops CRM', syncSupported: true, integrationProviders: ['hoops'] });
     expect(connectionOf(CRM_PROVIDERS.hoops)).toBe('pull');
-    expect(CRM_PROVIDERS.hoops.syncDefaults?.window).toEqual({ utcOffsetMinutes: 600, start: '19:00', end: '05:00', label: 'AEST' });
+    // Real IANA zone (DST-aware), not just the fixed AEST offset — see sync-window.ts's own comment.
+    expect(CRM_PROVIDERS.hoops.syncDefaults?.window).toEqual({ timezone: 'Australia/Sydney', utcOffsetMinutes: 600, start: '19:00', end: '05:00', label: 'AEST' });
     expect(connectionOf(CRM_PROVIDERS.prospectconnect)).toBe('pull');
     expect(PUSH_PROVIDERS).toEqual(['zapier']);
     // Hoops carries none of Pantheras' field names; a sale is won when its job is created (as Hoops' jobs report counts it).
@@ -351,6 +352,74 @@ describe('CRM integrations (real Mongo)', () => {
     expect(restarted?.metadata.currency).toBe('NZD');
 
     await crm.disconnect(org, 'hoops');
+    expect((await crm.list(org))[1].status).toBe('not_connected');
+  });
+
+  it('gives the connection check enough time for Hoops\' own documented worst case (two sequential lists, each possibly retried on a 429 for up to 110s) before giving up', async () => {
+    // Regression guard for the generic "HaiVE couldn't check the connection
+    // right now" firing on a real, valid key: the old 120s budget was
+    // shorter than Hoops' own retry backoff can legitimately take across
+    // the two lists discover_source() reads (see discover()'s own comment).
+    integrations.resolveAuth.mockResolvedValue(null);
+    integrations.connectWithAuth.mockImplementation(async (organizationId: string, provider: string) => {
+      await connection.collection('integration_credentials').updateOne({ organizationId, provider }, { $set: { organizationId, provider } }, { upsert: true });
+      await dataSources.reconcile(organizationId);
+    });
+    integrations.disconnect.mockImplementation(async (organizationId: string, provider: string) => {
+      await connection.collection('integration_credentials').deleteMany({ organizationId, provider });
+    });
+    http.post.mockReturnValue(of({ data: { status: 'ok', modules: {} } }));
+
+    await crm.connect(org, 'hoops', { apiKey: 'key-3' });
+
+    const [, , options] = http.post.mock.calls.find((call) => String(call[0]).includes('/sync/crm/discover'))!;
+    expect((options as { timeout: number }).timeout).toBeGreaterThanOrEqual(280_000);
+    await crm.disconnect(org, 'hoops');
+  });
+
+  it('when the connection check itself fails to come back (network error / exceeded even the generous timeout), nothing is kept and a clear, honest message is shown — not a silent half-connected state', async () => {
+    integrations.resolveAuth.mockResolvedValue(null);
+    integrations.connectWithAuth.mockImplementation(async (organizationId: string, provider: string) => {
+      await connection.collection('integration_credentials').updateOne({ organizationId, provider }, { $set: { organizationId, provider } }, { upsert: true });
+      await dataSources.reconcile(organizationId);
+    });
+    integrations.disconnect.mockImplementation(async (organizationId: string, provider: string) => {
+      await connection.collection('integration_credentials').deleteMany({ organizationId, provider });
+    });
+    http.post.mockReturnValue(throwError(() => new Error('timeout of 300000ms exceeded')));
+
+    await expect(crm.connect(org, 'hoops', { apiKey: 'key-4' })).rejects.toThrow('couldn’t check the connection right now');
+    expect(await connection.collection('integration_credentials').countDocuments({ organizationId: org })).toBe(0);
+    expect((await crm.list(org))[1].status).toBe('not_connected');
+  });
+
+  it('when python-agent reports the account is busy (a sync already running), shows that specific, honest reason — not the generic "didn\'t accept these details" or "couldn\'t read from" messages', async () => {
+    // Root-cause case: discover_source() on the python-agent side now
+    // declines fast with kind:'busy' when a sync is already using this
+    // Hoops account's one-request-at-a-time budget (see crm_mongo_sync.py's
+    // discover_source()). This confirms that specific reason reaches the
+    // user as-is, distinct from an auth rejection or a generic read failure.
+    integrations.resolveAuth.mockResolvedValue(null);
+    integrations.connectWithAuth.mockImplementation(async (organizationId: string, provider: string) => {
+      await connection.collection('integration_credentials').updateOne({ organizationId, provider }, { $set: { organizationId, provider } }, { upsert: true });
+      await dataSources.reconcile(organizationId);
+    });
+    integrations.disconnect.mockImplementation(async (organizationId: string, provider: string) => {
+      await connection.collection('integration_credentials').deleteMany({ organizationId, provider });
+    });
+    http.post.mockReturnValue(
+      of({
+        data: {
+          status: 'error',
+          kind: 'busy',
+          message: 'Hoops CRM is already syncing right now — try the connection check again in a minute.',
+          detail: 'A sync for this data source is currently running; Hoops allows only one request at a time per account.',
+        },
+      }),
+    );
+
+    await expect(crm.connect(org, 'hoops', { apiKey: 'key-5' })).rejects.toThrow('already syncing right now');
+    expect(await connection.collection('integration_credentials').countDocuments({ organizationId: org })).toBe(0);
     expect((await crm.list(org))[1].status).toBe('not_connected');
   });
 });

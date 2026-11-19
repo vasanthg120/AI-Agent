@@ -4,6 +4,7 @@ import { Test } from '@nestjs/testing';
 import { Connection } from 'mongoose';
 import { of, throwError } from 'rxjs';
 import { GridFsService } from '../common/gridfs/gridfs.service';
+import { windowOpensLabel, windowSchedule } from '../data-sources/sync-window';
 import { CustomerDirectoryService } from './customer-directory.service';
 import { CustomerMailService } from './customer-mail.service';
 import { CustomerWorkspaceService } from './customer-workspace.service';
@@ -398,6 +399,27 @@ describe('Customers (real Mongo)', () => {
     // Somebody else's source can't be synced.
     await expect(service.sync(org, `${PREFIX}-not-a-source`)).rejects.toBeInstanceOf(BadRequestException);
     await expect(service.sync(`${PREFIX}-nobody`)).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('tells the Customers page when a windowed source (Hoops) can be synced, so "Sync now" can explain itself before being clicked', async () => {
+    const window = { timezone: 'Australia/Sydney', start: '19:00', end: '05:00', label: 'AEST' };
+    await connection.collection('crm_data_sources').updateOne({ organizationId: org, provider: 'hoops' }, { $set: { 'sync.window': window } });
+
+    const result = await service.list(org, {});
+    const hoops = result.sources.find((s) => s.label === 'Hoops CRM')!;
+    const gorillaDash = result.sources.find((s) => s.label === 'Gorilla Dash')!;
+
+    // Computed independently, right alongside the call above, so this proves
+    // the service actually reads sync.window and calls windowSchedule with
+    // it — not a hardcoded time-of-day assumption that would be flaky.
+    const expected = windowSchedule(window, 'Hoops CRM', undefined);
+    expect(hoops.schedule).toBeDefined();
+    expect(hoops.schedule).toMatchObject({ windowLabel: windowOpensLabel(window), canSyncNow: expected.canSyncNow });
+    if (!expected.canSyncNow) expect(hoops.schedule!.reason).toBe(expected.reason);
+    expect(Math.abs(new Date(hoops.schedule!.nextRunAt).getTime() - expected.nextRunAt.getTime())).toBeLessThan(5000);
+
+    // A source with no provider-enforced window (Gorilla Dash) never gets one.
+    expect(gorillaDash.schedule).toBeUndefined();
   });
 
   it('the period keeps customers with anything happening in it — an inquiry, a quotation, an invoice, a payment or an email', async () => {

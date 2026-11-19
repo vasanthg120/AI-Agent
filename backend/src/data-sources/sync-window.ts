@@ -5,9 +5,16 @@
 // can work — a change to the rule needs the same change there.
 
 export interface SyncWindow {
-  // Fixed offset, not a named zone: AEST is UTC+10 all year (no daylight saving).
-  utcOffsetMinutes: number;
-  // "HH:MM", local to the offset. An end before the start runs past midnight.
+  // A real IANA zone (DST-aware) — e.g. "Australia/Sydney", which observes
+  // AEDT (UTC+11) roughly Oct-Apr, not AEST (UTC+10) year-round. Preferred
+  // over utcOffsetMinutes whenever set.
+  timezone?: string;
+  // Fallback only, for a window saved before `timezone` existed: a FIXED
+  // offset with no daylight saving — kept so an old stored document still
+  // resolves to something, never because a new window should set this
+  // instead of timezone.
+  utcOffsetMinutes?: number;
+  // "HH:MM", local to the zone/offset. An end before the start runs past midnight.
   start: string;
   end: string;
   label: string;
@@ -18,9 +25,31 @@ const minutes = (hhmm: string) => {
   return h * 60 + m;
 };
 
+/** The real UTC offset (minutes) window's zone observes AT this exact
+ * instant — DST-aware when `timezone` is set, so this mirror never drifts
+ * from python's zoneinfo-based enforcement (crm_mongo_sync.py's own
+ * _window_tz) across a daylight-saving transition. Falls back to the
+ * fixed utcOffsetMinutes for a window that predates `timezone`. */
+function offsetMinutesAt(window: SyncWindow, at: Date): number {
+  if (!window.timezone) return window.utcOffsetMinutes ?? 0;
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: window.timezone,
+    hourCycle: 'h23',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  }).formatToParts(at);
+  const get = (type: string) => Number(parts.find((p) => p.type === type)?.value);
+  const asLocalReadAsUtc = Date.UTC(get('year'), get('month') - 1, get('day'), get('hour'), get('minute'), get('second'));
+  return Math.round((asLocalReadAsUtc - at.getTime()) / 60_000);
+}
+
 /** The local date the window opened on, if `at` is inside a window ("YYYY-MM-DD"), else null. */
 export function windowNight(window: SyncWindow, at: Date): string | null {
-  const local = new Date(at.getTime() + window.utcOffsetMinutes * 60_000);
+  const local = new Date(at.getTime() + offsetMinutesAt(window, at) * 60_000);
   const now = local.getUTCHours() * 60 + local.getUTCMinutes();
   const start = minutes(window.start);
   const end = minutes(window.end);
@@ -33,14 +62,19 @@ export function windowNight(window: SyncWindow, at: Date): string | null {
 
 function opensOn(window: SyncWindow, night: string): Date {
   const start = minutes(window.start);
-  return new Date(Date.parse(`${night}T00:00:00Z`) + (start - window.utcOffsetMinutes) * 60_000);
+  // The zone's offset exactly at local midnight of this night — close
+  // enough to the real opening instant (hours later, same local day) to
+  // always land on the correct side of a DST transition, since AU/NZ-style
+  // transitions never happen between midnight and 7pm local.
+  const offset = offsetMinutesAt(window, new Date(Date.parse(`${night}T00:00:00Z`)));
+  return new Date(Date.parse(`${night}T00:00:00Z`) + (start - offset) * 60_000);
 }
 
 /** When the next night's window opens after `at` (tonight's, if it hasn't opened yet). */
 export function nextWindowOpening(window: SyncWindow, at: Date): Date {
   const night = windowNight(window, at);
   if (night) return opensOn(window, new Date(Date.parse(`${night}T00:00:00Z`) + 86_400_000).toISOString().slice(0, 10));
-  const localDate = new Date(at.getTime() + window.utcOffsetMinutes * 60_000).toISOString().slice(0, 10);
+  const localDate = new Date(at.getTime() + offsetMinutesAt(window, at) * 60_000).toISOString().slice(0, 10);
   const opens = opensOn(window, localDate);
   return opens > at ? opens : opensOn(window, new Date(Date.parse(`${localDate}T00:00:00Z`) + 86_400_000).toISOString().slice(0, 10));
 }

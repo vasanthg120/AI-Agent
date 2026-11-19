@@ -12,6 +12,7 @@ import { ReservationService } from '../billing/reservation.service';
 import { heuristicBusinessName } from '../crm/customer-grouping.util';
 import { DataSourcesService, currencyOf } from '../data-sources/data-sources.service';
 import { CRM_PROVIDERS } from '../data-sources/provider-catalog';
+import { SyncWindow, windowOpensLabel, windowSchedule } from '../data-sources/sync-window';
 import { UsersService } from '../users/users.service';
 import {
   AddCustomerContactDto,
@@ -102,6 +103,11 @@ export interface CustomerSource {
   lastSyncAt?: Date;
   /** Why the last sync failed, when it did — the table then shows the last successful one. */
   lastError?: string;
+  /** Set only for a source with a provider-enforced read window (Hoops: once
+   * a night, after 7:00pm AEST/AEDT) — lets "Sync now" explain itself (or
+   * disable) proactively instead of only after a click, same as the
+   * Settings -> Data Sources page's own CrmManageModal already does. */
+  schedule?: { windowLabel: string; nextRunAt: Date; canSyncNow: boolean; reason?: string };
 }
 
 /** A customer the Dialer can call: who they are, their numbers as written, and the deal a call is for. */
@@ -330,6 +336,12 @@ export interface GatewayPaymentRecord {
   status: 'pending' | 'processing' | 'authorized' | 'completed' | 'failed' | 'cancelled' | 'partially_refunded' | 'refunded' | 'disputed';
   date: Date;
   refundedAmount: number;
+  /** How the payment was taken (Square's source_type — e.g. "CARD", "CASH", "WALLET"), when the provider reports one. */
+  paymentMethodType?: string;
+  /** The provider's order id for this payment, when there is one. */
+  orderReference?: string;
+  /** The caller-supplied reference_id for this payment (e.g. an invoice/quote number), when there is one. */
+  transactionReference?: string;
 }
 
 export interface GatewayPaymentSummary {
@@ -342,11 +354,13 @@ export interface GatewayPaymentSummary {
   // Counted separately from `status` below — never folded into "paid",
   // since a dispute can be open against an otherwise-completed payment.
   disputedCount: number;
-  // 'unpaid' when there are no completed/refunded transactions at all —
-  // distinct from 'failed_only' (every transaction failed/was cancelled,
-  // so there IS gateway activity, just none of it ever took money) and from
-  // genuinely having no gateway activity recorded for this customer.
-  status: 'unpaid' | 'partially_paid' | 'paid' | 'refunded' | 'failed_only';
+  // 'unpaid' when there are no completed/refunded transactions at all and no
+  // transaction is still in flight either — distinct from 'pending' (there's
+  // an authorized/processing/pending attempt that hasn't resolved yet, so
+  // this customer must never read as a dead end) and from 'failed_only'
+  // (every transaction that DID resolve failed or was cancelled, and none
+  // are still in flight).
+  status: 'unpaid' | 'pending' | 'partially_paid' | 'paid' | 'refunded' | 'failed_only';
 }
 
 function emptyGatewayPaymentSummary(currency: string): GatewayPaymentSummary {
@@ -369,15 +383,39 @@ export function computeGatewayPaymentSummary(records: GatewayPaymentRecord[]): G
   const netPaid = totalPaid - totalRefunded;
   const lastPaymentAt = revenueRecords.length ? revenueRecords.reduce((latest, r) => (r.date > latest ? r.date : latest), revenueRecords[0].date) : undefined;
   const disputedCount = records.filter((r) => r.status === 'disputed').length;
+  // A payment still working its way through Square (pending/authorized/
+  // processing) must never read as "failed" just because nothing has
+  // settled yet — only when every non-revenue transaction has actually
+  // resolved (failed/cancelled) does 'failed_only' apply.
+  const stillInFlight = records.some((r) => r.status === 'pending' || r.status === 'authorized' || r.status === 'processing');
   const status: GatewayPaymentSummary['status'] =
-    revenueRecords.length === 0 ? 'failed_only' : netPaid <= 0 ? 'refunded' : totalRefunded > 0 ? 'partially_paid' : 'paid';
+    revenueRecords.length === 0
+      ? stillInFlight
+        ? 'pending'
+        : 'failed_only'
+      : netPaid <= 0
+        ? 'refunded'
+        : totalRefunded > 0
+          ? 'partially_paid'
+          : 'paid';
   return { totalPaid, totalRefunded, netPaid, currency, transactionCount: records.length, lastPaymentAt, disputedCount, status };
 }
 
 interface Directory {
   currency: string;
-  sources: { id: string; label: string; provider: string; active: boolean; canSync: boolean; lastSyncAt?: Date; lastError?: string }[];
+  sources: {
+    id: string;
+    label: string;
+    provider: string;
+    active: boolean;
+    canSync: boolean;
+    lastSyncAt?: Date;
+    lastError?: string;
+    schedule?: { windowLabel: string; nextRunAt: Date; canSyncNow: boolean; reason?: string };
+  }[];
   entries: Entry[];
+  /** Square (etc.) transactions stored but matched to nobody — see the loop that builds this list for why. */
+  unmatchedGatewayPayments: GatewayPaymentRecord[];
 }
 
 // One record of one system, with whatever it says about who the customer is.
@@ -588,20 +626,49 @@ export class CustomerDirectoryService {
       // distinct from `payments` above (quote receivables, an unrelated
       // concept — see this collection's own schema comment on the naming
       // collision this avoids).
-      find('square_payment_transactions', {}, { providerPaymentId: 1, matchedEmailKey: 1, matchedPhoneKey: 1, amount: 1, currency: 1, paymentStatus: 1, paymentDate: 1, refundedAmount: 1, provider: 1 }),
+      find('square_payment_transactions', {}, {
+        providerPaymentId: 1,
+        matchedEmailKey: 1,
+        matchedPhoneKey: 1,
+        amount: 1,
+        currency: 1,
+        paymentStatus: 1,
+        paymentDate: 1,
+        refundedAmount: 1,
+        provider: 1,
+        paymentMethodType: 1,
+        orderReference: 1,
+        transactionReference: 1,
+      }),
     ]);
 
     const sources = sourceDocs.map((s) => {
       const sync = (s.sync ?? {}) as Doc;
       const active = text(s.status) === 'active';
+      const label = text(s.label) || 'CRM';
+      const failing = sync.lastStatus === 'error';
+      // A failed attempt still stamps sync.lastSyncAt (see crm_mongo_sync.py) —
+      // showing that raw value here made a genuinely-failed sync read as
+      // "synced just now" right next to an error banner saying it failed.
+      // Mirrors crm-integrations.service.ts's own lastSuccessAt fallback.
+      const lastSyncAt = asDate(sync.lastSuccessAt) ?? (failing ? undefined : asDate(sync.lastSyncAt));
+      // A windowed source's (Hoops) OWN stored window — not the catalog
+      // default — so this reflects exactly what's enforced for THIS
+      // already-connected source, including after the DST backfill
+      // migration (data-sources.service.ts's addHoopsWindowTimezone).
+      const window = sync.window as SyncWindow | undefined;
+      const schedule = window ? windowSchedule(window, label, asDate(sync.lastSuccessAt)) : undefined;
       return {
         id: s._id.toString(),
-        label: text(s.label) || 'CRM',
+        label,
         provider: text(s.provider),
         active,
         canSync: active && !!CRM_PROVIDERS[text(s.provider) as keyof typeof CRM_PROVIDERS]?.syncSupported,
-        lastSyncAt: asDate(sync.lastSyncAt),
-        lastError: sync.lastStatus === 'error' ? text(sync.lastError) || 'The last sync failed.' : undefined,
+        lastSyncAt,
+        lastError: failing ? text(sync.lastError) || 'The last sync failed.' : undefined,
+        schedule: schedule
+          ? { windowLabel: windowOpensLabel(schedule.window), nextRunAt: schedule.nextRunAt, canSyncNow: schedule.canSyncNow, reason: schedule.reason }
+          : undefined,
       };
     });
     const providerOf = new Map(sources.map((s) => [s.id, s.provider]));
@@ -710,6 +777,11 @@ export class CustomerDirectoryService {
     const phonesOf = (members: number[]) => [...new Set(members.map((i) => phoneKey(pieces[i].identity.phone)).filter(Boolean))];
     const gatewayPaymentsByEmailKey = new Map<string, GatewayPaymentRecord[]>();
     const gatewayPaymentsByPhoneKey = new Map<string, GatewayPaymentRecord[]>();
+    // Stored but matched to nobody (no email/phone on the Square side, or no
+    // existing customer shares either key) — never silently dropped, per the
+    // spec: surfaced separately below so it can go in front of a human
+    // rather than vanishing from view entirely.
+    const unmatchedGatewayPayments: GatewayPaymentRecord[] = [];
     for (const doc of gatewayPaymentDocs) {
       const date = asDate(doc.paymentDate);
       if (!date) continue;
@@ -721,6 +793,9 @@ export class CustomerDirectoryService {
         status: text(doc.paymentStatus) as GatewayPaymentRecord['status'],
         date,
         refundedAmount: amount(doc.refundedAmount),
+        paymentMethodType: text(doc.paymentMethodType) || undefined,
+        orderReference: text(doc.orderReference) || undefined,
+        transactionReference: text(doc.transactionReference) || undefined,
       };
       const email = text(doc.matchedEmailKey);
       const phone = text(doc.matchedPhoneKey);
@@ -732,7 +807,9 @@ export class CustomerDirectoryService {
         if (!gatewayPaymentsByPhoneKey.has(phone)) gatewayPaymentsByPhoneKey.set(phone, []);
         gatewayPaymentsByPhoneKey.get(phone)!.push(record);
       }
+      if (!email && !phone) unmatchedGatewayPayments.push(record);
     }
+    unmatchedGatewayPayments.sort((a, b) => b.date.getTime() - a.date.getTime());
 
     const saved = new Map(analyses.map((a) => [text(a.customerId), a]));
     const tasksByKey = new Map<string, ProfileFollowUp[]>();
@@ -1043,7 +1120,7 @@ export class CustomerDirectoryService {
       });
     }
 
-    const directory = { currency, sources, entries };
+    const directory = { currency, sources, entries, unmatchedGatewayPayments };
     this.cache.set(organizationId, { at: Date.now(), directory });
     return directory;
   }
@@ -1383,7 +1460,16 @@ export class CustomerDirectoryService {
       // What is connected, plus anything disconnected that still holds customers.
       .filter((s) => s.customers > 0 || (s.active && s.provider !== BUILT_IN_PROVIDER))
       .sort((a, b) => b.customers - a.customers)
-      .map(({ id, label, customers, active, canSync, lastSyncAt, lastError }) => ({ id, label, customers, connected: active, canSync, lastSyncAt, lastError }));
+      .map(({ id, label, customers, active, canSync, lastSyncAt, lastError, schedule }) => ({
+        id,
+        label,
+        customers,
+        connected: active,
+        canSync,
+        lastSyncAt,
+        lastError,
+        schedule,
+      }));
 
     const distinct = (values: (string | undefined)[]) => [...new Set(values.filter((v): v is string => !!v))].sort((a, b) => a.localeCompare(b));
     const count = (name: string) => inSource.filter((e) => VIEWS[name](e.profile)).length;
@@ -1418,6 +1504,11 @@ export class CustomerDirectoryService {
       sort: sortBy,
       direction: descending ? 'desc' : 'asc',
       items: sorted.slice((page - 1) * pageSize, page * pageSize).map((e) => this.row(e, directory)),
+      // A Gateway Payment (Square etc.) that matched nobody — stored, never
+      // dropped, but needs a human to look at it (per the spec: never
+      // auto-assigned to a guess). Newest first, capped: a review queue, not
+      // an export.
+      unmatchedGatewayPayments: directory.unmatchedGatewayPayments.slice(0, 50),
     };
   }
 

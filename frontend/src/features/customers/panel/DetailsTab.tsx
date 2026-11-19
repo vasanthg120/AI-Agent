@@ -185,9 +185,11 @@ export function DetailsTab({
               <tr>
                 <th>Date</th>
                 <th>Provider</th>
+                <th>Method</th>
                 <th>Amount</th>
                 <th>Status</th>
                 <th>Refunded</th>
+                <th>Reference</th>
               </tr>
             </thead>
             <tbody>
@@ -195,11 +197,15 @@ export function DetailsTab({
                 <tr key={p.id}>
                   <td>{formatDate(p.date)}</td>
                   <td style={{ textTransform: 'capitalize' }}>{p.provider}</td>
+                  <td style={{ textTransform: 'capitalize' }}>{p.paymentMethodType ? p.paymentMethodType.toLowerCase() : dash}</td>
                   <td>{formatMoney(p.amount / 100, p.currency)}</td>
                   <td>
                     <Badge variant={GATEWAY_TRANSACTION_VARIANT[p.status]}>{p.status.replace(/_/g, ' ')}</Badge>
                   </td>
                   <td>{p.refundedAmount > 0 ? formatMoney(p.refundedAmount / 100, p.currency) : dash}</td>
+                  <td title={[p.transactionReference && `Reference: ${p.transactionReference}`, p.orderReference && `Order: ${p.orderReference}`].filter(Boolean).join(' · ') || undefined}>
+                    {p.transactionReference ?? p.orderReference ?? dash}
+                  </td>
                 </tr>
               ))}
             </tbody>

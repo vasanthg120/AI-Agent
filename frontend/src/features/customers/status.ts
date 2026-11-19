@@ -48,6 +48,7 @@ export const PAYMENT_VARIANT: Record<PaymentState, BadgeVariant> = {
 // unrelated concept the board already tracked).
 export const GATEWAY_PAYMENT_VARIANT: Record<GatewayPaymentSummary['status'], BadgeVariant> = {
   unpaid: 'neutral',
+  pending: 'info',
   partially_paid: 'warning',
   paid: 'success',
   refunded: 'info',
@@ -56,6 +57,7 @@ export const GATEWAY_PAYMENT_VARIANT: Record<GatewayPaymentSummary['status'], Ba
 
 export const GATEWAY_PAYMENT_LABEL: Record<GatewayPaymentSummary['status'], string> = {
   unpaid: 'Unpaid',
+  pending: 'Pending',
   partially_paid: 'Partially paid',
   paid: 'Paid',
   refunded: 'Refunded',

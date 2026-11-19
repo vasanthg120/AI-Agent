@@ -167,13 +167,29 @@ class HoopsClient:
     def get(self, path: str, params: dict | None = None) -> dict:
         url = f"{self.base_url}{path}"
         for attempt in range(len(_RETRY_WAITS) + 1):
+            started = time.monotonic()
             response = requests.get(url, params=params, headers={"x-api-key": self.api_key, "Accept": "application/json"}, timeout=TIMEOUT)
+            duration_ms = round((time.monotonic() - started) * 1000)
             self.requests_made += 1
             if response.status_code != 429:
                 break
             if attempt == len(_RETRY_WAITS):
+                logger.warning(
+                    "Hoops request exhausted every retry: provider=hoops path=%s attempt=%d/%d duration_ms=%d error_type=rate_limit",
+                    path,
+                    attempt + 1,
+                    len(_RETRY_WAITS) + 1,
+                    duration_ms,
+                )
                 raise HoopsError("Hoops answered 429 (rate limit): another request for this account is still in progress.")
-            logger.info("Hoops is busy with another request for this account; retrying in %ss", _RETRY_WAITS[attempt])
+            logger.info(
+                "Hoops request busy (429): provider=hoops path=%s attempt=%d/%d duration_ms=%d retrying_in_s=%s",
+                path,
+                attempt + 1,
+                len(_RETRY_WAITS) + 1,
+                duration_ms,
+                _RETRY_WAITS[attempt],
+            )
             time.sleep(_RETRY_WAITS[attempt])
         if response.status_code in (401, 403):
             raise HoopsError(f"Hoops rejected the API key (HTTP {response.status_code}).")

@@ -64,6 +64,7 @@ import {
 } from '@/components/ui';
 import type { DateRange, DropdownItem, MultiSelectOption } from '@/components/ui';
 import { ROUTES } from '@/constants/routes';
+import { nextRunText } from '@/features/integrations/CrmSetupWizard';
 import { useClickOutside } from '@/hooks/useClickOutside';
 import {
   customersService,
@@ -80,6 +81,7 @@ import { formatCurrency } from '@/utils/currency';
 import { extractErrorMessage } from '@/utils/errors';
 import { AddCustomerModal } from './AddCustomerModal';
 import { ImportCustomersModal } from './ImportCustomersModal';
+import { UnmatchedGatewayPaymentsModal } from './UnmatchedGatewayPaymentsModal';
 import { CustomerPanel, type CustomerPreview, type PanelTab } from './CustomerPanel';
 import { QuoteDetailDrawer } from './QuoteDetailDrawer';
 import type { Job } from '@/services/customerJobsService';
@@ -517,6 +519,7 @@ const CustomersBoard = memo(function CustomersBoard({
   const [includeArchived, setIncludeArchived] = useState(false);
   const [addingCustomer, setAddingCustomer] = useState(false);
   const [importing, setImporting] = useState(false);
+  const [reviewingUnmatchedPayments, setReviewingUnmatchedPayments] = useState(false);
   const [hidden, setHidden] = useState<ColumnId[]>(() =>
     remembered<ColumnId[]>(HIDDEN_KEY, []).filter((id) => COLUMNS.some((c) => c.id === id)),
   );
@@ -572,6 +575,19 @@ const CustomersBoard = memo(function CustomersBoard({
   // "Sync now" pulls from the selected source, or from every connected CRM that can be synced.
   const shown = data?.sources.filter((s) => source === 'all' || s.id === source) ?? [];
   const canSync = shown.some((s) => s.canSync);
+  // A provider-enforced read window (Hoops: once a night, after 7:00pm
+  // AEST/AEDT) — same schedule the Settings -> Data Sources page's own
+  // CrmManageModal already shows, now surfaced here too instead of only
+  // after a click. With one specific windowed source selected and its
+  // window currently closed, disable the button outright (there is
+  // nothing it could do); with "All sources" selected, the button stays
+  // enabled (other CRMs can still sync) and the window just becomes an
+  // informational note instead of a block.
+  const selectedSchedule = source !== 'all' ? shown.find((s) => s.schedule)?.schedule : undefined;
+  const canSyncNow = !selectedSchedule || selectedSchedule.canSyncNow;
+  const waitingSchedules = shown
+    .filter((s) => s.schedule && !s.schedule.canSyncNow && s.schedule.reason)
+    .map((s) => ({ label: s.label, reason: s.schedule!.reason!, nextRunAt: s.schedule!.nextRunAt }));
   const sync = async () => {
     setSyncing(true);
     try {
@@ -590,6 +606,11 @@ const CustomersBoard = memo(function CustomersBoard({
     }
   };
   const synced = shown.filter((s) => s.lastSyncAt).map((s) => `${s.label} synced ${formatRelativeTime(s.lastSyncAt!)}`);
+  // Shown proactively next to the sync status, so a windowed source's
+  // restriction is visible before anyone clicks "Sync now" — not only
+  // after, as a toast reacting to the click.
+  const waitingNotes = waitingSchedules.map((w) => `${w.label}: ${w.reason}`);
+  const metaText = [...synced, ...waitingNotes];
 
   // The board as a spreadsheet: what is on screen now, every page of it.
   const exportBoard = async () => {
@@ -633,9 +654,9 @@ const CustomersBoard = memo(function CustomersBoard({
         title="Customers"
         subtitle="Every customer across your connected CRMs and email, in one view."
         meta={
-          synced.length > 0 ? (
-            <span className={styles.meta} title={synced.join(' · ')}>
-              {synced.join(' · ')}
+          metaText.length > 0 ? (
+            <span className={styles.meta} title={metaText.join(' · ')}>
+              {metaText.join(' · ')}
             </span>
           ) : undefined
         }
@@ -658,11 +679,24 @@ const CustomersBoard = memo(function CustomersBoard({
               <Button
                 type="button"
                 variant="secondary"
-                leftIcon={<FiRefreshCw />}
+                leftIcon={canSyncNow ? <FiRefreshCw /> : <FiClock />}
                 loading={syncing}
+                disabled={!canSyncNow}
+                title={!canSyncNow ? selectedSchedule?.reason : undefined}
                 onClick={() => void sync()}
               >
-                Sync now
+                {canSyncNow ? 'Sync now' : `Next sync ${nextRunText(selectedSchedule!.nextRunAt)}`}
+              </Button>
+            )}
+            {(data?.unmatchedGatewayPayments.length ?? 0) > 0 && can(me, 'customers', 'edit') && (
+              <Button
+                type="button"
+                variant="secondary"
+                leftIcon={<FiAlertCircle />}
+                onClick={() => setReviewingUnmatchedPayments(true)}
+                title="Square (etc.) payments that didn't match any customer here — never auto-assigned by guess, so they need a human to look at them."
+              >
+                {`${data!.unmatchedGatewayPayments.length} unmatched payment${data!.unmatchedGatewayPayments.length === 1 ? '' : 's'}`}
               </Button>
             )}
             {can(me, 'customers', 'create') && (
@@ -696,6 +730,12 @@ const CustomersBoard = memo(function CustomersBoard({
             });
           }}
         />
+      )}
+      {/* Same reasoning as addingCustomer above — the trigger button lives in
+          this header, shown on every early-return branch too, so the modal
+          has to live here rather than only in the main return below. */}
+      {reviewingUnmatchedPayments && (
+        <UnmatchedGatewayPaymentsModal payments={data?.unmatchedGatewayPayments ?? []} onClose={() => setReviewingUnmatchedPayments(false)} />
       )}
     </>
   );

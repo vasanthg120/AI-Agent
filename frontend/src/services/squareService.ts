@@ -10,6 +10,13 @@ export interface SquareStatus {
   currency?: string;
   countrySupported?: boolean;
   needsReauth?: boolean;
+  connectionType?: 'personal_access_token' | 'oauth';
+  // Only meaningful when connectionType is 'oauth' — Square webhooks are
+  // application-level, so a Personal Access Token connection never has one.
+  webhookConfigured?: boolean;
+  // The most recent payment sync (webhook or reconciliation), or undefined
+  // if nothing has synced yet.
+  lastPaymentSyncAt?: string;
 }
 
 export interface SquarePayment {

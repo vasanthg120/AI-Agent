@@ -10,7 +10,7 @@ import { SquareService } from './square.service';
 // (buildAuthorizeUrl/handleCallback/saveAppCredentials), plus payment-
 // creation idempotency/error mapping.
 describe('SquareService', () => {
-  function build(overrides: { get?: jest.Mock; post?: jest.Mock; sign?: jest.Mock; verify?: jest.Mock; integrations?: Record<string, jest.Mock> } = {}) {
+  function build(overrides: { get?: jest.Mock; post?: jest.Mock; sign?: jest.Mock; verify?: jest.Mock; integrations?: Record<string, jest.Mock>; latestSync?: Record<string, unknown> | null } = {}) {
     const config = { get: (key: string) => (key === 'integrations.square.redirectUri' ? 'https://haive.test/square/callback' : undefined) };
     const http = { get: overrides.get ?? jest.fn(), post: overrides.post ?? jest.fn() };
     const jwt = { sign: overrides.sign ?? jest.fn().mockReturnValue('signed-state'), verify: overrides.verify ?? jest.fn() };
@@ -23,8 +23,12 @@ describe('SquareService', () => {
       getOAuthAppCredentialsStatus: jest.fn().mockResolvedValue({ configured: false }),
       ...overrides.integrations,
     };
-    const service = new SquareService(config as never, http as never, jwt as never, integrations as never);
-    return { service, http, jwt, integrations };
+    const lean = jest.fn().mockResolvedValue(overrides.latestSync ?? null);
+    const select = jest.fn().mockReturnValue({ lean });
+    const sort = jest.fn().mockReturnValue({ select });
+    const transactionModel = { findOne: jest.fn().mockReturnValue({ sort }) };
+    const service = new SquareService(config as never, http as never, jwt as never, integrations as never, transactionModel as never);
+    return { service, http, jwt, integrations, transactionModel };
   }
 
   function merchantResponse(country: string) {
@@ -201,7 +205,7 @@ describe('SquareService', () => {
 
       const result = await service.handleCallback('auth-code', 'good-state');
 
-      expect(result).toMatchObject({ connected: true, merchantId: 'M1', countrySupported: true });
+      expect(result).toMatchObject({ connected: true, merchantId: 'M1', countrySupported: true, organizationId: 'org-1' });
       expect(integrations.connectWithOAuth).toHaveBeenCalledWith(
         'org-1',
         'square',
@@ -299,6 +303,42 @@ describe('SquareService', () => {
 
       expect(status).toMatchObject({ connected: true, environment: 'production', country: 'US', countrySupported: true });
       expect(http.get).not.toHaveBeenCalled();
+    });
+
+    it('a Personal Access Token connection (applicationId present) reports connectionType personal_access_token and never checks for a webhook secret — Square webhooks are app-level and this path has no app', async () => {
+      const integrations = {
+        resolveAuth: jest.fn().mockResolvedValue({ credentials: { accessToken: 'sq-at' }, oauthMeta: { environment: 'sandbox', applicationId: 'app-123' } }),
+        getOAuthAppCredentialsStatus: jest.fn(),
+      };
+      const { service } = build({ integrations });
+
+      const status = await service.getStatus('org-1');
+
+      expect(status.connectionType).toBe('personal_access_token');
+      expect(integrations.getOAuthAppCredentialsStatus).not.toHaveBeenCalled();
+    });
+
+    it('an OAuth connection (no applicationId) reports connectionType oauth and surfaces whether a webhook secret is on file', async () => {
+      const integrations = {
+        resolveAuth: jest.fn().mockResolvedValue({ credentials: { accessToken: 'sq-at' }, oauthMeta: { environment: 'sandbox', merchantId: 'M1' } }),
+        getOAuthAppCredentialsStatus: jest.fn().mockResolvedValue({ configured: true, webhookSecretConfigured: true }),
+      };
+      const { service } = build({ integrations });
+
+      const status = await service.getStatus('org-1');
+
+      expect(status.connectionType).toBe('oauth');
+      expect(status.webhookConfigured).toBe(true);
+    });
+
+    it('surfaces the most recent square_payment_transactions sync time for this organization, or undefined when nothing has synced yet', async () => {
+      const integrations = { resolveAuth: jest.fn().mockResolvedValue({ credentials: { accessToken: 'sq-at' }, oauthMeta: { environment: 'sandbox', applicationId: 'app-123' } }) };
+      const lastSyncedAt = new Date('2026-11-18T09:00:00Z');
+      const { service: synced } = build({ integrations, latestSync: { lastSyncedAt } });
+      const { service: neverSynced } = build({ integrations, latestSync: null });
+
+      expect((await synced.getStatus('org-1')).lastPaymentSyncAt).toEqual(lastSyncedAt);
+      expect((await neverSynced.getStatus('org-1')).lastPaymentSyncAt).toBeUndefined();
     });
   });
 });

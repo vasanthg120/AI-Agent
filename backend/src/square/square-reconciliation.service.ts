@@ -46,11 +46,22 @@ export class SquareReconciliationService {
     }
   }
 
-  async reconcileOrganization(organizationId: string): Promise<{ count: number }> {
+  /** Pulls this org's FULL payment history (no beginTime — Square's own List
+   * Payments default is "the last year", confirmed live against its API
+   * reference, never assumed) — run once, right after a successful connect
+   * (see square.controller.ts), so a newly-connected org's existing
+   * customers show their payment history immediately rather than waiting
+   * for reconcileAll's 6-hour lookback to happen to cover it. Safe to call
+   * more than once: upsertFromPayment is fully idempotent. */
+  async initialSync(organizationId: string): Promise<{ count: number }> {
+    return this.reconcileOrganization(organizationId, { fullHistory: true });
+  }
+
+  async reconcileOrganization(organizationId: string, options: { fullHistory?: boolean } = {}): Promise<{ count: number }> {
     const auth = await this.integrations.resolveAuth(organizationId, 'square');
     if (!auth?.credentials.accessToken) return { count: 0 };
     const environment = (auth.oauthMeta?.environment as 'sandbox' | 'production') || 'sandbox';
-    const beginTime = new Date(Date.now() - this.LOOKBACK_HOURS * 60 * 60 * 1000).toISOString();
+    const beginTime = options.fullHistory ? undefined : new Date(Date.now() - this.LOOKBACK_HOURS * 60 * 60 * 1000).toISOString();
 
     let count = 0;
     let cursor: string | undefined;

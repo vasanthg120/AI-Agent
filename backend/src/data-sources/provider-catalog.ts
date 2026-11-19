@@ -469,7 +469,12 @@ export const CRM_PROVIDERS: Record<CrmProviderId, CrmProviderDefinition> = {
     // to these once by python-agent (integrations/hoops_won_rule.py).
     statusMapping: { won: ['job'], lost: ['voided'] },
     syncSupported: true,
-    syncDefaults: { intervalMinutes: 1440, window: { utcOffsetMinutes: 600, start: '19:00', end: '05:00', label: 'AEST' } },
+    // timezone is the real, DST-aware enforcement (Australia/Sydney observes
+    // AEDT, UTC+11, roughly Oct-Apr) — utcOffsetMinutes is kept only as the
+    // fallback a window predating this field would use; every window set
+    // from here on carries timezone and ignores it. See sync-window.ts's and
+    // crm_mongo_sync.py's own _window_tz for why both must stay in lockstep.
+    syncDefaults: { intervalMinutes: 1440, window: { timezone: 'Australia/Sydney', utcOffsetMinutes: 600, start: '19:00', end: '05:00', label: 'AEST' } },
     defaultCurrency: 'AUD',
   },
   // Any app in the organization's Zapier account: a Zap's trigger

@@ -11,6 +11,8 @@ import { CHAT_AGENTS } from '../chat/agents';
 import { CreateAgentRoleDto } from './dto/create-agent-role.dto';
 import { UpdateAgentRoleDto } from './dto/update-agent-role.dto';
 import { AgentRole, AgentRoleDocument } from './schemas/agent-role.schema';
+import { archivedOrganizationIds } from 'src/common/archived-organizations';
+import { CreateRoyaltyRuleDto } from 'src/royalty/dto/create-royalty-rule.dto';
 
 interface RoleGenerateResult {
   documentId: string;
@@ -22,7 +24,7 @@ interface RoleGenerateResult {
   systemPrompt: string;
 }
 
-// Agent Builder Phase 1's Describe method — same structured fields as
+// Agent Builder Phase 1's Describe metho       d — same structured fields as
 // RoleGenerateResult minus the document-specific ones (documentId/chunks/
 // sourceDocumentName), since there's no uploaded file to embed.
 interface RoleGenerateFromDescriptionResult {

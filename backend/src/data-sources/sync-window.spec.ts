@@ -34,3 +34,39 @@ describe('nightly sync window (mirrors crm_mongo_sync.py)', () => {
     expect(synced.reason).toContain('Already synced tonight');
   });
 });
+
+// Phase: Hoops CRM sync fix — the real bug. Sydney observes AEDT (UTC+11)
+// roughly Oct-Apr, not AEST (UTC+10) year-round; the fixed-offset HOOPS
+// window above reads an hour late during AEDT, which is exactly "I tried
+// after 7pm real Sydney time and it still said no." See
+// python-agent/app/integrations/crm_mongo_sync.py's own _window_tz for the
+// matching enforcement-side fix.
+describe('nightly sync window — DST-aware (Australia/Sydney)', () => {
+  const HOOPS_TZ: SyncWindow = { timezone: 'Australia/Sydney', start: '19:00', end: '05:00', label: 'AEST' };
+
+  it('opens an hour earlier (in UTC) during AEDT than the fixed-offset model would', () => {
+    // 2026-11-18 is inside AEDT (Sydney UTC+11) — 7:00pm Sydney local = 08:00 UTC.
+    expect(windowNight(HOOPS_TZ, at('2026-11-18T07:59:00Z'))).toBeNull();
+    expect(windowNight(HOOPS_TZ, at('2026-11-18T08:00:00Z'))).toBe('2026-11-18');
+    // The OLD fixed-UTC+10 model says this same real-world instant is still
+    // closed (it only opens at 09:00 UTC) — this is the reported bug,
+    // reproduced directly against the pre-fix window shape.
+    expect(windowNight(HOOPS, at('2026-11-18T08:00:00Z'))).toBeNull();
+  });
+
+  it('matches the fixed-offset model exactly during AEST (no daylight saving)', () => {
+    // 2026-07-15 is Sydney's winter — real AEST, UTC+10, same as the fixed model.
+    expect(windowNight(HOOPS_TZ, at('2026-07-15T08:59:00Z'))).toBeNull();
+    expect(windowNight(HOOPS_TZ, at('2026-07-15T09:00:00Z'))).toBe('2026-07-15');
+    expect(windowNight(HOOPS, at('2026-07-15T09:00:00Z'))).toBe('2026-07-15');
+  });
+
+  it('computes the next window opening correctly across the DST boundary', () => {
+    expect(nextWindowOpening(HOOPS_TZ, at('2026-11-18T06:00:00Z')).toISOString()).toBe('2026-11-18T08:00:00.000Z');
+  });
+
+  it('a window with no timezone set keeps the old fixed-offset behavior unchanged (backward compatible)', () => {
+    expect(windowNight(HOOPS, at('2026-11-18T08:00:00Z'))).toBeNull();
+    expect(windowNight(HOOPS, at('2026-11-18T09:00:00Z'))).toBe('2026-11-18');
+  });
+});

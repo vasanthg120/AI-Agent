@@ -68,11 +68,27 @@ export class SquarePaymentMatchingService {
 
   /** Square's own Customer record for this payment's customer_id (never
    * guessed, never matched by name) — email/phone only, the two fields
-   * customer-matching.ts's emailKey/phoneKey need. Returns {} (never
-   * throws) on any failure — a customer lookup failing must never block
-   * storing the payment itself; it just stays unmatched, exactly like a
-   * payment with no customer_id at all. */
-  private async resolveIdentityKeys(accessToken: string, environment: 'sandbox' | 'production', customerId: string): Promise<{ emailKey?: string; phoneKey?: string }> {
+   * customer-matching.ts's emailKey/phoneKey need. Checks this org's OWN
+   * already-resolved transactions for the SAME providerCustomerId first —
+   * Square's Customer record for a given id doesn't change payment to
+   * payment, so a previously-resolved mapping is reused instead of hitting
+   * Square's Customers API again on every single payment from a repeat
+   * customer (a real, needless-call gap the approved plan calls out).
+   * Falls through to a fresh lookup when nothing's been resolved yet, or
+   * when the only prior rows are themselves unmatched (nothing to reuse).
+   * Returns {} (never throws) on any failure — a customer lookup failing
+   * must never block storing the payment itself; it just stays unmatched,
+   * exactly like a payment with no customer_id at all. */
+  private async resolveIdentityKeys(organizationId: string, accessToken: string, environment: 'sandbox' | 'production', customerId: string): Promise<{ emailKey?: string; phoneKey?: string }> {
+    // $type: 'string' rather than $exists — a prior unresolved attempt may
+    // still have written the key with an undefined/null value depending on
+    // the driver, which must never read as "already resolved."
+    const reused = await this.transactionModel
+      .findOne({ organizationId, provider: 'square', providerCustomerId: customerId, $or: [{ matchedEmailKey: { $type: 'string' } }, { matchedPhoneKey: { $type: 'string' } }] })
+      .sort({ lastSyncedAt: -1 })
+      .select({ matchedEmailKey: 1, matchedPhoneKey: 1 })
+      .lean();
+    if (reused) return { emailKey: reused.matchedEmailKey, phoneKey: reused.matchedPhoneKey };
     try {
       const { data } = await firstValueFrom(
         this.http.get<{ customer?: { email_address?: string; phone_number?: string } }>(`${this.apiBaseUrl(environment)}/v2/customers/${encodeURIComponent(customerId)}`, {
@@ -96,7 +112,7 @@ export class SquarePaymentMatchingService {
    * given payment — never merges/increments — so the row is always exactly
    * what Square itself last reported. */
   async upsertFromPayment(organizationId: string, accessToken: string, environment: 'sandbox' | 'production', payment: SquarePaymentLike, sourceEventId?: string): Promise<void> {
-    const identity = payment.customer_id ? await this.resolveIdentityKeys(accessToken, environment, payment.customer_id) : {};
+    const identity = payment.customer_id ? await this.resolveIdentityKeys(organizationId, accessToken, environment, payment.customer_id) : {};
     await this.transactionModel.updateOne(
       { organizationId, provider: 'square', providerPaymentId: payment.id },
       {

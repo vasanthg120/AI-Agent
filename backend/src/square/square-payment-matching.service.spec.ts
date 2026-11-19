@@ -34,13 +34,20 @@ describe('mapSquarePaymentStatus', () => {
 });
 
 describe('SquarePaymentMatchingService', () => {
-  function build(overrides: { get?: jest.Mock } = {}) {
+  // findOne's chain (sort -> select -> lean) returns `reused` — null by
+  // default, meaning "nothing on file yet for this providerCustomerId, go
+  // fetch it fresh" (every pre-existing test here exercises that path).
+  function build(overrides: { get?: jest.Mock; reused?: Record<string, unknown> | null } = {}) {
     const get = overrides.get ?? jest.fn().mockReturnValue(of({ data: { customer: {} } }));
     const http = { get };
     const updateOne = jest.fn().mockResolvedValue(undefined);
-    const model = { updateOne };
+    const lean = jest.fn().mockResolvedValue(overrides.reused ?? null);
+    const select = jest.fn().mockReturnValue({ lean });
+    const sort = jest.fn().mockReturnValue({ select });
+    const findOne = jest.fn().mockReturnValue({ sort });
+    const model = { updateOne, findOne };
     const service = new SquarePaymentMatchingService(model as never, http as never);
-    return { service, http, updateOne };
+    return { service, http, updateOne, findOne };
   }
 
   it('resolves the customer\'s email/phone and stores them as normalized keys, never the raw value', async () => {
@@ -92,5 +99,28 @@ describe('SquarePaymentMatchingService', () => {
     await service.upsertFromPayment('org-1', 'token', 'sandbox', { id: 'pay_4', status: 'COMPLETED', customer_id: 'CUST1', amount_money: { amount: 100, currency: 'USD' } });
 
     expect(updateOne).toHaveBeenCalledTimes(1);
+  });
+
+  it('reuses an already-resolved providerCustomerId mapping instead of calling Square\'s Customers API again', async () => {
+    const get = jest.fn().mockReturnValue(of({ data: { customer: { email_address: 'should-not-be-used@example.com' } } }));
+    const { service, updateOne, findOne } = build({ get, reused: { matchedEmailKey: 'akash@example.com', matchedPhoneKey: undefined } });
+
+    await service.upsertFromPayment('org-1', 'token', 'sandbox', { id: 'pay_5', status: 'COMPLETED', customer_id: 'CUST1', amount_money: { amount: 100, currency: 'USD' } });
+
+    expect(get).not.toHaveBeenCalled();
+    expect(findOne).toHaveBeenCalledWith(expect.objectContaining({ organizationId: 'org-1', provider: 'square', providerCustomerId: 'CUST1' }));
+    const [, update] = updateOne.mock.calls[0];
+    expect(update.$set.matchedEmailKey).toBe('akash@example.com');
+  });
+
+  it('falls through to a fresh Customers API lookup when nothing has resolved this providerCustomerId before', async () => {
+    const get = jest.fn().mockReturnValue(of({ data: { customer: { email_address: 'fresh@example.com' } } }));
+    const { service, updateOne } = build({ get, reused: null });
+
+    await service.upsertFromPayment('org-1', 'token', 'sandbox', { id: 'pay_6', status: 'COMPLETED', customer_id: 'CUST2', amount_money: { amount: 100, currency: 'USD' } });
+
+    expect(get).toHaveBeenCalledTimes(1);
+    const [, update] = updateOne.mock.calls[0];
+    expect(update.$set.matchedEmailKey).toBe('fresh@example.com');
   });
 });

@@ -309,14 +309,30 @@ export class CrmIntegrationsService {
     return Promise.all(OFFERED.map((provider) => this.view(organizationId, provider)));
   }
 
-  /** Reads one page of each kind of record through the CRM's adapter: proves the connection and learns its fields. */
+  /** Reads one page of each kind of record through the CRM's adapter: proves the connection and learns its fields.
+   *
+   * Root cause of "HaiVE couldn't check the connection right now" firing on
+   * a real, valid Hoops key (confirmed by reading the two timeout budgets
+   * side by side, not assumed): Hoops allows only one request at a time per
+   * account and answers a second one with 429 (hoops.py's own class
+   * comment); HoopsClient.get() retries that with waits of 5/15/30/60s
+   * (hoops.py's _RETRY_WAITS) — up to 110s — and discover_source() does
+   * this for BOTH the transactions list and the customers list, so a
+   * genuinely busy Hoops account can legitimately take close to 220s to
+   * answer. That's well past this call's old 120s timeout, which cut the
+   * request off and threw before python-agent's own graceful error
+   * handling ever got to return a real (and specific) reason — so a
+   * perfectly valid key surfaced as this generic, misleading message.
+   * 300s comfortably covers that documented worst case (for every provider
+   * this method serves — a slow response simply has more room now, nothing
+   * about a fast one changes). */
   private async discover(organizationId: string, sourceId: string) {
     const token = this.jwt.sign({ sub: 'system', organizationId }, { expiresIn: '5m' });
     const { data } = await firstValueFrom(
       this.http.post<{ status: string; modules?: Record<string, { records: number; fields: number }>; message?: string; kind?: string; detail?: string }>(
         `${this.pythonAgentUrl}/sync/crm/discover`,
         { dataSourceId: sourceId },
-        { headers: { Authorization: `Bearer ${token}` }, timeout: 120_000 },
+        { headers: { Authorization: `Bearer ${token}` }, timeout: 300_000 },
       ),
     );
     return data;
@@ -410,24 +426,38 @@ export class CrmIntegrationsService {
     }
     if (provider === 'hoops') await this.applyHoopsChoices(source, values);
     let discovery: Awaited<ReturnType<CrmIntegrationsService['discover']>>;
+    const discoverStartedAt = Date.now();
     try {
       discovery = await this.discover(organizationId, source._id.toString());
     } catch (err) {
       await rollback();
       await this.dataSources.reconcile(organizationId);
-      this.logger.error(`Discovery call failed for ${provider} (org ${organizationId}): ${(err as Error).message}`);
+      // Structured, never the API key/token itself (those never pass through
+      // this call's error path — see discover()'s own request body).
+      this.logger.error(
+        `Discovery call failed: provider=${provider} org=${organizationId} durationMs=${Date.now() - discoverStartedAt} errorType=transport message=${(err as Error).message}`,
+      );
       throw new BadRequestException('HaiVE couldn’t check the connection right now. Nothing was saved — please try again in a minute.');
     }
     if (discovery.status !== 'ok') {
       await rollback();
       await this.dataSources.reconcile(organizationId);
-      this.logger.warn(`${provider} connection refused for org ${organizationId}: ${discovery.detail ?? discovery.message}`);
+      const kind = discovery.kind ?? 'other';
+      this.logger.warn(
+        `Discovery refused: provider=${provider} org=${organizationId} durationMs=${Date.now() - discoverStartedAt} errorType=${kind} detail=${discovery.detail ?? discovery.message}`,
+      );
       throw new BadRequestException({
+        // 'busy' (a sync already using this account's one-request-at-a-time
+        // budget — see discover()'s own python-agent-side comment): the
+        // message python-agent already produced is specific and honest on
+        // its own, passed through rather than re-templated.
         message:
-          discovery.kind === 'auth'
+          kind === 'auth'
             ? `${definition.label} didn’t accept these details. Check them and try again — nothing was saved.`
-            : `HaiVE couldn’t read from ${definition.label}. ${discovery.message ?? ''} Nothing was saved.`.trim(),
-        kind: discovery.kind ?? 'other',
+            : kind === 'busy'
+              ? discovery.message ?? `${definition.label} is busy right now. Nothing was saved — try again in a minute.`
+              : `HaiVE couldn’t read from ${definition.label}. ${discovery.message ?? ''} Nothing was saved.`.trim(),
+        kind,
         detail: discovery.detail,
       });
     }

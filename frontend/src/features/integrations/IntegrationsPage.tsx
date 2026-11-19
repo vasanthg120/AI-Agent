@@ -1418,6 +1418,17 @@ export function IntegrationsPage() {
                     },
                   ]
                 : []),
+              {
+                icon: FiClock,
+                text: squareDetail?.lastPaymentSyncAt ? `Last payment sync ${formatRelativeTime(squareDetail.lastPaymentSyncAt)}` : 'No payments synced yet',
+              },
+              // Webhooks are application-level in Square — only an OAuth
+              // (bring-your-own-app) connection can ever receive one; a
+              // Personal Access Token connection relies on the periodic
+              // reconciliation pass instead, which is expected, not a gap.
+              ...(squareDetail?.connectionType === 'oauth'
+                ? [{ icon: FiRefreshCw, text: squareDetail.webhookConfigured ? 'Webhook configured' : 'No webhook configured — relying on periodic sync' }]
+                : []),
             ]
           : undefined
       }

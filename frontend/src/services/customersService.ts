@@ -199,7 +199,10 @@ export interface GatewayPaymentSummary {
   transactionCount: number;
   lastPaymentAt?: string;
   disputedCount: number;
-  status: 'unpaid' | 'partially_paid' | 'paid' | 'refunded' | 'failed_only';
+  // 'pending': there's an authorized/processing/pending transaction and
+  // nothing has settled yet — distinct from 'failed_only' (everything that
+  // resolved, failed, and nothing is still in flight).
+  status: 'unpaid' | 'pending' | 'partially_paid' | 'paid' | 'refunded' | 'failed_only';
 }
 
 export interface GatewayPaymentRecord {
@@ -210,6 +213,9 @@ export interface GatewayPaymentRecord {
   status: 'pending' | 'processing' | 'authorized' | 'completed' | 'failed' | 'cancelled' | 'partially_refunded' | 'refunded' | 'disputed';
   date: string;
   refundedAmount: number;
+  paymentMethodType?: string;
+  orderReference?: string;
+  transactionReference?: string;
 }
 
 export type CustomerRecordType = 'business' | 'individual';
@@ -480,6 +486,10 @@ export interface CustomerSource {
   lastSyncAt?: string;
   // Why the last sync failed, when it did.
   lastError?: string;
+  // Set only for a source with a provider-enforced read window (e.g. Hoops:
+  // once a night, after 7:00pm AEST/AEDT) — lets "Sync now" explain itself
+  // up front instead of only after a click.
+  schedule?: { windowLabel: string; nextRunAt: string; canSyncNow: boolean; reason?: string };
 }
 
 export interface CustomerSyncResult {
@@ -529,6 +539,9 @@ export interface CustomerListResponse {
   sort: CustomerSort;
   direction: 'asc' | 'desc';
   items: Customer[];
+  // A Gateway Payment (Square etc.) that matched nobody — stored, never
+  // dropped, but needs a human to look at it. Newest first, capped server-side.
+  unmatchedGatewayPayments: GatewayPaymentRecord[];
 }
 
 export interface CustomerQuery {

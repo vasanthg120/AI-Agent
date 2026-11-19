@@ -10,6 +10,7 @@ import { ConnectSquareDto } from './dto/connect-square.dto';
 import { CreateSquarePaymentDto } from './dto/create-square-payment.dto';
 import { SaveSquareAppCredentialsDto } from './dto/save-square-app-credentials.dto';
 import { TestSquareConnectionDto } from './dto/test-square-connection.dto';
+import { SquareReconciliationService } from './square-reconciliation.service';
 import { SquareService } from './square.service';
 
 // Primary connect path, surfaced in the UI (see square.service.ts's class
@@ -31,14 +32,29 @@ export class SquareController {
 
   constructor(
     private square: SquareService,
+    private reconciliation: SquareReconciliationService,
     private config: ConfigService,
   ) {}
+
+  // Fire-and-forget: a brand-new connection's first payment pull covers the
+  // last year of history (initialSync) and can take a while with
+  // pagination — the connect response shouldn't wait on it. Never silently
+  // dropped on failure either way: reconcileAll's own 30-minute cron will
+  // pick this org up and retry regardless (same resilience precedent this
+  // file's own class comment describes for providers without webhooks).
+  private kickOffInitialSync(organizationId: string): void {
+    void this.reconciliation.initialSync(organizationId).catch((err) => {
+      this.logger.error(`Square initial sync failed for org ${organizationId}: ${(err as Error).message}`);
+    });
+  }
 
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('owner', 'admin')
   @Post('connect')
-  connect(@CurrentUser() user: JwtPayload, @Body() dto: ConnectSquareDto) {
-    return this.square.connect(user.organizationId, dto.applicationId.trim(), dto.accessToken.trim(), dto.environment);
+  async connect(@CurrentUser() user: JwtPayload, @Body() dto: ConnectSquareDto) {
+    const result = await this.square.connect(user.organizationId, dto.applicationId.trim(), dto.accessToken.trim(), dto.environment);
+    this.kickOffInitialSync(user.organizationId);
+    return result;
   }
 
   // Validates credentials against Square (ListLocations) WITHOUT saving
@@ -91,6 +107,7 @@ export class SquareController {
     try {
       const result = await this.square.handleCallback(code, state);
       const outcome = result.countrySupported === false ? 'unsupported_country' : 'connected';
+      if (result.organizationId) this.kickOffInitialSync(result.organizationId);
       return { url: `${frontendUrl}/settings/integrations?square=${outcome}`, statusCode: 302 };
     } catch (err) {
       this.logger.error(`Square callback failed: ${(err as Error).message}`);
