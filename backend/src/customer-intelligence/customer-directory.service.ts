@@ -13,6 +13,7 @@ import { heuristicBusinessName } from '../crm/customer-grouping.util';
 import { DataSourcesService, currencyOf } from '../data-sources/data-sources.service';
 import { CRM_PROVIDERS } from '../data-sources/provider-catalog';
 import { SyncWindow, windowOpensLabel, windowSchedule } from '../data-sources/sync-window';
+import { SquareReconciliationService } from '../square/square-reconciliation.service';
 import { UsersService } from '../users/users.service';
 import {
   AddCustomerContactDto,
@@ -375,8 +376,17 @@ function emptyGatewayPaymentSummary(currency: string): GatewayPaymentSummary {
 // transactions are counted separately, never folded into "paid".
 export function computeGatewayPaymentSummary(records: GatewayPaymentRecord[]): GatewayPaymentSummary {
   if (records.length === 0) return emptyGatewayPaymentSummary('USD');
-  const currency = records[0].currency;
-  const countsAsRevenue = (r: GatewayPaymentRecord) => r.status === 'completed' || r.status === 'partially_refunded' || r.status === 'refunded';
+  // One merchant account normally means one currency, but never assumed:
+  // if this customer's payments actually span more than one (a changed
+  // Square location/currency, a sandbox/production mix), the summary's
+  // money totals cover only the NEWEST payment's currency — two different
+  // currencies must never be added together as though they were one.
+  // transactionCount/disputedCount still cover every record (never
+  // hidden); only the monetary fields and status are currency-scoped.
+  const newest = records.reduce((latest, r) => (r.date > latest.date ? r : latest), records[0]);
+  const currency = newest.currency;
+  const inCurrency = (r: GatewayPaymentRecord) => r.currency === currency;
+  const countsAsRevenue = (r: GatewayPaymentRecord) => inCurrency(r) && (r.status === 'completed' || r.status === 'partially_refunded' || r.status === 'refunded');
   const revenueRecords = records.filter(countsAsRevenue);
   const totalPaid = revenueRecords.reduce((sum, r) => sum + r.amount, 0);
   const totalRefunded = revenueRecords.reduce((sum, r) => sum + r.refundedAmount, 0);
@@ -387,7 +397,7 @@ export function computeGatewayPaymentSummary(records: GatewayPaymentRecord[]): G
   // processing) must never read as "failed" just because nothing has
   // settled yet — only when every non-revenue transaction has actually
   // resolved (failed/cancelled) does 'failed_only' apply.
-  const stillInFlight = records.some((r) => r.status === 'pending' || r.status === 'authorized' || r.status === 'processing');
+  const stillInFlight = records.some((r) => inCurrency(r) && (r.status === 'pending' || r.status === 'authorized' || r.status === 'processing'));
   const status: GatewayPaymentSummary['status'] =
     revenueRecords.length === 0
       ? stillInFlight
@@ -526,6 +536,7 @@ export class CustomerDirectoryService {
     private jwt: JwtService,
     private users: UsersService,
     config: ConfigService,
+    private squareReconciliation: SquareReconciliationService,
   ) {
     this.pythonAgentUrl = config.get<string>('pythonAgentUrl') ?? 'http://localhost:8000';
   }
@@ -540,7 +551,7 @@ export class CustomerDirectoryService {
         .find({ organizationId, ...filter }, projection ? { projection } : undefined)
         .limit(MAX_RECORDS)
         .toArray();
-    const [sourceDocs, deals, quotes, invoices, contacts, payments, analyses, openTasks, statusDocs, jobDocs, profileDocs, gatewayPaymentDocs] = await Promise.all([
+    const [sourceDocs, deals, quotes, invoices, contacts, payments, analyses, openTasks, statusDocs, jobDocs, profileDocs, gatewayPaymentDocs, squareCredentialDocs] = await Promise.all([
       find('crm_data_sources', {}, { label: 1, provider: 1, status: 1, sync: 1, metadata: 1, isDefault: 1 }),
       find(
         'crm_deals',
@@ -639,7 +650,15 @@ export class CustomerDirectoryService {
         paymentMethodType: 1,
         orderReference: 1,
         transactionReference: 1,
+        lastSyncedAt: 1,
       }),
+      // Whether Square is connected for this org right now — read directly,
+      // same "shared collection, not the live provider" pattern as every
+      // other read in this Promise.all. Square has no crm_data_sources row
+      // of its own (it connects via integration_credentials), so this is
+      // what gives it a real connected/disconnected state for the
+      // synthesized source entry below, instead of only ever "connected".
+      find('integration_credentials', { provider: 'square' }, { provider: 1 }),
     ]);
 
     const sources = sourceDocs.map((s) => {
@@ -671,6 +690,35 @@ export class CustomerDirectoryService {
           : undefined,
       };
     });
+    // Square — a real entry in the same sources list a CRM gets, so the
+    // Customers page's source dropdown, "Sync now", and connection status
+    // work for it the same way, without a single provider-specific branch
+    // anywhere in the frontend. Synthesized here (never written to
+    // crm_data_sources, which is a CRM-shaped collection — modules,
+    // fieldMappings, terminology — none of which fit a payment gateway)
+    // rather than given a real document of its own, since everything it
+    // needs (connected state, last sync time) is already readable directly
+    // from integration_credentials/square_payment_transactions above.
+    // Kept even if currently disconnected but still holding history — same
+    // "disconnecting never deletes data" rule list()'s own source filter
+    // already applies to every CRM.
+    const squareConnected = squareCredentialDocs.length > 0;
+    if (squareConnected || gatewayPaymentDocs.length > 0) {
+      const squareLastSyncedAt = gatewayPaymentDocs.reduce<Date | undefined>((latest, doc) => {
+        const at = asDate(doc.lastSyncedAt);
+        return at && (!latest || at > latest) ? at : latest;
+      }, undefined);
+      sources.push({
+        id: 'square',
+        label: 'Square',
+        provider: 'square',
+        active: squareConnected,
+        canSync: squareConnected,
+        lastSyncAt: squareLastSyncedAt,
+        lastError: undefined,
+        schedule: undefined,
+      });
+    }
     const providerOf = new Map(sources.map((s) => [s.id, s.provider]));
     // Each CRM's amounts are in its own currency (Pantheras INR, Hoops AUD): a customer is shown in theirs.
     const currencyOfSource = new Map(sourceDocs.map((s) => [s._id.toString(), currencyOf(s as { provider?: string; metadata?: Record<string, unknown> })]));
@@ -1008,7 +1056,13 @@ export class CustomerDirectoryService {
       const byHand = profile.stages.filter((s) => s.manual).map((s) => [s.key, s.status]);
 
       const latest = normalized[0];
-      const sourceIds = [...new Set(mine.map((p) => p.sourceId).filter((sourceId): sourceId is string => !!sourceId))];
+      const sourceIds = [
+        ...new Set(mine.map((p) => p.sourceId).filter((sourceId): sourceId is string => !!sourceId)),
+        // So selecting "Square" in the source dropdown narrows to exactly
+        // the customers who have a matched Gateway Payment — same generic
+        // sourceIds-based filtering select()/list() already do for a CRM.
+        ...(gatewayPayments.length > 0 ? ['square'] : []),
+      ];
       // Whatever only moves with the clock is left out, so a day passing doesn't make a saved analysis stale.
       const factsHash = createHash('sha256')
         .update(
@@ -1586,7 +1640,17 @@ export class CustomerDirectoryService {
     const results = await Promise.all(
       wanted.map(async (source) => {
         try {
-          const result = (await this.dataSources.syncNow(organizationId, source.id)) as Record<string, unknown> | undefined;
+          // Square isn't a crm_data_sources row (see the synthesized entry
+          // in compute()) — syncNow() wouldn't find it, so this one source
+          // routes to the same reconciliation pass the Integrations page's
+          // own 30-minute cron already uses, not a second sync mechanism.
+          let result: Record<string, unknown> | undefined;
+          if (source.provider === 'square') {
+            await this.squareReconciliation.reconcileOrganization(organizationId);
+            result = { status: 'ok' };
+          } else {
+            result = (await this.dataSources.syncNow(organizationId, source.id)) as Record<string, unknown> | undefined;
+          }
           const failed = result?.status === 'error';
           // A CRM read once a night (Hoops) says when it will be read instead: not a failure.
           const note = result?.status === 'deferred' ? text(result?.message) || undefined : undefined;

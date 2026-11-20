@@ -53,9 +53,12 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       // without either side tracking socket ids itself. Per-session room
       // additionally lets SessionsService.revoke() disconnect exactly the
       // socket(s) for one revoked session without touching the user's other
-      // open tabs/devices.
+      // open tabs/devices. Per-org room lets emitToOrg() below reach every
+      // member of an organization currently connected (e.g. anyone with the
+      // Customers page open), without looking up user ids first.
       client.join(payload.sub);
       client.join(`session:${payload.jti}`);
+      client.join(`org:${payload.organizationId}`);
     } catch {
       this.logger.warn(`Rejected unauthenticated socket ${client.id}`);
       client.emit('error', { message: 'Unauthorized' });
@@ -74,6 +77,17 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
    * missed the live event. */
   emitToUser(userId: string, event: string, payload: unknown) {
     this.server.to(userId).emit(event, payload);
+  }
+
+  /** Pushes an event to every member of an organization currently connected
+   * (their per-org room, joined in handleConnection) — for data that isn't
+   * about one specific user, e.g. SquarePaymentMatchingService pushing a
+   * Gateway Payment update so an open Customers page can refresh itself
+   * without a manual reload. A no-op if nobody from that org is connected
+   * right now; the REST endpoint (GET /customers) stays the source of
+   * truth regardless, same resilience rule emitToUser's own comment states. */
+  emitToOrg(organizationId: string, event: string, payload: unknown) {
+    this.server.to(`org:${organizationId}`).emit(event, payload);
   }
 
   /** Used by SessionsService when a session is revoked — emits a

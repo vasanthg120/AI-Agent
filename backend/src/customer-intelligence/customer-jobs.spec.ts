@@ -133,6 +133,7 @@ describe('Jobs (real Mongo)', () => {
       { sign: () => 'jwt' } as never,
       { findAll: async () => [] } as never,
       { get: () => 'http://agent' } as never,
+      { reconcileOrganization: jest.fn() } as never,
     );
     const w = new CustomerWorkspaceService(connection, d, new GridFsService(connection));
     const vendorsStub = { getVendor: async () => ({ name: 'Test Vendor' }), existsInOrg: async () => true } as never;

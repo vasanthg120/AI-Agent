@@ -265,6 +265,7 @@ describe('Customer 360° (real Mongo)', () => {
       { sign: () => 'jwt' } as never,
       { findAll: async () => [] } as never,
       { get: () => 'http://agent' } as never,
+      { reconcileOrganization: jest.fn() } as never,
     );
     service = new Customer360Service(
       connection,

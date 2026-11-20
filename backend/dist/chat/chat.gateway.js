@@ -40,6 +40,7 @@ let ChatGateway = ChatGateway_1 = class ChatGateway {
             client.data.token = token;
             client.join(payload.sub);
             client.join(`session:${payload.jti}`);
+            client.join(`org:${payload.organizationId}`);
         }
         catch {
             this.logger.warn(`Rejected unauthenticated socket ${client.id}`);
@@ -52,6 +53,9 @@ let ChatGateway = ChatGateway_1 = class ChatGateway {
     }
     emitToUser(userId, event, payload) {
         this.server.to(userId).emit(event, payload);
+    }
+    emitToOrg(organizationId, event, payload) {
+        this.server.to(`org:${organizationId}`).emit(event, payload);
     }
     disconnectSession(jti) {
         const room = `session:${jti}`;

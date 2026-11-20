@@ -22,6 +22,7 @@ describe('Gateway Payments on the Customers directory (real Mongo)', () => {
   let service: CustomerDirectoryService;
   const http = { post: jest.fn() };
   const dataSources = { syncNow: jest.fn() };
+  const squareReconciliation = { reconcileOrganization: jest.fn().mockResolvedValue({ count: 0 }) };
   const reservations = { reserve: jest.fn(), settle: jest.fn(), release: jest.fn(), resolveTenantKey: (org: string) => org };
   let seq = 0;
   let org: string;
@@ -46,11 +47,12 @@ describe('Gateway Payments on the Customers directory (real Mongo)', () => {
       { sign: () => 'jwt' } as never,
       { findAll: async () => [] } as never,
       { get: () => 'http://agent' } as never,
+      squareReconciliation as never,
     );
   });
 
   afterAll(async () => {
-    for (const name of ['crm_contacts', 'square_payment_transactions', 'crm_data_sources']) {
+    for (const name of ['crm_contacts', 'square_payment_transactions', 'crm_data_sources', 'integration_credentials']) {
       await connection.collection(name).deleteMany({ organizationId: { $regex: `^${PREFIX}` } });
     }
     await connection.close();
@@ -69,6 +71,8 @@ describe('Gateway Payments on the Customers directory (real Mongo)', () => {
       refundedAmount: 0,
       ...fields,
     });
+
+  const connectSquare = (organizationId: string) => connection.collection('integration_credentials').insertOne({ organizationId, provider: 'square' });
 
   it('matches a Gateway Payment to an existing customer by email, never by name alone', async () => {
     await contact(org, 'akash@example.com');
@@ -137,6 +141,85 @@ describe('Gateway Payments on the Customers directory (real Mongo)', () => {
     const contactsAfter = await connection.collection('crm_contacts').find({ organizationId: org }).toArray();
     expect(contactsAfter).toHaveLength(1); // unchanged — a read-only join, never a write back to the CRM collections
   });
+
+  // Square as a real entry in the same `sources` list a CRM gets — the
+  // actual fix for the confirmed gap (Square invisible to the source
+  // dropdown/"Sync now"/status display) — synthesized in compute() rather
+  // than given a crm_data_sources row of its own.
+  describe('Square as a source (sources dropdown, filtering, "Sync now")', () => {
+    it('never appears when Square was never connected and has no payment history', async () => {
+      await contact(org, 'akash@example.com');
+
+      const { sources } = await service.list(org, {});
+
+      expect(sources.find((s) => s.id === 'square')).toBeUndefined();
+    });
+
+    it('appears connected once Square is connected, even with zero payments yet', async () => {
+      await connectSquare(org);
+
+      const { sources } = await service.list(org, {});
+
+      const square = sources.find((s) => s.id === 'square');
+      expect(square).toMatchObject({ label: 'Square', connected: true, canSync: true, customers: 0 });
+    });
+
+    it('stays listed (disconnected) when it holds payment history even after disconnecting — never silently dropped', async () => {
+      await contact(org, 'akash@example.com');
+      await transaction(org, 'pay_1', { matchedEmailKey: 'akash@example.com', amount: 100, paymentStatus: 'completed' });
+      // No connectSquare() — simulates "was connected, synced, then disconnected."
+
+      const { sources } = await service.list(org, {});
+
+      const square = sources.find((s) => s.id === 'square');
+      expect(square).toMatchObject({ connected: false, canSync: false });
+      expect(square!.customers).toBe(1);
+    });
+
+    it('shows the most recent lastSyncedAt across every Square transaction as the source\'s own lastSyncAt', async () => {
+      await connectSquare(org);
+      await contact(org, 'akash@example.com');
+      const older = daysAgo(5);
+      const newer = daysAgo(1);
+      await transaction(org, 'pay_older', { matchedEmailKey: 'akash@example.com', amount: 100, paymentStatus: 'completed', lastSyncedAt: older });
+      await transaction(org, 'pay_newer', { matchedEmailKey: 'akash@example.com', amount: 200, paymentStatus: 'completed', lastSyncedAt: newer });
+
+      const { sources } = await service.list(org, {});
+
+      const square = sources.find((s) => s.id === 'square');
+      expect(square!.lastSyncAt).toEqual(newer);
+    });
+
+    it('selecting Square in the source filter narrows to exactly the customers with a matched Gateway Payment', async () => {
+      await connectSquare(org);
+      await contact(org, 'akash@example.com');
+      await contact(org, 'priya@example.com');
+      await transaction(org, 'pay_1', { matchedEmailKey: 'akash@example.com', amount: 100, paymentStatus: 'completed' });
+
+      const narrowed = await service.list(org, { source: 'square' });
+
+      expect(narrowed.items.map((c) => c.email)).toEqual(['akash@example.com']);
+    });
+
+    it('"Sync now" for Square calls the Square reconciliation pass, never the CRM dataSources.syncNow', async () => {
+      await connectSquare(org);
+
+      const { results } = await service.sync(org, 'square');
+
+      expect(results).toEqual([{ source: 'Square', ok: true, error: undefined }]);
+      expect(squareReconciliation.reconcileOrganization).toHaveBeenCalledWith(org);
+      expect(dataSources.syncNow).not.toHaveBeenCalled();
+    });
+
+    it('"Sync now" for Square reports a clear failure when reconciliation itself throws, without touching other sources', async () => {
+      await connectSquare(org);
+      squareReconciliation.reconcileOrganization.mockRejectedValueOnce(new Error('Square is unreachable'));
+
+      const { results } = await service.sync(org, 'square');
+
+      expect(results).toEqual([{ source: 'Square', ok: false, error: 'The sync couldn’t be completed. Please try again in a minute.' }]);
+    });
+  });
 });
 
 describe('computeGatewayPaymentSummary (pure)', () => {
@@ -183,5 +266,28 @@ describe('computeGatewayPaymentSummary (pure)', () => {
   it('a failed attempt alongside a still-pending retry reads as "pending", not "failed_only" — there is still a live attempt', () => {
     const summary = computeGatewayPaymentSummary([record({ id: 'a', status: 'failed' }), record({ id: 'b', status: 'pending' })]);
     expect(summary.status).toBe('pending');
+  });
+
+  it('never adds two different currencies together — the totals cover only the newest payment\'s currency', () => {
+    const older = record({ id: 'usd', amount: 10000, currency: 'USD', date: new Date('2026-01-01') });
+    const newer = record({ id: 'aud', amount: 5000, currency: 'AUD', date: new Date('2026-06-01') });
+
+    const summary = computeGatewayPaymentSummary([older, newer]);
+
+    expect(summary.currency).toBe('AUD');
+    expect(summary.totalPaid).toBe(5000); // never 15000 — USD and AUD are never summed as one number
+    expect(summary.transactionCount).toBe(2); // still counted — never hidden, just not added into the money total
+  });
+
+  it('a pending transaction in a DIFFERENT currency from the newest one never counts toward "still in flight"', () => {
+    // The newest (AUD) transaction already resolved (completed) — an older,
+    // different-currency (USD) pending transaction must never flip the
+    // overall status away from 'paid' just because it's technically pending.
+    const resolved = record({ id: 'aud', amount: 5000, currency: 'AUD', status: 'completed', date: new Date('2026-06-01') });
+    const unrelatedPending = record({ id: 'usd', amount: 10000, currency: 'USD', status: 'pending', date: new Date('2026-01-01') });
+
+    const summary = computeGatewayPaymentSummary([resolved, unrelatedPending]);
+
+    expect(summary.status).toBe('paid');
   });
 });

@@ -47,6 +47,7 @@ describe('Customers — writes (real Mongo)', () => {
       { sign: () => 'jwt' } as never,
       users,
       { get: () => 'http://agent' } as never,
+      { reconcileOrganization: jest.fn() } as never,
     );
   });
 

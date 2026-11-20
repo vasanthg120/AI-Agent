@@ -41,6 +41,7 @@ describe('Job documents — PDF generation (real Mongo)', () => {
       { sign: () => 'jwt' } as never,
       { findAll: async () => [] } as never,
       { get: () => 'http://agent' } as never,
+      { reconcileOrganization: jest.fn() } as never,
     );
     const workspace = new CustomerWorkspaceService(connection, directory, new GridFsService(connection));
     const vendorsStub = { getVendor: async () => ({ name: 'Test Vendor' }), existsInOrg: async () => true } as never;

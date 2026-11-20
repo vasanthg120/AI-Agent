@@ -41,6 +41,7 @@ describe('Customer CSV import (real Mongo)', () => {
       { sign: () => 'jwt' } as never,
       usersStub,
       { get: () => 'http://agent' } as never,
+      { reconcileOrganization: jest.fn() } as never,
     );
     service = new CustomerImportService(directory, usersStub);
   });

@@ -20,6 +20,7 @@ export declare class ChatGateway implements OnGatewayConnection, OnGatewayDiscon
     handleConnection(client: AuthedSocket): Promise<void>;
     handleDisconnect(client: AuthedSocket): void;
     emitToUser(userId: string, event: string, payload: unknown): void;
+    emitToOrg(organizationId: string, event: string, payload: unknown): void;
     disconnectSession(jti: string): void;
     onMessage(client: AuthedSocket, body: {
         message: string;

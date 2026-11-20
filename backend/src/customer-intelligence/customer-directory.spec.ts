@@ -51,6 +51,7 @@ describe('Customers (real Mongo)', () => {
       { sign: () => 'jwt' } as never,
       { findAll: async () => [] } as never,
       { get: () => 'http://agent' } as never,
+      { reconcileOrganization: jest.fn() } as never,
     );
     gorilla = await source(org, 'gorilladash', 'Gorilla Dash');
     pantheras = await source(org, 'prospectconnect', 'Pantheras CRM');

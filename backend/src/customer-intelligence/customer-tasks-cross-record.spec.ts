@@ -48,6 +48,7 @@ describe('CustomerWorkspaceService.listAllTasks (real Mongo)', () => {
       { sign: () => 'jwt' } as never,
       users,
       { get: () => 'http://agent' } as never,
+      { reconcileOrganization: jest.fn() } as never,
     );
     workspace = new CustomerWorkspaceService(connection, directory, new GridFsService(connection));
   });

@@ -8,6 +8,7 @@ import { CloudFilesModule } from '../cloud-files/cloud-files.module';
 import { GridFsService } from '../common/gridfs/gridfs.service';
 import { Decoration, DecorationSchema } from '../crm/schemas/decoration.schema';
 import { IntegrationsModule } from '../integrations/integrations.module';
+import { SquareModule } from '../square/square.module';
 import { UsersModule } from '../users/users.module';
 import { VendorsModule } from '../vendors/vendors.module';
 import { XeroModule } from '../xero/xero.module';
@@ -47,6 +48,11 @@ import { TeamScopeModule } from '../team-activity/team-scope.module';
     // JobBoard's "Invoice Status — Xero" (section 11, additive) — read-only
     // use of both; see customer-jobs.service.ts's getXeroInvoiceStatus.
     XeroModule,
+    // Gateway Payments (Square) get a real entry in the Customers page's
+    // source list, same shape as a CRM — see customer-directory.service.ts's
+    // own squareSource()/sync() handling. One-directional (square.module.ts
+    // never imports this module back), same safety shape as XeroModule above.
+    SquareModule,
     IntegrationsModule,
     TeamScopeModule,
     // Decoration's own schema, registered a second time (NOT via CrmModule

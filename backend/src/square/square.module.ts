@@ -2,6 +2,7 @@ import { HttpModule } from '@nestjs/axios';
 import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { AuthModule } from '../auth/auth.module';
+import { ChatModule } from '../chat/chat.module';
 import { IntegrationsModule } from '../integrations/integrations.module';
 import { SquarePaymentTransaction, SquarePaymentTransactionSchema } from './schemas/square-payment-transaction.schema';
 import { SquareWebhookEvent, SquareWebhookEventSchema } from './schemas/square-webhook-event.schema';
@@ -23,6 +24,10 @@ import { SquareWebhookController } from './square-webhook.controller';
   ],
   controllers: [SquareController, SquareWebhookController],
   providers: [SquareService, SquarePaymentMatchingService, SquareReconciliationService],
-  exports: [SquareService, SquarePaymentMatchingService],
+  // SquareReconciliationService: customer-intelligence (Customers page)
+  // triggers it directly for a Square "Sync now" (customer-directory.
+  // service.ts) — the same one-directional reuse shape XeroModule already
+  // has in customer-intelligence.module.ts, never the other way around.
+  exports: [SquareService, SquarePaymentMatchingService, SquareReconciliationService],
 })
 export class SquareModule {}
