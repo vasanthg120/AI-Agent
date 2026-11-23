@@ -8,12 +8,12 @@ import { SquareReconciliationService } from './square-reconciliation.service';
 // the "no connection, nothing to do" / "one org failing never stops the
 // others" resilience the class comment describes.
 describe('SquareReconciliationService', () => {
-  function build(overrides: { resolveAuth?: jest.Mock; listPayments?: jest.Mock; upsertFromPayment?: jest.Mock; listConnectedOrganizationIds?: jest.Mock } = {}) {
+  function build(overrides: { resolveAuth?: jest.Mock; listPayments?: jest.Mock; upsertFromPayment?: jest.Mock; listConnectedOrganizationIds?: jest.Mock; listInvoiceRefsByOrder?: jest.Mock } = {}) {
     const integrations = {
       resolveAuth: overrides.resolveAuth ?? jest.fn().mockResolvedValue({ credentials: { accessToken: 'tok' }, oauthMeta: { environment: 'sandbox' } }),
       listConnectedOrganizationIds: overrides.listConnectedOrganizationIds ?? jest.fn().mockResolvedValue([]),
     };
-    const square = { listPayments: overrides.listPayments ?? jest.fn().mockResolvedValue({ payments: [] }) };
+    const square = { listPayments: overrides.listPayments ?? jest.fn().mockResolvedValue({ payments: [] }), listInvoiceRefsByOrder: overrides.listInvoiceRefsByOrder ?? jest.fn().mockResolvedValue(new Map()) };
     const matching = { upsertFromPayment: overrides.upsertFromPayment ?? jest.fn().mockResolvedValue(undefined) };
     const service = new SquareReconciliationService(integrations as never, square as never, matching as never);
     return { service, integrations, square, matching };
@@ -54,7 +54,7 @@ describe('SquareReconciliationService', () => {
     expect(listPayments).toHaveBeenCalledTimes(2);
     expect(listPayments.mock.calls[1][1]).toMatchObject({ cursor: 'next-page' });
     expect(upsertFromPayment).toHaveBeenCalledTimes(3);
-    expect(result).toEqual({ count: 3 });
+    expect(result).toMatchObject({ count: 3, failed: 0 });
   });
 
   it('an organization with no Square connection is a no-op, not an error', async () => {
@@ -63,7 +63,7 @@ describe('SquareReconciliationService', () => {
 
     const result = await service.reconcileOrganization('org-1');
 
-    expect(result).toEqual({ count: 0 });
+    expect(result).toMatchObject({ count: 0 });
     expect(square.listPayments).not.toHaveBeenCalled();
   });
 
@@ -78,5 +78,51 @@ describe('SquareReconciliationService', () => {
 
     await expect(service.reconcileAll()).resolves.toBeUndefined();
     expect(square.listPayments).toHaveBeenCalledTimes(2);
+  });
+
+  describe('historical reconciliation (full history)', () => {
+    it('reads the invoices of the org once, hands them to every upsert, and reports linked / without-invoice counts', async () => {
+      const invoices = new Map([['o1', { number: '4546', title: '4546 - Surry Hills' }]]);
+      const listInvoiceRefsByOrder = jest.fn().mockResolvedValue(invoices);
+      const listPayments = jest.fn().mockResolvedValue({ payments: [{ id: 'p1', order_id: 'o1' }, { id: 'p2', order_id: 'o2' }] });
+      const upsertFromPayment = jest.fn().mockResolvedValue(undefined);
+      const { service } = build({ listInvoiceRefsByOrder, listPayments, upsertFromPayment });
+
+      const result = await service.initialSync('org-1');
+
+      expect(listInvoiceRefsByOrder).toHaveBeenCalledTimes(1);
+      expect(listInvoiceRefsByOrder).toHaveBeenCalledWith('org-1');
+      expect(upsertFromPayment.mock.calls[0][5]).toBe(invoices);
+      expect(result).toEqual({ count: 2, invoiceLinked: 1, withoutInvoice: 1, failed: 0 });
+    });
+
+    it('is idempotent: a second run reports the same counts and upserts the same payments (no duplicates are created by it)', async () => {
+      const listPayments = jest.fn().mockResolvedValue({ payments: [{ id: 'p1' }, { id: 'p2' }] });
+      const upsertFromPayment = jest.fn().mockResolvedValue(undefined);
+      const { service } = build({ listPayments, upsertFromPayment });
+      const first = await service.initialSync('org-1');
+      const second = await service.initialSync('org-1');
+      expect(second).toEqual(first);
+      expect(upsertFromPayment.mock.calls.slice(0, 2).map((c) => c[3].id)).toEqual(upsertFromPayment.mock.calls.slice(2).map((c) => c[3].id));
+    });
+
+    it('one payment failing is counted and skipped — the rest still reconcile', async () => {
+      const listPayments = jest.fn().mockResolvedValue({ payments: [{ id: 'p1' }, { id: 'bad' }, { id: 'p3' }] });
+      const upsertFromPayment = jest.fn().mockImplementation((_o, _t, _e, payment) => (payment.id === 'bad' ? Promise.reject(new Error('boom')) : Promise.resolve()));
+      const { service } = build({ listPayments, upsertFromPayment });
+      const result = await service.initialSync('org-1');
+      expect(result).toMatchObject({ count: 2, failed: 1 });
+    });
+
+    it('falls back to the per-payment lookup when the invoice pre-read fails, and the bounded cron never pre-reads', async () => {
+      const listInvoiceRefsByOrder = jest.fn().mockRejectedValue(new Error('403'));
+      const upsertFromPayment = jest.fn().mockResolvedValue(undefined);
+      const listPayments = jest.fn().mockResolvedValue({ payments: [{ id: 'p1' }] });
+      const { service } = build({ listInvoiceRefsByOrder, upsertFromPayment, listPayments });
+      await service.initialSync('org-1');
+      expect(upsertFromPayment.mock.calls[0][5]).toBeUndefined();
+      await service.reconcileOrganization('org-1');
+      expect(listInvoiceRefsByOrder).toHaveBeenCalledTimes(1);
+    });
   });
 });

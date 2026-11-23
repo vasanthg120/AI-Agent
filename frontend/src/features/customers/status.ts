@@ -9,6 +9,7 @@ import type {
   MailState,
   OrderState,
   PaymentState,
+  QuotePaymentStatus,
   QuoteState,
 } from '@/services/customersService';
 
@@ -39,6 +40,7 @@ export const PAYMENT_VARIANT: Record<PaymentState, BadgeVariant> = {
   partially_paid: 'warning',
   unpaid: 'warning',
   overdue: 'danger',
+  overpaid: 'info',
   not_recorded: 'neutral',
   nothing_due: 'neutral',
 };
@@ -115,4 +117,18 @@ export const FLAG_VARIANT: Record<CustomerFlag, BadgeVariant> = {
   quote_pending: 'info',
   payment_pending: 'warning',
   payment_overdue: 'danger',
+};
+
+export const QUOTE_PAYMENT_VARIANT: Record<QuotePaymentStatus, BadgeVariant> = {
+  paid: 'success',
+  partially_paid: 'warning',
+  unpaid: 'neutral',
+  overpaid: 'info',
+};
+
+export const QUOTE_PAYMENT_LABEL: Record<QuotePaymentStatus, string> = {
+  paid: 'Paid',
+  partially_paid: 'Partially Paid',
+  unpaid: 'Unpaid',
+  overpaid: 'Overpaid',
 };

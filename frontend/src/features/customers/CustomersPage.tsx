@@ -63,6 +63,7 @@ import {
   Tabs,
 } from '@/components/ui';
 import type { DateRange, DropdownItem, MultiSelectOption } from '@/components/ui';
+import { getSocket } from '@/api/socketClient';
 import { ROUTES } from '@/constants/routes';
 import { nextRunText } from '@/features/integrations/CrmSetupWizard';
 import { useClickOutside } from '@/hooks/useClickOutside';
@@ -278,6 +279,7 @@ const FILTERS: {
       option('partially_paid', 'Part paid'),
       option('unpaid', 'Unpaid'),
       option('overdue', 'Overdue'),
+      option('overpaid', 'Overpaid'),
       option('not_recorded', 'Not recorded'),
       option('nothing_due', 'Nothing due'),
     ],
@@ -531,6 +533,22 @@ const CustomersBoard = memo(function CustomersBoard({
   const [exporting, setExporting] = useState(false);
   const listRef = useRef<HTMLDivElement>(null);
   const paged = useRef(false);
+
+  // A Gateway Payment (Square) landing — webhook or reconciliation — refreshes
+  // the board without a manual reload. Rides the app's one existing /chat
+  // socket (already connected app-wide for notifications); the event only
+  // signals "refetch", REST stays the source of truth.
+  useEffect(() => {
+    const token = useAuthStore.getState().accessToken;
+    if (!token) return;
+    const socket = getSocket(token);
+    if (!socket.connected) socket.connect();
+    const refresh = () => void queryClient.invalidateQueries({ queryKey: ['customers'] });
+    socket.on('gateway-payment-updated', refresh);
+    return () => {
+      socket.off('gateway-payment-updated', refresh);
+    };
+  }, [queryClient]);
 
   // Search as you type, without a request per keystroke.
   useEffect(() => {
@@ -1373,7 +1391,10 @@ function CustomerRow({
         );
       case 'gatewayPayment': {
         const g = customer.gatewayPaymentSummary;
-        if (!g || g.transactionCount === 0) {
+        // The reconciled sources behind this customer's payments: real providers (Square…), recorded remittances, and
+        // — marked "reported" — a CRM that says it was paid with no transaction to back it.
+        const sources = customer.paymentSources ?? [];
+        if ((!g || g.transactionCount === 0) && sources.length === 0) {
           return (
             <td key={id} className={styles.foldB}>
               {NONE}
@@ -1382,10 +1403,25 @@ function CustomerRow({
         }
         return (
           <td key={id} className={styles.foldB}>
-            <Badge variant={GATEWAY_PAYMENT_VARIANT[g.status]}>{GATEWAY_PAYMENT_LABEL[g.status]}</Badge>
-            {detailed && (
+            {/* Where the money was recorded: the real source name(s), never a generic "Paid". The status is the Payment column's job; it stays as the tooltip here. */}
+            {sources.length > 0
+              ? sources.map((source) => (
+                  <Badge
+                    key={source.name}
+                    variant={source.verified && g ? GATEWAY_PAYMENT_VARIANT[g.status] : 'neutral'}
+                    title={source.verified ? 'Backed by a transaction or payment record' : 'Reported by the CRM only — no transaction found'}
+                  >
+                    {source.verified ? source.name : `${source.name} (reported)`}
+                  </Badge>
+                ))
+              : (g?.providers?.length ? g.providers : [GATEWAY_PAYMENT_LABEL[g!.status]]).map((name) => (
+                  <Badge key={name} variant={GATEWAY_PAYMENT_VARIANT[g!.status]} title={GATEWAY_PAYMENT_LABEL[g!.status]}>
+                    {name}
+                  </Badge>
+                ))}
+            {detailed && g && g.transactionCount > 0 && (
               <div className={styles.cellSub}>
-                {formatCurrency(g.netPaid / 100, g.currency)} · {g.transactionCount} txn{g.transactionCount === 1 ? '' : 's'}
+                {GATEWAY_PAYMENT_LABEL[g.status]} · {formatCurrency(g.netPaid / 100, g.currency)} · {g.transactionCount} txn{g.transactionCount === 1 ? '' : 's'}
               </div>
             )}
           </td>

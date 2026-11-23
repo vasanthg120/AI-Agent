@@ -95,6 +95,18 @@ export class SquarePaymentTransaction {
   @Prop()
   sourceEventId?: string;
 
+  // Sanitized allowlist of Square's Payment object (see square-payment-
+  // details.ts) — card brand/last4, fees, receipt URL, references, etc. Never
+  // fingerprint/BIN/CVV/auth codes. Optional: rows synced before this existed
+  // simply lack it and are filled in on the next webhook/reconciliation.
+  @Prop({ type: Object })
+  details?: Record<string, unknown>;
+
+  // When the reconciliation last looked for the Square Invoice that billed this payment's order (see
+  // payment-reconciliation.service.ts) — so a payment with no invoice is not re-read on every run.
+  @Prop()
+  invoiceCheckedAt?: Date;
+
   @Prop({ required: true })
   lastSyncedAt: Date;
 }

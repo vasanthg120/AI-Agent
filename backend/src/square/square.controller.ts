@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Logger, Param, Post, Query, Redirect, UseGuards } from '@nestjs/common';
+import { BadGatewayException, Body, Controller, Delete, Get, HttpException, HttpStatus, Logger, NotFoundException, Param, Post, Query, Redirect, UseGuards } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtPayload } from '../auth/jwt-payload.interface';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
@@ -10,6 +10,7 @@ import { ConnectSquareDto } from './dto/connect-square.dto';
 import { CreateSquarePaymentDto } from './dto/create-square-payment.dto';
 import { SaveSquareAppCredentialsDto } from './dto/save-square-app-credentials.dto';
 import { TestSquareConnectionDto } from './dto/test-square-connection.dto';
+import { extractSquarePaymentDetails } from './square-payment-details';
 import { SquareReconciliationService } from './square-reconciliation.service';
 import { SquareService } from './square.service';
 
@@ -121,6 +122,17 @@ export class SquareController {
     return this.square.getStatus(user.organizationId);
   }
 
+  // Safe historical reconciliation: re-reads this org's own Square payments (full history) and re-links each to the
+  // Square Invoice that billed it. Idempotent on providerPaymentId; writes ONLY square_payment_transactions — never
+  // a quote, invoice or existing payment record. Which quote a payment settles is then derived from exact
+  // identifiers at read time (see quote-payment-status.ts), so a payment with no identifier stays unmatched.
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('owner', 'admin')
+  @Post('reconcile-history')
+  reconcileHistory(@CurrentUser() user: JwtPayload) {
+    return this.reconciliation.initialSync(user.organizationId);
+  }
+
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('owner', 'admin')
   @Delete('disconnect')
@@ -148,6 +160,26 @@ export class SquareController {
   @Get('payments')
   listPayments(@CurrentUser() user: JwtPayload, @Query('beginTime') beginTime?: string, @Query('endTime') endTime?: string, @Query('cursor') cursor?: string) {
     return this.square.listPayments(user.organizationId, { beginTime, endTime, cursor });
+  }
+
+  // Sanitized detail view for one payment (org-scoped through the org's own
+  // Square credentials): the allowlisted fields only, so card fingerprints
+  // and the like never reach the browser. Used for rows synced before
+  // details were stored; one call per click, never per list row.
+  @UseGuards(JwtAuthGuard)
+  @Get('payments/:paymentId/details')
+  async getPaymentDetails(@CurrentUser() user: JwtPayload, @Param('paymentId') paymentId: string) {
+    try {
+      const payment = await this.square.getPayment(user.organizationId, paymentId);
+      return { id: paymentId, details: extractSquarePaymentDetails(payment) };
+    } catch (err) {
+      const status = (err as { response?: { status?: number } }).response?.status;
+      if (status === 429) throw new HttpException('Square is rate-limiting requests — try again in a moment.', HttpStatus.TOO_MANY_REQUESTS);
+      if (status === 404) throw new NotFoundException('Square has no such payment.');
+      if (err instanceof HttpException) throw err;
+      this.logger.warn(`Square payment detail fetch failed: ${(err as Error).message}`);
+      throw new BadGatewayException('Could not load payment details from Square.');
+    }
   }
 
   @UseGuards(JwtAuthGuard)

@@ -55,6 +55,10 @@ export interface ProfileQuotation {
   amount: number;
   /** What the CRM says has been paid against it. */
   paidAmount: number;
+  /** Major units the quote's linked, settled gateway payments (net of refunds, same currency) cover — set only when at least one is linked. */
+  gatewayPaid?: number;
+  /** The quote's reconciled payments exceed its amount. */
+  overpaid?: boolean;
   state: 'draft' | 'sent' | 'accepted' | 'rejected';
   /** When payment is due — not the quotation's validity. */
   dueDate?: Date;
@@ -75,6 +79,8 @@ export interface ProfileInvoice {
   dueDate?: Date;
   quotationId?: string;
   dealId?: string;
+  /** Major units a matched gateway payment (exact invoice-number reference, same currency, net of refunds) has settled on this invoice. */
+  gatewayPaid?: number;
 }
 
 export interface ProfilePayment {
@@ -227,7 +233,7 @@ export const STAGE_TITLE: Record<StageKey, string> = {
 
 export type CustomerType = 'new' | 'existing' | 'returning';
 export type QuoteState = 'draft' | 'sent' | 'accepted' | 'rejected' | 'expired';
-export type PaymentState = 'paid' | 'partially_paid' | 'unpaid' | 'overdue' | 'not_recorded' | 'nothing_due';
+export type PaymentState = 'paid' | 'partially_paid' | 'unpaid' | 'overdue' | 'overpaid' | 'not_recorded' | 'nothing_due';
 export type OrderState = 'converted' | 'previous_order' | 'not_converted' | 'none';
 export type EmailState = 'reply_needed' | 'follow_up' | 'not_replied' | 'replied' | 'not_contacted' | 'none';
 export type CrmState = 'lead' | 'opportunity' | 'customer' | 'lost';
@@ -336,6 +342,7 @@ const PAYMENT_LABEL: Record<PaymentState, string> = {
   partially_paid: 'Partially paid',
   unpaid: 'Unpaid',
   overdue: 'Overdue',
+  overpaid: 'Overpaid',
   not_recorded: 'Not recorded',
   nothing_due: 'Nothing due',
 };
@@ -358,6 +365,7 @@ const PAYMENT_TONE: Record<PaymentState, StageTone> = {
   partially_paid: 'waiting',
   unpaid: 'waiting',
   overdue: 'attention',
+  overpaid: 'attention',
   not_recorded: 'muted',
   nothing_due: 'none',
 };
@@ -435,7 +443,7 @@ export function buildCustomerProfile(input: ProfileInput): CustomerProfile {
   for (const invoice of invoices) if (invoice.quotationId && !invoiceByQuote.has(invoice.quotationId)) invoiceByQuote.set(invoice.quotationId, invoice);
   const paidOn = (value: number, invoice: ProfileInvoice | undefined, quotation: ProfileQuotation | undefined) => {
     if (invoice?.status === 'paid') return value;
-    const recorded = Math.max(quotation?.paidAmount ?? 0, quotation ? (paidByQuote.get(quotation.id) ?? 0) : 0);
+    const recorded = Math.max(quotation?.paidAmount ?? 0, quotation ? (paidByQuote.get(quotation.id) ?? 0) : 0, invoice?.gatewayPaid ?? 0, quotation?.gatewayPaid ?? 0);
     return Math.min(value, recorded);
   };
   const orders: Order[] = [];
@@ -525,7 +533,7 @@ export function buildCustomerProfile(input: ProfileInput): CustomerProfile {
   const overdueOrders = billable.filter((o) => o.value - o.paid > 0 && !!o.dueDate && o.dueDate.getTime() < now.getTime());
   const overdueAmount = overdueOrders.reduce((sum, o) => sum + (o.value - o.paid), 0);
   // What was paid is only known when payments are recorded somewhere.
-  const paymentKnown = input.paymentsTracked || paidTotal > 0;
+  const paymentKnown = input.paymentsTracked || paidTotal > 0 || input.invoices.some((i) => (i.gatewayPaid ?? 0) > 0) || input.quotations.some((q) => (q.gatewayPaid ?? 0) > 0);
   const paymentStatus: PaymentState =
     billable.length === 0
       ? 'nothing_due'
@@ -534,7 +542,9 @@ export function buildCustomerProfile(input: ProfileInput): CustomerProfile {
         : overdueAmount > 0
           ? 'overdue'
           : outstandingTotal <= 0
-            ? 'paid'
+            ? billable.some((o) => !!o.quotationId && quoteById.get(o.quotationId)?.overpaid)
+              ? 'overpaid'
+              : 'paid'
             : paidTotal > 0
               ? 'partially_paid'
               : 'unpaid';

@@ -6,6 +6,7 @@ import { ActivityTimeline, CommentSection, FilePreview, StatusBadge, TaskList } 
 import { quotesService, type Quote, type QuotePayment } from '@/services/quotesService';
 import { statusDefinitionsService } from '@/services/statusDefinitionsService';
 import { extractErrorMessage } from '@/utils/errors';
+import { QUOTE_PAYMENT_LABEL } from './status';
 import styles from './quote-detail-drawer.module.css';
 
 export type QuotePanelTab = 'detail' | 'files' | 'comments' | 'tasks' | 'backtrack' | 'activity';
@@ -191,6 +192,65 @@ function SaleDetailTab({ quote, payments }: { quote: Quote; payments?: QuotePaym
           </div>
         </dl>
       </section>
+
+      {quote.paymentReconciliation && (
+        <section className={styles.section}>
+          <h3>Reconciled payment</h3>
+          <dl className={styles.totals}>
+            <div>
+              <dt>Quote number</dt>
+              <dd>{quote.quoteNumber ?? '—'}</dd>
+            </div>
+            <div>
+              <dt>Status</dt>
+              <dd>{QUOTE_PAYMENT_LABEL[quote.paymentReconciliation.status]}</dd>
+            </div>
+            <div>
+              <dt>Quote total</dt>
+              <dd>{money(quote.paymentReconciliation.quoteTotal)}</dd>
+            </div>
+            <div>
+              <dt>Paid</dt>
+              <dd>{money(quote.paymentReconciliation.paidAmount)}</dd>
+            </div>
+            <div>
+              <dt>Outstanding</dt>
+              <dd>{money(quote.paymentReconciliation.outstandingAmount)}</dd>
+            </div>
+            {quote.paymentReconciliation.sources.length > 0 && (
+              <div>
+                <dt>Source</dt>
+                <dd>{quote.paymentReconciliation.sources.map((s) => (s.verified ? s.name : `${s.name} (reported)`)).join(', ')}</dd>
+              </div>
+            )}
+            {quote.paymentReconciliation.paymentMethod && (
+              <div>
+                <dt>Method</dt>
+                <dd>{quote.paymentReconciliation.paymentMethod}</dd>
+              </div>
+            )}
+            {quote.paymentReconciliation.lastPaymentAt && (
+              <div>
+                <dt>Transaction date</dt>
+                <dd>{new Date(quote.paymentReconciliation.lastPaymentAt).toLocaleDateString()}</dd>
+              </div>
+            )}
+            {quote.paymentReconciliation.transactionReference && (
+              <div>
+                <dt>Transaction reference</dt>
+                <dd>{quote.paymentReconciliation.transactionReference}</dd>
+              </div>
+            )}
+            {quote.paymentReconciliation.refundedAmount > 0 && (
+              <div>
+                <dt>Refunded</dt>
+                <dd>{money(quote.paymentReconciliation.refundedAmount)}</dd>
+              </div>
+            )}
+          </dl>
+          {quote.paymentReconciliation.crmUnverified && <p className={styles.muted}>The CRM reports this as paid, but no matching transaction was found.</p>}
+        </section>
+      )}
 
       <section className={styles.section}>
         <h3>Payments</h3>

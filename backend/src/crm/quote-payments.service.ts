@@ -1,4 +1,5 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException, Optional } from '@nestjs/common';
+import { PaymentEvents } from '../common/payments/payment-events';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { Quote, QuoteDocument } from './schemas/quote.schema';
@@ -18,6 +19,7 @@ export class QuotePaymentsService {
     @InjectModel(Quote.name) private quoteModel: Model<QuoteDocument>,
     @InjectModel(QuotePayment.name) private paymentModel: Model<QuotePaymentDocument>,
     private quotesService: QuotesService,
+    @Optional() private paymentEvents?: PaymentEvents,
   ) {}
 
   async recordPayment(
@@ -104,5 +106,7 @@ export class QuotePaymentsService {
       .exec();
     const total = rows[0]?.total ?? 0;
     await this.quoteModel.updateOne({ _id: quoteId, organizationId }, { $set: { paidAmount: total } }).exec();
+    // A recorded (or voided) payment changes what the quote has been paid — the reconciliation re-derives its status.
+    this.paymentEvents?.notify(organizationId, 'quote-payment');
   }
 }

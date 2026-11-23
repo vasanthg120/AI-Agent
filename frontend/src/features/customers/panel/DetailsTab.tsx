@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import toast from 'react-hot-toast';
 import {
   FiAlertCircle,
@@ -29,6 +29,8 @@ import type {
 } from '@/services/customersService';
 import { formatRelativeTime } from '@/utils/date';
 import { formatDate, formatMoney } from '../format';
+import { GatewayPaymentDetailModal } from '../GatewayPaymentDetailModal';
+import { cardLabel, isSafeReceiptUrl, minorToMajor, providerLabel } from '../gatewayPayments';
 import {
   CRM_VARIANT,
   FLAG_LABEL,
@@ -74,8 +76,13 @@ export function DetailsTab({
   const money = (amount: number) => formatMoney(amount, detail.currency);
   const { orders, quotes, invoices, payment, mail, inquiry, gatewayPaymentSummary } = detail;
   const notRecorded = <span className={detailStyles.unknown}>Not recorded</span>;
+  // Looked up by id in the live detail, so a real-time refetch updates the open view.
+  const [openPaymentId, setOpenPaymentId] = useState<string>();
+  const openPayment = useMemo(() => detail.gatewayPayments.find((p) => p.id === openPaymentId), [detail.gatewayPayments, openPaymentId]);
+  const otherCurrencies = (gatewayPaymentSummary.currencyTotals ?? []).filter((t) => t.currency !== gatewayPaymentSummary.currency);
   return (
     <>
+      {openPayment && <GatewayPaymentDetailModal payment={openPayment} onClose={() => setOpenPaymentId(undefined)} />}
       <div
         className={clsx(detailStyles.actionBanner, detailStyles[`action_${detail.nextAction.urgency}`])}
         role="status"
@@ -163,12 +170,14 @@ export function DetailsTab({
         </div>
         <div className={detailStyles.summaryCell}>
           <dt>Gateway Payments</dt>
-          <dd>{gatewayPaymentSummary.transactionCount > 0 ? formatMoney(gatewayPaymentSummary.netPaid / 100, gatewayPaymentSummary.currency) : dash}</dd>
+          <dd>{gatewayPaymentSummary.transactionCount > 0 ? formatMoney(minorToMajor(gatewayPaymentSummary.netPaid, gatewayPaymentSummary.currency), gatewayPaymentSummary.currency) : dash}</dd>
           <span className={detailStyles.summaryNote}>
             {gatewayPaymentSummary.transactionCount > 0 ? (
               <>
                 <Badge variant={GATEWAY_PAYMENT_VARIANT[gatewayPaymentSummary.status]}>{GATEWAY_PAYMENT_LABEL[gatewayPaymentSummary.status]}</Badge>
+                {gatewayPaymentSummary.providers.length > 0 ? ` · via ${gatewayPaymentSummary.providers.join(', ')}` : ''}
                 {` · ${gatewayPaymentSummary.transactionCount} txn${gatewayPaymentSummary.transactionCount === 1 ? '' : 's'}`}
+                {otherCurrencies.map((t) => ` · + ${formatMoney(minorToMajor(t.netPaid, t.currency), t.currency)}`)}
               </>
             ) : (
               'No gateway payments yet'
@@ -189,22 +198,36 @@ export function DetailsTab({
                 <th>Amount</th>
                 <th>Status</th>
                 <th>Refunded</th>
-                <th>Reference</th>
+                <th>Transaction ID</th>
+                <th>Applied to</th>
+                <th>Receipt</th>
               </tr>
             </thead>
             <tbody>
               {detail.gatewayPayments.map((p) => (
-                <tr key={p.id}>
+                <tr key={p.id} tabIndex={0} style={{ cursor: 'pointer' }} title="View payment details" onClick={() => setOpenPaymentId(p.id)} onKeyDown={(e) => e.key === 'Enter' && setOpenPaymentId(p.id)}>
                   <td>{formatDate(p.date)}</td>
-                  <td style={{ textTransform: 'capitalize' }}>{p.provider}</td>
-                  <td style={{ textTransform: 'capitalize' }}>{p.paymentMethodType ? p.paymentMethodType.toLowerCase() : dash}</td>
-                  <td>{formatMoney(p.amount / 100, p.currency)}</td>
+                  <td>{providerLabel(p.provider)}</td>
+                  <td>{cardLabel(p)}</td>
+                  <td>{formatMoney(minorToMajor(p.amount, p.currency), p.currency)}</td>
                   <td>
                     <Badge variant={GATEWAY_TRANSACTION_VARIANT[p.status]}>{p.status.replace(/_/g, ' ')}</Badge>
                   </td>
-                  <td>{p.refundedAmount > 0 ? formatMoney(p.refundedAmount / 100, p.currency) : dash}</td>
-                  <td title={[p.transactionReference && `Reference: ${p.transactionReference}`, p.orderReference && `Order: ${p.orderReference}`].filter(Boolean).join(' · ') || undefined}>
-                    {p.transactionReference ?? p.orderReference ?? dash}
+                  <td>{p.refundedAmount > 0 ? formatMoney(minorToMajor(p.refundedAmount, p.currency), p.currency) : dash}</td>
+                  <td title={p.id} style={{ overflowWrap: 'anywhere' }}>{p.id}</td>
+                  <td>
+                    {[p.links?.invoice?.number && `Invoice ${p.links.invoice.number}`, p.links?.quote?.number && `Quote ${p.links.quote.number}`, p.links?.job?.number && `Job ${p.links.job.number}`]
+                      .filter(Boolean)
+                      .join(' · ') || (p.transactionReference ? `Ref ${p.transactionReference}` : 'Not linked to an invoice')}
+                  </td>
+                  <td>
+                    {isSafeReceiptUrl(p.details?.receiptUrl) ? (
+                      <a href={p.details!.receiptUrl} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()}>
+                        View
+                      </a>
+                    ) : (
+                      dash
+                    )}
                   </td>
                 </tr>
               ))}

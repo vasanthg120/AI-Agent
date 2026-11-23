@@ -2,13 +2,14 @@ import { memo, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { FiTrendingUp } from 'react-icons/fi';
-import { PageHeader, Tabs } from '@/components/ui';
+import { Badge, PageHeader, Tabs } from '@/components/ui';
 import { DataTable, Pagination, StatusBadge, TableToolbar } from '@/components/board';
 import type { DataTableColumn, RowHeight } from '@/components/board';
 import { dealsService, type Deal, type DealFilters } from '@/services/dealsService';
 import { quotesService, type ListQuotesFilters, type Quote } from '@/services/quotesService';
 import { statusDefinitionsService } from '@/services/statusDefinitionsService';
 import { exportRowsToCsv } from '@/utils/csvExport';
+import { QUOTE_PAYMENT_LABEL, QUOTE_PAYMENT_VARIANT } from '../status';
 import customerStyles from '../customers.module.css';
 
 const PAGE_SIZE = 25;
@@ -117,7 +118,22 @@ export const SalesBoardTab = memo(function SalesBoardTab({
         key: 'outstanding',
         header: 'Outstanding',
         align: 'right',
-        render: (q) => money(Math.max(q.quoteAmount - q.paidAmount, 0), q.currency),
+        // The reconciled outstanding when a reconciliation has run (so a Square payment shows even if Hoops still says Not Paid).
+        render: (q) => money(q.paymentReconciliation ? q.paymentReconciliation.outstandingAmount : Math.max(q.quoteAmount - q.paidAmount, 0), q.currency),
+      },
+      {
+        key: 'reconciledPayment',
+        header: 'Payment',
+        render: (q) => {
+          const p = q.paymentReconciliation;
+          if (!p) return '—';
+          return (
+            <span title={p.crmOutdated ? 'The CRM still shows less than what was actually paid' : p.crmUnverified ? 'Reported by the CRM — no matching transaction found' : undefined}>
+              <Badge variant={QUOTE_PAYMENT_VARIANT[p.status]}>{QUOTE_PAYMENT_LABEL[p.status]}</Badge>
+              {p.sources.length > 0 && <small> {p.sources.map((s) => (s.verified ? s.name : `${s.name} (reported)`)).join(', ')}</small>}
+            </span>
+          );
+        },
       },
       { key: 'createdAt', header: 'Created', render: (q) => new Date(q.createdAt).toLocaleDateString() },
     ],
@@ -147,7 +163,9 @@ export const SalesBoardTab = memo(function SalesBoardTab({
         { header: 'Status', value: (q: Quote) => q.quoteStatus },
         { header: 'Approval', value: (q: Quote) => q.clientApprovalStatus },
         { header: 'Amount', value: (q: Quote) => q.quoteAmount },
-        { header: 'Outstanding', value: (q: Quote) => Math.max(q.quoteAmount - q.paidAmount, 0) },
+        { header: 'Outstanding', value: (q: Quote) => (q.paymentReconciliation ? q.paymentReconciliation.outstandingAmount : Math.max(q.quoteAmount - q.paidAmount, 0)) },
+        { header: 'Payment', value: (q: Quote) => (q.paymentReconciliation ? QUOTE_PAYMENT_LABEL[q.paymentReconciliation.status] : '') },
+        { header: 'Payment source', value: (q: Quote) => q.paymentReconciliation?.sources.map((s) => s.name).join(', ') ?? '' },
         { header: 'Created', value: (q: Quote) => new Date(q.createdAt).toLocaleDateString() },
       ],
       quotesQuery.data.items,

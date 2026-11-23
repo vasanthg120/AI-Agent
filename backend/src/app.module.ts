@@ -58,6 +58,7 @@ import { StatusDefinitionsModule } from './status-definitions/status-definitions
 import { BusinessIntelligenceModule } from './business-intelligence/business-intelligence.module';
 import { MailModule } from './mail/mail.module';
 import { EncryptionModule } from './common/encryption/encryption.module';
+import { PaymentEventsModule } from './common/payments/payment-events';
 import { SessionsModule } from './sessions/sessions.module';
 import { ApiTokensModule } from './api-tokens/api-tokens.module';
 import { BillingModule } from './billing/billing.module';
@@ -82,6 +83,7 @@ import { ModulePermissionInterceptor } from './common/permissions/module-permiss
     // @SkipThrottle() (see HealthController).
     ThrottlerModule.forRoot([{ ttl: 60_000, limit: 60 }]),
     EncryptionModule,
+    PaymentEventsModule,
     MailModule,
     AuthModule,
     OrganizationsModule,

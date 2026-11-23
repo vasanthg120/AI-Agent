@@ -222,6 +222,12 @@ export class Quote {
   @Prop()
   paymentStatus?: string;
 
+  // Haive's reconciled payment status for this quote, derived from every connected payment source (see
+  // customer-intelligence/payment-reconciliation.service.ts). Written ONLY by that service; additive, never touches
+  // paidAmount, the manual paymentStatus label above, quote status or any source CRM record.
+  @Prop({ type: Object })
+  paymentReconciliation?: Record<string, unknown>;
+
   @Prop()
   deliveryStatus?: string;
 

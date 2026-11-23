@@ -38,7 +38,7 @@ export interface TimelineEvent {
 export type CustomerType = 'new' | 'existing' | 'returning';
 export type QuoteState = 'draft' | 'sent' | 'accepted' | 'rejected' | 'expired';
 export type InvoiceStatus = 'draft' | 'invoiced' | 'paid';
-export type PaymentState = 'paid' | 'partially_paid' | 'unpaid' | 'overdue' | 'not_recorded' | 'nothing_due';
+export type PaymentState = 'paid' | 'partially_paid' | 'unpaid' | 'overdue' | 'overpaid' | 'not_recorded' | 'nothing_due';
 export type OrderState = 'converted' | 'previous_order' | 'not_converted' | 'none';
 export type MailState = 'reply_needed' | 'follow_up' | 'not_replied' | 'replied' | 'not_contacted' | 'none';
 export type CrmState = 'lead' | 'opportunity' | 'customer' | 'lost';
@@ -189,9 +189,15 @@ export interface Customer {
   // concept the board already tracked). Always shown as "Gateway Payments"
   // in the UI, never bare "Payment Status", to avoid confusing the two.
   gatewayPaymentSummary: GatewayPaymentSummary;
+  // Every provider / record / CRM report behind this customer's payments (verified ones first) — the Gateway Payment column.
+  paymentSources: PaymentSource[];
 }
 
 export interface GatewayPaymentSummary {
+  // The source behind the payments (e.g. "Square") — never a status.
+  providers: string[];
+  // Paid/refunded/net per currency — never summed across currencies.
+  currencyTotals?: { currency: string; totalPaid: number; totalRefunded: number; netPaid: number; count: number }[];
   totalPaid: number;
   totalRefunded: number;
   netPaid: number;
@@ -216,6 +222,42 @@ export interface GatewayPaymentRecord {
   paymentMethodType?: string;
   orderReference?: string;
   transactionReference?: string;
+  // Allowlisted Square fields only; absent on rows synced before details were stored.
+  details?: SquarePaymentDetails;
+  links?: GatewayPaymentLinks;
+}
+
+export interface GatewayPaymentLinks {
+  customerName?: string;
+  crmSources: string[];
+  quote?: { id: string; number?: string };
+  invoice?: { id: string; number?: string };
+  job?: { id: string; number: string };
+}
+
+type SquareMoney = { amount: number; currency: string };
+export interface SquarePaymentDetails {
+  updatedAt?: string;
+  totalMoney?: SquareMoney;
+  approvedMoney?: SquareMoney;
+  refundedMoney?: SquareMoney;
+  tipMoney?: SquareMoney;
+  sourceType?: string;
+  card?: { brand?: string; last4?: string; cardType?: string; entryMethod?: string; status?: string };
+  processingFees?: { effectiveAt?: string; type?: string; amount: number; currency: string }[];
+  locationId?: string;
+  orderId?: string;
+  customerId?: string;
+  referenceId?: string;
+  teamMemberId?: string;
+  employeeId?: string;
+  receiptNumber?: string;
+  receiptUrl?: string;
+  note?: string;
+  productName?: string;
+  authorizedAt?: string;
+  capturedAt?: string;
+  refundIds?: string[];
 }
 
 export type CustomerRecordType = 'business' | 'individual';
@@ -291,6 +333,57 @@ export interface Journey {
   steps: JourneyStep[];
 }
 
+// A quote's payment status as the backend computes it once (quote-payment-status.ts) — every screen reads this, none recalculates.
+export type QuotePaymentStatus = 'unpaid' | 'partially_paid' | 'paid' | 'overpaid';
+export interface QuotePaymentSummary {
+  quoteId: string;
+  quoteNumber?: string;
+  currency: string;
+  quoteTotal: number;
+  paidAmount: number;
+  outstandingAmount: number;
+  status: QuotePaymentStatus;
+  // What transactions/records alone prove; paidAmount may exceed it only by money a CRM merely reported.
+  verifiedPaid: number;
+  reportedPaid: number;
+  basis: 'verified' | 'reported' | 'mixed' | 'none';
+  gateway?: string;
+  // Every source that contributed; verified=false means only a CRM reported it (no transaction behind it).
+  sources: PaymentSource[];
+  paymentMethod?: string;
+  paymentDate?: string;
+  transactionReference?: string;
+  transactionIds: string[];
+  transactions: QuotePaymentTransaction[];
+  refundedAmount: number;
+  crmReported?: { source?: string; state: string; percentPaid?: number; raw: string[]; methods: string[]; gatewayHints: string[] };
+  // The CRM says less than what is verified (e.g. Hoops "Not Paid" while Square paid).
+  crmOutdated: boolean;
+  // The CRM says more than is verified (e.g. Hoops "Paid" with no transaction found).
+  crmUnverified: boolean;
+}
+
+export interface PaymentSource {
+  name: string;
+  verified: boolean;
+}
+
+export interface QuotePaymentTransaction {
+  id: string;
+  source: string;
+  kind: 'gateway' | 'recorded';
+  amount: number;
+  refunded: number;
+  net: number;
+  currency: string;
+  date: string;
+  method?: string;
+  reference?: string;
+  receiptUrl?: string;
+  counted: boolean;
+  duplicateOf?: string;
+}
+
 // One quotation or invoice in full, with what it is connected to.
 export interface CustomerDocument {
   id: string;
@@ -320,6 +413,8 @@ export interface CustomerDocument {
   paid: number | null;
   outstanding: number | null;
   payments: { date: string; amount: number }[];
+  // The quote's payment status (an invoice shows its quotation's). Absent when no quotation is behind it.
+  payment?: QuotePaymentSummary;
   links: JourneyStep[];
   // The job a quotation was converted into, when it was.
   job?: JobRef;
@@ -339,6 +434,18 @@ export interface CustomerFollowUp {
   status: 'pending' | 'done' | 'dismissed';
   // Still to do, and its day has come or passed.
   due: boolean;
+}
+
+// A follow-up step as recorded in Hoops CRM. Hoops exposes only the quote's
+// current status word (e.g. "FOLLOW UP 2") — no dates, notes or history.
+export interface CrmFollowUp {
+  source: 'hoops';
+  step: string;
+  number?: number;
+  dealId: string;
+  dealName?: string;
+  quoteNumber?: string;
+  lastActivityAt?: string;
 }
 
 // ---- what the team attaches to a customer: comments, tasks, files (saved in HaiVE only) ----
@@ -443,6 +550,8 @@ export interface WorkspaceApi {
 }
 
 export interface CustomerDetail extends Customer {
+  // Payment status of each quotation, keyed by quotation id.
+  quotePayments: Record<string, QuotePaymentSummary>;
   // Everyone their records name, newest first.
   people: CustomerPerson[];
   address?: string;
@@ -474,6 +583,7 @@ export interface CustomerDetail extends Customer {
   analysis: CustomerAnalysis | null;
   // Every Gateway Payment transaction matched to this customer, newest first.
   gatewayPayments: GatewayPaymentRecord[];
+  crmFollowUps: CrmFollowUp[];
 }
 
 export interface CustomerSource {

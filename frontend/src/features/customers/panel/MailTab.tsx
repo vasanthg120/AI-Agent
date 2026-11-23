@@ -46,6 +46,29 @@ export function MailTab({ detail }: { detail: CustomerDetail }) {
       </div>
       {speed && <p className={detailStyles.muted}>{speed}</p>}
 
+      {detail.crmFollowUps.length > 0 && (
+        <section className={detailStyles.section}>
+          <h3>
+            Follow-ups in Hoops CRM <span className={detailStyles.sectionCount}>{detail.crmFollowUps.length}</span>
+          </h3>
+          <ul className={styles.list}>
+            {detail.crmFollowUps.map((f) => (
+              <li key={f.dealId} className={styles.listRow}>
+                <FiClock aria-hidden className={styles.listIcon} />
+                <div className={styles.listMain}>
+                  <strong>{f.number ? `Follow-up ${f.number}` : 'Follow-up'}</strong>
+                  <span>
+                    {[f.quoteNumber ? `Quote #${f.quoteNumber}` : f.dealName, f.lastActivityAt ? `Hoops updated ${formatDate(f.lastActivityAt)}` : ''].filter(Boolean).join(' · ')}
+                  </span>
+                </div>
+                <Badge variant="info">Hoops: {f.step}</Badge>
+              </li>
+            ))}
+          </ul>
+          <p className={detailStyles.muted}>Hoops shares only the current follow-up step — not dates or notes — so that is all shown here.</p>
+        </section>
+      )}
+
       {followUps.length > 0 && (
         <section className={detailStyles.section}>
           <h3>

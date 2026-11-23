@@ -63,6 +63,10 @@ export interface Quote {
   discountAmount: number;
   taxAmount: number;
 
+  // Haive's reconciled payment for this quote — derived from every connected payment source (Square, recorded payments,
+  // remittance…), the same calculation the Customers page shows. Present once a reconciliation has run.
+  paymentReconciliation?: QuotePaymentReconciliation;
+
   // --- Hoops-parity SalesBoard additions (see backend quote.schema.ts) ---
   salesStatus?: string;
   classification?: string;
@@ -86,6 +90,28 @@ export interface Quote {
   guestViewToken?: string;
   viewedAt?: string;
   viewCount: number;
+}
+
+export interface QuotePaymentReconciliation {
+  status: 'unpaid' | 'partially_paid' | 'paid' | 'overpaid';
+  quoteTotal: number;
+  paidAmount: number;
+  outstandingAmount: number;
+  currency: string;
+  basis: 'verified' | 'reported' | 'mixed' | 'none';
+  verifiedPaid: number;
+  reportedPaid: number;
+  refundedAmount: number;
+  sources: { name: string; verified: boolean }[];
+  gateway?: string;
+  paymentMethod?: string;
+  lastPaymentAt?: string;
+  transactionReference?: string;
+  crmReportedState?: string;
+  crmReportedRaw?: string[];
+  crmOutdated: boolean;
+  crmUnverified: boolean;
+  reconciledAt: string;
 }
 
 export const QUOTE_CUSTOMER_TYPES = ['new', 'bau'] as const;

@@ -1,5 +1,5 @@
 import { HttpService } from '@nestjs/axios';
-import { BadRequestException, Injectable, Logger, NotFoundException, ServiceUnavailableException } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger, NotFoundException, Optional, ServiceUnavailableException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { InjectConnection } from '@nestjs/mongoose';
@@ -27,6 +27,11 @@ import { buildCustomerDocuments, CustomerDocument, DocumentCharge, DocumentParty
 import { CustomerMailService, EmailSummary } from './customer-mail.service';
 import { emailReplySpeeds, emailTimelineEvents, followUpTimelineEvents, TimelineEvent } from './customer-timeline';
 import { ENQUIRY_PROVIDERS, NamedValue, normalizeEnquiry } from './enquiry-normalizers';
+import { SquarePaymentDetails } from '../square/square-payment-details';
+import { PaymentEvents } from '../common/payments/payment-events';
+import { QuotePaymentSource, QuotePaymentSummary, RecordedPaymentInput, summarizeQuotePayment } from './quote-payment-status';
+import { readCrmPaymentReport } from './crm-payment-report';
+import { loadNormalizedPayments } from './payment-sources';
 import { clusterCustomers, companyKey, emailKey, MatchIdentity, phoneKey } from './customer-matching';
 import {
   buildCustomerProfile,
@@ -152,6 +157,8 @@ export interface CustomerRow extends CustomerSummary {
   addresses: CustomerAddress[];
   /** Real payment-gateway transactions (Square today) — deliberately separate from the unrelated existing `payment`/`outstanding` quote-receivables stats above. See GatewayPaymentSummary's own comment. */
   gatewayPaymentSummary: GatewayPaymentSummary;
+  /** Every provider/record/CRM report that contributed to this customer's payments (verified ones first) — the Gateway Payment column. */
+  paymentSources: QuotePaymentSource[];
 }
 
 export interface CustomerAddress {
@@ -206,7 +213,32 @@ export interface CustomerFollowUp {
   due: boolean;
 }
 
+/**
+ * A follow-up step as Hoops itself records it. Hoops' Extended API exposes
+ * only the transaction's current `status` word (e.g. "FOLLOW UP 2") — no
+ * per-follow-up dates, notes or history — so that is all this carries; nothing
+ * else is invented. One entry per open Hoops quote, derived fresh from the last
+ * sync (so a repeated sync can never duplicate it, and a change in Hoops
+ * replaces it).
+ */
+export interface CrmFollowUp {
+  source: 'hoops';
+  /** Hoops' own wording, e.g. "FOLLOW UP 2". */
+  step: string;
+  /** The N of "Follow up N", when the step is numbered. */
+  number?: number;
+  dealId: string;
+  dealName?: string;
+  quoteNumber?: string;
+  /** When Hoops' record last changed, as last synced — not a follow-up date. */
+  lastActivityAt?: Date;
+}
+
 export interface CustomerDetail extends CustomerRow {
+  /** Follow-up steps recorded in Hoops CRM (separate from `followUps`, which are Haive's own email/task reminders). */
+  crmFollowUps: CrmFollowUp[];
+  /** Payment status of each quotation (keyed by quotation id) — the single source every screen reads. */
+  quotePayments: Record<string, QuotePaymentSummary>;
   /** Everyone their records name, newest first. */
   people: CustomerPerson[];
   /** Their address, when the enquiry system recorded one. */
@@ -322,6 +354,9 @@ interface Entry {
   addresses: CustomerAddress[];
   gatewayPayments: GatewayPaymentRecord[];
   gatewayPaymentSummary: GatewayPaymentSummary;
+  crmFollowUps: CrmFollowUp[];
+  quotePayments: Record<string, QuotePaymentSummary>;
+  paymentSources: QuotePaymentSource[];
 }
 
 // A real payment-gateway transaction (Square today) matched to this
@@ -343,15 +378,137 @@ export interface GatewayPaymentRecord {
   orderReference?: string;
   /** The caller-supplied reference_id for this payment (e.g. an invoice/quote number), when there is one. */
   transactionReference?: string;
+  /** Sanitized Square detail block (card brand/last4, fees, receipt…) — only what Square actually sent; absent on rows synced before details were stored. */
+  details?: SquarePaymentDetails;
+  /** Exact-reference links to this customer's own CRM documents; set only on a customer's detail view, never on unmatched payments. */
+  links?: GatewayPaymentLinks;
+}
+
+/** How a payment connects to the customer's documents. Only ever an exact match of Square's reference_id to a quote/invoice/job number — never inferred from an amount. */
+export interface GatewayPaymentLinks {
+  customerName?: string;
+  /** CRM sources (e.g. Hoops) this customer is known to. */
+  crmSources: string[];
+  quote?: { id: string; number?: string };
+  invoice?: { id: string; number?: string };
+  job?: { id: string; number: string };
+}
+
+/** The business identifier a Square Invoice names: its number/title, up to a " - suffix" ("4546 - Surry Hills" → "4546", "INV-0056" → "INV-0056"). Whole-token only; a hyphen with no space around it stays part of the token. */
+export function invoiceIdentifier(value: string | undefined): string | undefined {
+  // A leading "Quote" label ("Quote 4536", "Quote - 4530 - SURRYHILLS", "Quote #4512") is not part of the identifier.
+  const title = (value ?? '').replace(/^\s*quote\s*(?:[#:–—-]\s*|\s)/i, '');
+  const match = /^\s*([A-Za-z0-9][A-Za-z0-9._/#-]*?)\s*(?:[-–—:|]\s.*)?$/.exec(title);
+  return match ? match[1].toLowerCase() : undefined;
+}
+
+/** Every identifier a payment itself carries that could name a document: Square's reference_id (stored as transactionReference, or in the details block) and the number/title of the Square Invoice that billed it — exact matches only. */
+function paymentReferences(r: Pick<GatewayPaymentRecord, 'transactionReference' | 'details'>): string[] {
+  const direct = [r.transactionReference, r.details?.referenceId].map((v) => (v ?? '').trim().toLowerCase());
+  const viaInvoice = [r.details?.squareInvoiceNumber, r.details?.squareInvoiceTitle].map(invoiceIdentifier).map((v) => v ?? '');
+  return [...new Set([...direct, ...viaInvoice].filter(Boolean))];
+}
+
+/** True when `note` names the document number as a whole token (e.g. "Payment for INV-0056"). Only for numbers with a letter in them — a bare "4546" in free text is never trusted. */
+function noteNames(note: string | undefined, number: string | undefined): boolean {
+  const n = (number ?? '').trim();
+  if (!note || n.length < 4 || !/[a-z]/i.test(n)) return false;
+  const escaped = n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`(^|[^a-z0-9])${escaped}($|[^a-z0-9])`, 'i').test(note);
+}
+
+/** Links a payment to the customer's quote, invoice and job — only by an identifier the payment itself carries (reference_id, the Square Invoice's number, or a document number written in its note). Never by amount. The quote is resolved from whichever document matched: the quote's own number, an invoice raised from it, or a job converted from it. A number shared by two documents is ambiguous and links to neither. */
+export function linkGatewayPayment(
+  payment: Pick<GatewayPaymentRecord, 'transactionReference' | 'details'> | string | undefined,
+  docs: { quotes: { id: string; number?: string }[]; invoices: { id: string; number?: string; quotationId?: string }[]; jobs: { id: string; number: string; quotationId: string }[] },
+): Pick<GatewayPaymentLinks, 'quote' | 'invoice' | 'job'> {
+  const refs = typeof payment === 'string' || payment === undefined ? [(payment ?? '').trim().toLowerCase()].filter(Boolean) : paymentReferences(payment);
+  const note = typeof payment === 'object' ? payment.details?.note : undefined;
+  if (refs.length === 0 && !note) return {};
+  const byRef = (n?: string) => !!n && refs.includes(n.trim().toLowerCase());
+  const only = <T,>(rows: T[]): T | undefined => (rows.length === 1 ? rows[0] : undefined);
+  const direct = only(docs.quotes.filter((q) => byRef(q.number)));
+  const invoice = only(docs.invoices.filter((i) => byRef(i.number) || noteNames(note, i.number))) ?? (direct ? docs.invoices.find((i) => i.quotationId === direct.id) : undefined);
+  const job = only(docs.jobs.filter((j) => byRef(j.number) || noteNames(note, j.number))) ?? (direct ? docs.jobs.find((j) => j.quotationId === direct.id) : undefined);
+  const quoteOf = (id?: string) => (id ? docs.quotes.find((q) => q.id === id) : undefined);
+  const quote = direct ?? quoteOf(invoice?.quotationId) ?? quoteOf(job?.quotationId);
+  // An invoice raised from the resolved quote belongs to it too, even when the payment only named the quote's job.
+  const invoiceOut = invoice ?? (quote ? docs.invoices.find((i) => i.quotationId === quote.id) : undefined);
+  return { ...(quote ? { quote: { id: quote.id, number: quote.number } } : {}), ...(invoiceOut ? { invoice: { id: invoiceOut.id, number: invoiceOut.number } } : {}), ...(job ? { job: { id: job.id, number: job.number } } : {}) };
+}
+
+/** Display names for known providers; an unknown provider keeps its recorded name. */
+export const GATEWAY_PROVIDER_LABEL: Record<string, string> = { square: 'Square', stripe: 'Stripe' };
+
+/** The money a customer's gateway payments settle against ONE invoice: only transactions whose reference is exactly that invoice's number, in the invoice's currency, net of refunds. Never inferred from an amount. Minor units in, major units out. */
+export function gatewayPaidOnInvoice(invoiceNumber: string | undefined, invoiceCurrency: string, payments: GatewayPaymentRecord[]): number {
+  const key = (invoiceNumber ?? '').trim().toLowerCase();
+  if (!key) return 0;
+  const cents = payments
+    .filter((r) => r.currency.toUpperCase() === invoiceCurrency.toUpperCase())
+    .filter((r) => r.status === 'completed' || r.status === 'partially_refunded' || r.status === 'refunded')
+    .filter((r) => paymentReferences(r).includes(key))
+    .reduce((sum, r) => sum + Math.max(r.amount - r.refundedAmount, 0), 0);
+  return cents / 100;
+}
+
+/** The money a customer's gateway payments settle against ONE invoice: only transactions linked to that invoice (see linkGatewayPayment — an identifier the payment carries, never an amount), in the invoice's currency, net of refunds. Multiple payments add up; each payment id counts once. Minor units in, major units out. */
+export function gatewayPaidOnLinkedInvoice(invoiceId: string, invoiceCurrency: string, payments: GatewayPaymentRecord[]): number {
+  const seen = new Set<string>();
+  const cents = payments
+    .filter((r) => r.links?.invoice?.id === invoiceId)
+    .filter((r) => r.currency.toUpperCase() === invoiceCurrency.toUpperCase())
+    .filter((r) => r.status === 'completed' || r.status === 'partially_refunded' || r.status === 'refunded')
+    .filter((r) => (seen.has(r.id) ? false : !!seen.add(r.id)))
+    .reduce((sum, r) => sum + Math.max(r.amount - r.refundedAmount, 0), 0);
+  return cents / 100;
+}
+
+const FOLLOW_UP_STEP = /^\s*follow[\s_-]*up(?:\s*#?\s*(\d+))?\s*$/i;
+
+/** Reads a Hoops transaction status as a follow-up step; null when it isn't one. */
+export function crmFollowUpStep(status: unknown): { step: string; number?: number } | null {
+  const step = typeof status === 'string' ? status.trim() : '';
+  const match = FOLLOW_UP_STEP.exec(step);
+  return match ? { step, number: match[1] ? Number(match[1]) : undefined } : null;
+}
+
+/** Every CRM text that talks about this quote's payment: the quote's own payment/status labels, the deal's Hoops status
+ * word, and any payment-looking string field the CRM synced (found by name, never by a hardcoded provider field). A report only. */
+export function crmPaymentTexts(quote: Record<string, any> | undefined, deal: Record<string, any> | undefined): string[] {
+  const out: unknown[] = [quote?.paymentStatus, quote?.paymentInvoiceStatus, quote?.quoteStatus, deal?.sourceData?.status];
+  for (const bag of [deal?.sourceData, deal?.sourceData?.summary]) {
+    if (!bag || typeof bag !== 'object') continue;
+    for (const [key, value] of Object.entries(bag as Record<string, unknown>)) if (typeof value === 'string' && /pay|paid|remit|gateway/i.test(key)) out.push(value);
+  }
+  return out.filter((v): v is string => typeof v === 'string');
+}
+
+/** Where a customer's money came from, for the Gateway Payment column: every provider/record/CRM report that contributed
+ * to any quote, plus providers whose payments are on file but not yet tied to a quote. Verified sources first. */
+export function customerPaymentSources(quotePayments: Record<string, QuotePaymentSummary>, providers: string[]): QuotePaymentSource[] {
+  const out: QuotePaymentSource[] = [];
+  const add = (name: string, verified: boolean) => {
+    const found = out.find((s) => s.name === name);
+    if (found) found.verified = found.verified || verified;
+    else out.push({ name, verified });
+  };
+  for (const summary of Object.values(quotePayments)) for (const src of summary.sources) add(src.name, src.verified);
+  for (const name of providers) add(name, true);
+  return out.sort((a, b) => Number(b.verified) - Number(a.verified));
 }
 
 export interface GatewayPaymentSummary {
+  /** Distinct provider display names behind the payments, e.g. ["Square"] — the source, never a status. */
+  providers: string[];
   totalPaid: number;
   totalRefunded: number;
   netPaid: number;
   currency: string;
   transactionCount: number;
   lastPaymentAt?: Date;
+  /** Paid/refunded/net per currency — currencies are never added together. totalPaid/netPaid above cover only the newest payment's currency. */
+  currencyTotals: { currency: string; totalPaid: number; totalRefunded: number; netPaid: number; count: number }[];
   // Counted separately from `status` below — never folded into "paid",
   // since a dispute can be open against an otherwise-completed payment.
   disputedCount: number;
@@ -365,7 +522,7 @@ export interface GatewayPaymentSummary {
 }
 
 function emptyGatewayPaymentSummary(currency: string): GatewayPaymentSummary {
-  return { totalPaid: 0, totalRefunded: 0, netPaid: 0, currency, transactionCount: 0, disputedCount: 0, status: 'unpaid' };
+  return { providers: [], currencyTotals: [], totalPaid: 0, totalRefunded: 0, netPaid: 0, currency, transactionCount: 0, disputedCount: 0, status: 'unpaid' };
 }
 
 // Always recomputed fresh from the source rows — never incremented — the
@@ -408,10 +565,25 @@ export function computeGatewayPaymentSummary(records: GatewayPaymentRecord[]): G
         : totalRefunded > 0
           ? 'partially_paid'
           : 'paid';
-  return { totalPaid, totalRefunded, netPaid, currency, transactionCount: records.length, lastPaymentAt, disputedCount, status };
+  const providers = [...new Set(records.map((r) => GATEWAY_PROVIDER_LABEL[r.provider.toLowerCase()] ?? r.provider))];
+  const byCurrency = new Map<string, { currency: string; totalPaid: number; totalRefunded: number; netPaid: number; count: number }>();
+  for (const r of records) {
+    const row = byCurrency.get(r.currency) ?? { currency: r.currency, totalPaid: 0, totalRefunded: 0, netPaid: 0, count: 0 };
+    row.count += 1;
+    if (r.status === 'completed' || r.status === 'partially_refunded' || r.status === 'refunded') {
+      row.totalPaid += r.amount;
+      row.totalRefunded += r.refundedAmount;
+      row.netPaid = row.totalPaid - row.totalRefunded;
+    }
+    byCurrency.set(r.currency, row);
+  }
+  return { providers, currencyTotals: [...byCurrency.values()], totalPaid, totalRefunded, netPaid, currency, transactionCount: records.length, lastPaymentAt, disputedCount, status };
 }
 
 interface Directory {
+  /** Payments read from every registered source, and how many carry a provider invoice — for the reconciliation report. */
+  paymentsScanned: number;
+  paymentsWithInvoice: number;
   currency: string;
   sources: {
     id: string;
@@ -537,6 +709,8 @@ export class CustomerDirectoryService {
     private users: UsersService,
     config: ConfigService,
     private squareReconciliation: SquareReconciliationService,
+    // Signals the payment reconciliation after a CRM sync (optional: absent in unit tests that build this by hand).
+    @Optional() private paymentEvents?: PaymentEvents,
   ) {
     this.pythonAgentUrl = config.get<string>('pythonAgentUrl') ?? 'http://localhost:8000';
   }
@@ -589,6 +763,9 @@ export class CustomerDirectoryService {
           paidAmount: 1,
           currency: 1,
           quoteStatus: 1,
+          // What the CRM / the team reported about payment (e.g. Hoops "Not Paid", "50% Paid", "Remittance") — a report, not proof.
+          paymentStatus: 1,
+          paymentInvoiceStatus: 1,
           clientApprovalStatus: 1,
           clientDetails: 1,
           createdAt: 1,
@@ -620,7 +797,7 @@ export class CustomerDirectoryService {
       ),
       // The people the CRMs hold, whether or not anything has been quoted to them yet.
       find('crm_contacts', {}, { dataSourceId: 1, name: 1, email: 1, phone: 1, company: 1, sourceCreatedAt: 1 }),
-      find('crm_quote_payments',{ voided: { $ne: true } }, { quoteId: 1, amount: 1, paymentDate: 1 }),
+      find('crm_quote_payments',{ voided: { $ne: true } }, { quoteId: 1, amount: 1, paymentDate: 1, paymentMethod: 1, reference: 1 }),
       find('customer_analyses', {}, { customerId: 1, factsHash: 1, 'result.summary': 1 }),
       // The team's own tasks that are still open: they show on the board as follow-ups.
       find(TASKS_COLLECTION, { status: 'open' }, { customerKeys: 1, title: 1, dueDate: 1 }),
@@ -637,20 +814,11 @@ export class CustomerDirectoryService {
       // distinct from `payments` above (quote receivables, an unrelated
       // concept — see this collection's own schema comment on the naming
       // collision this avoids).
-      find('square_payment_transactions', {}, {
-        providerPaymentId: 1,
-        matchedEmailKey: 1,
-        matchedPhoneKey: 1,
-        amount: 1,
-        currency: 1,
-        paymentStatus: 1,
-        paymentDate: 1,
-        refundedAmount: 1,
-        provider: 1,
-        paymentMethodType: 1,
-        orderReference: 1,
-        transactionReference: 1,
-        lastSyncedAt: 1,
+      // Every registered payment source (payment-sources.ts) normalized into one shape — the reconciliation never
+      // reads a provider's own collection directly, so a provider is added by registering an adapter.
+      loadNormalizedPayments(this.connection, organizationId).then(({ payments: normalized, failures }) => {
+        for (const f of failures) this.logger.warn(`Payment source ${f.provider} could not be read for org ${organizationId}: ${f.error}`);
+        return normalized;
       }),
       // Whether Square is connected for this org right now — read directly,
       // same "shared collection, not the live provider" pattern as every
@@ -705,7 +873,7 @@ export class CustomerDirectoryService {
     const squareConnected = squareCredentialDocs.length > 0;
     if (squareConnected || gatewayPaymentDocs.length > 0) {
       const squareLastSyncedAt = gatewayPaymentDocs.reduce<Date | undefined>((latest, doc) => {
-        const at = asDate(doc.lastSyncedAt);
+        const at = doc.lastSyncedAt;
         return at && (!latest || at > latest) ? at : latest;
       }, undefined);
       sources.push({
@@ -806,12 +974,16 @@ export class CustomerDirectoryService {
 
     const groups = clusterCustomers(pieces);
     const paymentsByQuote = new Map<string, ProfilePayment[]>();
+    // The same records, itemized for the shared payment calculation (method/reference let it tell a remittance from a duplicate).
+    const recordedByQuote = new Map<string, RecordedPaymentInput[]>();
     for (const p of payments) {
       const date = asDate(p.paymentDate);
       if (!date || amount(p.amount) <= 0) continue;
       const quotationId = text(p.quoteId);
       if (!paymentsByQuote.has(quotationId)) paymentsByQuote.set(quotationId, []);
       paymentsByQuote.get(quotationId)!.push({ quotationId, amount: amount(p.amount), date });
+      if (!recordedByQuote.has(quotationId)) recordedByQuote.set(quotationId, []);
+      recordedByQuote.get(quotationId)!.push({ id: p._id.toString(), amount: amount(p.amount), date, method: text(p.paymentMethod) || undefined, reference: text(p.reference) || undefined });
     }
     const paymentsTracked = paymentsByQuote.size > 0 || quotes.some((q) => amount(q.paidAmount) > 0) || invoices.some((i) => lower(i.invoiceStatus) === 'paid');
     const defaultSource = sourceDocs.find((s) => s.isDefault);
@@ -831,22 +1003,21 @@ export class CustomerDirectoryService {
     // rather than vanishing from view entirely.
     const unmatchedGatewayPayments: GatewayPaymentRecord[] = [];
     for (const doc of gatewayPaymentDocs) {
-      const date = asDate(doc.paymentDate);
-      if (!date) continue;
       const record: GatewayPaymentRecord = {
-        id: text(doc.providerPaymentId),
-        provider: text(doc.provider) || 'square',
-        amount: amount(doc.amount),
-        currency: text(doc.currency) || 'USD',
-        status: text(doc.paymentStatus) as GatewayPaymentRecord['status'],
-        date,
-        refundedAmount: amount(doc.refundedAmount),
-        paymentMethodType: text(doc.paymentMethodType) || undefined,
-        orderReference: text(doc.orderReference) || undefined,
-        transactionReference: text(doc.transactionReference) || undefined,
+        id: doc.id,
+        provider: doc.provider || 'square',
+        amount: doc.amount,
+        currency: doc.currency || 'USD',
+        status: doc.status as GatewayPaymentRecord['status'],
+        date: doc.date,
+        refundedAmount: doc.refundedAmount,
+        paymentMethodType: doc.paymentMethodType,
+        orderReference: doc.orderReference,
+        transactionReference: doc.transactionReference,
+        details: doc.details,
       };
-      const email = text(doc.matchedEmailKey);
-      const phone = text(doc.matchedPhoneKey);
+      const email = doc.matchedEmailKey ?? '';
+      const phone = doc.matchedPhoneKey ?? '';
       if (email) {
         if (!gatewayPaymentsByEmailKey.has(email)) gatewayPaymentsByEmailKey.set(email, []);
         gatewayPaymentsByEmailKey.get(email)!.push(record);
@@ -856,6 +1027,25 @@ export class CustomerDirectoryService {
         gatewayPaymentsByPhoneKey.get(phone)!.push(record);
       }
       if (!email && !phone) unmatchedGatewayPayments.push(record);
+    }
+    // A payment with no customer identity of its own (no email/phone on the provider side) is still tied to its quote when
+    // an exact identifier it carries (reference_id, the Square Invoice number, an invoice/job number) names exactly one
+    // quote in this organization. Never by amount, and never when the identifier is ambiguous. Payments that DO carry
+    // identity keep matching through them only, so a payment is never moved to a different customer.
+    const referenceOnlyByQuote = new Map<string, GatewayPaymentRecord[]>();
+    {
+      const orgDocs = {
+        quotes: quotes.map((q) => ({ id: q._id.toString(), number: text(q.quoteNumber) || undefined })),
+        invoices: invoices.map((i) => ({ id: i._id.toString(), number: text(i.invoiceNumber) || undefined, quotationId: text(i.quoteId) || undefined })),
+        jobs: jobDocs.map((j) => ({ id: j._id.toString(), number: text(j.number), quotationId: text(j.quotationId) })),
+      };
+      const remaining: GatewayPaymentRecord[] = [];
+      for (const r of unmatchedGatewayPayments) {
+        const quoteId = linkGatewayPayment(r, orgDocs).quote?.id;
+        if (!quoteId) remaining.push(r);
+        else referenceOnlyByQuote.set(quoteId, [...(referenceOnlyByQuote.get(quoteId) ?? []), r]);
+      }
+      unmatchedGatewayPayments.splice(0, unmatchedGatewayPayments.length, ...remaining);
     }
     unmatchedGatewayPayments.sort((a, b) => b.date.getTime() - a.date.getTime());
 
@@ -908,7 +1098,8 @@ export class CustomerDirectoryService {
       // else — a payment can match on either, so de-dup by transaction id
       // in case a customer's email AND phone both happen to be on file for
       // the same payment.
-      const gatewayPayments = [...new Map([...emails.flatMap((e) => gatewayPaymentsByEmailKey.get(e) ?? []), ...phonesOf(members).flatMap((p) => gatewayPaymentsByPhoneKey.get(p) ?? [])].map((r) => [r.id, r])).values()];
+      const matchedGatewayPayments = [...new Map([...emails.flatMap((e) => gatewayPaymentsByEmailKey.get(e) ?? []), ...phonesOf(members).flatMap((p) => gatewayPaymentsByPhoneKey.get(p) ?? []), ...mine.filter((p) => p.kind === 'quote').flatMap((p) => referenceOnlyByQuote.get(p.doc._id.toString()) ?? [])].map((r) => [r.id, r])).values()];
+      const gatewayPayments = matchedGatewayPayments;
       const gatewayPaymentSummary = computeGatewayPaymentSummary(gatewayPayments);
       // The same person is on several records: one entry each, filled in from whichever record has the detail.
       const people: CustomerPerson[] = [];
@@ -971,6 +1162,41 @@ export class CustomerDirectoryService {
           owner: text(q.quoteOwnerLabel) || undefined,
           dealId: text(q.dealId) || undefined,
         }));
+      // Link each matched payment to this customer's own documents (identifier-based only), once, so the invoice
+      // paid amounts and the payment views are computed from the very same links.
+      const crmSources = [...new Set(mine.map((p) => sources.find((src) => src.id === p.sourceId)?.label).filter((l): l is string => !!l))];
+      // Payments only ever match through an email/phone key, so those are the job keys that matter here.
+      const jobKeys = [...emails.map((e) => `e:${e}`), ...phonesOf(members).map((ph) => `p:${ph}`)];
+      const jobList = [...new Set(jobKeys.flatMap((key) => jobsByKey.get(key) ?? []))].map((job) => ({ id: job._id.toString(), number: text(job.number), quotationId: text(job.quotationId) }));
+      const invoiceRefs = mine
+        .filter((p) => p.kind === 'invoice')
+        .map(({ doc: i }) => ({ id: i._id.toString(), number: text(i.invoiceNumber) || undefined, quotationId: text(i.quoteId) || undefined }));
+      const linkedGatewayPayments: GatewayPaymentRecord[] = gatewayPayments.map((r) => ({
+        ...r,
+        links: { customerName: name, crmSources, ...linkGatewayPayment(r, { quotes: quotations, invoices: invoiceRefs, jobs: jobList }) },
+      }));
+      // One payment status per quote, from the single shared calculation — what every screen then displays.
+      const quotePayments: Record<string, QuotePaymentSummary> = {};
+      for (const q of quotations) {
+        const record = mine.find((p) => p.kind === 'quote' && p.doc._id.toString() === q.id);
+        const deal = mine.find((p) => p.kind === 'deal' && p.doc._id.toString() === q.dealId);
+        const crmSource = sources.find((src) => src.id === record?.sourceId)?.label;
+        const summary = summarizeQuotePayment({
+          quoteId: q.id,
+          quoteNumber: q.number,
+          quoteTotal: q.amount,
+          currency: text(record?.doc.currency) || customerCurrency,
+          gatewayPayments: linkedGatewayPayments,
+          recordedPaid: q.paidAmount,
+          recordedPayments: recordedByQuote.get(q.id) ?? [],
+          crmReport: readCrmPaymentReport(crmPaymentTexts(record?.doc, deal?.doc)),
+          crmSource,
+          crmChangedAt: asDate(deal?.doc.lastActivityAt),
+        });
+        quotePayments[q.id] = summary;
+        q.gatewayPaid = summary.basis !== 'none' ? summary.paidAmount : undefined;
+        q.overpaid = summary.status === 'overpaid';
+      }
       const invoiceRecords: ProfileInvoice[] = mine
         .filter((p) => p.kind === 'invoice')
         .map(({ doc: invoice, date }) => ({
@@ -983,6 +1209,7 @@ export class CustomerDirectoryService {
           dueDate: asDate(invoice.dueDate),
           quotationId: text(invoice.quoteId) || undefined,
           dealId: text(invoice.dealId) || undefined,
+          gatewayPaid: gatewayPaidOnLinkedInvoice(invoice._id.toString(), customerCurrency, linkedGatewayPayments) || undefined,
         }));
       const contactRecords: ProfileContact[] = mine
         .filter((p) => p.kind === 'contact')
@@ -1146,8 +1373,19 @@ export class CustomerDirectoryService {
         salesDiscountPct,
         profileNote,
         addresses,
-        gatewayPayments,
+        gatewayPayments: linkedGatewayPayments,
         gatewayPaymentSummary,
+        quotePayments,
+        paymentSources: customerPaymentSources(quotePayments, gatewayPaymentSummary.providers),
+        crmFollowUps: mine
+          .filter((p) => p.kind === 'deal' && lower(p.doc.dealStatus) === 'open')
+          .flatMap((p): CrmFollowUp[] => {
+            const found = crmFollowUpStep((p.doc.sourceData as Doc | undefined)?.status);
+            if (!found) return [];
+            const quote = quotations.find((q) => q.dealId === p.doc._id.toString() || q.id === p.doc._id.toString());
+            return [{ source: 'hoops', ...found, dealId: p.doc._id.toString(), dealName: text(p.doc.name) || undefined, quoteNumber: quote?.number, lastActivityAt: asDate(p.doc.lastActivityAt) }];
+          })
+          .sort((a, b) => (a.number ?? 0) - (b.number ?? 0) || time(a.lastActivityAt) - time(b.lastActivityAt)),
         // A job found under two of their keys is still one job.
         jobs: [...new Set(keys.flatMap((key) => jobsByKey.get(key) ?? []))]
           .sort((a, b) => amount(b.seq) - amount(a.seq))
@@ -1174,7 +1412,14 @@ export class CustomerDirectoryService {
       });
     }
 
-    const directory = { currency, sources, entries, unmatchedGatewayPayments };
+    const directory = {
+      paymentsScanned: gatewayPaymentDocs.length,
+      paymentsWithInvoice: gatewayPaymentDocs.filter((p) => !!p.invoiceId).length,
+      currency,
+      sources,
+      entries,
+      unmatchedGatewayPayments,
+    };
     this.cache.set(organizationId, { at: Date.now(), directory });
     return directory;
   }
@@ -1203,7 +1448,28 @@ export class CustomerDirectoryService {
       profileNote: entry.profileNote,
       addresses: entry.addresses,
       gatewayPaymentSummary: entry.gatewayPaymentSummary,
+      paymentSources: entry.paymentSources,
       ...summary,
+    };
+  }
+
+  /** What the payment reconciliation persists and reports: every quote's reconciled payment (the same summaries the
+   * Customers page shows — one calculation), with the customer it belongs to. `fresh` rebuilds from the sources. */
+  async paymentReconciliationView(organizationId: string, fresh = false) {
+    if (fresh) this.cache.delete(organizationId);
+    const directory = await this.compute(organizationId);
+    const linkedPaymentIds = new Set<string>();
+    const quotes: { quoteId: string; customerId: string; customerName: string; summary: QuotePaymentSummary }[] = [];
+    for (const entry of directory.entries) {
+      for (const p of entry.gatewayPayments) if (p.links?.quote) linkedPaymentIds.add(`${p.provider}:${p.id}`);
+      for (const [quoteId, summary] of Object.entries(entry.quotePayments)) quotes.push({ quoteId, customerId: entry.id, customerName: entry.name, summary });
+    }
+    return {
+      quotes,
+      paymentsScanned: directory.paymentsScanned,
+      paymentsWithInvoice: directory.paymentsWithInvoice,
+      paymentsLinkedToQuote: linkedPaymentIds.size,
+      paymentsNotMatchedToCustomer: directory.unmatchedGatewayPayments.length,
     };
   }
 
@@ -1666,6 +1932,7 @@ export class CustomerDirectoryService {
       }),
     );
     this.cache.delete(organizationId);
+    this.paymentEvents?.notify(organizationId, 'crm-sync');
     return { results };
   }
 
@@ -2019,6 +2286,7 @@ export class CustomerDirectoryService {
           linesFrom: own.length > 0 ? ('document' as const) : ('deal' as const),
           charges: [...charge('tax', record?.doc.taxes), ...charge('fee', record?.doc.fees)],
           payments: entry.payments.filter((p) => p.quotationId === line.id).map(({ date, amount: paid }) => ({ date, amount: paid })),
+          payment: entry.quotePayments[line.id],
           job: entry.jobs.find((job) => job.quotationId === line.id),
         };
       }),
@@ -2062,6 +2330,8 @@ export class CustomerDirectoryService {
       ...activity,
       analysis,
       gatewayPayments: [...entry.gatewayPayments].sort((a, b) => b.date.getTime() - a.date.getTime()),
+      crmFollowUps: entry.crmFollowUps,
+      quotePayments: entry.quotePayments,
     };
   }
 

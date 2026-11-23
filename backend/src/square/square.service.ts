@@ -475,6 +475,30 @@ export class SquareService {
     return { payments: data.payments ?? [], cursor: data.cursor };
   }
 
+  /** Every Square Invoice of this org, keyed by the order it bills (an exact id) — read once, so a historical
+   * reconciliation resolves each payment's invoice from memory instead of one search call per payment. Read-only. */
+  async listInvoiceRefsByOrder(organizationId: string): Promise<Map<string, { id?: string; number?: string; title?: string }>> {
+    const { accessToken, environment } = await this.resolveOrgAuth(organizationId);
+    const base = this.apiBaseUrl(environment);
+    const headers = this.squareHeaders(accessToken);
+    const { data: loc } = await firstValueFrom(this.http.get<{ locations?: { id: string }[] }>(`${base}/v2/locations`, { headers }));
+    const byOrder = new Map<string, { id?: string; number?: string; title?: string }>();
+    for (const location of loc.locations ?? []) {
+      let cursor: string | undefined;
+      do {
+        const { data } = await firstValueFrom(
+          this.http.get<{ invoices?: { id?: string; order_id?: string; invoice_number?: string; title?: string }[]; cursor?: string }>(`${base}/v2/invoices`, {
+            headers,
+            params: { location_id: location.id, limit: '200', ...(cursor ? { cursor } : {}) },
+          }),
+        );
+        for (const invoice of data.invoices ?? []) if (invoice.order_id) byOrder.set(invoice.order_id, { id: invoice.id, number: invoice.invoice_number, title: invoice.title });
+        cursor = data.cursor;
+      } while (cursor);
+    }
+    return byOrder;
+  }
+
   private squareHeaders(accessToken: string): Record<string, string> {
     return {
       Authorization: `Bearer ${accessToken}`,

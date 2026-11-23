@@ -9,6 +9,7 @@
 // no link to anything, so it is placed by time — before the first quotation
 // made after it — and marked as such.
 
+import { QuotePaymentSummary } from './quote-payment-status';
 import { InvoiceLine, QuoteLine, StageTone } from './customer-profile.builder';
 import { formatAmount } from './customer-timeline';
 
@@ -96,6 +97,8 @@ export interface CustomerDocument {
   paid: number | null;
   outstanding: number | null;
   payments: { date: Date; amount: number }[];
+  /** The quote's payment status from the one shared calculation (an invoice shows its quotation's). Absent when no quotation is behind it. */
+  payment?: QuotePaymentSummary;
   /** The other steps of its journey, in order. */
   links: JourneyStep[];
   /** The job a quotation was converted into, when it was. */
@@ -131,6 +134,7 @@ export interface QuotationRecord {
   linesFrom?: LinesFrom;
   charges?: DocumentCharge[];
   payments: { date: Date; amount: number }[];
+  payment?: QuotePaymentSummary;
   /** The job it was converted into. */
   job?: { id: string; number: string; done: boolean };
 }
@@ -309,9 +313,11 @@ export function buildCustomerDocuments(input: DocumentsInput): { journeys: Journ
         validUntil: line.expiresAt,
         preparedFor,
         ...itemsOf('quotation', line.amount, quotation),
-        paid: null,
-        outstanding: null,
+        // A quotation with a linked payment shows what it has really been paid; otherwise what was paid isn't recorded.
+        paid: quotation.payment && quotation.payment.basis !== 'none' ? quotation.payment.paidAmount : null,
+        outstanding: quotation.payment && quotation.payment.basis !== 'none' ? quotation.payment.outstandingAmount : null,
         payments,
+        ...(quotation.payment ? { payment: quotation.payment } : {}),
         links: linksOf(line.id),
         ...(quotation.job ? { job: { id: quotation.job.id, number: quotation.job.number } } : {}),
       };
@@ -337,6 +343,7 @@ export function buildCustomerDocuments(input: DocumentsInput): { journeys: Journ
         paid: line.paid,
         outstanding: line.outstanding,
         payments: quotation?.payments ?? [],
+        ...(quotation?.payment ? { payment: quotation.payment } : {}),
         links: linksOf(line.id),
       };
     }),

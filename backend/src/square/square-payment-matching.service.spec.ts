@@ -46,8 +46,9 @@ describe('SquarePaymentMatchingService', () => {
     const sort = jest.fn().mockReturnValue({ select });
     const findOne = jest.fn().mockReturnValue({ sort });
     const model = { updateOne, findOne };
-    const service = new SquarePaymentMatchingService(model as never, http as never);
-    return { service, http, updateOne, findOne };
+    const chatGateway = { emitToOrg: jest.fn() };
+    const service = new SquarePaymentMatchingService(model as never, http as never, chatGateway as never);
+    return { service, http, updateOne, findOne, chatGateway };
   }
 
   it('resolves the customer\'s email/phone and stores them as normalized keys, never the raw value', async () => {
@@ -122,5 +123,83 @@ describe('SquarePaymentMatchingService', () => {
     expect(get).toHaveBeenCalledTimes(1);
     const [, update] = updateOne.mock.calls[0];
     expect(update.$set.matchedEmailKey).toBe('fresh@example.com');
+  });
+
+  it('pushes a live gateway-payment-updated event to the organization after saving', async () => {
+    const { service, chatGateway } = build();
+
+    await service.upsertFromPayment('org-1', 'token', 'sandbox', { id: 'pay_9', status: 'COMPLETED', amount_money: { amount: 100, currency: 'USD' } });
+
+    expect(chatGateway.emitToOrg).toHaveBeenCalledWith('org-1', 'gateway-payment-updated', { provider: 'square', paymentId: 'pay_9' });
+  });
+
+  it('a failing live push never fails the save itself', async () => {
+    const { service, chatGateway, updateOne } = build();
+    chatGateway.emitToOrg.mockImplementation(() => {
+      throw new Error('socket down');
+    });
+
+    await expect(service.upsertFromPayment('org-1', 'token', 'sandbox', { id: 'pay_10', status: 'COMPLETED', amount_money: { amount: 100, currency: 'USD' } })).resolves.toBeUndefined();
+    expect(updateOne).toHaveBeenCalledTimes(1);
+  });
+
+  // Payments made through Square Invoices carry no reference_id or note — the Square Invoice is the identifier.
+  describe('Square Invoice resolution', () => {
+    const payment = { id: 'pay_9', status: 'COMPLETED', customer_id: 'C1', order_id: 'ORD1', location_id: 'L1', amount_money: { amount: 36850, currency: 'AUD' } };
+    function withInvoices(invoices: unknown[]) {
+      const ctx = build();
+      const post = jest.fn().mockReturnValue(of({ data: { invoices } }));
+      (ctx.http as unknown as { post: jest.Mock }).post = post;
+      return { ...ctx, post };
+    }
+
+    it("stores the invoice whose order_id equals the payment's order_id exactly", async () => {
+      const { service, updateOne, post } = withInvoices([
+        { id: 'inv-other', order_id: 'ORD-OTHER', invoice_number: '9999', title: 'wrong' },
+        { id: 'inv-1', order_id: 'ORD1', invoice_number: '4546 - Surry Hills', title: '4546 - Surry Hills' },
+      ]);
+      await service.upsertFromPayment('org-1', 'token', 'sandbox', payment);
+      expect(post.mock.calls[0][1]).toEqual({ query: { filter: { location_ids: ['L1'], customer_ids: ['C1'] } } });
+      expect(updateOne.mock.calls[0][1].$set.details).toMatchObject({ squareInvoiceId: 'inv-1', squareInvoiceNumber: '4546 - Surry Hills' });
+    });
+
+    it('never guesses: no invoice on that order means no invoice reference', async () => {
+      const { service, updateOne } = withInvoices([{ id: 'inv-x', order_id: 'ORD-OTHER', invoice_number: '4546' }]);
+      await service.upsertFromPayment('org-1', 'token', 'sandbox', payment);
+      expect(updateOne.mock.calls[0][1].$set.details.squareInvoiceNumber).toBeUndefined();
+    });
+
+    it('is scoped to the organization and re-uses an invoice already stored for the same order', async () => {
+      const { service, updateOne, findOne, post } = withInvoices([]);
+      const stored = { details: { squareInvoiceId: 'inv-1', squareInvoiceNumber: '4546' } };
+      findOne.mockImplementation((q: Record<string, unknown>) =>
+        q.orderReference
+          ? { select: () => ({ lean: () => Promise.resolve(stored) }) }
+          : { sort: () => ({ select: () => ({ lean: () => Promise.resolve(null) }) }) },
+      );
+      await service.upsertFromPayment('org-1', 'token', 'sandbox', payment);
+      const lookup = findOne.mock.calls.map((c: unknown[]) => c[0] as Record<string, unknown>).find((q: Record<string, unknown>) => q.orderReference);
+      expect(lookup).toMatchObject({ organizationId: 'org-1', orderReference: 'ORD1' });
+      expect(post).not.toHaveBeenCalled();
+      expect(updateOne.mock.calls[0][1].$set.details.squareInvoiceNumber).toBe('4546');
+    });
+
+    it('a webhook redelivery upserts the same {org, provider, payment id} row (no duplicate)', async () => {
+      const { service, updateOne } = withInvoices([]);
+      await service.upsertFromPayment('org-1', 'token', 'sandbox', payment);
+      await service.upsertFromPayment('org-1', 'token', 'sandbox', payment);
+      expect(updateOne.mock.calls[0][0]).toEqual(updateOne.mock.calls[1][0]);
+      expect(updateOne.mock.calls[0][0]).toEqual({ organizationId: 'org-1', provider: 'square', providerPaymentId: 'pay_9' });
+      expect(updateOne.mock.calls[0][2]).toEqual({ upsert: true });
+    });
+
+    it('a failed Square lookup never blocks storing the payment', async () => {
+      const ctx = build();
+      (ctx.http as unknown as { post: jest.Mock }).post = jest.fn().mockImplementation(() => {
+        throw new Error('boom');
+      });
+      await ctx.service.upsertFromPayment('org-1', 'token', 'sandbox', payment);
+      expect(ctx.updateOne).toHaveBeenCalledTimes(1);
+    });
   });
 });

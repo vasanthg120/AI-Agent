@@ -1,4 +1,5 @@
 import { axiosClient } from '@/api/axiosClient';
+import type { SquarePaymentDetails } from './customersService';
 
 export interface SquareStatus {
   connected: boolean;
@@ -77,6 +78,13 @@ export const squareService = {
   async getPayment(paymentId: string): Promise<SquarePayment> {
     const { data } = await axiosClient.get(`/square/payments/${paymentId}`);
     return data;
+  },
+
+  // Sanitized detail block for one payment, fetched on demand (one call per
+  // opened payment, never per list row).
+  async getPaymentDetails(paymentId: string): Promise<SquarePaymentDetails> {
+    const { data } = await axiosClient.get<{ id: string; details: SquarePaymentDetails }>(`/square/payments/${encodeURIComponent(paymentId)}/details`);
+    return data.details;
   },
 
   async createPayment(payload: {

@@ -21,6 +21,11 @@ import { SquareWebhookController } from './square-webhook.controller';
     HttpModule.register({ timeout: 15_000 }),
     AuthModule,
     IntegrationsModule,
+    // ChatGateway.emitToOrg — a Gateway Payment landing (webhook or
+    // reconciliation) pushes a live event so an open Customers page can
+    // refresh itself. Same reuse NotificationsModule already makes of
+    // ChatGateway; chat.module.ts imports nothing from here, so no cycle.
+    ChatModule,
   ],
   controllers: [SquareController, SquareWebhookController],
   providers: [SquareService, SquarePaymentMatchingService, SquareReconciliationService],

@@ -10,7 +10,7 @@ import { extractErrorMessage } from '@/utils/errors';
 import { formatDate, formatMoney } from '../format';
 import { JobTag } from '../jobs/JobTag';
 import { StageChip } from '../StageChip';
-import { INVOICE_VARIANT, QUOTE_VARIANT } from '../status';
+import { INVOICE_VARIANT, QUOTE_PAYMENT_LABEL, QUOTE_PAYMENT_VARIANT, QUOTE_VARIANT } from '../status';
 import detailStyles from '../customer-detail.module.css';
 import { JourneyStepCard } from './DetailsTab';
 import styles from './panel.module.css';
@@ -89,6 +89,7 @@ export function DocumentsTab({
                     Amount
                   </th>
                   <th scope="col">Status</th>
+                  <th scope="col">Payment</th>
                   <th scope="col">Valid until</th>
                   <th scope="col" aria-label="Open" />
                 </tr>
@@ -111,6 +112,24 @@ export function DocumentsTab({
                     </td>
                     <td data-label="Status">
                       <Badge variant={QUOTE_VARIANT[q.state]}>{q.stateLabel}</Badge>
+                    </td>
+                    <td data-label="Payment">
+                      {detail.quotePayments?.[q.id] ? (
+                        <>
+                          <Badge variant={QUOTE_PAYMENT_VARIANT[detail.quotePayments[q.id].status]}>
+                            {QUOTE_PAYMENT_LABEL[detail.quotePayments[q.id].status]}
+                          </Badge>
+                          {detail.quotePayments[q.id].paidAmount > 0 && (
+                            <div className={detailStyles.cellSub}>
+                              {money(detail.quotePayments[q.id].paidAmount)} paid
+                              {detail.quotePayments[q.id].outstandingAmount > 0 &&
+                                ` · ${money(detail.quotePayments[q.id].outstandingAmount)} due`}
+                            </div>
+                          )}
+                        </>
+                      ) : (
+                        dash
+                      )}
                     </td>
                     <td data-label="Valid until">{q.expiresAt ? formatDate(q.expiresAt) : dash}</td>
                     <td className={clsx(styles.docOpen, detailStyles.stackOpen)}>
@@ -406,8 +425,18 @@ function DocumentView({
               <dt>{what} total</dt>
               <dd>{money(document.amount)}</dd>
             </div>
-            {!isQuotation && (
+            {(!isQuotation || document.payment) && (
               <>
+                {document.payment && (
+                  <div>
+                    <dt>Payment status</dt>
+                    <dd>
+                      <Badge variant={QUOTE_PAYMENT_VARIANT[document.payment.status]}>
+                        {QUOTE_PAYMENT_LABEL[document.payment.status]}
+                      </Badge>
+                    </dd>
+                  </div>
+                )}
                 <div>
                   <dt>Paid</dt>
                   <dd>{document.paid === null ? 'Not recorded' : money(document.paid)}</dd>
@@ -416,6 +445,76 @@ function DocumentView({
                   <dt>Outstanding</dt>
                   <dd>{document.outstanding === null ? 'Not recorded' : money(document.outstanding)}</dd>
                 </div>
+                {document.payment && (document.payment.basis !== 'none' || document.payment.crmReported) && (
+                  <>
+                    {document.payment.quoteNumber && (
+                      <div>
+                        <dt>Quote number</dt>
+                        <dd>{document.payment.quoteNumber}</dd>
+                      </div>
+                    )}
+                    {document.payment.sources.length > 0 && (
+                      <div>
+                        <dt>Payment source</dt>
+                        <dd>
+                          {document.payment.sources.map((source) => (
+                            <Badge key={source.name} variant={source.verified ? 'success' : 'neutral'} title={source.verified ? 'Backed by a transaction / payment record' : 'Only reported by the CRM — no transaction found'}>
+                              {source.verified ? source.name : `${source.name} (reported)`}
+                            </Badge>
+                          ))}
+                        </dd>
+                      </div>
+                    )}
+                    {document.payment.paymentMethod && (
+                      <div>
+                        <dt>Payment method</dt>
+                        <dd>{document.payment.paymentMethod}</dd>
+                      </div>
+                    )}
+                    {document.payment.paymentDate && (
+                      <div>
+                        <dt>Transaction date</dt>
+                        <dd>{formatDate(document.payment.paymentDate)}</dd>
+                      </div>
+                    )}
+                    {document.payment.transactionReference && (
+                      <div>
+                        <dt>Transaction reference</dt>
+                        <dd>{document.payment.transactionReference}</dd>
+                      </div>
+                    )}
+                    {document.payment.refundedAmount > 0 && (
+                      <div>
+                        <dt>Refunded</dt>
+                        <dd>{money(document.payment.refundedAmount)}</dd>
+                      </div>
+                    )}
+                    {document.payment.crmReported && (
+                      <div>
+                        <dt>{document.payment.crmReported.source ?? 'CRM'} says</dt>
+                        <dd>
+                          {document.payment.crmReported.raw.join(' · ')}
+                          {document.payment.crmOutdated && ' — out of date; Haive uses the verified payments'}
+                          {document.payment.crmUnverified && ' — no matching transaction found'}
+                        </dd>
+                      </div>
+                    )}
+                    {document.payment.transactions.length > 1 && (
+                      <div>
+                        <dt>Transactions</dt>
+                        <dd>
+                          {document.payment.transactions.map((t) => (
+                            <div key={`${t.source}-${t.id}`}>
+                              {t.source} · {formatDate(t.date)} · {money(t.amount)}
+                              {t.refunded > 0 ? ` (refunded ${money(t.refunded)})` : ''}
+                              {t.counted ? '' : ' · duplicate, not counted'}
+                            </div>
+                          ))}
+                        </dd>
+                      </div>
+                    )}
+                  </>
+                )}
               </>
             )}
           </dl>

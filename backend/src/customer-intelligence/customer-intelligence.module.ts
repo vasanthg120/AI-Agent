@@ -4,6 +4,7 @@ import { MongooseModule } from '@nestjs/mongoose';
 import { AuditModule } from '../audit/audit.module';
 import { AuthModule } from '../auth/auth.module';
 import { BillingModule } from '../billing/billing.module';
+import { ChatModule } from '../chat/chat.module';
 import { CloudFilesModule } from '../cloud-files/cloud-files.module';
 import { GridFsService } from '../common/gridfs/gridfs.service';
 import { Decoration, DecorationSchema } from '../crm/schemas/decoration.schema';
@@ -23,6 +24,8 @@ import { CustomerJobsController } from './customer-jobs.controller';
 import { CustomerJobsService } from './customer-jobs.service';
 import { JobGridFsService } from './job-gridfs.service';
 import { CustomerMailService } from './customer-mail.service';
+import { PaymentReconciliationController } from './payment-reconciliation.controller';
+import { PaymentReconciliationService } from './payment-reconciliation.service';
 import { CustomerWorkspaceController } from './customer-workspace.controller';
 import { CustomerWorkspaceService } from './customer-workspace.service';
 import { CustomersController } from './customers.controller';
@@ -53,6 +56,7 @@ import { TeamScopeModule } from '../team-activity/team-scope.module';
     // own squareSource()/sync() handling. One-directional (square.module.ts
     // never imports this module back), same safety shape as XeroModule above.
     SquareModule,
+    ChatModule,
     IntegrationsModule,
     TeamScopeModule,
     // Decoration's own schema, registered a second time (NOT via CrmModule
@@ -65,7 +69,7 @@ import { TeamScopeModule } from '../team-activity/team-scope.module';
     // soft-reference check in this app.
     MongooseModule.forFeature([{ name: Decoration.name, schema: DecorationSchema }]),
   ],
-  controllers: [CustomersController, CustomerWorkspaceController, CustomerJobsController, CustomerCloudController, CustomerCloudSyncController, Customer360Controller, CallCustomerSnapshotController],
+  controllers: [CustomersController, CustomerWorkspaceController, CustomerJobsController, CustomerCloudController, CustomerCloudSyncController, Customer360Controller, CallCustomerSnapshotController, PaymentReconciliationController],
   providers: [
     CustomerMailService,
     CustomerDirectoryService,
@@ -78,6 +82,7 @@ import { TeamScopeModule } from '../team-activity/team-scope.module';
     GridFsService,
     JobGridFsService,
     Customer360Service,
+    PaymentReconciliationService,
   ],
   // CustomerJobsService: CrmModule's QuotesController reads it for the
   // SalesBoard's "Job #" column / "View Linked Job" action (one-directional
@@ -85,6 +90,6 @@ import { TeamScopeModule } from '../team-activity/team-scope.module';
   // comment on why that's safe).
   // CustomerDirectoryService: the Dialer's Contacts search (calling/) reads
   // the same directory the Customers page shows.
-  exports: [CustomerJobsService, CustomerDirectoryService],
+  exports: [CustomerJobsService, CustomerDirectoryService, PaymentReconciliationService],
 })
 export class CustomerIntelligenceModule {}
