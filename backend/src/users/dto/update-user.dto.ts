@@ -62,4 +62,12 @@ export class UpdateUserDto {
   @IsOptional()
   @IsBoolean()
   aiAccessEnabled?: boolean;
+
+  // The person's reporting manager (a user of this business). null or an
+  // empty string clears it. Checked server-side: active, same business, no
+  // reporting loops.
+  @IsOptional()
+  @IsString()
+  @MaxLength(64)
+  reportingManagerId?: string | null;
 }

@@ -164,6 +164,14 @@ export class User {
   @Prop()
   department?: string;
 
+  // Who this person reports to (a User _id in the same organization). Used by
+  // work-automation to address the EOD report to the manager. Optional: unset
+  // means no manager is configured and no report is ever sent to anyone else.
+  // Validated on write (same org, active, no cycles) — see
+  // users/reporting-hierarchy.ts and UsersService.updateByAdmin.
+  @Prop({ index: true, sparse: true })
+  reportingManagerId?: string;
+
   @Prop({ default: true })
   active: boolean;
 

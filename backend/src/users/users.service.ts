@@ -21,6 +21,7 @@ import { AgentRole, AgentRoleDocument } from '../agent-roles/schemas/agent-role.
 import type { JwtPayload } from '../auth/jwt-payload.interface';
 import { CHAT_AGENTS } from '../chat/agents';
 import { CreateUserDto } from './dto/create-user.dto';
+import { wouldCreateCycle } from './reporting-hierarchy';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { UpdateProfileDto } from './dto/update-profile.dto';
 import {
@@ -572,6 +573,17 @@ export class UsersService {
     if (dto.department !== undefined) set.department = dto.department.trim();
     if (dto.voiceAccessEnabled !== undefined) set.voiceAccessEnabled = dto.voiceAccessEnabled;
     if (dto.aiAccessEnabled !== undefined) set.aiAccessEnabled = dto.aiAccessEnabled;
+    // Reporting manager: null / '' clears it; otherwise it must be an active
+    // person of this same business and must not create a reporting loop.
+    if (dto.reportingManagerId !== undefined) {
+      const managerId = (dto.reportingManagerId ?? '').trim();
+      if (!managerId) {
+        if (target.reportingManagerId) unset.reportingManagerId = '';
+      } else {
+        await this.assertValidReportingManager(organizationId, id, managerId);
+        set.reportingManagerId = managerId;
+      }
+    }
     // Switching an account off signs it out everywhere (its sessions are also refused by JwtStrategy while inactive).
     if (dto.active === false) set.sessions = [];
 
@@ -582,6 +594,28 @@ export class UsersService {
     return this.describeUser(updated, await this.aiRolesOf(organizationId));
   }
 
+  /** Throws unless `managerId` can be the reporting manager of `userId`: an active
+   * person of the same business, not the person themself, and not someone who
+   * already (directly or indirectly) reports to them. */
+  async assertValidReportingManager(organizationId: string, userId: string, managerId: string): Promise<void> {
+    if (!isValidObjectId(managerId)) throw new BadRequestException('Choose a reporting manager from this business.');
+    if (managerId === userId) throw new BadRequestException('A person can’t report to themself.');
+    const manager = await this.userModel.findOne({ _id: managerId, organizationId }).select('active').lean().exec();
+    if (!manager) throw new BadRequestException('The reporting manager must be a person in this business.');
+    if (!manager.active) throw new BadRequestException('The reporting manager must be an active account.');
+    const linked = await this.userModel.find({ organizationId, reportingManagerId: { $exists: true } }).select('reportingManagerId').lean().exec();
+    const managerOf = new Map(linked.map((u) => [u._id.toString(), u.reportingManagerId as string | undefined]));
+    if (wouldCreateCycle(userId, managerId, (id) => managerOf.get(id))) {
+      throw new BadRequestException('That would create a reporting loop: the chosen manager already reports to this person.');
+    }
+  }
+
+  /** Active people of the business with their manager link — the hierarchy as data. */
+  async hierarchy(organizationId: string): Promise<{ id: string; name: string; email: string; active: boolean; reportingManagerId?: string }[]> {
+    const rows = await this.userModel.find({ organizationId }).select('name email active reportingManagerId').lean().exec();
+    return rows.map((u) => ({ id: u._id.toString(), name: u.name, email: u.email, active: u.active, reportingManagerId: u.reportingManagerId }));
+  }
+
   async deleteByAdmin(id: string, organizationId: string, caller?: JwtPayload) {
     await this.assertNotOwner(id, organizationId);
     if (caller && !caller.roles.includes('owner') && !caller.roles.includes('admin')) await this.assertMayManage(caller, id, organizationId);
@@ -589,6 +623,8 @@ export class UsersService {
     if (!deleted) throw new NotFoundException('User not found');
     // Their access to any other business goes with them.
     await this.userModel.deleteMany({ linkedLoginUserId: id }).exec();
+    // Nobody is left pointing at a manager that no longer exists.
+    await this.userModel.updateMany({ organizationId, reportingManagerId: id }, { $unset: { reportingManagerId: '' } }).exec();
   }
 
   async updateOwnProfile(userId: string, dto: UpdateProfileDto) {
@@ -636,6 +672,7 @@ export class UsersService {
       roles: user.roles,
       assignedAgentId: user.assignedAgentId,
       department: user.department,
+      reportingManagerId: user.reportingManagerId,
       active: user.active,
       voiceAccessEnabled: user.voiceAccessEnabled,
       aiAccessEnabled: user.aiAccessEnabled,

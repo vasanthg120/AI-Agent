@@ -230,6 +230,17 @@ export const SETTINGS_NAV: SettingsNavGroup[] = [
         keywords: ['sla', 'response', 'escalation', 'reply', 'inbox'],
         requireRoles: ['owner', 'admin'],
       },
+      {
+        id: 'work-automation',
+        label: 'Work automation',
+        icon: <FiClock />,
+        path: ROUTES.settingsWorkAutomation,
+        module: 'settings',
+        hint: 'Automatic To-Do & EOD',
+        summary: 'When end-of-day reports are generated and emailed, which platforms feed everyone’s To-Do, who reports to whom, and how synchronization is doing.',
+        keywords: ['eod', 'todo', 'to-do', 'report', 'manager', 'sync', 'automation', 'schedule'],
+        requireRoles: ['owner', 'admin'],
+      },
     ],
   },
 ];

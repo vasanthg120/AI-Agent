@@ -57,6 +57,7 @@ import { VendorsModule } from './vendors/vendors.module';
 import { StatusDefinitionsModule } from './status-definitions/status-definitions.module';
 import { BusinessIntelligenceModule } from './business-intelligence/business-intelligence.module';
 import { MailModule } from './mail/mail.module';
+import { WorkAutomationModule } from './work-automation/work-automation.module';
 import { EncryptionModule } from './common/encryption/encryption.module';
 import { PaymentEventsModule } from './common/payments/payment-events';
 import { SessionsModule } from './sessions/sessions.module';
@@ -143,6 +144,7 @@ import { ModulePermissionInterceptor } from './common/permissions/module-permiss
     AuditModule,
     SessionsModule,
     ApiTokensModule,
+    WorkAutomationModule,
   ],
   controllers: [HealthController],
   providers: [

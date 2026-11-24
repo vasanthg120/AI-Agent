@@ -15,6 +15,7 @@ import { CommandPalette } from '@/components/common/CommandPalette';
 import { FloatingAssistant } from '@/components/assistant/FloatingAssistant';
 import { DealInsightDrawer } from '@/features/deals/DealInsightDrawer';
 import { ROUTES } from '@/constants/routes';
+import { useWorkSyncOnOpen } from '@/features/work/useWorkSyncOnOpen';
 import { AccountContextStrip } from './AccountContextStrip';
 import { Sidebar } from './Sidebar';
 import { TopBar } from './TopBar';
@@ -73,6 +74,8 @@ export function AppLayout() {
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const location = useLocation();
   const contentRef = useRef<HTMLElement>(null);
+  // Collects this person's assigned work from the connected platforms as soon as they open Haive.
+  useWorkSyncOnOpen();
   const assistantPanelOpen = useUiStore((state) => state.assistantPanelOpen);
   const setAssistantPanelOpen = useUiStore((state) => state.setAssistantPanelOpen);
 

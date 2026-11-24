@@ -22,6 +22,9 @@ export const ROUTES = {
   finance: '/finance',
   reporting: '/reporting',
   todoEod: '/todo-eod',
+  // Automatic To-Do & EOD (features/work): the employee's own board, and the manager's team view.
+  myWork: '/my-work',
+  teamWork: '/team-work',
   eod: '/eod',
   chat: '/chat',
   chatConversation: (id: string) => `/chat/${id}`,
@@ -58,6 +61,7 @@ export const ROUTES = {
   settingsDealAssignment: '/settings/deal-assignment',
   settingsRoyaltyRules: '/settings/royalty-rules',
   settingsEmailSla: '/settings/email-sla',
+  settingsWorkAutomation: '/settings/work-automation',
   settingsIntegrations: '/settings/integrations',
   settingsSubAccounts: '/settings/sub-accounts',
 

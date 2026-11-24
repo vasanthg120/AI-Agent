@@ -59,6 +59,11 @@ const ReportingPage = lazy(() =>
   import('@/features/reporting/ReportingPage').then((m) => ({ default: m.ReportingPage })),
 );
 const TodoEodPage = lazy(() => import('@/features/todo-eod/TodoEodPage').then((m) => ({ default: m.TodoEodPage })));
+const MyWorkPage = lazy(() => import('@/features/work/MyWorkPage').then((m) => ({ default: m.MyWorkPage })));
+const TeamWorkPage = lazy(() => import('@/features/work/TeamWorkPage').then((m) => ({ default: m.TeamWorkPage })));
+const WorkAutomationSettings = lazy(() =>
+  import('@/features/settings/tabs/WorkAutomationSettings').then((m) => ({ default: m.WorkAutomationSettings })),
+);
 const EodPage = lazy(() => import('@/features/todo-eod/EodPage').then((m) => ({ default: m.EodPage })));
 const ChatPage = lazy(() => import('@/features/chat/ChatPage').then((m) => ({ default: m.ChatPage })));
 const ChatHistoryPage = lazy(() =>
@@ -205,6 +210,10 @@ export function AppRoutes() {
             </Route>
             <Route path={ROUTES.todoEod} element={<TodoEodPage />} />
             <Route path={ROUTES.eod} element={<EodPage />} />
+            <Route path={ROUTES.myWork} element={<MyWorkPage />} />
+            <Route element={<RequireRole role={['owner', 'admin', 'manager']} />}>
+              <Route path={ROUTES.teamWork} element={<TeamWorkPage />} />
+            </Route>
             <Route element={<RequireModule module="ai_agent" />}>
               <Route path={ROUTES.chat} element={<ChatPage />} />
               <Route path={`${ROUTES.chat}/:conversationId`} element={<ChatPage />} />
@@ -271,6 +280,7 @@ export function AppRoutes() {
                 <Route element={<RequireRole role={['owner', 'admin']} module="settings" />}>
                   <Route path="royalty-rules" element={<RoyaltyRulesSettings />} />
                   <Route path="email-sla" element={<EmailSlaSettings />} />
+                  <Route path="work-automation" element={<WorkAutomationSettings />} />
                 </Route>
               </Route>
               {/* Siblings of, not children under, SettingsLayout above — the

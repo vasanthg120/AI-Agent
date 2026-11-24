@@ -73,6 +73,11 @@ export class MailService {
     }
   }
 
+  /** Sends already-built content over the configured SMTP and says what happened (never throws). The fallback channel for work-automation EOD reports. */
+  sendContent(to: string, content: EmailContent): Promise<MailDelivery> {
+    return this.deliver(to, content);
+  }
+
   sendWelcomeEmail(to: string, name: string): Promise<void> {
     return this.send(to, welcomeEmail(name, this.appUrl));
   }
