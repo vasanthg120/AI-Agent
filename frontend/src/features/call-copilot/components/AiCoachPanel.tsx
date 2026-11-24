@@ -29,6 +29,7 @@ import { VOICE_LANGUAGES } from '@/services/voiceService';
 import { EASE_OUT, FADE_UP, ROW_IN, SPRING_SOFT, staggerChildren } from '../motion';
 import { ScoreRing, scoreBand, scoreTone } from './ScoreRing';
 import { VoiceCoachButton } from './VoiceCoachButton';
+import { CallIntelligenceReport } from './CallIntelligenceReport';
 import styles from './AiCoachPanel.module.css';
 
 const CATEGORY_LABEL: Record<CallScoreCategory, string> = {
@@ -38,6 +39,15 @@ const CATEGORY_LABEL: Record<CallScoreCategory, string> = {
   objection_handling: 'Objection Handling',
   engagement_confidence: 'Engagement & Confidence',
   closing_followup: 'Closing & Follow-up',
+  // Call Intelligence's nine (shown by CallIntelligenceReport; here for completeness).
+  discovery: 'Requirement Understanding & Discovery',
+  listening: 'Active Listening & Engagement',
+  product_knowledge: 'Product / Service Knowledge',
+  communication: 'Communication & Clarity',
+  value_proposition: 'Persuasion & Value Proposition',
+  trust_building: 'Customer Relationship & Trust Building',
+  opportunity: 'Opportunity Identification & Buying Signals',
+  closure: 'Call Closure & Next Steps',
 };
 
 type Tone = 'success' | 'warning' | 'danger' | 'info' | 'accent';
@@ -152,7 +162,8 @@ export function AiCoachPanel({ sessionId, createdAt, pending, coaching, onGenera
         <div className={styles.emptyText}>
           <strong>This call hasn&apos;t been coached yet</strong>
           <span>
-            Your AI Coach reviews the conversation, scores it on six sales skills and tells you what to try next.
+            Your AI Coach reviews the conversation like a demanding sales manager — nine weighted skills, out of 100,
+            every mark backed by a quote — and tells you exactly what to change.
           </span>
         </div>
         {readOnly ? (
@@ -173,6 +184,37 @@ export function AiCoachPanel({ sessionId, createdAt, pending, coaching, onGenera
   const notScored = report.categoryScores.length > 0 && report.categoryScores.every((c) => c.score === 0);
   const tone = scoreTone(overall);
 
+  const voiceRow =
+    report.voiceScript && !readOnly ? (
+      <div className={styles.voiceRow}>
+        <span className={styles.voiceLabel}>Hear it from your coach</span>
+        <select
+          className={styles.languageSelect}
+          value={voiceLanguage}
+          onChange={(e) => changeVoiceLanguage(e.target.value)}
+          aria-label="Language for the spoken coaching"
+          title="Language for the spoken coaching"
+        >
+          {VOICE_LANGUAGES.map((l) => (
+            <option key={l.code} value={l.code}>
+              {l.label}
+            </option>
+          ))}
+        </select>
+        <VoiceCoachButton
+          sessionId={sessionId}
+          englishScript={report.voiceScript}
+          languageCode={voiceLanguage}
+          languageLabel={VOICE_LANGUAGES.find((l) => l.code === voiceLanguage)?.label ?? voiceLanguage}
+        />
+      </div>
+    ) : null;
+
+  // Call Intelligence: the full, evidence-checked report (every call reviewed from 2026-11).
+  if (report.evaluation && report.evaluation.version >= 2) {
+    return <CallIntelligenceReport evaluation={report.evaluation} voice={voiceRow} />;
+  }
+
   return (
     <motion.div className={styles.panel} variants={staggerChildren(0.08)} initial="hidden" animate="show">
       <motion.section variants={FADE_UP} className={styles.scoreCard}>
@@ -185,29 +227,12 @@ export function AiCoachPanel({ sessionId, createdAt, pending, coaching, onGenera
           <p className={styles.scoreCopy}>
             {notScored ? 'There was no sales conversation to score in this call.' : BAND_TEXT[tone]}
           </p>
-          {report.voiceScript && !readOnly && (
-            <div className={styles.voiceRow}>
-              <span className={styles.voiceLabel}>Hear it from your coach</span>
-              <select
-                className={styles.languageSelect}
-                value={voiceLanguage}
-                onChange={(e) => changeVoiceLanguage(e.target.value)}
-                aria-label="Language for the spoken coaching"
-                title="Language for the spoken coaching"
-              >
-                {VOICE_LANGUAGES.map((l) => (
-                  <option key={l.code} value={l.code}>
-                    {l.label}
-                  </option>
-                ))}
-              </select>
-              <VoiceCoachButton
-                sessionId={sessionId}
-                englishScript={report.voiceScript}
-                languageCode={voiceLanguage}
-                languageLabel={VOICE_LANGUAGES.find((l) => l.code === voiceLanguage)?.label ?? voiceLanguage}
-              />
-            </div>
+          {voiceRow}
+          {/* Reviewed before Call Intelligence: the earlier, gentler scoring. Run the new review on it. */}
+          {!readOnly && sessionId && (
+            <Button type="button" size="sm" variant="secondary" leftIcon={<FiZap />} loading={generating} onClick={() => void handleGenerate()}>
+              Review again — stricter scoring
+            </Button>
           )}
         </div>
       </motion.section>

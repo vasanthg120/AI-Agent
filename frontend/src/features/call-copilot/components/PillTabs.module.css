@@ -118,3 +118,15 @@
     animation: none;
   }
 }
+
+/* PHONE: every tab in view — four small tabs (Overview, Customer, AI Coach, Transcript)
+   used to push the last one off the edge of a 390px screen. */
+@media (max-width: 480px) {
+  .small .tab {
+    padding: 6px 9px;
+  }
+
+  .small .label svg {
+    display: none;
+  }
+}

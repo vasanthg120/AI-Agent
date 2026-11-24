@@ -571,9 +571,20 @@ function CallRow({ item, opening, showOwner, onOpen }: { item: CallSessionSummar
           ) : coached ? (
             <span
               className={styles.score}
-              title={notScored ? 'Not scored — no sales conversation' : `Coach score ${item.overallScore} out of 10`}
+              title={
+                notScored
+                  ? 'Not scored — too little conversation to judge'
+                  : item.score100 !== undefined
+                    ? `Call Intelligence score ${item.score100} out of 100`
+                    : `Coach score ${item.overallScore} out of 10 (earlier scoring)`
+              }
             >
-              <ScoreRing value={item.overallScore ?? 0} size={46} strokeWidth={5} showOutOf={false} muted={notScored} />
+              {/* Call Intelligence scores out of 100; calls reviewed before it keep their score out of 10. */}
+              {item.score100 !== undefined && !notScored ? (
+                <ScoreRing value={item.score100} max={100} size={46} strokeWidth={5} showOutOf={false} />
+              ) : (
+                <ScoreRing value={item.overallScore ?? 0} size={46} strokeWidth={5} showOutOf={false} muted={notScored} />
+              )}
             </span>
           ) : (
             <span className={styles.noScore} title="Not coached yet">

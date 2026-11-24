@@ -13,6 +13,23 @@ export interface CallTranscriptSegment {
   audioFileId: string;
   recordedAt: string;
   speaker?: string;
+  // An uploaded or phone recording: when the turn starts and ends (seconds into the call).
+  startSeconds?: number;
+  endSeconds?: number;
+}
+
+/** A call's recording for the player (backend recording/call-recording.service.ts). */
+export interface CallRecordingInfo {
+  // original: the uploaded or phone-call file; joined: a live call's parts as one file;
+  // parts: parts that couldn't be joined (played one after another); none: nothing recorded.
+  kind: 'original' | 'joined' | 'parts' | 'none';
+  fileId: string | null;
+  mimeType: string | null;
+  durationSeconds: number | null;
+  // Where each transcript segment starts, in seconds, keyed by its sequence.
+  segmentStarts: Record<string, number>;
+  parts: string[];
+  note?: string;
 }
 
 export interface CallEvent {
@@ -41,7 +58,16 @@ export type CallScoreCategory =
   | 'value_communication'
   | 'objection_handling'
   | 'engagement_confidence'
-  | 'closing_followup';
+  | 'closing_followup'
+  // Call Intelligence's nine (objection_handling is shared with the earlier six).
+  | 'discovery'
+  | 'listening'
+  | 'product_knowledge'
+  | 'communication'
+  | 'value_proposition'
+  | 'trust_building'
+  | 'opportunity'
+  | 'closure';
 
 export interface CallCategoryScore {
   category: CallScoreCategory;
@@ -78,6 +104,103 @@ export interface CoachingReport {
   keyMoments: CallKeyMoment[];
   coachingSummary?: string;
   voiceScript?: string;
+  // Call Intelligence (calls reviewed from 2026-11): the whole report, the score out of 100 and its band.
+  evaluation?: CallEvaluation;
+  score100?: number;
+  scoreBand?: string;
+}
+
+// ---- Call Intelligence (python-agent app/agent/call_intelligence.py) ------------------
+
+/** A quote from the call, checked against the transcript: its line, time into the call and speaker. */
+export interface EvaluationEvidence {
+  lineId: string;
+  quote: string;
+  at: number | null;
+  speaker: string;
+  judgement?: 'positive' | 'negative';
+}
+
+export interface EvaluationCategory {
+  key: CallScoreCategory;
+  label: string;
+  weight: number;
+  assessable: boolean;
+  notAssessableReason?: string;
+  // 0-10; null when it could not be judged.
+  score: number | null;
+  rationale: string;
+  evidence: EvaluationEvidence[];
+}
+
+export interface EvaluationAdjustment {
+  category: CallScoreCategory | null;
+  from: number | null;
+  to: number | null;
+  by: 'rule' | 'review';
+  reason: string;
+}
+
+export type EvaluationOutcome =
+  | 'sale_confirmed'
+  | 'strong_progress'
+  | 'next_step_agreed'
+  | 'information_only'
+  | 'no_progress'
+  | 'lost'
+  | 'cut_short'
+  | 'not_a_sales_call'
+  | 'unclear';
+
+export interface CallEvaluation {
+  version: number;
+  assessable: boolean;
+  notAssessableReason?: string | null;
+  // Out of 100, over the categories that could be judged; null when none could.
+  score: number | null;
+  band: 'exceptional' | 'very_good' | 'good' | 'average' | 'poor' | 'critical' | 'not_assessable';
+  bandLabel: string;
+  // Share of the scorecard's weight that could be judged (0-100).
+  coverage: number;
+  lowCoverage?: boolean;
+  categories: EvaluationCategory[];
+  recording: { category: 'live' | 'upload' | 'phone'; categoryLabel?: string; durationSeconds?: number | null; languageCode?: string | null; speakersSeparated?: boolean; lines?: number; transcriptCut?: boolean };
+  understanding: {
+    callPurpose: string;
+    context: string;
+    speakers: { label: string; role: 'agent' | 'customer' | 'other' | 'mixed' | 'unknown'; basis: string }[];
+    customerRequirements: string[];
+  } | null;
+  analysis: {
+    customerQuestions: { question: string; answered: 'yes' | 'partly' | 'no'; at: number | null }[];
+    objections: { objection: string; handling: 'well' | 'partly' | 'not_handled'; how: string; at: number | null }[];
+    buyingSignals: { signal: string; actedOn: boolean; at: number | null }[];
+    commitments: { by: 'agent' | 'customer'; text: string; realistic: boolean; at: number | null }[];
+    communicationIssues: { kind: string; text: string; at: number | null }[];
+    customerEngagement: { level: 'high' | 'medium' | 'low' | 'unclear'; basis: string };
+    customerSentiment: { start: string; end: string; basis: string };
+  } | null;
+  challenge: {
+    missedOpportunities: { kind: string; text: string; betterApproach: string; evidence: EvaluationEvidence | null; at: number | null }[];
+    seriousConcerns: { kind: string; text: string; evidence: EvaluationEvidence }[];
+    expertWouldHaveDone: string[];
+  };
+  conclusion: {
+    outcome?: { result: EvaluationOutcome; explanation: string; performanceVsOutcome: string };
+    verdict: string;
+    strengths: { text: string; evidence: EvaluationEvidence }[];
+    weaknesses: { text: string; severity: 'critical' | 'major' | 'minor'; impact: string; evidence: EvaluationEvidence | null }[];
+    coaching: { change: string; how: string; example: string }[];
+    nextActions: { text: string; owner: 'agent' | 'customer' | 'manager'; priority: 'high' | 'medium' | 'low'; basis: string }[];
+    summaryForAgent: string;
+  };
+  qa: {
+    reviewed: boolean;
+    quotesChecked: number;
+    quotesDropped: number;
+    checks: { check: string; passed: boolean; note: string }[];
+    adjustments: EvaluationAdjustment[];
+  };
 }
 
 // A session is loaded with every coaching field optional (older and still-
@@ -194,6 +317,8 @@ export interface UploadRecordingParams {
   dealId?: string;
   contactId?: string;
   languageCode: string;
+  // How much of the file has gone up (0–1).
+  onProgress?: (fraction: number) => void;
 }
 
 export interface CallCopilotCallbacks {
@@ -379,6 +504,12 @@ export const callCopilotService = {
     return data as Blob;
   },
 
+  /** The whole call as one recording (a live call's parts joined on the server), its length and where each line starts. */
+  async getRecording(sessionId: string): Promise<CallRecordingInfo> {
+    const { data } = await axiosClient.get<CallRecordingInfo>(`/call-copilot/sessions/${sessionId}/recording`, { timeout: 120_000 });
+    return data;
+  },
+
   /** Uploads a pre-recorded call; responds once the session is created and
    * background processing has started (NOT once processing finishes — that
    * arrives later via watchUploadProgress on the same socket the live path
@@ -389,7 +520,11 @@ export const callCopilotService = {
     if (params.dealId) form.append('dealId', params.dealId);
     if (params.contactId) form.append('contactId', params.contactId);
     form.append('languageCode', params.languageCode);
-    const { data } = await axiosClient.post<{ sessionId: string; status: string }>('/call-copilot/sessions/upload', form);
+    const { data } = await axiosClient.post<{ sessionId: string; status: string }>('/call-copilot/sessions/upload', form, {
+      onUploadProgress: (e) => {
+        if (params.onProgress && e.total) params.onProgress(Math.min(1, e.loaded / e.total));
+      },
+    });
     return data;
   },
 

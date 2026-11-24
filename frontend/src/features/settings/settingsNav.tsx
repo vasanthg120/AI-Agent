@@ -3,6 +3,7 @@ import {
   FiSettings,
   FiBell,
   FiVolume2,
+  FiMessageCircle,
   FiPhoneCall,
   FiShield,
   FiUsers,
@@ -92,6 +93,16 @@ export const SETTINGS_NAV: SettingsNavGroup[] = [
         hint: 'How the AI sounds',
         summary: 'Pick the voice and accent the AI uses whenever it speaks — preview any voice before you choose it.',
         keywords: ['tts', 'speech', 'accent', 'audio', 'elevenlabs'],
+      },
+      // How Haive talks to each person (their own settings; owners/admins also set the company default).
+      {
+        id: 'ai-conversations',
+        label: 'AI Conversations',
+        icon: <FiMessageCircle />,
+        path: ROUTES.settingsAiConversations,
+        hint: 'How Haive talks to you',
+        summary: 'Greeting, language, briefing, the questions Haive suggests, scheduled conversations, alerts and quiet hours.',
+        keywords: ['haive', 'assistant', 'briefing', 'greeting', 'schedule', 'quiet hours', 'questions', 'language'],
       },
       {
         id: 'security',

@@ -228,7 +228,7 @@ export function NotificationsPage() {
                               {formatRelativeTime(n.timestamp)}
                             </time>
                             {n.source && <span className={styles.source}>{formatSource(n.source)}</span>}
-                            {hasTarget && <span className={styles.opens}>Opens the record</span>}
+                            {hasTarget && <span className={styles.opens}>{n.entityType === 'assistantBriefing' ? 'Opens Haive' : 'Opens the record'}</span>}
                           </span>
                         </span>
                         {hasTarget && <FiChevronRight className={styles.chevron} aria-hidden />}

@@ -50,6 +50,9 @@ interface UploadTranscribeSegment {
   sequence: number;
   text: string;
   speaker?: string;
+  // When the turn starts and ends in the recording (Sarvam's diarized entries) — kept for Call Intelligence's timestamps.
+  startSeconds?: number | null;
+  endSeconds?: number | null;
 }
 
 // Real-Time AI Sales Call Copilot — "Upload a Recording" flow. Kept as its
@@ -277,7 +280,10 @@ export class CallCopilotUploadService {
     this.logger.log(`call.processing.transcribed session=${sessionId} segments=${segments.length}`);
 
     for (const seg of segments) {
-      await this.callCopilotService.appendTranscriptSegment(session, seg.sequence, seg.text, seg.speaker, session.originalRecordingFileId!);
+      await this.callCopilotService.appendTranscriptSegment(session, seg.sequence, seg.text, seg.speaker, session.originalRecordingFileId!, {
+        startSeconds: seg.startSeconds,
+        endSeconds: seg.endSeconds,
+      });
       if (seg.text) emit('call:transcript', { sequence: seg.sequence, text: seg.text });
     }
 
@@ -316,7 +322,9 @@ export class CallCopilotUploadService {
         if (/^(plivo|twilio)-/.test(coached.originalFilename ?? '')) {
           this.logger.log(`call.report.ready org=${coached.organizationId} user=${coached.userId} session=${sessionId} score=${coached.overallScore ?? 'none'}`);
           // No customer name or number in a lock-screen message.
-          const score = coached.overallScore !== undefined ? ` Score ${coached.overallScore.toFixed(1)}/10.` : '';
+          const band = (coached.evaluation as { bandLabel?: string } | undefined)?.bandLabel;
+          const score =
+            coached.score100 !== undefined ? ` Score ${coached.score100}/100${band ? ` · ${band}` : ''}.` : coached.overallScore ? ` Score ${coached.overallScore.toFixed(1)}/10.` : '';
           void this.notifications.pushToDialer(coached.userId, coached.organizationId, {
             title: 'Your call report is ready',
             body: `${coached.headline ?? 'Summary, score and coaching tips are in.'}${score}`.slice(0, 180),
@@ -325,6 +333,10 @@ export class CallCopilotUploadService {
         }
         emit('call:coaching', {
           overallScore: coached.overallScore,
+          // Call Intelligence: the whole report, the score out of 100 and its band.
+          evaluation: coached.evaluation,
+          score100: coached.score100,
+          scoreBand: coached.scoreBand,
           categoryScores: coached.categoryScores,
           whatWentWell: coached.whatWentWell,
           whatToImprove: coached.whatToImprove,

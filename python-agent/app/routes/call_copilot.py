@@ -18,6 +18,7 @@ from app.agent.call_copilot_analysis import (
     localize_voice_script,
     summarize_call,
 )
+from app.agent.call_intelligence import evaluate_call, legacy_fields
 from app.config import settings
 from app.integrations.sarvam_client import (
     SUPPORTED_LANGUAGES,
@@ -285,6 +286,54 @@ def coach(body: CoachRequest, user: dict = Depends(get_current_user)):
         voiceScript=result.get("voiceScript", ""),
     )
 
+
+
+# --- Call Intelligence: the one evaluation every call goes through ---------------------
+#
+# Live calls, uploaded recordings and phone calls (Plivo / Twilio) all come here from
+# CallCopilotService.runCoaching with the same shape: numbered transcript lines with
+# their time into the call and speaker. See app.agent.call_intelligence for the stages.
+
+
+class EvaluateLine(BaseModel):
+    id: str
+    at: float | None = None
+    speaker: str | None = None
+    text: str
+
+
+class EvaluateMeta(BaseModel):
+    # live | upload | phone — the three kinds of recording, one evaluation.
+    category: Literal["live", "upload", "phone"]
+    categoryLabel: str = ""
+    durationSeconds: float | None = None
+    languageCode: str | None = None
+    speakersSeparated: bool = False
+
+
+class EvaluateRequest(BaseModel):
+    sessionId: str
+    lines: list[EvaluateLine]
+    meta: EvaluateMeta
+    contextBlob: str = ""
+    detectedEvents: list[str] = []
+    summary: str = ""
+
+
+@router.post("/call-copilot/evaluate")
+def evaluate(body: EvaluateRequest, user: dict = Depends(get_current_user)) -> dict:
+    """The full report, plus the same thing in the AI Coach's earlier fields (which the
+    Dialer, the spoken coach and the Call Library read)."""
+    evaluation = evaluate_call(
+        [line.model_dump() for line in body.lines],
+        body.meta.model_dump(),
+        body.contextBlob,
+        body.detectedEvents,
+        body.summary,
+        organization_id=user.get("organizationId"),
+        user_id=user["sub"],
+    )
+    return {"evaluation": evaluation, **legacy_fields(evaluation)}
 
 class VoiceScriptRequest(BaseModel):
     sessionId: str

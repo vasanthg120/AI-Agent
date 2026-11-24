@@ -1,0 +1,81 @@
+/* Voice-reactive waveform (see VoiceWaveform.tsx). */
+
+.wave {
+  --bar-color: var(--color-accent);
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  height: 28px;
+}
+
+.sm {
+  gap: 2px;
+  height: 18px;
+}
+
+.onDark {
+  --bar-color: #fff;
+}
+
+.danger {
+  --bar-color: var(--color-danger);
+}
+
+.bar {
+  width: 3px;
+  height: 100%;
+  border-radius: 3px;
+  background: var(--bar-color);
+  opacity: 0.9;
+  transform: scaleY(0.12);
+  transform-origin: center;
+  transition: opacity var(--duration-fast) var(--ease-out);
+  will-change: transform;
+}
+
+.sm .bar {
+  width: 2px;
+}
+
+/* Nothing to hear: a slow, quiet wave. */
+.wave[data-live='false'] .bar {
+  opacity: 0.45;
+  animation: idle 2.4s ease-in-out infinite;
+  animation-delay: calc(var(--i) * -0.11s);
+}
+
+/* Speaking, without a stream to measure: a lively, voice-like motion. */
+.wave[data-active='true'] .bar {
+  opacity: 0.9;
+  animation: talk 0.9s ease-in-out infinite;
+  animation-delay: calc(var(--i) * -0.13s);
+}
+
+@keyframes idle {
+  0%,
+  100% {
+    transform: scaleY(0.12);
+  }
+  50% {
+    transform: scaleY(0.32);
+  }
+}
+
+@keyframes talk {
+  0%,
+  100% {
+    transform: scaleY(calc(0.2 + 0.05 * var(--d)));
+  }
+  30% {
+    transform: scaleY(0.85);
+  }
+  60% {
+    transform: scaleY(0.4);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wave .bar {
+    animation: none !important;
+  }
+}

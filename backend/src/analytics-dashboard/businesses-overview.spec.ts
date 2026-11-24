@@ -325,4 +325,32 @@ describe('Main Account: every business at a glance (real Mongo)', () => {
   it('refuses another Main Account’s sub-account, even by id', async () => {
     await expect(service.list(mainOwner(), 'won', { organizationId: org('otherSub'), dateFrom: '2026-11-01', dateTo: '2026-11-12' }, now)).rejects.toBeInstanceOf(ForbiddenException);
   });
+
+  // Haive's spoken briefing reads the same figures (backend/src/assistant).
+  describe('for the spoken briefing', () => {
+    it('anyone who sees a whole business team gets its figures; a store manager or a team member does not', async () => {
+      const admin = await service.forBriefing(caller('branchAdmin', org('branch'), ['admin']), '2026-11-01', '2026-11-12', now);
+      expect(admin!.businesses.map((b) => b.id)).toEqual([org('branch')]);
+      expect(admin!.businesses[0].revenue.achieved).toBe(1000);
+      expect(await service.forBriefing(caller('branchRep', org('branch'), ['agent_user']), '2026-11-01', '2026-11-12', now)).toBeNull();
+      expect(await service.forBriefing(caller('branchAdmin', org('branch'), ['manager'], { storeId: 'store-1' }), '2026-11-01', '2026-11-12', now)).toBeNull();
+      // The Main Account owner: every business, as on the Dashboard's All businesses.
+      expect((await service.forBriefing(mainOwner(), '2026-11-01', '2026-11-12', now))!.businesses).toHaveLength(3);
+    });
+
+    it('adds quotations awaiting the customer’s decision and the biggest deals closing this week', async () => {
+      const soon = await connection.collection('crm_deals').insertOne({ organizationId: org('branch'), dataSourceId: src('branchCrm'), name: 'jest-biz closing Friday', dealStatus: 'open', monetaryValue: 900, expectedClosingDate: '2026-11-14' });
+      try {
+        const extras = await service.briefingExtras(caller('branchAdmin', org('branch'), ['admin']), now);
+        const branch = extras.get(org('branch'))!;
+        // The 200 "pending" quotation of 4 Nov counts; the accepted one and the October one don't.
+        expect(branch.quotesAwaitingDecision).toEqual({ count: 1, value: 200 });
+        // Closing within seven days of 12 Nov: only the one on the 14th (the 25th is later, the 2nd has passed).
+        expect(branch.closingThisWeek).toEqual([{ name: 'jest-biz closing Friday', value: 900, closes: '2026-11-14' }]);
+        expect((await service.briefingExtras(caller('branchRep', org('branch'), ['agent_user']), now)).size).toBe(0);
+      } finally {
+        await connection.collection('crm_deals').deleteOne({ _id: soon.insertedId });
+      }
+    });
+  });
 });

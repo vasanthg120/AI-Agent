@@ -17,6 +17,8 @@ const ENTITY_TARGETS: Record<NotificationEntityType, { route: string; queryParam
   task: { route: ROUTES.todoEod },
   outlookAccount: { route: ROUTES.settingsIntegrations },
   dailyReport: { route: ROUTES.todoEod },
+  // Opens Haive on that briefing, wherever the dashboard is (AssistantVoice reads ?haive=).
+  assistantBriefing: { route: ROUTES.dashboard, queryParam: 'haive' },
 };
 
 /** Returns the path+query string to navigate to for this notification, or

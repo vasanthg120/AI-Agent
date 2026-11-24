@@ -42,6 +42,15 @@ export class CallTranscriptSegment {
   // separate) and for an upload where diarization wasn't available.
   @Prop()
   speaker?: string;
+
+  // When this turn starts and ends, in seconds into the recording — Sarvam's
+  // batch transcription gives them for an uploaded or phone recording. A live
+  // call has none (its timing comes from recordedAt; see call-intelligence.ts).
+  @Prop()
+  startSeconds?: number;
+
+  @Prop()
+  endSeconds?: number;
 }
 
 @Schema({ _id: false })
@@ -82,9 +91,13 @@ export class CallRecommendation {
 export class CallCategoryScore {
   @Prop({
     required: true,
+    // The first six: the earlier AI Coach (calls reviewed before Call Intelligence).
+    // Then Call Intelligence's nine weighted categories (app/agent/call_intelligence.py).
     enum: [
       'opening_rapport', 'discovery_listening', 'value_communication',
       'objection_handling', 'engagement_confidence', 'closing_followup',
+      'discovery', 'listening', 'product_knowledge', 'communication',
+      'value_proposition', 'trust_building', 'opportunity', 'closure',
     ],
   })
   category: string;
@@ -194,6 +207,13 @@ export class CallSession {
   @Prop()
   originalRecordingFileId?: string;
 
+  // A live call's parts joined into ONE continuous recording (GridFS, call_recordings) —
+  // built when the call ends or first played, rebuilt if parts were added since (see
+  // CallRecordingService). segmentStartsMs: where each transcript segment's audio starts
+  // in it, by sequence. Absent for uploads (their original file is already one recording).
+  @Prop({ type: Object })
+  fullRecording?: { fileId: string; durationMs: number; partCount: number; segmentStartsMs: Record<string, number>; builtAt: Date };
+
   @Prop()
   originalFilename?: string;
 
@@ -267,11 +287,25 @@ export class CallSession {
   @Prop({ type: [CallCategoryScore], default: [] })
   categoryScores: CallCategoryScore[];
 
-  // Computed server-side as the mean of categoryScores[].score, rounded to
-  // one decimal — never asked from the LLM as a standalone number, so it can
-  // never disagree with its own category breakdown.
+  // Out of 10, which every list, filter and average reads. Call Intelligence:
+  // the score out of 100 ÷ 10 (0 = too little conversation to judge); before
+  // it, the mean of the six categories. Never asked from the model directly.
   @Prop()
   overallScore?: number;
+
+  // Call Intelligence (app/agent/call_intelligence.py): the whole report —
+  // understanding, analysis, nine weighted categories with checked quotes,
+  // missed opportunities, coaching, next actions and the quality review. Absent
+  // on calls reviewed before it, which keep the fields below only.
+  @Prop({ type: Object })
+  evaluation?: Record<string, unknown>;
+
+  // The weighted score out of 100 (null when not assessable) and its band.
+  @Prop()
+  score100?: number;
+
+  @Prop()
+  scoreBand?: string;
 
   @Prop({ type: [String], default: [] })
   whatWentWell: string[];

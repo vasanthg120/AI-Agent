@@ -9,7 +9,10 @@ import { callCopilotService, type CallSummaryResult, type CoachingReport } from 
 import { VOICE_LANGUAGES } from '@/services/voiceService';
 import { extractErrorMessage } from '@/utils/errors';
 import { EASE_OUT, SPRING_SNAPPY } from '../motion';
+import { VoiceOrb } from '@/components/voice/VoiceOrb';
 import { CustomerPicker, type SelectedCustomer } from './CustomerPicker';
+import { shapeOf, type DecodedShape } from './recording/peaks';
+import { WavePreview } from './recording/WavePreview';
 import { CallSummaryModal } from './CallSummaryModal';
 import styles from './UploadRecordingModal.module.css';
 
@@ -26,6 +29,14 @@ export interface UploadRecordingModalProps {
   // caller can refresh the Call Library list — never called for a modal
   // the user simply closed before that point.
   onProcessed?: () => void;
+}
+
+/** A recording's length: 4:07, or 1:02:30. */
+function formatLength(seconds: number): string {
+  const s = Math.round(seconds);
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  return `${h ? `${h}:${String(m).padStart(2, '0')}` : m}:${String(s % 60).padStart(2, '0')}`;
 }
 
 function formatSize(bytes: number): string {
@@ -47,6 +58,9 @@ export function UploadRecordingModal({ open, onClose, onProcessed }: UploadRecor
   const [progressMessage, setProgressMessage] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [fileInfo, setFileInfo] = useState<{ name: string; size: number } | null>(null);
+  // The chosen file, read in the browser while it uploads: its shape and its whole length.
+  const [fileShape, setFileShape] = useState<DecodedShape | null | undefined>(undefined);
+  const [uploaded, setUploaded] = useState(0);
   const [dragging, setDragging] = useState(false);
   const [summaryResult, setSummaryResult] = useState<CallSummaryResult | null>(null);
   const [transcript, setTranscript] = useState('');
@@ -64,6 +78,8 @@ export function UploadRecordingModal({ open, onClose, onProcessed }: UploadRecor
     setProgressMessage('');
     setError(null);
     setFileInfo(null);
+    setFileShape(undefined);
+    setUploaded(0);
     setSummaryResult(null);
     setTranscript('');
     setSessionId(null);
@@ -83,11 +99,15 @@ export function UploadRecordingModal({ open, onClose, onProcessed }: UploadRecor
     setStage(0);
     setError(null);
     setFileInfo({ name: file.name, size: file.size });
+    setFileShape(undefined);
+    setUploaded(0);
+    void shapeOf(file).then(setFileShape);
     try {
       const { sessionId: newSessionId } = await callCopilotService.uploadRecording(file, {
         dealId: customer?.dealId,
         contactId: undefined,
         languageCode: language,
+        onProgress: setUploaded,
       });
       setSessionId(newSessionId);
       setPhase('processing');
@@ -195,9 +215,17 @@ export function UploadRecordingModal({ open, onClose, onProcessed }: UploadRecor
                     </span>
                     <span className={styles.fileText}>
                       <span className={styles.fileName}>{fileInfo.name}</span>
-                      <span className={styles.fileSize}>{formatSize(fileInfo.size)}</span>
+                      <span className={styles.fileSize}>
+                        {fileShape ? `${formatLength(fileShape.durationSeconds)} · ` : ''}
+                        {formatSize(fileInfo.size)}
+                        {phase === 'uploading' && uploaded > 0 && uploaded < 1 ? ` · ${Math.round(uploaded * 100)}% uploaded` : ''}
+                      </span>
                     </span>
                   </div>
+                )}
+                {fileInfo && fileShape !== null && (
+                  // The whole recording, filling as it uploads.
+                  <WavePreview peaks={fileShape?.peaks ?? null} progress={phase === 'uploading' ? uploaded : 1} className={styles.wave} />
                 )}
 
                 <ol className={styles.stepper}>
@@ -221,7 +249,8 @@ export function UploadRecordingModal({ open, onClose, onProcessed }: UploadRecor
                 </ol>
 
                 <p className={styles.message}>
-                  {phase === 'uploading' ? 'Uploading your recording…' : progressMessage}
+                  <VoiceOrb state={phase === 'uploading' ? 'idle' : 'thinking'} size={26} />
+                  <span>{phase === 'uploading' ? 'Uploading your recording…' : progressMessage}</span>
                 </p>
                 <p className={styles.hint}>You can close this window — processing continues in the background.</p>
               </motion.div>

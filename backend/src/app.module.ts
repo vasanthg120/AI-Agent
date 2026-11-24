@@ -50,6 +50,7 @@ import { EmailSlaModule } from './email-sla/email-sla.module';
 import { EmailFollowUpModule } from './email-follow-up/email-follow-up.module';
 import { HomeDashboardModule } from './home-dashboard/home-dashboard.module';
 import { AnalyticsDashboardModule } from './analytics-dashboard/analytics-dashboard.module';
+import { AssistantModule } from './assistant/assistant.module';
 import { RoyaltyModule } from './royalty/royalty.module';
 import { ReportingModule } from './reporting/reporting.module';
 import { VendorsModule } from './vendors/vendors.module';
@@ -126,6 +127,7 @@ import { ModulePermissionInterceptor } from './common/permissions/module-permiss
     EmailFollowUpModule,
     HomeDashboardModule,
     AnalyticsDashboardModule,
+    AssistantModule,
     RoyaltyModule,
     ReportingModule,
     VendorsModule,

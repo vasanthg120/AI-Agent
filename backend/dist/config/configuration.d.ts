@@ -186,5 +186,8 @@ declare const _default: () => {
         escalationEnabled: boolean;
         aiFollowupActionsEnabled: boolean;
     };
+    assistant: {
+        proactiveEnabled: boolean;
+    };
 };
 export default _default;

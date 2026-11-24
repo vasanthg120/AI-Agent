@@ -110,6 +110,57 @@ export class NotificationsService {
     }
   }
 
+  /**
+   * Haive reaching out (AI Conversations: a scheduled briefing or an alert) on the
+   * channels the person chose there — the bell and/or a push (phone and desktop, as
+   * their Notifications settings and the organization allow). Never an email: these
+   * are nudges to open Haive, several a day at most. Returns what was delivered.
+   */
+  async notifyAssistant(
+    userId: string,
+    organizationId: string,
+    message: { title: string; body: string; slot: string; kind: 'system' | 'warning' },
+    channels: { bell: boolean; phone: boolean },
+  ): Promise<{ bell: boolean; push: boolean }> {
+    let bell = false;
+    let push = false;
+    if (channels.bell) {
+      const notification = await this.notificationModel.create({
+        userId,
+        organizationId,
+        kind: message.kind,
+        title: message.title,
+        description: message.body,
+        source: 'haive',
+        entityType: 'assistantBriefing',
+        entityId: message.slot,
+      });
+      this.chatGateway.emitToUser(userId, 'notification', notification);
+      bell = true;
+    }
+    if (channels.phone) {
+      try {
+        const [user, orgPolicy] = await Promise.all([this.usersService.findById(userId), this.organizationsService.getNotificationPolicy(organizationId)]);
+        const prefs = user?.notificationPreferences ?? DEFAULT_PREFS;
+        // Only counted as pushed when it can reach a device: push is set up here, and they have one allowed.
+        const devices = (user?.pushSubscriptions ?? []).filter(
+          (s) => !s.app && ((s.deviceType === 'desktop' && prefs.desktopPush) || (s.deviceType === 'mobile' && prefs.mobilePush)),
+        );
+        if (user && orgPolicy.pushEnabled && this.webPushService.enabled && devices.length > 0) {
+          await this.webPushService.sendToUser(
+            userId,
+            { title: message.title, body: message.body, url: `/dashboard?haive=${encodeURIComponent(message.slot)}` },
+            { allowDesktop: prefs.desktopPush, allowMobile: prefs.mobilePush },
+          );
+          push = true;
+        }
+      } catch (err) {
+        this.logger.warn(`Haive push failed for ${userId}: ${(err as Error).message}`);
+      }
+    }
+    return { bell, push };
+  }
+
   async markAllRead(userId: string) {
     await this.notificationModel.updateMany({ userId, read: false }, { read: true }).exec();
   }

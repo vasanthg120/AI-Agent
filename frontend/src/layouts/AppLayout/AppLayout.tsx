@@ -13,6 +13,8 @@ import { useNotificationsStore } from '@/stores/notificationsStore';
 import { useUiStore } from '@/stores/uiStore';
 import { CommandPalette } from '@/components/common/CommandPalette';
 import { FloatingAssistant } from '@/components/assistant/FloatingAssistant';
+import { AssistantVoice } from '@/components/assistant/AssistantVoice';
+import { VoiceDock } from '@/components/assistant/VoiceDock';
 import { DealInsightDrawer } from '@/features/deals/DealInsightDrawer';
 import { ROUTES } from '@/constants/routes';
 import { AccountContextStrip } from './AccountContextStrip';
@@ -156,6 +158,10 @@ export function AppLayout() {
           {/* Floats over the page in the bottom-right corner — it no longer
               docks beside the page and squeezes it narrower. */}
           <FloatingAssistant />
+          {/* Haive’s voice: the daily spoken briefing and spoken answers, on every page. */}
+          <AssistantVoice />
+          {/* Talk to Haive from the bottom-right corner of every page — where it listens, thinks and answers. */}
+          <VoiceDock />
           {/* One deal panel for every list of deals (see stores/dealDrawerStore). */}
           <DealInsightDrawer />
         </div>
@@ -199,6 +205,10 @@ export function AppLayout() {
 
         {/* Same floating window as desktop; on phones its CSS turns it into a bottom sheet. */}
         <FloatingAssistant />
+        {/* Haive’s voice: the daily spoken briefing and spoken answers, on every page. */}
+        <AssistantVoice />
+          {/* Talk to Haive from the bottom-right corner of every page — where it listens, thinks and answers. */}
+          <VoiceDock />
         <DealInsightDrawer />
       </div>
     </MotionConfig>

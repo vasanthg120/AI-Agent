@@ -82,6 +82,12 @@ export function ChatPage() {
   // backdrop+slide-in pattern AppLayout.tsx already uses for its sidebar.
   const isMobile = useMediaQuery('(max-width: 900px)');
 
+  // On a phone the details drawer covers the whole conversation (and Haive speaking in it):
+  // it starts closed there, and opens from the top bar when wanted.
+  useEffect(() => {
+    if (isMobile && useUiStore.getState().rightPanelOpen) setRightPanelOpen(false);
+  }, [isMobile, setRightPanelOpen]);
+
   useEffect(() => {
     if (!isMobile || !rightPanelOpen) return;
     const handler = (e: KeyboardEvent) => {

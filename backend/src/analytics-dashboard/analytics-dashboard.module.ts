@@ -35,5 +35,7 @@ import { PreviousMonthClosuresService } from './previous-month-closures.service'
   ],
   controllers: [AnalyticsDashboardController],
   providers: [AnalyticsDashboardService, PreviousMonthClosuresService, BusinessesOverviewService],
+  // Haive's spoken briefing (backend/src/assistant) reads each business's figures from it.
+  exports: [BusinessesOverviewService],
 })
 export class AnalyticsDashboardModule {}

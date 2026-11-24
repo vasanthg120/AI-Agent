@@ -92,6 +92,9 @@ const NotificationSettings = lazy(() =>
 const VoiceSettings = lazy(() =>
   import('@/features/settings/tabs/VoiceSettings').then((m) => ({ default: m.VoiceSettings })),
 );
+const AiConversationSettings = lazy(() =>
+  import('@/features/settings/tabs/AiConversationSettings').then((m) => ({ default: m.AiConversationSettings })),
+);
 const DataSourcesSettings = lazy(() =>
   import('@/features/settings/tabs/DataSourcesSettings').then((m) => ({ default: m.DataSourcesSettings })),
 );
@@ -244,6 +247,7 @@ export function AppRoutes() {
                 </Route>
                 <Route path="notifications" element={<NotificationSettings />} />
                 <Route path="voice" element={<VoiceSettings />} />
+                <Route path="ai-conversations" element={<AiConversationSettings />} />
                 <Route path="security" element={<SecuritySettings />} />
                 <Route element={<RequireModule module="ai_roles" />}>
                   <Route path="agent-roles" element={<AgentRolesSettings />} />

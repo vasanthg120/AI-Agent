@@ -43,6 +43,8 @@ export interface AttentionItem {
   businessName: string;
   severity: 'critical' | 'warning' | 'info';
   text: string;
+  // What it is about (Haive's briefing leaves out what a person chose not to follow).
+  topic: 'subscription' | 'sync' | 'emails' | 'pipeline' | 'revenue' | 'calls';
   // What opens when it is clicked: one of the lists above, or Agent Activity's missed calls.
   list?: BusinessListKind | 'missed_calls';
 }
@@ -88,6 +90,28 @@ export interface BusinessesOverview {
   generatedAt: Date;
 }
 
+/** What a spoken briefing adds to a business's figures (see BusinessesOverviewService.briefingExtras). */
+export interface BriefingExtras {
+  quotesAwaitingDecision: Amount;
+  closingThisWeek: { name: string; value: number; closes: string }[];
+}
+
+// A quotation older than this that is still "pending" is history, not a decision the customer is about to make.
+const QUOTE_DECISION_DAYS = 60;
+
+// A new enquiry unanswered for this long is a lead going cold: Haive speaks up.
+export const ENQUIRY_ALERT_HOURS = 2;
+
+/** What Haive may alert someone about in one business (see BusinessesOverviewService.alertSignals). */
+export interface BusinessAlertSignals {
+  businessId: string;
+  businessName: string;
+  currency: string;
+  enquiriesWaiting: { count: number; oldest: Date | null };
+  syncProblems: BusinessHealthItem[];
+  slippedYesterday: Amount;
+}
+
 export interface BusinessListRow {
   id: string;
   title: string;
@@ -123,7 +147,8 @@ function shortDate(at: Date | undefined, timeZone: string): string {
 const SYMBOL: Record<string, string> = { INR: '₹', AUD: 'A$', NZD: 'NZ$', USD: '$', GBP: '£', EUR: '€' };
 const LOCALE: Record<string, string> = { INR: 'en-IN', AUD: 'en-AU', NZD: 'en-NZ', GBP: 'en-GB' };
 
-function money(value: number, currency: string): string {
+/** An amount the way the Dashboard writes it (₹2,26,851 / A$12,400). */
+export function money(value: number, currency: string): string {
   const number = Math.round(value).toLocaleString(LOCALE[currency] ?? 'en-US');
   return SYMBOL[currency] ? `${SYMBOL[currency]}${number}` : `${currency} ${number}`;
 }
@@ -173,7 +198,104 @@ export class BusinessesOverviewService {
 
   async overview(caller: JwtPayload, dateFrom: string, dateTo: string, now = new Date()): Promise<BusinessesOverview> {
     if (dateTo < dateFrom) throw new BadRequestException('The last day is before the first day.');
-    const scope = await this.mainScope(caller);
+    return this.build(caller, await this.mainScope(caller), dateFrom, dateTo, now);
+  }
+
+  /**
+   * The same figures for anyone who sees a whole business's team — its owner or an
+   * admin (or someone given Revenue & Analytics) — over the businesses they may see
+   * (the Main Account owner: every one). Null for a store manager or anyone who sees
+   * only their own work: business revenue isn't theirs to be briefed on. Used by
+   * Haive's spoken briefing (backend/src/assistant).
+   */
+  async forBriefing(caller: JwtPayload, dateFrom: string, dateTo: string, now = new Date()): Promise<BusinessesOverview | null> {
+    const scope = await this.scopes.resolve(caller);
+    if (!scope.team || scope.storeId) return null;
+    return this.build(caller, scope, dateFrom, dateTo, now);
+  }
+
+  /** What a briefing adds per business: quotations still awaiting the customer's decision, and the biggest open deals closing this week. */
+  async briefingExtras(caller: JwtPayload, now = new Date()): Promise<Map<string, BriefingExtras>> {
+    const scope = await this.scopes.resolve(caller);
+    const out = new Map<string, BriefingExtras>();
+    if (!scope.team || scope.storeId) return out;
+    await Promise.all(
+      scope.businesses.map(async (b) => {
+        out.set(b.id, await this.inBusiness(b.id, () => this.extrasOf(b, now)));
+      }),
+    );
+    return out;
+  }
+
+  /**
+   * What Haive may speak up about for one business, right now (its proactive alerts):
+   * new enquiries nobody has answered for ENQUIRY_ALERT_HOURS, mailboxes and CRMs that
+   * stopped syncing, and open deals whose closing date was yesterday (newly slipped —
+   * not the whole backlog, which the briefing already covers). Counted, never guessed.
+   */
+  async alertSignals(business: ScopedBusiness, now = new Date()): Promise<BusinessAlertSignals> {
+    return this.inBusiness(business.id, async () => {
+      const organizationId = business.id;
+      const today = businessDayOf(business.timeZone, now);
+      const y = new Date(`${today}T00:00:00.000Z`);
+      y.setUTCDate(y.getUTCDate() - 1);
+      const yesterday = y.toISOString().slice(0, 10);
+      const [enquiries, health, slipped] = await Promise.all([
+        this.emails.enquiriesWaitingSince(organizationId, new Date(now.getTime() - ENQUIRY_ALERT_HOURS * 60 * 60 * 1000), now),
+        this.health(organizationId, now),
+        this.dealModel
+          .aggregate<{ count: number; value: number }>([
+            { $match: { organizationId, dealStatus: 'open', expectedClosingDate: { $gte: yesterday, $lt: today } } },
+            { $group: { _id: null, count: { $sum: 1 }, value: { $sum: { $ifNull: ['$monetaryValue', 0] } } } },
+          ])
+          .exec(),
+      ]);
+      return {
+        businessId: business.id,
+        businessName: business.name,
+        currency: business.currency,
+        enquiriesWaiting: enquiries,
+        // Broken first, then silent for too long (a mailbox unread for days is as bad as a failing one).
+        syncProblems: [...health.filter((h) => h.status === 'reconnect' || h.status === 'failing'), ...health.filter((h) => h.status === 'stale')],
+        slippedYesterday: amount(slipped[0]),
+      };
+    });
+  }
+
+  private async extrasOf(business: ScopedBusiness, now: Date): Promise<BriefingExtras> {
+    const organizationId = business.id;
+    const today = businessDayOf(business.timeZone, now);
+    const weekOut = new Date(`${today}T00:00:00.000Z`);
+    weekOut.setUTCDate(weekOut.getUTCDate() + 7);
+    const inAWeek = weekOut.toISOString().slice(0, 10);
+    // A quotation sent and not yet accepted or turned down; older than 60 days is history, not a live decision.
+    const since = new Date(now.getTime() - QUOTE_DECISION_DAYS * 24 * 60 * 60 * 1000);
+    const [awaiting, closing] = await Promise.all([
+      this.quoteModel
+        .aggregate<{ count: number; value: number }>([
+          { $match: { organizationId, clientApprovalStatus: { $in: ['pending', 'awaiting_response'] }, createdAt: { $gte: since } } },
+          { $group: { _id: null, count: { $sum: 1 }, value: { $sum: { $ifNull: ['$quoteAmount', 0] } } } },
+        ])
+        .exec(),
+      this.dealModel
+        .find({ organizationId, dealStatus: 'open', expectedClosingDate: { $gte: today, $lte: `${inAWeek}\uffff` } })
+        .select({ name: 1, monetaryValue: 1, expectedClosingDate: 1 })
+        .sort({ monetaryValue: -1 })
+        .limit(3)
+        .lean<Doc[]>()
+        .exec(),
+    ]);
+    return {
+      quotesAwaitingDecision: amount(awaiting[0]),
+      closingThisWeek: closing.map((d) => ({
+        name: String(d.name || 'Deal'),
+        value: Number(d.monetaryValue) || 0,
+        closes: typeof d.expectedClosingDate === 'string' ? d.expectedClosingDate.slice(0, 10) : '',
+      })),
+    };
+  }
+
+  private async build(caller: JwtPayload, scope: TeamScope, dateFrom: string, dateTo: string, now: Date): Promise<BusinessesOverview> {
     const { first, last } = countedMonths(dateFrom, dateTo);
     const [rows, activity] = await Promise.all([
       Promise.all(scope.businesses.map((b) => this.inBusiness(b.id, () => this.figures(b, dateFrom, dateTo, now)))),
@@ -349,15 +471,15 @@ export class BusinessesOverviewService {
   private attention(rows: BusinessOverviewRow[]): AttentionItem[] {
     const items: AttentionItem[] = [];
     for (const r of rows) {
-      const push = (severity: AttentionItem['severity'], text: string, list?: AttentionItem['list']) =>
-        items.push({ businessId: r.id, businessName: r.name, severity, text, list });
-      if (r.locked) push('critical', 'No active subscription — its team can only open Billing.');
+      const push = (topic: AttentionItem['topic'], severity: AttentionItem['severity'], text: string, list?: AttentionItem['list']) =>
+        items.push({ businessId: r.id, businessName: r.name, severity, text, topic, list });
+      if (r.locked) push('subscription', 'critical', 'No active subscription — its team can only open Billing.');
       for (const h of r.health) {
         const what = h.kind === 'mailbox' ? `Mailbox ${h.label}` : h.label;
-        if (h.status === 'reconnect') push('critical', `${what} needs connecting again — no new email is being read.`);
+        if (h.status === 'reconnect') push('sync', 'critical', `${what} needs connecting again — no new email is being read.`);
         else if (h.status === 'failing')
-          push('critical', `${what} ${h.kind === 'mailbox' ? 'isn’t being read' : 'isn’t syncing'} since ${shortDate(h.since ?? h.lastOkAt, r.timeZone)}${h.reason ? `: ${h.reason}` : '.'}`);
-        else if (h.status === 'stale') push('warning', `${what} last ${h.kind === 'mailbox' ? 'read' : 'synced'} ${shortDate(h.lastOkAt, r.timeZone)}.`);
+          push('sync', 'critical', `${what} ${h.kind === 'mailbox' ? 'isn’t being read' : 'isn’t syncing'} since ${shortDate(h.since ?? h.lastOkAt, r.timeZone)}${h.reason ? `: ${h.reason}` : '.'}`);
+        else if (h.status === 'stale') push('sync', 'warning', `${what} last ${h.kind === 'mailbox' ? 'read' : 'synced'} ${shortDate(h.lastOkAt, r.timeZone)}.`);
       }
       // One line for the inbox: how many wait, how many of them for over a day, how many are new enquiries.
       const { waiting, overdue, newEnquiries } = r.emails;
@@ -365,14 +487,14 @@ export class BusinessesOverviewService {
         const late = overdue === 0 ? '' : overdue === waiting ? (waiting === 1 ? ', over 24 hours' : ', all over 24 hours') : `, ${overdue} of them over 24 hours`;
         const asking =
           newEnquiries === 0 ? '' : newEnquiries === waiting ? (waiting === 1 ? ' — a new enquiry' : ` — all ${waiting} new enquiries`) : ` — ${plural(newEnquiries, 'new enquiry', 'new enquiries')}`;
-        push(overdue > 0 ? 'warning' : 'info', `${plural(waiting, 'email')} waiting for a reply${late}${asking}.`, 'emails_waiting');
+        push('emails', overdue > 0 ? 'warning' : 'info', `${plural(waiting, 'email')} waiting for a reply${late}${asking}.`, 'emails_waiting');
       }
       if (r.pipeline.pastDue.count > 0)
-        push('warning', `${plural(r.pipeline.pastDue.count, 'open deal')} past the closing date (${money(r.pipeline.pastDue.value, r.currency)}).`, 'past_due');
+        push('pipeline', 'warning', `${plural(r.pipeline.pastDue.count, 'open deal')} past the closing date (${money(r.pipeline.pastDue.value, r.currency)}).`, 'past_due');
       // Behind: clearly less of the target done than of the period gone (only once a tenth of it has gone).
       if (r.revenue.pct !== null && r.revenue.periodGonePct >= 10 && r.revenue.periodGonePct < 100 && r.revenue.pct + 10 < r.revenue.periodGonePct)
-        push('info', `Revenue at ${r.revenue.pct}% of target with ${r.revenue.periodGonePct}% of the period gone.`, 'won');
-      if (r.calls && r.calls.missed > 0) push('info', `${plural(r.calls.missed, 'missed call')} in this period.`, 'missed_calls');
+        push('revenue', 'info', `Revenue at ${r.revenue.pct}% of target with ${r.revenue.periodGonePct}% of the period gone.`, 'won');
+      if (r.calls && r.calls.missed > 0) push('calls', 'info', `${plural(r.calls.missed, 'missed call')} in this period.`, 'missed_calls');
     }
     const rank = { critical: 0, warning: 1, info: 2 } as const;
     return items.sort((a, b) => rank[a.severity] - rank[b.severity] || a.businessName.localeCompare(b.businessName));

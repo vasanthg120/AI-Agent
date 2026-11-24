@@ -201,3 +201,115 @@
   padding: var(--space-3);
   border-top: 1px solid var(--color-border);
 }
+
+/* ---------- Haive's voice: briefing above today's conversation, live status ---------- */
+
+.bodyStack {
+  display: flex;
+  flex-direction: column;
+}
+
+/* The briefing card never takes more than half the window; the conversation scrolls below it. */
+.cardSlot {
+  flex-shrink: 0;
+  max-height: 50%;
+  overflow-y: auto;
+}
+
+.cardSlotFull {
+  flex: 1;
+  max-height: none;
+}
+
+.listSlot {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+}
+
+.dot_listening {
+  background: var(--color-danger);
+  animation: blink 1s ease-in-out infinite;
+}
+
+.dot_transcribing,
+.dot_thinking {
+  background: var(--color-warning);
+  animation: blink 1.2s ease-in-out infinite;
+}
+
+.dot_speaking {
+  background: var(--color-accent);
+  animation: blink 0.8s ease-in-out infinite;
+}
+
+@keyframes blink {
+  50% {
+    opacity: 0.35;
+  }
+}
+
+/* The avatar breathes while Haive speaks, glows red while it listens. */
+.logo_speaking {
+  animation: speak 1.1s ease-in-out infinite;
+}
+
+.logo_listening {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-danger) 45%, transparent);
+}
+
+.logo_thinking,
+.logo_transcribing {
+  animation: think 1.6s ease-in-out infinite;
+}
+
+@keyframes speak {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--color-accent) 45%, transparent);
+  }
+  50% {
+    box-shadow: 0 0 0 7px color-mix(in srgb, var(--color-accent) 0%, transparent);
+  }
+}
+
+@keyframes think {
+  50% {
+    opacity: 0.6;
+  }
+}
+
+/* The voice row sits above the text box, inside the footer. */
+.footer > :first-child {
+  margin: calc(-1 * var(--space-3)) calc(-1 * var(--space-3)) var(--space-2);
+  border-top: none;
+}
+
+
+/* "Brief me" — when the briefing isn't prepared on sign-in (AI Conversations settings). */
+.briefMe {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  border: 1px solid color-mix(in srgb, var(--color-accent) 40%, var(--color-border));
+  border-radius: var(--radius-full);
+  background: var(--color-bg-active);
+  font: inherit;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--color-accent-hover);
+  cursor: pointer;
+}
+
+.briefMe:hover:not(:disabled),
+.briefMe:focus-visible {
+  border-color: var(--color-accent);
+  outline: none;
+}
+
+.briefMe:disabled {
+  opacity: 0.7;
+  cursor: wait;
+}

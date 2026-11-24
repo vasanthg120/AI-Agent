@@ -1,0 +1,351 @@
+/* AI Conversations settings. */
+
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+  /* Room for the save bar over the last section. */
+  padding-bottom: 72px;
+}
+
+.error {
+  color: var(--color-danger);
+  font-size: var(--text-sm);
+}
+
+.intro {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.source {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-3);
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+}
+
+.linkButton {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0;
+  border: none;
+  background: none;
+  font: inherit;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--color-accent-hover);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.linkButton:hover,
+.linkButton:focus-visible {
+  text-decoration: underline;
+  outline: none;
+}
+
+.linkButton:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+
+.twoUp {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-4);
+}
+
+.note {
+  margin: 0;
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+}
+
+.note a {
+  color: var(--color-accent-hover);
+  font-weight: 600;
+}
+
+/* ---------- toggle chips (metrics, days) ---------- */
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.chip,
+.day {
+  padding: 6px 14px;
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-full);
+  background: var(--color-bg-surface);
+  font: inherit;
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition:
+    background var(--duration-fast) var(--ease-out),
+    border-color var(--duration-fast) var(--ease-out);
+}
+
+.chip:hover,
+.day:hover {
+  border-color: var(--color-accent);
+}
+
+.chip:focus-visible,
+.day:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+.chipOn {
+  border-color: var(--color-accent);
+  background: var(--color-bg-active);
+  color: var(--color-accent-hover);
+  font-weight: 600;
+}
+
+/* ---------- questions ---------- */
+
+.questionList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.question {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: 8px var(--space-3);
+}
+
+.question + .question {
+  border-top: 1px solid var(--color-border);
+}
+
+.questionText {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--text-sm);
+  color: var(--color-text-primary);
+  overflow-wrap: anywhere;
+}
+
+.questionOff .questionText {
+  color: var(--color-text-muted);
+}
+
+.empty {
+  margin: 0;
+  padding: 10px var(--space-3);
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+}
+
+.iconButton {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border: none;
+  border-radius: var(--radius-md);
+  background: none;
+  color: var(--color-text-muted);
+  cursor: pointer;
+}
+
+.iconButton:hover,
+.iconButton:focus-visible {
+  background: var(--color-danger-soft, rgba(220, 38, 38, 0.08));
+  color: var(--color-danger);
+  outline: none;
+}
+
+.addRow {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+}
+
+.textInput {
+  flex: 1;
+  min-width: 0;
+  height: 36px;
+  padding: 0 var(--space-3);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-input);
+  font: inherit;
+  font-size: var(--text-sm);
+  color: var(--color-text-primary);
+}
+
+.textInput:focus {
+  outline: none;
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 3px var(--color-accent-muted);
+}
+
+.textInput:disabled {
+  opacity: 0.55;
+}
+
+/* ---------- schedules ---------- */
+
+.schedule {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.scheduleOff {
+  opacity: 0.65;
+}
+
+.scheduleTop {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.scheduleLabel {
+  font-weight: 600;
+}
+
+.time {
+  flex: 0 0 auto;
+  width: 118px;
+}
+
+.days {
+  display: flex;
+  gap: 6px;
+}
+
+.day {
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  font-size: var(--text-xs);
+}
+
+.scheduleActions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.inline {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+}
+
+.zone {
+  height: 36px;
+  max-width: 240px;
+  font-size: var(--text-sm);
+}
+
+.count {
+  height: 36px;
+  width: 76px;
+  font-size: var(--text-sm);
+}
+
+/* ---------- quiet hours ---------- */
+
+.quiet {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.quietTimes {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+}
+
+/* ---------- save bar ---------- */
+
+.saveBar {
+  position: sticky;
+  bottom: var(--space-3);
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: 10px var(--space-4);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-lg);
+  background: var(--color-bg-surface);
+  box-shadow: var(--shadow-lg, 0 8px 24px rgba(0, 0, 0, 0.12));
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.saveActions {
+  display: flex;
+  gap: var(--space-2);
+}
+
+@media (max-width: 640px) {
+  .twoUp {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .scheduleTop {
+    flex-wrap: wrap;
+  }
+
+  .scheduleLabel {
+    flex: 1 1 100%;
+  }
+
+  .days {
+    flex-wrap: wrap;
+  }
+
+  .addRow {
+    flex-wrap: wrap;
+  }
+
+  .addRow .textInput {
+    flex: 1 1 100%;
+  }
+}
+
+.warn {
+  margin: 0;
+  font-size: var(--text-xs);
+  color: var(--color-warning-ink);
+}

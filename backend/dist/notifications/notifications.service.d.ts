@@ -34,6 +34,18 @@ export declare class NotificationsService {
         body: string;
         url: string;
     }): Promise<void>;
+    notifyAssistant(userId: string, organizationId: string, message: {
+        title: string;
+        body: string;
+        slot: string;
+        kind: 'system' | 'warning';
+    }, channels: {
+        bell: boolean;
+        phone: boolean;
+    }): Promise<{
+        bell: boolean;
+        push: boolean;
+    }>;
     markAllRead(userId: string): Promise<void>;
     getPreferences(userId: string, organizationId: string | undefined): Promise<{
         desktopPush: boolean;

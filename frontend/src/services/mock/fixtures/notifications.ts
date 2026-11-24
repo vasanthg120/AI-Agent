@@ -8,7 +8,9 @@ export type NotificationEntityType =
   | 'deal'
   | 'task'
   | 'outlookAccount'
-  | 'dailyReport';
+  | 'dailyReport'
+  // Haive reaching out (a scheduled briefing or an alert): entityId is the briefing's slot.
+  | 'assistantBriefing';
 
 export interface AppNotification {
   id: string;

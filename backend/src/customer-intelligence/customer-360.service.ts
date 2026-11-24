@@ -258,7 +258,7 @@ export class Customer360Service implements OnModuleInit {
       ? await this.connection
           .collection('call_sessions')
           .find({ organizationId, $or: sessionOr })
-          .project({ transcript: 0, events: 0, recommendations: 0, voiceScripts: 0, contextBlob: 0 })
+          .project({ transcript: 0, events: 0, recommendations: 0, voiceScripts: 0, contextBlob: 0, evaluation: 0 })
           .limit(CALL_LIMIT)
           .toArray()
       : [];

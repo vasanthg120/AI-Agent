@@ -12,6 +12,7 @@ import { ReservationService } from '../billing/reservation.service';
 import { CallSession, CallSessionDocument } from './schemas/call-session.schema';
 import { sessionRangeEnd, sessionRangeStart } from './session-date-range';
 import { AI_REPORT_TIMEOUT_MS, COACHING_ABANDONED_AFTER_MS, describeCoachingFailure } from './processing-failure';
+import { EvaluateReply, RECORDING_LABEL, callDurationSeconds, recordingCategory, speakersSeparated, transcriptLines } from './call-intelligence';
 
 const AUDIO_BUCKET = 'call_recordings';
 
@@ -77,7 +78,7 @@ export class CallCopilotService {
   async listSessions(organizationId: string, userId: string): Promise<CallSessionDocument[]> {
     return this.sessionModel
       .find({ organizationId, userId })
-      .select({ transcript: 0 }) // history list doesn't need the full transcript payload
+      .select({ transcript: 0, evaluation: 0 }) // history list doesn't need the full transcript payload
       .sort({ createdAt: -1 })
       .limit(50)
       .exec();
@@ -106,7 +107,7 @@ export class CallCopilotService {
       );
       const match: Record<string, unknown> = { _id: { $in: data.hits.map((h) => h.sessionId) }, organizationId, userId };
       if (options.dealId) match.dealId = options.dealId;
-      const docs = await this.sessionModel.find(match).select({ transcript: 0 }).exec();
+      const docs = await this.sessionModel.find(match).select({ transcript: 0, evaluation: 0 }).exec();
       const byId = new Map(docs.map((d) => [d._id.toString(), d]));
       // Preserve the SEARCH's ranking (best match first), not Mongo's own
       // find() order — hits are already sorted best-first by
@@ -131,7 +132,7 @@ export class CallCopilotService {
     const [items, total] = await Promise.all([
       this.sessionModel
         .find(match)
-        .select({ transcript: 0 })
+        .select({ transcript: 0, evaluation: 0 })
         .sort({ createdAt: -1 })
         .skip((page - 1) * pageSize)
         .limit(pageSize)
@@ -177,7 +178,7 @@ export class CallCopilotService {
     const [items, total] = await Promise.all([
       this.sessionModel
         .find(match)
-        .select({ transcript: 0 })
+        .select({ transcript: 0, evaluation: 0 })
         .sort({ createdAt: -1 })
         .skip((page - 1) * pageSize)
         .limit(pageSize)
@@ -365,8 +366,12 @@ export class CallCopilotService {
     text: string,
     speaker: string | undefined,
     audioFileId: string,
+    // An uploaded or phone recording: when this turn starts and ends (seconds).
+    timing: { startSeconds?: number | null; endSeconds?: number | null } = {},
   ): Promise<void> {
-    session.transcript.push({ sequence, text, speaker, audioFileId, recordedAt: new Date() } as never);
+    const startSeconds = typeof timing.startSeconds === 'number' ? timing.startSeconds : undefined;
+    const endSeconds = typeof timing.endSeconds === 'number' ? timing.endSeconds : undefined;
+    session.transcript.push({ sequence, text, speaker, audioFileId, recordedAt: new Date(), startSeconds, endSeconds } as never);
     await session.save();
   }
 
@@ -586,28 +591,31 @@ export class CallCopilotService {
     return true;
   }
 
-  /** The review itself. Never throws: a failure is logged and kept on the
-   * session in words the coach panel can show. */
-  private async runCoaching(session: CallSessionDocument, fullTranscript: string): Promise<CallSessionDocument> {
+  /** The review itself — Call Intelligence, the same for a live call, an
+   * uploaded recording and a phone call (see call-intelligence.ts): the
+   * transcript goes as numbered lines with their time and speaker, never as
+   * one run-on string. Never throws: a failure is logged and kept on the
+   * session in words the coach panel can show. (`_fullTranscript` is kept for
+   * the callers; the lines are built from the session itself.) */
+  private async runCoaching(session: CallSessionDocument, _fullTranscript: string): Promise<CallSessionDocument> {
     try {
       const token = this.bridgeToken(session.userId, session.organizationId);
       const summaryText = [session.headline, ...session.summaryPoints, ...session.keyTakeaways].filter(Boolean).join('\n');
+      const category = recordingCategory(session);
       const { data } = await firstValueFrom(
-        this.http.post<{
-          categoryScores: { category: string; score: number; rationale: string }[];
-          whatWentWell: string[];
-          whatToImprove: string[];
-          whatWouldHaveDoneDifferently: string[];
-          nextCallFocus: string[];
-          keyMoments: { momentType: string; text: string; recommendation: string; relatedEventText: string }[];
-          coachingSummary: string;
-          voiceScript: string;
-        }>(
-          `${this.pythonAgentUrl}/call-copilot/coach`,
+        this.http.post<EvaluateReply>(
+          `${this.pythonAgentUrl}/call-copilot/evaluate`,
           {
             sessionId: session._id.toString(),
+            lines: transcriptLines(session),
+            meta: {
+              category,
+              categoryLabel: RECORDING_LABEL[category],
+              durationSeconds: callDurationSeconds(session),
+              languageCode: session.languageCode ?? null,
+              speakersSeparated: speakersSeparated(session),
+            },
             contextBlob: session.contextBlob ?? '',
-            fullTranscript,
             detectedEvents: session.events.map((e) => e.text),
             summary: summaryText,
           },
@@ -615,26 +623,24 @@ export class CallCopilotService {
         ),
       );
 
+      session.evaluation = data.evaluation as never;
+      session.score100 = data.evaluation.score ?? undefined;
+      session.scoreBand = data.evaluation.band;
       session.categoryScores = data.categoryScores as never;
-      session.overallScore = data.categoryScores.length
-        ? Math.round((data.categoryScores.reduce((sum, c) => sum + c.score, 0) / data.categoryScores.length) * 10) / 10
-        : undefined;
+      // Out of 10 for every list and average; 0 = too little conversation to judge ("Not scored").
+      session.overallScore = data.overallScore ?? 0;
       session.whatWentWell = data.whatWentWell;
       session.whatToImprove = data.whatToImprove;
       session.whatWouldHaveDoneDifferently = data.whatWouldHaveDoneDifferently;
       session.nextCallFocus = data.nextCallFocus;
-      // Match each moment back to a real detected-event timestamp by exact
-      // text — the LLM never sees or invents a timestamp itself, only which
-      // already-detected signal (if any) a moment corresponds to.
-      session.keyMoments = data.keyMoments.map((m) => {
-        const matchedEvent = session.events.find((e) => e.text === m.relatedEventText);
-        return {
-          momentType: m.momentType,
-          text: m.text,
-          recommendation: m.recommendation,
-          occurredAt: matchedEvent?.detectedAt,
-        };
-      }) as never;
+      // A moment's time is its transcript line's (never the model's): shown as time into the call.
+      const callStart = (session as unknown as { createdAt?: Date }).createdAt?.getTime();
+      session.keyMoments = data.keyMoments.map((m) => ({
+        momentType: m.momentType,
+        text: m.text,
+        recommendation: m.recommendation,
+        occurredAt: typeof m.at === 'number' && callStart !== undefined ? new Date(callStart + m.at * 1000) : undefined,
+      })) as never;
       session.coachingSummary = data.coachingSummary;
       session.voiceScript = data.voiceScript;
       session.voiceScripts = [];

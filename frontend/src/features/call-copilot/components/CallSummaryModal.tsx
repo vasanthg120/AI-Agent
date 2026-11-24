@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import toast from 'react-hot-toast';
 import { motion } from 'framer-motion';
@@ -14,20 +14,21 @@ import {
   FiMessageSquare,
   FiMic,
   FiPhoneCall,
+  FiPlay,
   FiSearch,
   FiTarget,
   FiUploadCloud,
   FiUser,
 } from 'react-icons/fi';
-import { Modal, Spinner } from '@/components/ui';
+import { Modal } from '@/components/ui';
 import {
-  callCopilotService,
   type CallFollowUpAction,
   type CallSummaryResult,
   type CallTranscriptSegment,
   type CoachingReport,
 } from '@/services/callCopilotService';
 import { OUTCOME_META, describeSource, formatCallDate, type CallKind } from '../callMeta';
+import { RecordingPlayer, type RecordingPlayerHandle } from './recording/RecordingPlayer';
 import { EASE_OUT, FADE_UP, ROW_IN, staggerChildren } from '../motion';
 import { AiCoachPanel } from './AiCoachPanel';
 import { CustomerSnapshotCard, useCustomerSnapshot } from './CustomerSnapshotCard';
@@ -208,6 +209,8 @@ export function CallSummaryModal({
                 segments={segments}
                 sessionId={sessionId}
                 isUpload={source === 'upload'}
+                createdAt={createdAt}
+                speakerRoles={coaching?.evaluation?.understanding?.speakers}
               />
             )}
           </motion.div>
@@ -367,28 +370,61 @@ interface Turn {
   speaker?: string;
   side: 'a' | 'b';
   text: string;
+  // Seconds into the call the turn starts (the Call Intelligence report quotes the same times).
+  at?: number;
 }
 
 // One bubble per stretch of speech: consecutive segments from the same speaker
 // join up (a live call arrives in ~7-second clips, which would otherwise be a
-// bubble each). Speakers take turns on the left and right.
-function buildTurns(segments: CallTranscriptSegment[]): Turn[] {
+// bubble each). Speakers take turns on the left and right. A turn's time is its
+// first segment's: Sarvam's start time for a recording, or — for a live call —
+// when the previous clip arrived, from the start of the call (as the backend's
+// call-intelligence.ts works it out, so the report's quotes and these agree).
+const UNLABELLED_BLOCK_SECONDS = 20;
+
+function buildTurns(segments: CallTranscriptSegment[], createdAt?: string, starts: Record<string, number> = {}): Turn[] {
   const order: string[] = [];
   const turns: Turn[] = [];
-  for (const segment of segments) {
+  const start = createdAt ? new Date(createdAt).getTime() : undefined;
+  let previousArrival: number | undefined;
+  for (const segment of [...segments].sort((a, b) => a.sequence - b.sequence)) {
+    const arrival = segment.recordedAt ? new Date(segment.recordedAt).getTime() : undefined;
+    // Its place in the recording when known exactly (the joined recording), else its own timing, else when it arrived.
+    const inRecording = starts[String(segment.sequence)];
+    const at =
+      typeof inRecording === 'number'
+        ? inRecording
+        : typeof segment.startSeconds === 'number'
+        ? segment.startSeconds
+        : segment.speaker === undefined && start !== undefined
+          ? previousArrival === undefined
+            ? 0
+            : Math.max(0, Math.round((previousArrival - start) / 1000))
+          : undefined;
+    if (arrival !== undefined) previousArrival = arrival;
     if (!segment.text) continue;
     const speaker = segment.speaker;
     if (speaker !== undefined && !order.includes(speaker)) order.push(speaker);
     const side = speaker !== undefined && order.indexOf(speaker) % 2 === 1 ? 'b' : 'a';
     const last = turns[turns.length - 1];
-    if (last && last.speaker === speaker) last.text += ` ${segment.text}`;
-    else turns.push({ speaker, side, text: segment.text });
+    // Speech with no speaker labels (a live call, one microphone) would otherwise be one bubble for the
+    // whole call: a new one every ~20 seconds keeps each moment the report quotes findable by its time.
+    const longUnlabelled = speaker === undefined && last?.at !== undefined && at !== undefined && at - last.at >= UNLABELLED_BLOCK_SECONDS;
+    if (last && last.speaker === speaker && !longUnlabelled) last.text += ` ${segment.text}`;
+    else turns.push({ speaker, side, text: segment.text, at });
   }
   return turns;
 }
 
-function speakerLabel(speaker: string): string {
-  return /^\d+$/.test(speaker) ? `Speaker ${Number(speaker) + 1}` : speaker;
+function speakerLabel(speaker: string, roles?: { label: string; role: string }[]): string {
+  const label = /^\d+$/.test(speaker) ? `Speaker ${Number(speaker) + 1}` : speaker;
+  const role = roles?.find((r) => r.label === label)?.role;
+  return role === 'agent' ? `Agent (${label})` : role === 'customer' ? `Customer (${label})` : label;
+}
+
+function turnClock(seconds: number): string {
+  const s = Math.max(0, Math.round(seconds));
+  return `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
 }
 
 function escapeRegExp(text: string): string {
@@ -414,29 +450,34 @@ function TranscriptTab({
   segments,
   sessionId,
   isUpload,
+  createdAt,
+  speakerRoles,
 }: {
   transcript?: string;
   segments?: CallTranscriptSegment[];
   sessionId?: string;
   isUpload: boolean;
+  createdAt?: string;
+  // Who each speaker is, as the Call Intelligence review worked out.
+  speakerRoles?: { label: string; role: string }[];
 }) {
   const [query, setQuery] = useState('');
+  const player = useRef<RecordingPlayerHandle | null>(null);
+  // Where each transcript line starts in the recording (a live call's parts joined on the server), and where playback is.
+  const [starts, setStarts] = useState<Record<string, number>>({});
+  const [playhead, setPlayhead] = useState<number | null>(null);
 
-  // Ordered, deduped list of every segment's audioFileId — for a live call
-  // this is every ~7s clip in sequence (AudioPlayer plays them back-to-back
-  // for continuous full-call playback); for an uploaded call every segment
-  // already shares the SAME id (the one original file), so this naturally
-  // collapses to a single-element list with no special-casing needed here.
+  // Every part of the call in order — only used if the server can't say what the recording is.
   const audioFileIds = useMemo(() => {
     if (!segments?.length) return [];
     const ids: string[] = [];
-    for (const s of segments) {
-      if (s.audioFileId && ids[ids.length - 1] !== s.audioFileId) ids.push(s.audioFileId);
+    for (const s of [...segments].sort((a, b) => a.sequence - b.sequence)) {
+      if (s.audioFileId && !ids.includes(s.audioFileId)) ids.push(s.audioFileId);
     }
     return ids;
   }, [segments]);
 
-  const turns = useMemo(() => (segments?.length ? buildTurns(segments) : []), [segments]);
+  const turns = useMemo(() => (segments?.length ? buildTurns(segments, createdAt, starts) : []), [segments, createdAt, starts]);
   const fullText = turns.length > 0 ? turns.map((t) => t.text).join('\n') : (transcript ?? '');
   const matchCount = useMemo(() => {
     const needle = query.trim();
@@ -444,15 +485,35 @@ function TranscriptTab({
     return (fullText.match(new RegExp(escapeRegExp(needle), 'gi')) ?? []).length;
   }, [fullText, query]);
 
+  // The line being played: the last one that has started.
+  const activeTurn = useMemo(() => {
+    if (playhead === null) return -1;
+    let active = -1;
+    turns.forEach((t, i) => {
+      if (t.at !== undefined && t.at <= playhead + 0.25) active = i;
+    });
+    return active;
+  }, [turns, playhead]);
+  const turnRefs = useRef<Array<HTMLDivElement | null>>([]);
+  useEffect(() => {
+    if (activeTurn >= 0) turnRefs.current[activeTurn]?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  }, [activeTurn]);
+
   return (
     <div className={styles.transcriptSection}>
       {sessionId && audioFileIds.length > 0 && (
         <div className={styles.audioCard}>
           <span className={styles.audioLabel}>
-            <FiHeadphones aria-hidden /> Recording
+            <FiHeadphones aria-hidden /> {isUpload ? 'Recording' : 'Call recording'}
           </span>
-          <AudioPlayer sessionId={sessionId} audioFileIds={audioFileIds} />
-          {isUpload && <span className={styles.hint}>One recording for the whole call.</span>}
+          <RecordingPlayer
+            ref={player}
+            sessionId={sessionId}
+            fallbackParts={audioFileIds}
+            onInfo={(info) => setStarts(info.segmentStarts)}
+            onTime={setPlayhead}
+            downloadName={`call-${(createdAt ?? '').slice(0, 10) || sessionId}`}
+          />
         </div>
       )}
 
@@ -482,8 +543,33 @@ function TranscriptTab({
       {turns.length > 0 ? (
         <motion.div className={styles.turns} variants={staggerChildren(0.03, 0)} initial="hidden" animate="show">
           {turns.map((turn, i) => (
-            <motion.div key={i} className={clsx(styles.turn, turn.side === 'b' && styles.turnB)} variants={FADE_UP}>
-              {turn.speaker !== undefined && <span className={styles.speakerLabel}>{speakerLabel(turn.speaker)}</span>}
+            <motion.div
+              key={i}
+              ref={(node: HTMLDivElement | null) => {
+                turnRefs.current[i] = node;
+              }}
+              className={clsx(styles.turn, turn.side === 'b' && styles.turnB, i === activeTurn && styles.turnActive)}
+              variants={FADE_UP}
+            >
+              {(turn.speaker !== undefined || turn.at !== undefined) && (
+                <span className={styles.speakerLabel}>
+                  {turn.at !== undefined &&
+                    (sessionId && audioFileIds.length > 0 ? (
+                      <button
+                        type="button"
+                        className={clsx(styles.turnTime, styles.turnSeek)}
+                        onClick={() => player.current?.seek(turn.at!, true)}
+                        aria-label={`Play from ${turnClock(turn.at)}`}
+                        title="Play from here"
+                      >
+                        <FiPlay aria-hidden /> {turnClock(turn.at)}
+                      </button>
+                    ) : (
+                      <span className={styles.turnTime}>{turnClock(turn.at)}</span>
+                    ))}
+                  {turn.speaker !== undefined && speakerLabel(turn.speaker, speakerRoles)}
+                </span>
+              )}
               <div className={styles.bubble}>{highlight(turn.text, query)}</div>
             </motion.div>
           ))}
@@ -492,74 +578,6 @@ function TranscriptTab({
         <p className={styles.paragraph}>
           {transcript ? highlight(transcript, query) : 'No transcript was captured for this call.'}
         </p>
-      )}
-    </div>
-  );
-}
-
-// Fetches each recording file as an authenticated blob (see
-// callCopilotService.getAudioBlob's own comment on why a plain <audio
-// src="..."> can't hit this JwtAuthGuard-protected endpoint directly) and
-// plays it from a local object URL — same pattern VoiceInputModal.tsx's
-// playBlob already uses for TTS playback.
-//
-// A live call has NO single continuous recording — every ~7s segment is its
-// own independently-valid file (see call-copilot.gateway.ts's comment on
-// why: stop/restart MediaRecorder instances can't be byte-concatenated into
-// one valid container). Playing only audioFileIds[0] plays just the first
-// ~7 seconds, not the call. This plays the list back-to-back instead —
-// advancing on 'ended' — which gives continuous full-call playback without
-// server-side re-encoding/ffmpeg. An upload has exactly one file
-// (audioFileIds.length === 1) and this collapses to a plain single player.
-function AudioPlayer({ sessionId, audioFileIds }: { sessionId: string; audioFileIds: string[] }) {
-  const [index, setIndex] = useState(0);
-  const [url, setUrl] = useState<string | null>(null);
-  const [failed, setFailed] = useState(false);
-
-  useEffect(() => {
-    setIndex(0);
-  }, [sessionId, audioFileIds]);
-
-  useEffect(() => {
-    const fileId = audioFileIds[index];
-    if (!fileId) return;
-    let objectUrl: string | null = null;
-    let cancelled = false;
-    setUrl(null);
-    setFailed(false);
-
-    callCopilotService
-      .getAudioBlob(sessionId, fileId)
-      .then((blob) => {
-        if (cancelled) return;
-        objectUrl = URL.createObjectURL(blob);
-        setUrl(objectUrl);
-      })
-      .catch(() => {
-        if (!cancelled) setFailed(true);
-      });
-
-    return () => {
-      cancelled = true;
-      if (objectUrl) URL.revokeObjectURL(objectUrl);
-    };
-  }, [sessionId, audioFileIds, index]);
-
-  if (failed) return <p className={styles.hint}>The recording couldn&apos;t be loaded.</p>;
-  if (!url) return <Spinner size={16} />;
-  return (
-    <div className={styles.audioPlayerWrap}>
-      <audio
-        controls
-        autoPlay={index > 0}
-        src={url}
-        className={styles.audioPlayer}
-        onEnded={() => setIndex((i) => (i + 1 < audioFileIds.length ? i + 1 : i))}
-      />
-      {audioFileIds.length > 1 && (
-        <span className={styles.hint}>
-          Part {index + 1} of {audioFileIds.length} — plays through automatically
-        </span>
       )}
     </div>
   );

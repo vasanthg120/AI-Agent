@@ -87,6 +87,39 @@ let NotificationsService = NotificationsService_1 = class NotificationsService {
             this.logger.warn(`Dialer push failed: ${err.message}`);
         }
     }
+    async notifyAssistant(userId, organizationId, message, channels) {
+        let bell = false;
+        let push = false;
+        if (channels.bell) {
+            const notification = await this.notificationModel.create({
+                userId,
+                organizationId,
+                kind: message.kind,
+                title: message.title,
+                description: message.body,
+                source: 'haive',
+                entityType: 'assistantBriefing',
+                entityId: message.slot,
+            });
+            this.chatGateway.emitToUser(userId, 'notification', notification);
+            bell = true;
+        }
+        if (channels.phone) {
+            try {
+                const [user, orgPolicy] = await Promise.all([this.usersService.findById(userId), this.organizationsService.getNotificationPolicy(organizationId)]);
+                const prefs = user?.notificationPreferences ?? DEFAULT_PREFS;
+                const devices = (user?.pushSubscriptions ?? []).filter((s) => !s.app && ((s.deviceType === 'desktop' && prefs.desktopPush) || (s.deviceType === 'mobile' && prefs.mobilePush)));
+                if (user && orgPolicy.pushEnabled && this.webPushService.enabled && devices.length > 0) {
+                    await this.webPushService.sendToUser(userId, { title: message.title, body: message.body, url: `/dashboard?haive=${encodeURIComponent(message.slot)}` }, { allowDesktop: prefs.desktopPush, allowMobile: prefs.mobilePush });
+                    push = true;
+                }
+            }
+            catch (err) {
+                this.logger.warn(`Haive push failed for ${userId}: ${err.message}`);
+            }
+        }
+        return { bell, push };
+    }
     async markAllRead(userId) {
         await this.notificationModel.updateMany({ userId, read: false }, { read: true }).exec();
     }

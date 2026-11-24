@@ -10,6 +10,7 @@ import { CallCopilotController } from './call-copilot.controller';
 import { CallCopilotGateway } from './call-copilot.gateway';
 import { CallCopilotService } from './call-copilot.service';
 import { CallCopilotUploadService } from './call-copilot-upload.service';
+import { CallRecordingService } from './recording/call-recording.service';
 import { CallSession, CallSessionSchema } from './schemas/call-session.schema';
 import { TeamScopeModule } from '../team-activity/team-scope.module';
 
@@ -36,7 +37,7 @@ import { TeamScopeModule } from '../team-activity/team-scope.module';
     TeamScopeModule,
   ],
   controllers: [CallCopilotController],
-  providers: [CallCopilotService, CallCopilotUploadService, CallCopilotGateway, GridFsService],
+  providers: [CallCopilotService, CallCopilotUploadService, CallCopilotGateway, GridFsService, CallRecordingService],
   // The Plivo integration turns a recorded phone call into a session through
   // the same upload pipeline (see PlivoModule).
   exports: [CallCopilotUploadService],

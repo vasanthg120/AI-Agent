@@ -44,7 +44,8 @@ export interface UseSegmentedRecordingResult {
   stream: MediaStream | null;
   error: MicErrorReason | null;
   start: () => Promise<MicErrorReason | null>;
-  stop: () => void;
+  // Resolves once the last part has been handed over.
+  stop: () => Promise<void>;
 }
 
 /** Captures audio in a continuous loop of short, independently-complete
@@ -127,14 +128,32 @@ export function useSegmentedRecording(onSegment: (blob: Blob, sequence: number) 
     }
   }, [armSegment]);
 
-  const stop = useCallback(() => {
+  /**
+   * Stops recording. Resolves once the last part (the seconds since the previous one) has
+   * been handed to onSegment — so the call isn't ended before its final words are sent.
+   */
+  const stop = useCallback((): Promise<void> => {
     stoppingRef.current = true;
     if (timerRef.current) clearTimeout(timerRef.current);
-    if (recorderRef.current && recorderRef.current.state !== 'inactive') recorderRef.current.stop();
-    streamRef.current?.getTracks().forEach((t) => t.stop());
-    streamRef.current = null;
+    const recorder = recorderRef.current;
+    const lastPart =
+      recorder && recorder.state !== 'inactive'
+        ? new Promise<void>((resolve) => {
+            // onstop (armSegment's) hands the part over first; this runs after it.
+            recorder.addEventListener('stop', () => setTimeout(resolve, 0), { once: true });
+            // Never hold "End call" up for long, whatever the browser does.
+            setTimeout(resolve, 3000);
+            recorder.stop();
+          })
+        : Promise.resolve();
+    // The microphone goes off only after the recorder has flushed its last data.
+    void lastPart.then(() => {
+      streamRef.current?.getTracks().forEach((t) => t.stop());
+      streamRef.current = null;
+    });
     setStream(null);
     setIsRecording(false);
+    return lastPart;
   }, []);
 
   return { isRecording, stream, error, start, stop };

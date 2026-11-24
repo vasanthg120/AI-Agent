@@ -1,0 +1,201 @@
+/* Haive's animated avatar (see VoiceOrb.tsx). --level (0–1) is set from the live audio. */
+
+.wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.orb {
+  --level: 0;
+  --glow: var(--color-accent);
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--size);
+  height: var(--size);
+  flex-shrink: 0;
+}
+
+.orb[data-state='listening'] {
+  --glow: var(--color-danger);
+}
+
+.core {
+  position: relative;
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  background: radial-gradient(circle at 30% 25%, #2d2a26, #0f0e0c 70%);
+  box-shadow:
+    0 0 0 2px color-mix(in srgb, var(--glow) 35%, transparent),
+    0 6px 18px color-mix(in srgb, var(--glow) 28%, transparent);
+  transition: box-shadow 260ms var(--ease-out);
+  animation: breathe 3.6s ease-in-out infinite;
+}
+
+.dark .core {
+  box-shadow:
+    0 0 0 2px color-mix(in srgb, var(--glow) 55%, transparent),
+    0 6px 22px color-mix(in srgb, var(--glow) 40%, transparent);
+}
+
+.core img {
+  width: 56%;
+  height: 56%;
+  object-fit: contain;
+  user-select: none;
+}
+
+/* The halo: swells with the voice it hears (or its own). */
+.halo {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  border-radius: 50%;
+  background: radial-gradient(circle, color-mix(in srgb, var(--glow) 45%, transparent) 0%, transparent 70%);
+  opacity: 0;
+  transform: scale(1);
+  transition: opacity 240ms var(--ease-out);
+}
+
+.orb[data-state='listening'] .halo,
+.orb[data-state='speaking'] .halo {
+  opacity: calc(0.35 + var(--level) * 0.65);
+  transform: scale(calc(1.15 + var(--level) * 0.75));
+}
+
+/* Without a measured stream, the halo moves on its own. */
+.orb[data-state='speaking'][data-measured='false'] .halo {
+  animation: swell 1.1s ease-in-out infinite;
+}
+
+.orb[data-state='listening'][data-measured='false'] .halo {
+  animation: swell 1.8s ease-in-out infinite;
+}
+
+/* Speaking: ripples spread outwards. */
+.ripple {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  border: 2px solid color-mix(in srgb, var(--glow) 60%, transparent);
+  opacity: 0;
+  pointer-events: none;
+}
+
+.orb[data-state='speaking'] .ripple {
+  animation: ripple 1.8s var(--ease-out) infinite;
+}
+
+.orb[data-state='speaking'] .rippleLate {
+  animation-delay: 0.9s;
+}
+
+/* Thinking: an arc circles the avatar. */
+.arc {
+  position: absolute;
+  inset: -5px;
+  z-index: 1;
+  border-radius: 50%;
+  background: conic-gradient(from 0deg, transparent 0deg, var(--glow) 90deg, transparent 160deg);
+  -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 3px), #000 calc(100% - 2px));
+  mask: radial-gradient(farthest-side, transparent calc(100% - 3px), #000 calc(100% - 2px));
+  opacity: 0;
+  transition: opacity 240ms var(--ease-out);
+}
+
+.orb[data-state='thinking'] .arc {
+  opacity: 1;
+  animation: spin 1.1s linear infinite;
+}
+
+.orb[data-state='thinking'] .core {
+  animation: breathe 1.4s ease-in-out infinite;
+}
+
+.label {
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--color-text-primary);
+  white-space: nowrap;
+}
+
+.dark + .label,
+.wrap:has(.dark) .label {
+  color: #fff;
+}
+
+.dots::after {
+  content: '';
+  display: inline-block;
+  width: 1.2em;
+  text-align: left;
+  animation: dots 1.2s steps(4, end) infinite;
+}
+
+@keyframes breathe {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.04);
+  }
+}
+
+@keyframes swell {
+  0%,
+  100% {
+    opacity: 0.35;
+    transform: scale(1.15);
+  }
+  50% {
+    opacity: 0.8;
+    transform: scale(1.55);
+  }
+}
+
+@keyframes ripple {
+  from {
+    opacity: 0.75;
+    transform: scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: scale(1.9);
+  }
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes dots {
+  0% {
+    content: '';
+  }
+  25% {
+    content: '.';
+  }
+  50% {
+    content: '..';
+  }
+  75% {
+    content: '...';
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .orb *,
+  .dots::after {
+    animation: none !important;
+  }
+}

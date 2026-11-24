@@ -367,4 +367,10 @@ export default () => ({
     // click — "Draft follow-up", "Generate draft", "Regenerate" — does not depend on this.
     aiFollowupActionsEnabled: (process.env.AI_FOLLOWUP_ACTIONS_ENABLED ?? 'false').toLowerCase() === 'true',
   },
+  // Haive's proactive conversations: each person's scheduled briefings and attention alerts
+  // (AI Conversations settings), sent as a bell + push notification with no AI cost — the
+  // briefing is written only when it's opened. On unless ASSISTANT_PROACTIVE_ENABLED=false.
+  assistant: {
+    proactiveEnabled: (process.env.ASSISTANT_PROACTIVE_ENABLED ?? 'true').toLowerCase() !== 'false',
+  },
 });

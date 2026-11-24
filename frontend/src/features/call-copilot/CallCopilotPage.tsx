@@ -88,7 +88,7 @@ export function CallCopilotPage() {
   // Never leave a mic hot if the user navigates away mid-call.
   useEffect(() => {
     return () => {
-      recording.stop();
+      void recording.stop();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -115,8 +115,8 @@ export function CallCopilotPage() {
   };
 
   const handleEnd = () => {
-    recording.stop();
-    endCall();
+    // The call ends after its last few seconds have been sent (never cut off).
+    void endCall(recording.stop());
   };
 
   const handleCloseSummary = () => {

@@ -36,6 +36,11 @@ export class WebPushService {
     webpush.setVapidDetails(subject!, publicKey!, privateKey!);
   }
 
+  /** Push can be sent at all here (the VAPID keys are set). */
+  get enabled(): boolean {
+    return this.configured;
+  }
+
   /** Sends to every subscription of the allowed device type(s) — filtering
    * happens here, not by only ever storing "allowed" subscriptions, so a
    * toggle flip takes effect on the very next notification without needing

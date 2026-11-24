@@ -43,6 +43,7 @@ export const ROUTES = {
   settingsGeneral: '/settings/general',
   settingsNotifications: '/settings/notifications',
   settingsVoice: '/settings/voice',
+  settingsAiConversations: '/settings/ai-conversations',
   settingsCalling: '/settings/calling',
   settingsDataSources: '/settings/data-sources',
   settingsSecurity: '/settings/security',

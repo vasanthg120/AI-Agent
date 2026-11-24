@@ -19,6 +19,7 @@ exports.NOTIFICATION_ENTITY_TYPES = [
     'task',
     'outlookAccount',
     'dailyReport',
+    'assistantBriefing',
 ];
 let Notification = class Notification {
 };

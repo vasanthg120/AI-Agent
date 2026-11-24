@@ -28,19 +28,21 @@ export interface ScoreRingProps {
   // Greyed out — a score that says "nothing to score" rather than "scored badly".
   muted?: boolean;
   showOutOf?: boolean;
+  // What the score is out of: 10 (the default, every earlier score) or 100 (Call Intelligence).
+  max?: number;
   className?: string;
 }
 
 // A ring that fills — and counts up — to the score when it appears. One motion
 // value drives both the arc and the number, so they can never disagree.
-export function ScoreRing({ value, size = 132, strokeWidth = 10, muted, showOutOf = true, className }: ScoreRingProps) {
-  const clamped = Math.min(10, Math.max(0, value));
+export function ScoreRing({ value, size = 132, strokeWidth = 10, muted, showOutOf = true, max = 10, className }: ScoreRingProps) {
+  const clamped = Math.min(max, Math.max(0, value));
   const radius = (size - strokeWidth) / 2;
   const center = size / 2;
   const wholeNumber = Number.isInteger(clamped);
 
   const progress = useMotionValue(0);
-  const arc = useTransform(progress, (p) => p / 10);
+  const arc = useTransform(progress, (p) => p / max);
   const label = useTransform(progress, (p) => (wholeNumber ? String(Math.round(p)) : p.toFixed(1)));
 
   useEffect(() => {
@@ -48,14 +50,14 @@ export function ScoreRing({ value, size = 132, strokeWidth = 10, muted, showOutO
     return () => controls.stop();
   }, [clamped, progress]);
 
-  const tone: ScoreTone = muted ? 'muted' : scoreTone(clamped);
+  const tone: ScoreTone = muted ? 'muted' : scoreTone((clamped / max) * 10);
 
   return (
     <div
       className={clsx(styles.ring, styles[tone], className)}
       style={{ width: size, height: size }}
       role="img"
-      aria-label={`Score ${clamped} out of 10`}
+      aria-label={`Score ${clamped} out of ${max}`}
     >
       <svg className={styles.svg} width={size} height={size} viewBox={`0 0 ${size} ${size}`} aria-hidden>
         <circle className={styles.track} cx={center} cy={center} r={radius} strokeWidth={strokeWidth} fill="none" />
@@ -76,7 +78,7 @@ export function ScoreRing({ value, size = 132, strokeWidth = 10, muted, showOutO
         <motion.span className={styles.value} style={{ fontSize: size * 0.3 }}>
           {label}
         </motion.span>
-        {showOutOf && <span className={styles.outOf}>out of 10</span>}
+        {showOutOf && <span className={styles.outOf}>out of {max}</span>}
       </div>
     </div>
   );

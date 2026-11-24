@@ -201,5 +201,8 @@ exports.default = () => ({
         escalationEnabled: (process.env.EMAIL_SLA_ESCALATION_ENABLED ?? 'false').toLowerCase() === 'true',
         aiFollowupActionsEnabled: (process.env.AI_FOLLOWUP_ACTIONS_ENABLED ?? 'false').toLowerCase() === 'true',
     },
+    assistant: {
+        proactiveEnabled: (process.env.ASSISTANT_PROACTIVE_ENABLED ?? 'true').toLowerCase() !== 'false',
+    },
 });
 //# sourceMappingURL=configuration.js.map

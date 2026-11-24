@@ -24,6 +24,8 @@ export const NOTIFICATION_ENTITY_TYPES = [
   'task',
   'outlookAccount',
   'dailyReport',
+  // Haive reaching out (a scheduled briefing or an alert): entityId is the briefing's slot.
+  'assistantBriefing',
 ] as const;
 export type NotificationEntityType = (typeof NOTIFICATION_ENTITY_TYPES)[number];
 

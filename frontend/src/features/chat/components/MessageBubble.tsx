@@ -134,7 +134,8 @@ export function MessageBubble({ message, isLast }: MessageBubbleProps) {
 
         {!!message.toolsUsed?.length && (
           <div className={styles.toolsRow}>
-            {message.toolsUsed.map((tool) => (
+            {/* A tool used more than once (two CRM lookups) shows once. */}
+            {[...new Set(message.toolsUsed)].map((tool) => (
               <Badge key={tool} variant="info">
                 {tool}
               </Badge>

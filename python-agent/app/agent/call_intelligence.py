@@ -133,7 +133,7 @@ _EVIDENCE = {
     "type": "object",
     "properties": {
         "lineId": {"type": "string", "description": "The transcript line it comes from, e.g. 'L12'."},
-        "quote": {"type": "string", "description": "Words copied EXACTLY from that line (a short excerpt, under 25 words). Never paraphrase inside a quote."},
+        "quote": {"type": "string", "description": "Words copied EXACTLY from that line — the few words that prove the point (3-12 words). Never paraphrase inside a quote."},
         "judgement": {"type": "string", "enum": ["positive", "negative"]},
     },
     "required": ["lineId", "quote", "judgement"],
@@ -178,6 +178,8 @@ EVALUATION_TOOL = {
                 "properties": {
                     "customerQuestions": {
                         "type": "array",
+                        "maxItems": 5,
+                        "description": "The customer's real questions (at most 5).",
                         "items": {
                             "type": "object",
                             "properties": {
@@ -190,6 +192,7 @@ EVALUATION_TOOL = {
                     },
                     "objections": {
                         "type": "array",
+                        "maxItems": 4,
                         "items": {
                             "type": "object",
                             "properties": {
@@ -203,6 +206,7 @@ EVALUATION_TOOL = {
                     },
                     "buyingSignals": {
                         "type": "array",
+                        "maxItems": 4,
                         "items": {
                             "type": "object",
                             "properties": {
@@ -215,6 +219,7 @@ EVALUATION_TOOL = {
                     },
                     "commitments": {
                         "type": "array",
+                        "maxItems": 4,
                         "items": {
                             "type": "object",
                             "properties": {
@@ -228,6 +233,7 @@ EVALUATION_TOOL = {
                     },
                     "communicationIssues": {
                         "type": "array",
+                        "maxItems": 3,
                         "items": {
                             "type": "object",
                             "properties": {
@@ -271,8 +277,8 @@ EVALUATION_TOOL = {
                             "type": "integer",
                             "description": "0-10 against professional sales standards. 5 = basic, expected behaviour. 8+ only for clearly skilled work shown in the quotes; 10 is rare. Ignored when not assessable.",
                         },
-                        "rationale": {"type": "string", "description": "Why this mark, in two or three plain sentences — what happened, why it was good or bad, its effect on the customer or the sale."},
-                        "evidence": {"type": "array", "items": _EVIDENCE, "description": "1-3 quotes the mark rests on. A mark of 8+ needs at least one positive quote."},
+                        "rationale": {"type": "string", "description": "Why this mark, in one or two plain sentences (under 45 words): what happened and its effect on the customer or the sale."},
+                        "evidence": {"type": "array", "maxItems": 2, "items": _EVIDENCE, "description": "1-2 quotes the mark rests on. A mark of 8+ needs at least one positive quote."},
                     },
                     "required": ["key", "assessable", "notAssessableReason", "score", "rationale", "evidence"],
                 },
@@ -283,6 +289,8 @@ EVALUATION_TOOL = {
                 "properties": {
                     "missedOpportunities": {
                         "type": "array",
+                        "maxItems": 4,
+                        "description": "The most important ones (at most 4).",
                         "items": {
                             "type": "object",
                             "properties": {
@@ -309,7 +317,7 @@ EVALUATION_TOOL = {
                             "required": ["kind", "text", "lineId", "quote"],
                         },
                     },
-                    "expertWouldHaveDone": {"type": "array", "items": {"type": "string"}, "description": "What an experienced salesperson would have done differently in this call."},
+                    "expertWouldHaveDone": {"type": "array", "maxItems": 2, "items": {"type": "string"}, "description": "What an experienced salesperson would have done differently in this call (1-2 points)."},
                 },
                 "required": ["missedOpportunities", "seriousConcerns", "expertWouldHaveDone"],
             },
@@ -332,6 +340,7 @@ EVALUATION_TOOL = {
                     "verdict": {"type": "string", "description": "One honest sentence on how the agent did. Not softened."},
                     "strengths": {
                         "type": "array",
+                        "maxItems": 4,
                         "description": "What the agent genuinely did well, each with its quote. Empty if nothing stood out — never pad.",
                         "items": {
                             "type": "object",
@@ -341,6 +350,7 @@ EVALUATION_TOOL = {
                     },
                     "weaknesses": {
                         "type": "array",
+                        "maxItems": 4,
                         "items": {
                             "type": "object",
                             "properties": {
@@ -355,7 +365,8 @@ EVALUATION_TOOL = {
                     },
                     "coaching": {
                         "type": "array",
-                        "description": "2-4 precise changes. Never 'improve communication' or 'listen better' — say exactly what to do differently and how.",
+                        "maxItems": 3,
+                        "description": "2-3 precise changes. Never 'improve communication' or 'listen better' — say exactly what to do differently and how.",
                         "items": {
                             "type": "object",
                             "properties": {
@@ -368,7 +379,8 @@ EVALUATION_TOOL = {
                     },
                     "nextActions": {
                         "type": "array",
-                        "description": "Follow-ups this call calls for (send a quote, schedule a call, escalate…). Things still to do — never mark anything done.",
+                        "maxItems": 4,
+                        "description": "Follow-ups this call calls for (send a quote, schedule a call, escalate…), at most 4. Things still to do — never mark anything done.",
                         "items": {
                             "type": "object",
                             "properties": {
@@ -381,7 +393,7 @@ EVALUATION_TOOL = {
                         },
                     },
                     "summaryForAgent": {"type": "string", "description": "3-5 sentences, spoken to the agent directly: how the call went, the biggest problem, the one thing to change."},
-                    "voiceScript": {"type": "string", "description": "The same, as a manager would say it out loud (75-200 words): the score band, the strongest point, the biggest miss, one focus. Plain speech, no lists."},
+                    "voiceScript": {"type": "string", "description": "The same, as a manager would say it out loud (60-120 words): the strongest point, the biggest miss, one focus. Plain speech, no lists."},
                 },
                 "required": ["outcome", "verdict", "strengths", "weaknesses", "coaching", "nextActions", "summaryForAgent", "voiceScript"],
             },
@@ -411,8 +423,14 @@ EVALUATION_SYSTEM_PROMPT = (
     "invent a quote, a statement, a number, a time or an outcome. Mark interpretations as yours ('this suggests…').\n"
     "- The transcript may not separate speakers ('Unlabelled'): then work out who is speaking from what is said, "
     "and say so where it matters rather than guessing confidently.\n"
-    "- Write plainly and directly, the way a respected manager talks: specific, never generic."
+    "- Write plainly and directly, the way a respected manager talks: specific, never generic.\n"
+    "- Be brief: short rationales, quotes of a few words. The conclusion (outcome, strengths, weaknesses, "
+    "coaching, next actions) is required — leave room for it."
 )
+
+# Room for the whole answer (a transcript in Tamil or Hindi script costs several tokens a word); a
+# cut-off answer is retried and then fails, never published as a hollow report.
+EVALUATION_MAX_TOKENS = 14000
 
 
 def _evaluation_input(lines_text: str, truncated: bool, meta: dict, context_blob: str, detected_events: list[str], summary: str) -> str:
@@ -549,6 +567,7 @@ def verify(evaluation: dict, lines: list[dict]) -> tuple[dict, dict]:
     out["challenge"] = {"missedOpportunities": missed, "seriousConcerns": concerns, "expertWouldHaveDone": challenge.get("expertWouldHaveDone") or []}
 
     conclusion = evaluation.get("conclusion") or {}
+    outcome = conclusion.get("outcome") if isinstance(conclusion.get("outcome"), dict) else None
     strengths = []
     for s in conclusion.get("strengths") or []:
         ev = v.evidence(s.get("lineId", ""), s.get("quote", ""), "strength")
@@ -559,7 +578,22 @@ def verify(evaluation: dict, lines: list[dict]) -> tuple[dict, dict]:
     for w in conclusion.get("weaknesses") or []:
         ev = v.evidence(w.get("lineId", ""), w.get("quote", ""), "weakness") if w.get("quote") else None
         weaknesses.append({**{k: w.get(k, "") for k in ("text", "severity", "impact")}, "evidence": ev})
-    out["conclusion"] = {**conclusion, "strengths": strengths, "weaknesses": weaknesses}
+    out["conclusion"] = {
+        "outcome": {
+            "result": outcome.get("result") if outcome.get("result") in OUTCOMES else "unclear",
+            "explanation": outcome.get("explanation", ""),
+            "performanceVsOutcome": outcome.get("performanceVsOutcome", ""),
+        }
+        if outcome
+        else None,
+        "verdict": conclusion.get("verdict") or "",
+        "strengths": strengths,
+        "weaknesses": weaknesses,
+        "coaching": [c for c in conclusion.get("coaching") or [] if isinstance(c, dict)],
+        "nextActions": [a for a in conclusion.get("nextActions") or [] if isinstance(a, dict)],
+        "summaryForAgent": conclusion.get("summaryForAgent") or "",
+        "voiceScript": conclusion.get("voiceScript") or "",
+    }
 
     record = {"quotesChecked": v.checked, "quotesDropped": len(v.dropped), "dropped": v.dropped[:20]}
     return out, record
@@ -858,6 +892,8 @@ def evaluate_call(
         name="call_intelligence_evaluate",
         organization_id=organization_id,
         user_id=user_id,
+        max_tokens=EVALUATION_MAX_TOKENS,
+        require_complete=True,
     )
     report, record = verify(draft, lines)
     adjustments: list[dict] = []

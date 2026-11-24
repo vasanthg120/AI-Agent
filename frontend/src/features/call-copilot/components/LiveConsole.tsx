@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
 import clsx from 'clsx';
 import { FiActivity, FiAlertCircle, FiFileText, FiGlobe, FiSquare, FiUser } from 'react-icons/fi';
@@ -8,7 +8,8 @@ import { FADE_UP, staggerChildren } from '../motion';
 import { CustomerContextCard } from './CustomerContextCard';
 import { CustomerSnapshotCard } from './CustomerSnapshotCard';
 import { EventsFeed } from './EventsFeed';
-import { LevelMeter } from './LevelMeter';
+import { VoiceOrb, type VoiceOrbState } from '@/components/voice/VoiceOrb';
+import { VoiceWaveform } from '@/components/voice/VoiceWaveform';
 import { Panel } from './Panel';
 import { RecommendationsPanel } from './RecommendationsPanel';
 import { SentimentIndicator } from './SentimentIndicator';
@@ -33,6 +34,13 @@ export interface LiveConsoleProps {
   stream: MediaStream | null;
   onEnd: () => void;
 }
+
+const ORB_LABEL: Record<VoiceOrbState, string> = {
+  idle: 'Ready',
+  listening: 'Listening',
+  thinking: 'Analysing',
+  speaking: 'Speaking',
+};
 
 const STATUS_LABEL: Record<LiveStatus, string> = {
   starting: 'Connecting',
@@ -69,6 +77,24 @@ export function LiveConsole({
 }: LiveConsoleProps) {
   const wordCount = useMemo(() => (transcript.trim() ? transcript.trim().split(/\s+/).length : 0), [transcript]);
 
+  // Haive's state on the bar: listening to the call — and thinking from the moment new speech
+  // arrives until its suggestions and signals for it come back (or a while passes).
+  const [analysing, setAnalysing] = useState(false);
+  const firstTranscript = useRef(true);
+  useEffect(() => {
+    if (firstTranscript.current) {
+      firstTranscript.current = false;
+      return;
+    }
+    if (status !== 'recording' || !transcript) return;
+    setAnalysing(true);
+    const done = setTimeout(() => setAnalysing(false), 12_000);
+    return () => clearTimeout(done);
+  }, [transcript, status]);
+  useEffect(() => setAnalysing(false), [recommendations, events, sentiment]);
+  const orbState: VoiceOrbState = status !== 'recording' || analysing ? 'thinking' : 'listening';
+  const orbLabel = status === 'starting' ? 'Connecting' : status === 'ending' ? 'Wrapping up' : ORB_LABEL[orbState];
+
   return (
     <motion.div className={styles.console} variants={staggerChildren(0.08)} initial="hidden" animate="show">
       <motion.header variants={FADE_UP} className={styles.bar}>
@@ -80,7 +106,11 @@ export function LiveConsole({
           <span className={styles.timer} aria-label="Call duration">
             {formatClock(elapsedSeconds)}
           </span>
-          <LevelMeter stream={status === 'recording' ? stream : null} />
+          <span className={styles.voice}>
+            <VoiceOrb state={orbState} stream={stream} size={34} tone="dark" showLabel label={orbLabel} />
+            {/* The microphone from the moment it's on (it's recording while the call connects, too). */}
+            <VoiceWaveform stream={status === 'ending' ? null : stream} tone="onDark" bars={22} />
+          </span>
         </div>
 
         <div className={styles.barMeta}>

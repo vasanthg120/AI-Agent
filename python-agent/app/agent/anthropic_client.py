@@ -473,6 +473,8 @@ def _run_forced_tool_extraction(
     organization_id: str | None = None,
     user_id: str = "",
     request_id: str = "",
+    max_tokens: int = 8192,
+    require_complete: bool = False,
 ) -> dict:
     """Shared forced-tool-choice call — the original retry-once-then-raise
     shape extract_role established, generalized to accept content blocks
@@ -509,7 +511,7 @@ def _run_forced_tool_extraction(
             ) as usage:
                 response = _client(api_key).messages.create(
                     model=settings.anthropic_model,
-                    max_tokens=8192,
+                    max_tokens=max_tokens,
                     system=system_prompt,
                     tools=[tool],
                     tool_choice={"type": "tool", "name": tool["name"]},
@@ -522,6 +524,10 @@ def _run_forced_tool_extraction(
                 block = next((b for b in response.content if b.type == "tool_use"), None)
                 if block is None:
                     raise ValueError("Model did not return a tool_use block")
+                # A caller that needs every part of the answer (Call Intelligence's report) treats an
+                # answer cut off at the token limit as a failure, never as a shorter result.
+                if require_complete and getattr(response, "stop_reason", None) == "max_tokens":
+                    raise ValueError(f"The answer was cut off at {max_tokens} tokens")
                 usage["input"] = user_content
                 usage["output"] = block.input
                 return block.input

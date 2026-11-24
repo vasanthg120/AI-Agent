@@ -32,6 +32,7 @@ import { VoiceScriptDto } from './dto/voice-script.dto';
 import { Feature } from '../common/app-features';
 import { FeatureGuard } from '../common/guards/feature.guard';
 import { Permission } from '../common/permissions/permission.decorator';
+import { CallRecordingService } from './recording/call-recording.service';
 
 // Covers exactly the formats UploadRecordingModal.tsx's file input accepts
 // ("audio/*,video/mp4,.m4a") — a small local map rather than pulling in the
@@ -73,6 +74,7 @@ export class CallCopilotController {
     private uploadService: CallCopilotUploadService,
     private gridFs: GridFsService,
     private scopes: TeamScopeService,
+    private recordings: CallRecordingService,
   ) {}
 
   @Get('sessions')
@@ -233,10 +235,23 @@ export class CallCopilotController {
     return { languageCode: dto.languageCode, voiceScript };
   }
 
+  /**
+   * The whole call as one recording, for the player: an upload's or phone call's original
+   * file, or a live call's parts joined into one (built the first time if the call's end
+   * didn't already) — with its length and where each transcript line starts.
+   */
+  @Get('sessions/:id/recording')
+  async recording(@CurrentUser() user: JwtPayload, @Param('id') id: string) {
+    const session = (await this.callCopilotService.getSession(user.organizationId, user.sub, id)) ?? (await this.teamSession(user, id));
+    if (!session) throw new NotFoundException('Call session not found');
+    return this.recordings.recordingFor(session);
+  }
+
   @Get('sessions/:id/audio/:fileId')
   async streamAudio(@CurrentUser() user: JwtPayload, @Param('id') id: string, @Param('fileId') fileId: string, @Res() res: Response) {
     const session = (await this.callCopilotService.getSession(user.organizationId, user.sub, id)) ?? (await this.teamSession(user, id));
-    const isKnownFile = fileId === session?.originalRecordingFileId || session?.transcript.some((s) => s.audioFileId === fileId);
+    const isKnownFile =
+      fileId === session?.originalRecordingFileId || fileId === session?.fullRecording?.fileId || session?.transcript.some((s) => s.audioFileId === fileId);
     if (!session || !isKnownFile) {
       throw new NotFoundException('Recording segment not found');
     }

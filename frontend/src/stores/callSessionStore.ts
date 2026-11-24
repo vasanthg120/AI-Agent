@@ -34,7 +34,8 @@ interface CallSessionState {
 
   startCall: (params: StartCallParams) => void;
   appendAudioSegment: (blob: Blob, sequence: number, languageCode: string) => Promise<void>;
-  endCall: () => void;
+  // lastPart: resolves once the recorder has handed over its final part (see useSegmentedRecording.stop).
+  endCall: (lastPart?: Promise<void>) => Promise<void>;
   reset: () => void;
 }
 
@@ -59,6 +60,9 @@ const initialState = {
 // immutable `set()` merges as events arrive. One difference from chat: this
 // is a single active call at a time (no per-conversation map), matching how
 // only one call can realistically be in progress in one browser tab.
+// Audio parts on their way to the server: ending a call waits for them.
+let sending: Promise<unknown> = Promise.resolve();
+
 export const useCallSessionStore = create<CallSessionState>((set, get) => ({
   ...initialState,
 
@@ -88,14 +92,20 @@ export const useCallSessionStore = create<CallSessionState>((set, get) => ({
 
   async appendAudioSegment(blob, sequence, languageCode) {
     const { controller, status } = get();
-    if (!controller || status !== 'recording') return;
-    await controller.sendAudioSegment(blob, sequence, languageCode);
+    // Every part counts: one recorded while the call is still being set up, and the last one sent as it ends.
+    if (!controller || (status !== 'recording' && status !== 'starting' && status !== 'ending')) return;
+    const send = controller.sendAudioSegment(blob, sequence, languageCode);
+    sending = Promise.allSettled([sending, send]);
+    await send;
   },
 
-  endCall() {
+  async endCall(lastPart) {
     const { controller, status } = get();
     if (!controller || (status !== 'recording' && status !== 'starting')) return;
     set({ status: 'ending' });
+    // "End" goes after the last part (the socket keeps the order), so no audio is cut off.
+    await lastPart;
+    await sending;
     controller.end();
   },
 

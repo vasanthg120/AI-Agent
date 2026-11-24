@@ -1,6 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 import { FiPause, FiPlay, FiSquare, FiVolume2 } from 'react-icons/fi';
-import { IconButton, Spinner } from '@/components/ui';
+import { IconButton } from '@/components/ui';
+import { VoiceOrb } from '@/components/voice/VoiceOrb';
+import { VoiceWaveform } from '@/components/voice/VoiceWaveform';
+import { streamOfElement } from '@/components/voice/useAudioFrames';
 import { extractErrorMessage } from '@/utils/errors';
 import { callCopilotService } from '@/services/callCopilotService';
 import { voiceService } from '@/services/voiceService';
@@ -35,11 +38,15 @@ export function VoiceCoachButton({
   // user has already moved off never starts playing over the new selection.
   const requestRef = useRef(0);
 
+  // The coach's voice as a stream, for the avatar and waveform to move with (never changes what is heard).
+  const [voice, setVoice] = useState<MediaStream | null>(null);
+
   const discardAudio = () => {
     audioRef.current?.pause();
     audioRef.current = null;
     if (urlRef.current) URL.revokeObjectURL(urlRef.current);
     urlRef.current = null;
+    setVoice(null);
   };
 
   useEffect(() => {
@@ -80,6 +87,7 @@ export function VoiceCoachButton({
       };
       audioRef.current = audio;
       await audio.play();
+      setVoice(streamOfElement(audio));
       setState('playing');
     } catch (err) {
       if (request !== requestRef.current) return;
@@ -103,13 +111,12 @@ export function VoiceCoachButton({
 
   return (
     <div className={styles.voiceControls}>
+      {state !== 'idle' && (
+        <VoiceOrb state={state === 'loading' ? 'thinking' : state === 'playing' ? 'speaking' : 'idle'} stream={state === 'playing' ? voice : null} size={30} />
+      )}
+      {state === 'playing' && <VoiceWaveform stream={voice} active size="sm" bars={14} />}
       {state === 'loading' && (
-        <>
-          <Spinner size={16} />
-          <span className={styles.voiceHint}>
-            {languageCode === 'en' ? 'Preparing audio…' : `Preparing ${languageLabel} audio…`}
-          </span>
-        </>
+        <span className={styles.voiceHint}>{languageCode === 'en' ? 'Preparing your coach’s voice…' : `Preparing ${languageLabel} audio…`}</span>
       )}
       {state === 'idle' && (
         <IconButton

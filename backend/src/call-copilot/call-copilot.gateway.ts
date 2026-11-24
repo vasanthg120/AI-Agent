@@ -13,10 +13,21 @@ import { Server, Socket } from 'socket.io';
 import { JwtPayload } from '../auth/jwt-payload.interface';
 import { UsersService } from '../users/users.service';
 import { CallCopilotService } from './call-copilot.service';
+import { CallRecordingService } from './recording/call-recording.service';
 import { CallSessionDocument } from './schemas/call-session.schema';
 
 interface AuthedSocket extends Socket {
-  data: { user?: JwtPayload; activeSession?: CallSessionDocument };
+  // signedIn: the connection's own sign-in check, still running when the browser's first
+  // message (call:start, sent straight after connecting) can already arrive.
+  // storing: audio parts still being saved and transcribed — the call's end waits for them.
+  // starting: the call being set up (call:start), for audio that arrives before it's ready.
+  data: {
+    user?: JwtPayload;
+    activeSession?: CallSessionDocument;
+    signedIn?: Promise<JwtPayload | null>;
+    starting?: Promise<CallSessionDocument | null>;
+    storing?: Set<Promise<unknown>>;
+  };
 }
 
 // Deliberately a SEPARATE namespace/gateway from ChatGateway, not new event
@@ -36,9 +47,15 @@ export class CallCopilotGateway implements OnGatewayConnection, OnGatewayDisconn
     private callCopilotService: CallCopilotService,
     private jwtService: JwtService,
     private usersService: UsersService,
+    private recordings: CallRecordingService,
   ) {}
 
   async handleConnection(client: AuthedSocket) {
+    client.data.signedIn = this.signIn(client);
+    await client.data.signedIn;
+  }
+
+  private async signIn(client: AuthedSocket): Promise<JwtPayload | null> {
     const token =
       (client.handshake.auth?.token as string | undefined) ??
       (client.handshake.headers.authorization ?? '').replace(/^Bearer\s+/i, '');
@@ -53,10 +70,12 @@ export class CallCopilotGateway implements OnGatewayConnection, OnGatewayDisconn
       // reaching every tab this user has open on this namespace, not just
       // whichever socket happened to issue the upload request.
       client.join(payload.sub);
+      return payload;
     } catch {
       this.logger.warn(`Rejected unauthenticated call-copilot socket ${client.id}`);
       client.emit('call:error', { message: 'Unauthorized' });
       client.disconnect(true);
+      return null;
     }
   }
 
@@ -85,16 +104,23 @@ export class CallCopilotGateway implements OnGatewayConnection, OnGatewayDisconn
     @ConnectedSocket() client: AuthedSocket,
     @MessageBody() body: { dealId?: string; contactId?: string; contextQuery?: string },
   ) {
-    const user = client.data.user;
+    // Audio recorded while the call is still being set up waits for it (see onAudioSegment).
+    client.data.starting = this.start(client, body);
+    await client.data.starting;
+  }
+
+  private async start(client: AuthedSocket, body: { dealId?: string; contactId?: string; contextQuery?: string }): Promise<CallSessionDocument | null> {
+    // The browser starts the call the moment it connects: wait for the connection's sign-in to finish.
+    const user = client.data.user ?? (await client.data.signedIn) ?? undefined;
     if (!user) {
       client.emit('call:error', { message: 'Unauthorized' });
-      return;
+      return null;
     }
     // Sockets skip the HTTP checks: Call Copilot access is read again here, live.
     const { refusal } = await this.usersService.socketAccess(user, 'call_copilot', 'create', 'call_copilot');
     if (refusal) {
       client.emit('call:error', { message: refusal });
-      return;
+      return null;
     }
     try {
       const session = await this.callCopilotService.startSession(
@@ -107,9 +133,11 @@ export class CallCopilotGateway implements OnGatewayConnection, OnGatewayDisconn
       client.data.activeSession = session;
       client.emit('call:started', { sessionId: session._id.toString() });
       client.emit('call:contextReady', { sessionId: session._id.toString(), contextBlob: session.contextBlob ?? '' });
+      return session;
     } catch (err) {
       this.logger.error(`call:start failed: ${(err as Error).message}`);
       client.emit('call:error', { message: 'Could not start the call session. Please try again.' });
+      return null;
     }
   }
 
@@ -118,7 +146,8 @@ export class CallCopilotGateway implements OnGatewayConnection, OnGatewayDisconn
     @ConnectedSocket() client: AuthedSocket,
     @MessageBody() body: { sequence: number; audio: Buffer; mimeType: string; languageCode: string },
   ) {
-    const session = client.data.activeSession;
+    // A part recorded while the call was still being set up: it belongs to the call being created.
+    const session = client.data.activeSession ?? (await client.data.starting) ?? undefined;
     if (!session) {
       client.emit('call:error', { message: 'No active call session.' });
       return;
@@ -126,13 +155,12 @@ export class CallCopilotGateway implements OnGatewayConnection, OnGatewayDisconn
 
     try {
       const audioBuffer = Buffer.isBuffer(body.audio) ? body.audio : Buffer.from(body.audio);
-      const { transcript, transcribeFailed } = await this.callCopilotService.appendAudioSegment(
-        session,
-        body.sequence,
-        audioBuffer,
-        body.mimeType,
-        body.languageCode,
-      );
+      // The last part arrives as the call ends: "End call" waits until it is saved, so no audio is lost.
+      const storing = this.callCopilotService.appendAudioSegment(session, body.sequence, audioBuffer, body.mimeType, body.languageCode);
+      const pending = (client.data.storing ??= new Set());
+      pending.add(storing);
+      void storing.catch(() => undefined).finally(() => pending.delete(storing));
+      const { transcript, transcribeFailed } = await storing;
       const sessionId = session._id.toString();
       if (transcript) {
         client.emit('call:transcript', { sessionId, sequence: body.sequence, text: transcript });
@@ -176,7 +204,11 @@ export class CallCopilotGateway implements OnGatewayConnection, OnGatewayDisconn
       return;
     }
     try {
+      // Parts still being saved (the last few seconds, sent just before "End call") go in first.
+      if (client.data.storing?.size) await Promise.allSettled([...client.data.storing]);
       const ended = await this.callCopilotService.endSession(session);
+      // The call's parts joined into one recording now, in the background, so the first play is instant.
+      this.recordings.prepare(ended);
       client.emit('call:summary', {
         sessionId: ended._id.toString(),
         headline: ended.headline,
@@ -205,6 +237,10 @@ export class CallCopilotGateway implements OnGatewayConnection, OnGatewayDisconn
           this.emitToUser(coached.userId, 'call:coaching', {
             sessionId: coached._id.toString(),
             overallScore: coached.overallScore,
+            // Call Intelligence: the whole report, the score out of 100 and its band.
+            evaluation: coached.evaluation,
+            score100: coached.score100,
+            scoreBand: coached.scoreBand,
             categoryScores: coached.categoryScores,
             whatWentWell: coached.whatWentWell,
             whatToImprove: coached.whatToImprove,
@@ -221,6 +257,7 @@ export class CallCopilotGateway implements OnGatewayConnection, OnGatewayDisconn
       client.emit('call:error', { message: 'Could not finalize the call summary, but your recording was saved.' });
     } finally {
       client.data.activeSession = undefined;
+      client.data.starting = undefined;
     }
   }
 }

@@ -1097,10 +1097,12 @@ export class EmailIntelligenceService {
   // "To reply" boxes together), those waiting over 24 hours, and the new
   // enquiries among them. Not tied to a period: what is waiting is waiting.
 
-  private businessInboxMatch(organizationId: string, which: BusinessInboxView, now: Date): Record<string, unknown> {
+  private businessInboxMatch(organizationId: string, which: BusinessInboxView, now: Date, userId?: string): Record<string, unknown> {
     const dayAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000);
     return {
       organizationId,
+      // One person's own mailbox (Haive's briefing for someone who sees only their own work).
+      ...(userId ? { userId } : {}),
       ...(which === 'overdue' ? { receivedAt: { $lte: dayAgo } } : {}),
       ...(which === 'new_enquiries' ? { intent: { $in: ENQUIRY_INTENTS } } : {}),
       ...needsResponseMatch(),
@@ -1108,11 +1110,11 @@ export class EmailIntelligenceService {
   }
 
   /** One query: waiting for a reply, of which over 24 hours, of which new enquiries. */
-  async businessInboxCounts(organizationId: string, now = new Date()): Promise<{ waiting: number; overdue: number; newEnquiries: number }> {
+  async businessInboxCounts(organizationId: string, now = new Date(), userId?: string): Promise<{ waiting: number; overdue: number; newEnquiries: number }> {
     const dayAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000);
     const [row] = await this.itemModel
       .aggregate<{ waiting: number; overdue: number; newEnquiries: number }>([
-        { $match: this.businessInboxMatch(organizationId, 'waiting', now) },
+        { $match: this.businessInboxMatch(organizationId, 'waiting', now, userId) },
         {
           $group: {
             _id: null,
@@ -1124,6 +1126,17 @@ export class EmailIntelligenceService {
       ])
       .exec();
     return { waiting: row?.waiting ?? 0, overdue: row?.overdue ?? 0, newEnquiries: row?.newEnquiries ?? 0 };
+  }
+
+  /** New enquiries still waiting for a reply that arrived before `before` (Haive's "a lead is waiting" alert). */
+  async enquiriesWaitingSince(organizationId: string, before: Date, now = new Date()): Promise<{ count: number; oldest: Date | null }> {
+    const [row] = await this.itemModel
+      .aggregate<{ count: number; oldest: Date }>([
+        { $match: { ...this.businessInboxMatch(organizationId, 'new_enquiries', now), receivedAt: { $lte: before } } },
+        { $group: { _id: null, count: { $sum: 1 }, oldest: { $min: '$receivedAt' } } },
+      ])
+      .exec();
+    return { count: row?.count ?? 0, oldest: row?.oldest ?? null };
   }
 
   /** The emails behind those numbers, longest waiting first. */

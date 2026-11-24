@@ -270,7 +270,8 @@ export class ChatService {
    * reply) at zero additional LLM cost. Always creates fresh (no
    * existing-conversation lookup). Reuses finishTurn() so the Redis cache
    * invalidation added for live chat covers this write path too. */
-  async createSystemConversationRecord(userId: string, organizationId: string, agentId: string, title: string, promptText: string, replyText: string) {
+  // agentId undefined = the general assistant (Haive's spoken briefing, backend/src/assistant).
+  async createSystemConversationRecord(userId: string, organizationId: string, agentId: string | undefined, title: string, promptText: string, replyText: string) {
     const conversation = await this.conversationModel.create({ userId, organizationId, title, agentId, messages: [] });
     conversation.messages.push({
       role: 'user',
