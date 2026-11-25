@@ -1,44 +1,31 @@
 import { Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
-import { Model, PipelineStage } from 'mongoose';
+import { Model } from 'mongoose';
 import { JwtPayload } from '../auth/jwt-payload.interface';
-import { currentDataSourceScope } from '../data-sources/data-source-context';
+import { businessTimeZone, DEFAULT_BUSINESS_TIMEZONE } from '../common/business-day';
 import { CustomerActivityService } from '../crm/customer-activity.service';
 import { DealPerformanceDashboardService } from '../crm/deal-performance-dashboard.service';
 import { QuotesService } from '../crm/quotes.service';
 import { Deal, DealDocument } from '../crm/schemas/deal.schema';
 import { Quote, QuoteDocument } from '../crm/schemas/quote.schema';
 import { SalesAnalyticsService } from '../crm/sales-analytics.service';
-import { countedMonths, expectedClosingMonthsMatch } from '../crm/deal-filter.util';
+import { countedInMonths, countedMonths, sameDealOnceAcrossSources } from '../crm/deal-filter.util';
 import { DashboardService } from '../dashboard/dashboard.service';
 import { EmailIntelligenceService } from '../email-intelligence/email-intelligence.service';
 import { OrganizationsService } from '../organizations/organizations.service';
 import { AiInsightItem, AnalyticsDashboardOverview, PipelineByMonth, PipelineHealth, PipelineMonth, ScopeInfo } from './analytics-dashboard.types';
 import { PreviousMonthClosuresService } from './previous-month-closures.service';
 
-// Unified view (two or more CRMs at once, only when explicitly chosen): the
-// same deal kept in two CRMs — same name, value and close date — counts once.
-function unifiedDealDedupe(): PipelineStage[] {
-  if ((currentDataSourceScope()?.sourceIds.length ?? 0) < 2) return [];
-  return [
-    {
-      $group: {
-        _id: { name: { $toLower: { $trim: { input: '$name' } } }, value: '$monetaryValue', closing: '$expectedClosingDate' },
-        dealStatus: { $first: '$dealStatus' },
-        monetaryValue: { $first: '$monetaryValue' },
-      },
-    },
-  ];
-}
-
-// The deals a dashboard period is about: expected to close in the months the
-// dates touch (countedMonths), within the caller's scope (a store, or one
-// person's own deals).
-function periodDealMatch(organizationId: string, scope: ScopeInfo, dateFrom: string, dateTo: string): Record<string, unknown> {
+// The deals a dashboard period is about, in the months the dates touch
+// (countedMonths): won and lost deals CLOSED in them, open deals expected to
+// close in them (countedInMonths in deal-filter.util.ts) — within the caller's
+// scope (a store, or one person's own deals). A deal created or expected months
+// earlier and won in this period is this period's.
+function periodDealMatch(organizationId: string, scope: ScopeInfo, dateFrom: string, dateTo: string, timeZone: string): Record<string, unknown> {
   const { first, last } = countedMonths(dateFrom, dateTo);
   return {
     organizationId,
-    expectedClosingDate: expectedClosingMonthsMatch(first, last),
+    ...countedInMonths(first, last, timeZone),
     ...(scope.level === 'store' && scope.storeId ? { storeId: scope.storeId } : {}),
     ...(scope.level === 'user' && scope.userId ? { ownerId: scope.userId } : {}),
   };
@@ -119,21 +106,21 @@ export class AnalyticsDashboardService {
     // when it actually happened (confirmed live: 42/42 synced deals shared
     // one single createdAt month while their real expectedClosingDate spanned
     // five different months) — so "this month" showed literally every deal
-    // the org has ever had, and any other month showed none. Reverted to
-    // expectedClosingDate, the same field SalesAnalyticsService.getAchievement
-    // already uses (and already trusted) for "Total Revenue"/target math
-    // directly above on this same page — auto-stamped to the real close date
-    // the moment a deal flips to won/lost (see deals.service.ts's own
-    // update() comment), and the one date field the external sync provides
-    // that actually reflects real business timing, not sync-ingestion time.
-    // A deal with no expectedClosingDate set is honestly excluded from every
-    // period rather than guessed into one — same accepted tradeoff
-    // getAchievement itself already has. The months counted are the whole
-    // months the dates touch (see this method's own leading comment).
+    // the org has ever had, and any other month showed none. Deals now go by
+    // the same rule as SalesAnalyticsService.getAchievement's "Total Revenue"
+    // directly above on this same page (periodDealMatch): won and lost deals
+    // by the day they CLOSED (closedAt; their closing date when that isn't
+    // known), open deals by their expected closing date. Until 2026-11-25 a
+    // won deal went by its expected closing date — a CRM forecast the sync
+    // re-reads, so a deal expected in July and won in November counted in
+    // July. A deal with no date at all is honestly excluded from every period
+    // rather than guessed into one. The months counted are the whole months
+    // the dates touch (see this method's own leading comment).
     const start = new Date(`${dateFrom}T00:00:00.000Z`);
     const end = new Date(`${dateTo}T23:59:59.999Z`);
     const { first: period, last: lastPeriod, months } = countedMonths(dateFrom, dateTo);
-    const dealMatch = periodDealMatch(organizationId, scope, dateFrom, dateTo);
+    const timeZone = await businessTimeZone(this.dealModel.db, organizationId);
+    const dealMatch = periodDealMatch(organizationId, scope, dateFrom, dateTo, timeZone);
     // Scope only, no date range — used below to resolve which deals are in
     // scope (store/owner) before joining quotes through them; a quote's
     // linked deal can legitimately belong to this store/owner even if that
@@ -172,7 +159,7 @@ export class AnalyticsDashboardService {
       this.dealModel
         .aggregate<{ _id: string; count: number; value: number }>([
           { $match: dealMatch },
-          ...unifiedDealDedupe(),
+          ...sameDealOnceAcrossSources(timeZone, ['dealStatus', 'monetaryValue']),
           { $group: { _id: '$dealStatus', count: { $sum: 1 }, value: { $sum: '$monetaryValue' } } },
         ])
         .exec(),
@@ -312,23 +299,11 @@ export class AnalyticsDashboardService {
   // deal kept in two CRMs shown together), in a single aggregate.
   async getPipelineHealth(caller: JwtPayload, scope: ScopeInfo, dateFrom: string, dateTo: string, today: string): Promise<PipelineHealth> {
     const { first, last } = countedMonths(dateFrom, dateTo);
-    const dedupe: PipelineStage[] =
-      (currentDataSourceScope()?.sourceIds.length ?? 0) < 2
-        ? []
-        : [
-            {
-              $group: {
-                _id: { name: { $toLower: { $trim: { input: '$name' } } }, value: '$monetaryValue', closing: '$expectedClosingDate' },
-                dealStatus: { $first: '$dealStatus' },
-                monetaryValue: { $first: '$monetaryValue' },
-                expectedClosingDate: { $first: '$expectedClosingDate' },
-              },
-            },
-          ];
+    const timeZone = await businessTimeZone(this.dealModel.db, caller.organizationId);
     const rows = await this.dealModel
       .aggregate<{ _id: { status: string; pastDue: boolean }; count: number; value: number }>([
-        { $match: periodDealMatch(caller.organizationId, scope, dateFrom, dateTo) },
-        ...dedupe,
+        { $match: periodDealMatch(caller.organizationId, scope, dateFrom, dateTo, timeZone) },
+        ...sameDealOnceAcrossSources(timeZone, ['dealStatus', 'monetaryValue', 'expectedClosingDate']),
         {
           $group: {
             _id: {
@@ -367,24 +342,13 @@ export class AnalyticsDashboardService {
       ...(scope.level === 'store' && scope.storeId ? { storeId: scope.storeId } : {}),
       ...(scope.level === 'user' && scope.userId ? { ownerId: scope.userId } : {}),
     };
-    // Two or more CRMs shown together: the same deal kept in both counts once (as in the overview).
-    const dedupe: PipelineStage[] =
-      (currentDataSourceScope()?.sourceIds.length ?? 0) < 2
-        ? []
-        : [
-            {
-              $group: {
-                _id: { name: { $toLower: { $trim: { input: '$name' } } }, value: '$monetaryValue', closing: '$expectedClosingDate' },
-                monetaryValue: { $first: '$monetaryValue' },
-                expectedClosingDate: { $first: '$expectedClosingDate' },
-              },
-            },
-          ];
     const [rows, storeName] = await Promise.all([
       this.dealModel
         .aggregate<{ _id: string; count: number; value: number }>([
           { $match: match },
-          ...dedupe,
+          // Two or more CRMs shown together: the same deal kept in both counts once (as in the overview).
+          // Open deals only, so the day each counts on is its expected closing date: no time zone involved.
+          ...sameDealOnceAcrossSources(DEFAULT_BUSINESS_TIMEZONE, ['monetaryValue', 'expectedClosingDate']),
           // "YYYY-MM-DD" → "YYYY-MM"; anything that is not a date written that way has no month.
           { $group: { _id: { $substrBytes: [{ $ifNull: ['$expectedClosingDate', ''] }, 0, 7] }, count: { $sum: 1 }, value: { $sum: { $ifNull: ['$monetaryValue', 0] } } } },
         ])

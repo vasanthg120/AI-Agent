@@ -7,9 +7,11 @@ import { TeamActivityListQueryDto, TeamActivityQueryDto } from './dto/team-activ
 import { TeamActivityService } from './team-activity.service';
 import { TeamScopeService } from './team-scope.service';
 
-// Agent Activity and the Dashboard's Team Performance. Whose figures come back
-// is decided on the server from the caller alone (TeamScopeService), never from
-// what the page asks for: a business or person outside it is refused.
+// Employee Activity (formerly Agent Activity) and the Dashboard's Team
+// Performance. Whose figures come back is decided on the server from the caller
+// alone (TeamScopeService), never from what the page asks for: a business or
+// person outside it is refused. Figures may be up to 30 seconds old (the
+// answer says when it was worked out: generatedAt).
 @UseGuards(JwtAuthGuard)
 @Permission(['dashboard', 'analytics'])
 @Controller('team-activity')
@@ -28,18 +30,27 @@ export class TeamActivityController {
 
   @Get('overview')
   overview(@CurrentUser() user: JwtPayload, @Query() query: TeamActivityQueryDto) {
-    return this.activity.overview(user, { ...query, period: query.period ?? 'today' });
+    const q = { ...query, period: query.period ?? 'today', compare: query.compare === 'true' };
+    return this.activity.cached('overview', user, q, () => this.activity.overview(user, q));
   }
 
-  /** Day by day (week by week for long ranges): calls, talk time, emails sent and answered, deals created and won. */
+  /** Day by day (week by week for long ranges): calls, talk time, emails, deals created / won / lost, measured time. */
   @Get('trend')
   trend(@CurrentUser() user: JwtPayload, @Query() query: TeamActivityQueryDto) {
-    return this.activity.trend(user, { ...query, period: query.period ?? 'last7' });
+    const q = { ...query, period: query.period ?? 'last7', compare: false };
+    return this.activity.cached('trend', user, q, () => this.activity.trend(user, q));
+  }
+
+  /** Measured time in HaiVE and on calls, the other apps people work in, and (for one person) sessions and sign-ins. */
+  @Get('usage')
+  usage(@CurrentUser() user: JwtPayload, @Query() query: TeamActivityQueryDto) {
+    const q = { ...query, period: query.period ?? 'today', compare: false };
+    return this.activity.cached('usage', user, q, () => this.activity.usage(user, q));
   }
 
   /** The calls, emails or deals behind one number — for one person, or everyone visible. */
   @Get('list')
   list(@CurrentUser() user: JwtPayload, @Query() query: TeamActivityListQueryDto) {
-    return this.activity.list(user, query.kind, { ...query, period: query.period ?? 'today' });
+    return this.activity.list(user, query.kind, { ...query, period: query.period ?? 'today', compare: false });
   }
 }

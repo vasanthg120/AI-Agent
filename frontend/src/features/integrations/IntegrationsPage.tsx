@@ -182,7 +182,6 @@ export function IntegrationsPage() {
   } = useQuery({ queryKey: ['crm-integrations'], queryFn: crmIntegrationsService.list, refetchInterval: 60_000, enabled: canManageIntegrations });
   const [setupFor, setSetupFor] = useState<CrmIntegration | null>(null);
   const [manageId, setManageId] = useState<string | null>(null);
-  const [syncingId, setSyncingId] = useState<string | null>(null);
 
   // Accounting — Xero. Same card/status shape as Outlook/Gmail above
   // (connected/disconnected/error), plus one extra state no mailbox needs:
@@ -683,20 +682,6 @@ export function IntegrationsPage() {
     }
   };
 
-  const syncCrm = async (integration: CrmIntegration) => {
-    setSyncingId(integration.id);
-    try {
-      const { result } = await crmIntegrationsService.syncNow(integration.id);
-      if (result.status === 'error') toast.error(result.error ?? 'The sync didn’t finish.', { duration: 8_000 });
-      else if (result.status === 'deferred') toast(result.message ?? 'Not now — the next sync runs by itself.', { duration: 8_000 });
-      else toast.success(`${integration.label} is up to date`);
-    } catch (error) {
-      toast.error(extractErrorMessage(error), { duration: 8_000 });
-    } finally {
-      setSyncingId(null);
-      void queryClient.invalidateQueries({ queryKey: ['crm-integrations'] });
-    }
-  };
 
   const openImportModal = () => {
     setImportManifestText('');
@@ -1131,13 +1116,13 @@ export function IntegrationsPage() {
       {
         icon: FiClock,
         text: source.lastSyncAt
-          ? `${integration.connection === 'push' ? 'Last record' : 'Last synced'} ${formatRelativeTime(source.lastSyncAt)}`
+          ? `${integration.connection === 'push' ? 'Last record' : 'Last read'} ${formatRelativeTime(source.lastSyncAt)}`
           : integration.connection === 'push'
             ? 'No records received yet'
-            : 'Not synced yet',
+            : 'Not read yet',
       },
       // A CRM read once a night (Hoops): when it next runs, in the viewer's own time.
-      ...(source.schedule ? [{ icon: FiRefreshCw, text: `Next sync ${nextRunText(source.schedule.nextRunAt)}` }] : []),
+      ...(source.schedule ? [{ icon: FiRefreshCw, text: `Next nightly read ${nextRunText(source.schedule.nextRunAt)}` }] : []),
       // A CRM that hasn't sent anything yet already says so in the line above.
       ...(records.length > 0 || source.lastSyncAt ? [{ icon: FiDatabase, text: records.length > 0 ? records.join(' · ') : 'No records yet' }] : []),
       ...(source.isDefault ? [{ icon: FiStar, text: 'Shown on dashboards' }] : []),
@@ -1151,7 +1136,8 @@ export function IntegrationsPage() {
         key={integration.id}
         logo={crmLogo(integration)}
         name={integration.label}
-        tagline={integration.connection === 'push' ? 'Sends new records live' : integration.nightly ? 'Synced every night' : 'Synced automatically'}
+        // Live: read when a page showing its data opens. Nightly: the CRM allows one read a night (Hoops).
+        tagline={integration.connection === 'push' ? 'Sends new records live' : integration.nightly ? 'Read nightly (its rule)' : 'Live — read when you open a page'}
         tone={crmTone(integration)}
         status={crmStatus(integration)}
         // The card already carries the name: "Hoops — customers, contacts…" reads as "Customers, contacts…".
@@ -1176,16 +1162,6 @@ export function IntegrationsPage() {
               ) : integration.source?.error?.kind === 'auth' ? (
                 <Button size="sm" onClick={() => setSetupFor(integration)}>
                   Reconnect
-                </Button>
-              ) : integration.connection === 'pull' && (integration.source?.schedule?.canSyncNow ?? true) ? (
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  leftIcon={<FiRefreshCw />}
-                  loading={syncingId === integration.id}
-                  onClick={() => void syncCrm(integration)}
-                >
-                  Sync now
                 </Button>
               ) : null}
             </>

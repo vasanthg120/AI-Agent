@@ -14,6 +14,8 @@ import {
   type DateRange,
 } from '@/components/ui';
 import { ROUTES } from '@/constants/routes';
+import { LiveIndicator } from '@/components/live/LiveIndicator';
+import { useLiveData } from '@/hooks/useLiveData';
 import { useAuthStore } from '@/stores/authStore';
 import { dayjs } from '@/utils/date';
 import { salesReportService } from '@/services/salesReportService';
@@ -83,6 +85,8 @@ const REPORT_ICON = { sales: FiTrendingUp, grossMargin: FiPercent, royalty: FiAw
 // visually crowd it.
 export function ReportingPage() {
   const navigate = useNavigate();
+  // Live: opening Reporting asks each connected CRM for what changed; the report reloads when it lands.
+  const live = useLiveData({ invalidate: 'all' });
   // The margin percentage is org-wide financial configuration: owners and administrators set it.
   const canSetMargin = useAuthStore((state) =>
     (state.user?.roles ?? []).some((role) => role === 'owner' || role === 'admin'),
@@ -132,6 +136,7 @@ export function ReportingPage() {
         icon={FiPieChart}
         title="Reporting"
         subtitle="Analyse your financial, customer and team performance — pick a report, choose a period, and the numbers update instantly."
+        meta={<LiveIndicator live={live} />}
       />
 
       <ChoiceCards

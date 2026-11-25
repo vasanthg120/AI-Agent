@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import clsx from 'clsx';
 import { FiAlertTriangle, FiChevronRight, FiInfo } from 'react-icons/fi';
+import { useMediaQuery } from '@/hooks/useMediaQuery';
 import type { TeamDepartment, TeamSupportItem } from '@/services/teamActivityService';
 import styles from './TeamActivity.module.css';
 import taskStyles from './TeamTasks.module.css';
@@ -66,6 +67,48 @@ export function DepartmentsTable({
   showBusiness: boolean;
   onSelect: (key: string | null) => void;
 }) {
+  // Too many figures for a narrow screen: one card per team instead of a table that scrolls sideways.
+  const narrow = useMediaQuery('(max-width: 900px)');
+  if (narrow) {
+    return (
+      <ul className={styles.personCards}>
+        {departments.map((d) => {
+          const active = d.key === activeKey;
+          const figures: { label: string; value: string; tone?: 'warning' | 'danger' }[] = [
+            { label: 'People active', value: `${d.activePeople}/${d.people}` },
+            { label: 'Tasks done', value: String(d.followUpsCompleted) },
+            { label: 'Open', value: String(d.followUpsPending) },
+            { label: 'Overdue', value: String(d.followUpsOverdue), tone: d.followUpsOverdue > 0 ? 'danger' : undefined },
+            { label: 'Replied', value: String(d.emailsReplied) },
+            { label: 'Missed emails', value: String(d.emailsMissed), tone: d.emailsMissed > 0 ? 'warning' : undefined },
+            { label: 'Calls', value: String(d.calls) },
+            { label: 'Need support', value: String(d.needSupport), tone: d.needSupport > 0 ? 'warning' : undefined },
+          ];
+          return (
+            <li key={d.key}>
+              <button type="button" className={clsx(styles.personCard, active && taskStyles.deptActive)} aria-pressed={active} onClick={() => onSelect(active ? null : d.key)}>
+                <span className={styles.personCell}>
+                  <span className={styles.personText}>
+                    <span className={styles.personName}>{d.name}</span>
+                    {showBusiness && <span className={styles.personSub}>{d.businessName}</span>}
+                  </span>
+                  <FiChevronRight className={styles.rowChevron} aria-hidden />
+                </span>
+                <span className={styles.personFigures}>
+                  {figures.map((f) => (
+                    <span key={f.label} className={clsx(styles.personFigure, f.tone && styles[`cell_${f.tone}`])}>
+                      <span className={styles.personFigureLabel}>{f.label}</span>
+                      <strong>{f.value}</strong>
+                    </span>
+                  ))}
+                </span>
+              </button>
+            </li>
+          );
+        })}
+      </ul>
+    );
+  }
   return (
     <div className={styles.tableWrap}>
       <table className={styles.table}>

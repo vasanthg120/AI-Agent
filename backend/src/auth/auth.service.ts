@@ -1,8 +1,9 @@
 import { randomInt, randomUUID } from 'crypto';
-import { BadRequestException, ConflictException, ForbiddenException, Injectable, UnauthorizedException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, Optional, UnauthorizedException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
 import { AuditService } from '../audit/audit.service';
+import { EmployeeUsageService } from '../employee-usage/employee-usage.service';
 import { MailService } from '../mail/mail.service';
 import { OrganizationsService } from '../organizations/organizations.service';
 import { isOrganizationBlocked } from '../organizations/schemas/organization.schema';
@@ -34,6 +35,8 @@ export class AuthService {
     private mailService: MailService,
     private auditService: AuditService,
     private invitations: InvitationsService,
+    // Records sign-ins, sign-outs and moves between businesses for Employee Activity; never blocks them.
+    @Optional() private usage?: EmployeeUsageService,
   ) {}
 
   /** Registration always creates a brand-new organization (+ its default
@@ -250,15 +253,18 @@ export class AuthService {
   async issueSessionToken(user: UserDocument, meta: SessionMeta): Promise<{ accessToken: string }> {
     const jti = randomUUID();
     const now = new Date();
+    const device = parseDeviceLabel(meta.userAgent);
+    const location = lookupLocation(meta.ip);
     await this.usersService.addSession(user._id.toString(), {
       jti,
-      device: parseDeviceLabel(meta.userAgent),
+      device,
       userAgent: meta.userAgent,
       ip: meta.ip,
-      location: lookupLocation(meta.ip),
+      location,
       createdAt: now,
       lastSeenAt: now,
     });
+    void this.usage?.logSignIn({ organizationId: user.organizationId, userId: user._id.toString(), kind: 'sign_in', jti, device, location }, now);
     const payload: JwtPayload = {
       sub: user._id.toString(),
       email: user.email,
@@ -304,6 +310,7 @@ export class AuthService {
     };
     const secondsLeft = caller.exp ? caller.exp - Math.floor(Date.now() / 1000) : 0;
     const accessToken = secondsLeft > 0 ? this.jwtService.sign(payload, { expiresIn: secondsLeft }) : this.jwtService.sign(payload);
+    void this.usage?.logSignIn({ organizationId, userId: target._id.toString(), kind: 'switch_in', jti: caller.jti });
     void this.auditService.log({
       userId: loginId,
       organizationId,
@@ -370,8 +377,13 @@ export class AuthService {
    * is the first time "logout" has been a real backend action rather than
    * the frontend's previous no-op (stateless JWTs had nothing to revoke
    * before sessions existed). */
-  logout(userId: string, jti: string): Promise<unknown> {
-    return this.usersService.revokeSession(userId, jti);
+  async logout(userId: string, jti: string): Promise<unknown> {
+    const result = await this.usersService.revokeSession(userId, jti);
+    if (this.usage) {
+      const login = await this.usersService.findById(userId);
+      if (login) void this.usage.logSignIn({ organizationId: login.organizationId, userId, kind: 'sign_out', jti });
+    }
+    return result;
   }
 }
 

@@ -4,14 +4,14 @@ import clsx from 'clsx';
 import { AnimatedNumber, Card } from '@/components/ui';
 import { pressable } from '@/utils/pressable';
 import { formatINR as money } from '@/utils/currency';
-import { dealsService, type Deal, type DealFilters } from '@/services/dealsService';
+import { closingDayOf, dealsService, type Deal, type DealFilters } from '@/services/dealsService';
 import { countedMonths } from '../countedMonths';
 import { usePipelineHealth } from '../usePipelineHealth';
 import { DrillDownModal, type DrillDownRow } from './DrillDownModal';
 import styles from './PipelineHealthCard.module.css';
 
 function toRows(items: Deal[]): DrillDownRow[] {
-  return items.map((d) => ({ id: d._id, dealId: d._id, title: d.name, subtitle: d.dealStatus, meta: d.expectedClosingDate, value: d.monetaryValue }));
+  return items.map((d) => ({ id: d._id, dealId: d._id, title: d.name, subtitle: d.dealStatus, meta: closingDayOf(d), value: d.monetaryValue }));
 }
 
 type OpenDrilldown = 'total' | 'won' | 'pastDue' | null;

@@ -1,5 +1,6 @@
 import { JwtService } from '@nestjs/jwt';
 import { AuditService } from '../audit/audit.service';
+import { EmployeeUsageService } from '../employee-usage/employee-usage.service';
 import { MailService } from '../mail/mail.service';
 import { OrganizationsService } from '../organizations/organizations.service';
 import { InvitationsService } from '../users/invitations.service';
@@ -25,7 +26,8 @@ export declare class AuthService {
     private mailService;
     private auditService;
     private invitations;
-    constructor(usersService: UsersService, organizationsService: OrganizationsService, jwtService: JwtService, mailService: MailService, auditService: AuditService, invitations: InvitationsService);
+    private usage?;
+    constructor(usersService: UsersService, organizationsService: OrganizationsService, jwtService: JwtService, mailService: MailService, auditService: AuditService, invitations: InvitationsService, usage?: EmployeeUsageService | undefined);
     register(email: string, password: string, name: string, organizationName: string, meta?: SessionMeta): Promise<{
         accessToken: string;
     }>;

@@ -49,8 +49,10 @@ export class EmailSyncJob {
   // same syncMyMailbox, but the sync history / "last synced" UI needs to
   // say which happened, since an auto-run finding nothing new means
   // something different to a user than their own click doing the same.
-  @Prop({ required: true, enum: ['user', 'scheduled'], default: 'user' })
-  triggeredBy: 'user' | 'scheduled';
+  // 'live': a page showing this mailbox was opened — new mail is stored at
+  // once and the AI reads it right after (EmailIntelligenceSyncService.fetchLive).
+  @Prop({ required: true, enum: ['user', 'scheduled', 'live'], default: 'user' })
+  triggeredBy: 'user' | 'scheduled' | 'live';
 
   @Prop({ required: true })
   startedAt: Date;

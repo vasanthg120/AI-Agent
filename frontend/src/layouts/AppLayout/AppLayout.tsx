@@ -9,6 +9,7 @@ import { useAccounts } from '@/features/sub-accounts/useAccounts';
 import { useAuthStore } from '@/stores/authStore';
 import { useCurrencyStore } from '@/stores/currencyStore';
 import { useMediaQuery } from '@/hooks/useMediaQuery';
+import { useUsageTracker } from '@/hooks/useUsageTracker';
 import { useNotificationsStore } from '@/stores/notificationsStore';
 import { useUiStore } from '@/stores/uiStore';
 import { CommandPalette } from '@/components/common/CommandPalette';
@@ -77,6 +78,8 @@ export function AppLayout() {
   const contentRef = useRef<HTMLElement>(null);
   const assistantPanelOpen = useUiStore((state) => state.assistantPanelOpen);
   const setAssistantPanelOpen = useUiStore((state) => state.setAssistantPanelOpen);
+  // Measured time in HaiVE for Employee Activity: only while the page is in front and in use.
+  useUsageTracker();
 
   // The full Chat page already IS the complete Agentic Chat experience —
   // showing the compact global panel on top of it would be a redundant

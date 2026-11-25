@@ -400,6 +400,11 @@ export class DataSourcesService implements OnApplicationBootstrap {
     return true;
   }
 
+  /** A live read just landed new records (live-data.service.ts): the next request re-reads the sources. */
+  forget(organizationId: string): void {
+    this.cache.delete(organizationId);
+  }
+
   private async sourcesFor(organizationId: string): Promise<DataSourceDocument[]> {
     const hit = this.cache.get(organizationId);
     if (hit && Date.now() - hit.at < CACHE_TTL_MS) return hit.sources;

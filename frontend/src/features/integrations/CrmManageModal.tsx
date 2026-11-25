@@ -12,7 +12,8 @@ import styles from './integrations.module.css';
 
 const MODULE_TERM: Record<string, string> = { deals: 'deal', quotes: 'quote', contacts: 'contact', accounts: 'account' };
 const plural = (word: string) => (/(s|x|ch|sh)$/i.test(word) ? `${word}es` : /[^aeiou]y$/i.test(word) ? `${word.slice(0, -1)}ies` : `${word}s`);
-const TRIGGER: Record<string, string> = { scheduled: 'Automatic', manual: 'Sync now', push: 'Received' };
+// live: a page showing its data was opened (only what changed is read).
+const TRIGGER: Record<string, string> = { live: 'Page opened', scheduled: 'Automatic', manual: 'By hand', push: 'Received' };
 
 const when = (iso?: string) =>
   iso ? new Date(iso).toLocaleString(undefined, { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' }) : '—';
@@ -21,8 +22,8 @@ const dateOnly = (iso: string) => new Date(iso).toLocaleDateString(undefined, { 
 export const HEALTH: Record<string, { label: string; variant: 'success' | 'danger' | 'neutral' | 'accent' }> = {
   healthy: { label: 'Healthy', variant: 'success' },
   failing: { label: 'Needs attention', variant: 'danger' },
-  not_synced: { label: 'Not synced yet', variant: 'neutral' },
-  syncing: { label: 'Syncing…', variant: 'accent' },
+  not_synced: { label: 'Not read yet', variant: 'neutral' },
+  syncing: { label: 'Reading…', variant: 'accent' },
 };
 
 interface Props {
@@ -74,8 +75,8 @@ export function CrmManageModal({ integration, onClose, onReconnect }: Props) {
   const syncNow = () =>
     run('sync', async () => {
       const { result } = await crmIntegrationsService.syncNow(provider);
-      if (result.status === 'error') toast.error(result.error ?? 'The sync didn’t finish.', { duration: 8_000 });
-      else if (result.status === 'deferred') toast(result.message ?? 'Not now — the next sync runs by itself.', { duration: 8_000 });
+      if (result.status === 'error') toast.error(result.error ?? 'The read didn’t finish.', { duration: 8_000 });
+      else if (result.status === 'deferred') toast(result.message ?? 'Not now — the next read runs by itself.', { duration: 8_000 });
       else toast.success(`${label} is up to date`);
       await queryClient.invalidateQueries({ queryKey: ['crm-integrations', 'history', provider] });
     });
@@ -100,13 +101,13 @@ export function CrmManageModal({ integration, onClose, onReconnect }: Props) {
   };
 
   const health = HEALTH[source.health] ?? HEALTH.not_synced;
-  // A CRM read once a night (Hoops): "Sync now" only inside its window, once.
+  // A CRM read once a night (Hoops): "Try again" only inside its window, once.
   const schedule = source.schedule;
   const canSyncNow = !schedule || schedule.canSyncNow;
   const tabs = [
     { id: 'overview', label: 'Overview' },
     { id: 'mapping', label: 'Field mapping' },
-    { id: 'history', label: push ? 'Activity' : 'Sync history' },
+    { id: 'history', label: push ? 'Activity' : 'Read history' },
     ...(push ? [{ id: 'address', label: 'Address & key' }] : []),
   ];
 
@@ -140,9 +141,10 @@ export function CrmManageModal({ integration, onClose, onReconnect }: Props) {
                     Review mapping
                   </Button>
                 )}
+                {/* A failure only: a working CRM is read whenever a page needs it. */}
                 {!push && source.error.kind !== 'auth' && canSyncNow && (
                   <Button type="button" size="sm" variant="secondary" loading={busy === 'sync'} onClick={() => void syncNow()}>
-                    Retry
+                    Try again
                   </Button>
                 )}
               </ErrorNotice>
@@ -150,12 +152,12 @@ export function CrmManageModal({ integration, onClose, onReconnect }: Props) {
 
             <dl className={styles.facts}>
               <div>
-                <dt>{push ? 'Last record received' : 'Last sync'}</dt>
+                <dt>{push ? 'Last record received' : 'Last read'}</dt>
                 <dd>{source.lastSyncAt ? `${when(source.lastSyncAt)} (${formatRelativeTime(source.lastSyncAt)})` : 'Not yet'}</dd>
               </div>
               {!push && (
                 <div>
-                  <dt>Last successful sync</dt>
+                  <dt>Last successful read</dt>
                   <dd>{source.lastSuccessAt ? when(source.lastSuccessAt) : 'Not yet'}</dd>
                 </div>
               )}
@@ -172,7 +174,7 @@ export function CrmManageModal({ integration, onClose, onReconnect }: Props) {
                     ? `${label} sends each new record`
                     : schedule
                       ? `Once a night, after ${schedule.windowLabel} — next ${nextRunText(schedule.nextRunAt)}`
-                      : 'Automatically, every few minutes'}
+                      : 'Live — what changed is read whenever a page showing its data opens'}
                 </dd>
               </div>
               {source.history && (
@@ -183,7 +185,7 @@ export function CrmManageModal({ integration, onClose, onReconnect }: Props) {
                       ? `All in — ${source.history.from ? `back to ${dateOnly(source.history.from)}` : 'everything'}`
                       : source.history.importedBackTo
                         ? `Back to ${dateOnly(source.history.importedBackTo)} so far — more each night until ${source.history.from ? dateOnly(source.history.from) : 'the beginning'}`
-                        : `From ${source.history.from ? dateOnly(source.history.from) : 'the beginning'} — starts with the first sync`}
+                        : `From ${source.history.from ? dateOnly(source.history.from) : 'the beginning'} — starts with the first read`}
                   </dd>
                 </div>
               )}
@@ -231,9 +233,6 @@ export function CrmManageModal({ integration, onClose, onReconnect }: Props) {
                   <Button type="button" variant="secondary" onClick={() => onReconnect(integration)}>
                     Reconnect
                   </Button>
-                  <Button type="button" leftIcon={<FiRefreshCw />} loading={busy === 'sync'} disabled={!canSyncNow} onClick={() => void syncNow()}>
-                    Sync now
-                  </Button>
                 </>
               )}
             </div>
@@ -249,8 +248,8 @@ export function CrmManageModal({ integration, onClose, onReconnect }: Props) {
             <EmptyState
               compact
               icon={FiRefreshCw}
-              title={push ? 'Nothing received yet' : 'No syncs yet'}
-              description={push ? `Records appear here as ${label} sends them.` : 'Each sync is listed here with what it brought in.'}
+              title={push ? 'Nothing received yet' : 'No reads yet'}
+              description={push ? `Records appear here as ${label} sends them.` : 'Each read is listed here with what it brought in.'}
             />
           ) : (
             <div className={styles.tableWrap}>

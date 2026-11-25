@@ -46,8 +46,8 @@ export function TeamActivityKpis({
           </span>
           <span className={styles.kpiLabel}>{m.label}</span>
         </span>
-        <span className={styles.kpiValue}>{m.key === 'pipelineValue' && !currency ? '—' : m.value(counts, currency)}</span>
-        <span className={styles.kpiSub}>{(m.key === 'pipelineValue' && !currency ? 'several currencies' : sub) ?? ' '}</span>
+        <span className={styles.kpiValue}>{(m.key === 'pipelineValue' || m.key === 'wonValue') && !currency ? '—' : m.value(counts, currency)}</span>
+        <span className={styles.kpiSub}>{((m.key === 'pipelineValue' || m.key === 'wonValue') && !currency ? 'several currencies' : sub) ?? ' '}</span>
       </motion.button>
     );
   };

@@ -19,6 +19,8 @@ import { needsResponseMatch } from '../email-intelligence/email-response-state';
 import { Deal, DealDocument } from './schemas/deal.schema';
 import { SalesAnalyticsService } from './sales-analytics.service';
 import { hasTeamRole, isOwner } from '../common/team-roster';
+import { businessTimeZone } from '../common/business-day';
+import { countedInMonths, countedMonthExpr, sameDealOnceAcrossSources } from './deal-filter.util';
 
 export interface CalendarEvent {
   id: string;
@@ -193,6 +195,7 @@ export class BusinessDashboardService {
     }
 
     const dealFilter = { organizationId, storeId };
+    const timeZone = await businessTimeZone(this.dealModel.db, organizationId);
     const [achievement, teamPerformance, revenueDeals, followUps, dealsAtRisk, missedEod, users] = await Promise.all([
       this.salesAnalyticsService.getAchievement(organizationId, 'store', storeId, period),
       this.dealModel
@@ -202,7 +205,8 @@ export class BusinessDashboardService {
           { $sort: { revenue: -1 } },
         ])
         .exec(),
-      this.dealModel.find({ ...dealFilter, expectedClosingDate: { $regex: `^${period}` } }).exec(),
+      // The month's deals as revenue counts them: won/lost by the day they closed, open by expected closing.
+      this.dealModel.find({ ...dealFilter, ...countedInMonths(period, period, timeZone) }).exec(),
       this.dealModel
         .find({ ...dealFilter, dealStatus: 'open', expectedClosingDate: { $lte: this.daysFromNow(7) } })
         .sort({ expectedClosingDate: 1 })
@@ -313,18 +317,21 @@ export class BusinessDashboardService {
     };
   }
 
+  // Won deals' value in the month each was CLOSED — getAchievement's revenue rule.
   private async getRevenueTrend(organizationId: string, months: number) {
     const periods = lastNPeriods(months);
+    const timeZone = await businessTimeZone(this.dealModel.db, organizationId);
     const rows = await this.dealModel
       .aggregate<{ _id: string; revenue: number }>([
         {
           $match: {
             organizationId,
             dealStatus: 'won',
-            expectedClosingDate: { $gte: `${periods[0]}-01`, $lte: `${periods[periods.length - 1]}-31` },
+            ...countedInMonths(periods[0], periods[periods.length - 1], timeZone),
           },
         },
-        { $group: { _id: { $substrCP: ['$expectedClosingDate', 0, 7] }, revenue: { $sum: '$monetaryValue' } } },
+        ...sameDealOnceAcrossSources(timeZone, ['dealStatus', 'monetaryValue', 'expectedClosingDate', 'closedAt']),
+        { $group: { _id: countedMonthExpr(timeZone), revenue: { $sum: '$monetaryValue' } } },
       ])
       .exec();
     const byPeriod = new Map(rows.map((r) => [r._id, r.revenue]));

@@ -50,7 +50,7 @@ const EDITOR_TABS = [
   { id: 'mappings', label: 'Field mapping' },
   { id: 'status', label: 'Won / lost & stages' },
   { id: 'capabilities', label: 'Capabilities' },
-  { id: 'general', label: 'Naming & sync' },
+  { id: 'general', label: 'Naming & updates' },
 ];
 
 interface Draft {
@@ -86,7 +86,7 @@ function draftOf(source: DataSourceAdminView): Draft {
 }
 
 function SyncLine({ source }: { source: DataSourceAdminView }) {
-  if (source.native) return <span className={styles.meta}>Records created directly in HaiVE — nothing to sync.</span>;
+  if (source.native) return <span className={styles.meta}>Records created directly in HaiVE — nothing to read.</span>;
   if (source.webhook) {
     if (source.sync.lastStatus === 'error')
       return (
@@ -103,24 +103,24 @@ function SyncLine({ source }: { source: DataSourceAdminView }) {
       </span>
     );
   }
-  if (!source.sync.supported) return <span className={styles.meta}>HaiVE can’t sync this CRM automatically yet.</span>;
+  if (!source.sync.supported) return <span className={styles.meta}>HaiVE can’t read this CRM automatically yet.</span>;
   const { lastStatus, lastSyncAt, lastError } = source.sync;
-  if (lastStatus === 'running') return <span className={styles.meta}>Syncing now…</span>;
+  if (lastStatus === 'running') return <span className={styles.meta}>Being read now…</span>;
   if (lastStatus === 'error')
     return (
       <span className={styles.syncError}>
-        <FiAlertCircle aria-hidden /> Last sync failed {timeAgo(lastSyncAt)}: {lastError}
+        <FiAlertCircle aria-hidden /> Last read failed {timeAgo(lastSyncAt)}: {lastError}
       </span>
     );
-  if (lastStatus === 'never') return <span className={styles.meta}>Not synced yet.</span>;
+  if (lastStatus === 'never') return <span className={styles.meta}>Not read yet.</span>;
   return (
     <span className={styles.meta}>
-      Synced {timeAgo(lastSyncAt)}
+      Read {timeAgo(lastSyncAt)}
       {!source.sync.enabled
-        ? ' · automatic sync off'
+        ? ' · updates off'
         : source.sync.window
           ? ` · once a night, after ${windowStart(source.sync.window)}`
-          : ` · every ${source.sync.intervalMinutes} min`}
+          : ' · live, read when a page opens'}
     </span>
   );
 }
@@ -190,16 +190,6 @@ export function DataSourcesSettings() {
     }
   };
 
-  const syncNow = (source: DataSourceAdminView) =>
-    run(
-      `sync-${source.id}`,
-      async () => {
-        const result = await dataSourcesService.syncNow(source.id);
-        if (result.status === 'error') throw new Error(result.error ?? 'Sync failed');
-      },
-      `${source.label} synced`,
-    );
-
   const dirty = !!selected && !!draft && JSON.stringify(draft) !== JSON.stringify(draftOf(selected));
 
   const save = async () => {
@@ -216,7 +206,7 @@ export function DataSourcesSettings() {
         syncEnabled: draft.syncEnabled,
         syncIntervalMinutes: draft.syncIntervalMinutes,
       });
-      toast.success('Saved. The next sync uses the new settings.');
+      toast.success('Saved. The next read uses the new settings.');
       await refresh();
     } catch (err) {
       toast.error(extractErrorMessage(err), { duration: 8_000 });
@@ -347,18 +337,6 @@ export function DataSourcesSettings() {
                   >
                     {active ? 'Configuring' : 'Configure'}
                   </Button>
-                  {!source.native && source.sync.supported && source.status === 'active' && (
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="ghost"
-                      leftIcon={<FiRefreshCw />}
-                      loading={busy === `sync-${source.id}`}
-                      onClick={() => void syncNow(source)}
-                    >
-                      Sync now
-                    </Button>
-                  )}
                   {source.webhook && (
                     <Button
                       type="button"
@@ -415,7 +393,7 @@ export function DataSourcesSettings() {
           description={
             selected.native
               ? 'Records created in HaiVE are already in HaiVE’s own format.'
-              : 'How this CRM’s records map onto HaiVE. Changes apply from the next sync; nothing here touches the CRM itself.'
+              : 'How this CRM’s records map onto HaiVE. Changes apply from the next read; nothing here touches the CRM itself.'
           }
           footer={
             <div className={styles.saveBar}>
@@ -479,7 +457,7 @@ export function DataSourcesSettings() {
                       <h3 className={styles.mapTitle}>
                         {MODULE_LABEL[module]}
                         {options.length > 0 && (
-                          <span className={styles.meta}> · {options.length} fields seen in the last sync</span>
+                          <span className={styles.meta}> · {options.length} fields seen in the last read</span>
                         )}
                       </h3>
                       <datalist id={listId}>
@@ -721,36 +699,25 @@ export function DataSourcesSettings() {
               </div>
               {!selected.native && selected.sync.supported && (
                 <>
-                  <h3 className={styles.mapTitle}>Sync</h3>
+                  <h3 className={styles.mapTitle}>Updates</h3>
                   <label className={styles.moduleToggle}>
                     <Switch
                       checked={draft.syncEnabled}
                       onChange={(on) => setDraft((d) => d && { ...d, syncEnabled: on })}
-                      ariaLabel="Sync automatically"
+                      ariaLabel="Keep up to date"
                     />
-                    Sync automatically
+                    Keep up to date
                   </label>
                   {selected.sync.window ? (
                     <p className={styles.meta}>
                       Once a night, after {windowStart(selected.sync.window)} — set by {selected.providerLabel}, which
-                      allows one sync a night.
+                      allows one read a night.
                     </p>
                   ) : (
-                    <label className={styles.selectField}>
-                      <span>Every</span>
-                      <select
-                        className={styles.select}
-                        value={draft.syncIntervalMinutes}
-                        disabled={!draft.syncEnabled}
-                        onChange={(e) => setDraft((d) => d && { ...d, syncIntervalMinutes: Number(e.target.value) })}
-                      >
-                        {[5, 10, 15, 30, 60, 180, 720, 1440].map((m) => (
-                          <option key={m} value={m}>
-                            {m < 60 ? `${m} minutes` : m === 60 ? '1 hour' : m === 1440 ? '1 day' : `${m / 60} hours`}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
+                    <p className={styles.meta}>
+                      Live — HaiVE asks {selected.providerLabel} for what changed whenever a page showing its data opens.
+                      {draft.syncEnabled ? '' : ' Off: pages show what was last read.'}
+                    </p>
                   )}
                 </>
               )}

@@ -706,6 +706,12 @@
   white-space: nowrap;
 }
 
+/* The AI's own reading (its type for an email), told apart from what Outlook holds. */
+.aiMark {
+  color: var(--color-accent);
+  vertical-align: -1px;
+}
+
 .inboxCompany {
   flex: 0 1 auto;
   min-width: 0;

@@ -1,6 +1,8 @@
 import { Injectable } from '@nestjs/common';
 import { InjectConnection } from '@nestjs/mongoose';
 import { Connection } from 'mongoose';
+import { businessTimeZone } from '../common/business-day';
+import { countedDayOf, countedOnDays } from '../crm/deal-filter.util';
 import { sourceCondition } from '../data-sources/data-source-scope.plugin';
 import { scopeCurrency } from '../data-sources/scope-currency';
 
@@ -59,9 +61,10 @@ function quotationTax(quote: Doc): { amount: number; tax: number; recorded: bool
  * A won deal and the quotations raised for it, as one sale. The deal's value is the sale (the same figure
  * the Dashboard counts as revenue) — never its quotations added up, which would count a re-issued copy of
  * a quote twice. Its tax is in the same proportion as on the quotations the customer accepted (all of
- * them, if the CRM never marked one accepted).
+ * them, if the CRM never marked one accepted). `closedOn`: the day it closed (countedDayOf); without it, its
+ * closing date.
  */
-export function wonSale(deal: Doc, quotes: Doc[]): WonSale {
+export function wonSale(deal: Doc, quotes: Doc[], closedOn?: string): WonSale {
   const value = Math.max(0, num(deal.monetaryValue));
   const accepted = quotes.filter((q) => q.clientApprovalStatus === 'approved');
   const basis = (accepted.length > 0 ? accepted : quotes).slice().sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
@@ -77,7 +80,7 @@ export function wonSale(deal: Doc, quotes: Doc[]): WonSale {
     dealName: text(deal.name),
     quoteNumbers: numbers.length ? numbers.join(', ') : undefined,
     customer: text(client.companyName) || text(client.contactName) || text(deal.name) || NO_CUSTOMER,
-    date: text(deal.expectedClosingDate).slice(0, 10),
+    date: closedOn ?? text(deal.expectedClosingDate).slice(0, 10),
     dealOwnerId: text(deal.ownerId) || undefined,
     quoteOwnerUserId: text(latest.ownerUserId) || undefined,
     quoteOwner: text(latest.quoteOwner) || undefined,
@@ -114,19 +117,16 @@ export function countedNote(totals: WonSalesTotals): string {
   return parts.join(' ');
 }
 
-/** The day after a "YYYY-MM-DD" date, as the same kind of string. */
-function dayAfter(ymd: string): string {
-  const d = new Date(`${ymd}T00:00:00.000Z`);
-  d.setUTCDate(d.getUTCDate() + 1);
-  return d.toISOString().slice(0, 10);
-}
 
 // The one definition of "sales" the Sales, Gross Margin and Royalty reports
 // share (since 2026-11-10, the user's choice): the deals WON in the period —
-// by the day each closed (expectedClosingDate, set to the real day when a deal
-// is won), at the deal's own value. That is exactly the Dashboard's revenue,
-// so the two never disagree. Before, every quotation sent in the period
-// counted, accepted or not — the reports showed everything ever quoted.
+// by the day each closed (countedDayExpr in crm/deal-filter.util.ts: closedAt
+// in the business's time zone, its closing date when that isn't known), at the
+// deal's own value. That is exactly the Dashboard's revenue, so the two never
+// disagree. Before, every quotation sent in the period counted, accepted or
+// not — the reports showed everything ever quoted. Until 2026-11-25 the day
+// was the expected closing date, which a CRM keeps as a forecast: a deal
+// expected in July and won in November was July's sale.
 //
 // Like the dashboards, it reads the CRM the request shows (the one chosen for
 // dashboards, through the data-source scope) — never two CRMs added together,
@@ -138,22 +138,25 @@ export class WonSalesService {
   constructor(@InjectConnection() private connection: Connection) {}
 
   async won(organizationId: string, dateFrom: string, dateTo: string, storeConstraint?: string): Promise<WonSale[]> {
+    const timeZone = await businessTimeZone(this.connection, organizationId);
     const match: Doc = {
       organizationId,
       dealStatus: 'won',
-      // Whole days, the last one included ("YYYY-MM-DD" strings compare as text).
-      expectedClosingDate: { $gte: dateFrom, $lt: dayAfter(dateTo) },
+      // Closed on one of the days, the last one included.
+      ...countedOnDays(dateFrom, dateTo, timeZone),
       ...(storeConstraint ? { storeId: storeConstraint } : {}),
     };
     const scoped = sourceCondition(match);
-    const deals = await this.connection
+    const found = await this.connection
       .collection('crm_deals')
       .find(scoped ? { ...match, $and: [scoped] } : match, {
-        projection: { name: 1, monetaryValue: 1, expectedClosingDate: 1, ownerId: 1 },
+        projection: { name: 1, monetaryValue: 1, dealStatus: 1, expectedClosingDate: 1, closedAt: 1, ownerId: 1 },
       })
-      .sort({ expectedClosingDate: -1 })
       .toArray();
-    if (deals.length === 0) return [];
+    if (found.length === 0) return [];
+    // Latest closing first.
+    const closedOn = new Map(found.map((d) => [d._id.toString(), countedDayOf(d as Doc, timeZone) ?? '']));
+    const deals = found.sort((a, b) => closedOn.get(b._id.toString())!.localeCompare(closedOn.get(a._id.toString())!));
 
     const quotes = await this.connection
       .collection('crm_quotes')
@@ -182,7 +185,7 @@ export class WonSalesService {
       if (!byDeal.has(key)) byDeal.set(key, []);
       byDeal.get(key)!.push(q);
     }
-    return deals.map((deal) => wonSale(deal, byDeal.get(deal._id.toString()) ?? []));
+    return deals.map((deal) => wonSale(deal, byDeal.get(deal._id.toString()) ?? [], closedOn.get(deal._id.toString()) || undefined));
   }
 
   /** What the sales in scope are priced in: the shown CRM's currency (Hoops: AUD), else INR. */

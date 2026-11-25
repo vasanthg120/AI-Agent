@@ -6,7 +6,8 @@ import { Deal, DealDocument } from './schemas/deal.schema';
 import { UsersService } from '../users/users.service';
 import { SalesAnalyticsService } from './sales-analytics.service';
 import { DealPerformanceOverviewQueryDto } from './dto/deal-performance-overview-query.dto';
-import { buildDealMatchStage } from './deal-filter.util';
+import { businessTimeZone } from '../common/business-day';
+import { buildDealMatchStage, countedInMonths, countedMonthExpr } from './deal-filter.util';
 import { isOwner } from '../common/team-roster';
 import { hoopsSalespersonId, unlinkedHoopsSales } from './hoops-salespeople';
 
@@ -62,9 +63,15 @@ export class DealPerformanceDashboardService {
     private salesAnalyticsService: SalesAnalyticsService,
   ) {}
 
+  /** The business's own time zone: the day a closed deal counts on depends on it (deal-filter.util.ts). */
+  timeZoneOf(organizationId: string): Promise<string> {
+    return businessTimeZone(this.dealModel.db, organizationId);
+  }
+
   async getOverview(organizationId: string, filters: DealPerformanceOverviewQueryDto, storeConstraint?: string) {
     const months = filters.months ?? 6;
-    const match = buildDealMatchStage(organizationId, filters, storeConstraint);
+    const timeZone = await this.timeZoneOf(organizationId);
+    const match = buildDealMatchStage(organizationId, filters, storeConstraint, { timeZone });
     const matchNoDate = buildDealMatchStage(organizationId, filters, storeConstraint, { includeDateRange: false });
 
     // Achievement/revenueProgress need a single scope — derived from the
@@ -94,7 +101,7 @@ export class DealPerformanceDashboardService {
           { $group: { _id: '$dealStatus', count: { $sum: 1 }, value: { $sum: '$monetaryValue' } } },
         ])
         .exec(),
-      this.getWonLostTrend(matchNoDate, months),
+      this.getWonLostTrend(matchNoDate, months, timeZone),
       this.dealModel
         .aggregate<StatusCountValue>([
           { $match: { ...matchNoDate, dealStatus: 'open', stageId: { $exists: true, $nin: [null, ''] } } },
@@ -188,7 +195,8 @@ export class DealPerformanceDashboardService {
     return 'Performance is on track — no urgent items flagged for this period.';
   }
 
-  private async getWonLostTrend(matchNoDate: Record<string, unknown>, months: number) {
+  // Won and lost deals in the month each was CLOSED (countedInMonths), as revenue is.
+  private async getWonLostTrend(matchNoDate: Record<string, unknown>, months: number, timeZone: string) {
     const periods = lastNPeriods(months);
     const rows = await this.dealModel
       .aggregate<{ _id: { period: string; status: string }; count: number; value: number }>([
@@ -196,12 +204,12 @@ export class DealPerformanceDashboardService {
           $match: {
             ...matchNoDate,
             dealStatus: { $in: ['won', 'lost'] },
-            expectedClosingDate: { $gte: `${periods[0]}-01`, $lte: `${periods[periods.length - 1]}-31` },
+            ...countedInMonths(periods[0], periods[periods.length - 1], timeZone),
           },
         },
         {
           $group: {
-            _id: { period: { $substrCP: ['$expectedClosingDate', 0, 7] }, status: '$dealStatus' },
+            _id: { period: countedMonthExpr(timeZone), status: '$dealStatus' },
             count: { $sum: 1 },
             value: { $sum: '$monetaryValue' },
           },

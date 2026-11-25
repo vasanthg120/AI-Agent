@@ -5,7 +5,8 @@ import { scopeCurrency } from '../data-sources/scope-currency';
 import { Deal, DealDocument } from './schemas/deal.schema';
 import { SalesTarget, SalesTargetDocument } from './schemas/sales-target.schema';
 import { UpsertSalesTargetDto } from './dto/upsert-sales-target.dto';
-import { countedMonths, expectedClosingMonthsMatch } from './deal-filter.util';
+import { businessTimeZone } from '../common/business-day';
+import { countedInMonths, countedMonths, sameDealOnceAcrossSources } from './deal-filter.util';
 
 export interface Achievement {
   period: string;
@@ -92,9 +93,11 @@ export class SalesAnalyticsService implements OnModuleInit {
   /** Achievement %, remaining target, average daily sales still needed, and a
    * simple linear month-end projection — deliberately not a real forecasting
    * model (see plan notes): `achieved / daysElapsed * daysInMonth`, with a
-   * coarse days-elapsed-ratio confidence score. Won deals are attributed to
-   * the period via `expectedClosingDate`'s "YYYY-MM" prefix, a pragmatic
-   * proxy in the absence of a separate "closed at" timestamp. */
+   * coarse days-elapsed-ratio confidence score. Revenue is the won deals'
+   * value in the month each deal was CLOSED (countedInMonths in
+   * deal-filter.util.ts: closedAt in the business's time zone, the closing
+   * date when that isn't known) — a deal created or expected months earlier
+   * counts in the month it was won. Open and lost deals never count. */
   //
   // lastPeriod (optional): several months at once (a dashboard date range,
   // countedMonths in deal-filter.util.ts) — revenue across all of them,
@@ -108,10 +111,11 @@ export class SalesAnalyticsService implements OnModuleInit {
     lastPeriod: string = period,
   ): Promise<Achievement> {
     const { months } = countedMonths(`${period}-01`, `${lastPeriod}-01`);
+    const timeZone = await businessTimeZone(this.dealModel.db, organizationId);
     const dealFilter: Record<string, unknown> = {
       organizationId,
       dealStatus: 'won',
-      expectedClosingDate: expectedClosingMonthsMatch(months[0], months[months.length - 1]),
+      ...countedInMonths(months[0], months[months.length - 1], timeZone),
     };
     if (scope === 'store') dealFilter.storeId = scopeId;
     if (scope === 'user') dealFilter.ownerId = scopeId;
@@ -120,6 +124,8 @@ export class SalesAnalyticsService implements OnModuleInit {
       this.dealModel
         .aggregate<{ achieved: number }>([
           { $match: dealFilter },
+          // Two CRMs read together: a deal kept in both is one sale, not two.
+          ...sameDealOnceAcrossSources(timeZone, ['monetaryValue']),
           { $group: { _id: null, achieved: { $sum: '$monetaryValue' } } },
         ])
         .exec()

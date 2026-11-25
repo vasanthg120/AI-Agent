@@ -7,7 +7,7 @@ import { FiTrendingUp, FiTarget, FiActivity, FiClock, FiArrowUpRight, FiArrowDow
 import { useState } from 'react';
 import { AnimatedNumber, Card } from '@/components/ui';
 import { formatINR as money } from '@/utils/currency';
-import { dealsService } from '@/services/dealsService';
+import { closingDayOf, dealsService } from '@/services/dealsService';
 import { employeeProductivityService } from '@/services/employeeProductivityService';
 import type { AnalyticsDashboardOverview } from '@/services/analyticsDashboardService';
 import { DrillDownModal, type DrillDownRow } from './DrillDownModal';
@@ -128,7 +128,7 @@ export function TeamPerformanceSummaryCards({ data, dateFrom, dateTo, storeId }:
     id: d._id,
     dealId: d._id,
     title: d.name,
-    subtitle: d.expectedClosingDate,
+    subtitle: closingDayOf(d),
     value: d.monetaryValue,
   }));
 

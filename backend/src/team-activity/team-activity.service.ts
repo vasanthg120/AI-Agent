@@ -3,9 +3,12 @@ import { InjectConnection } from '@nestjs/mongoose';
 import { Connection, Types, isValidObjectId } from 'mongoose';
 import { JwtPayload } from '../auth/jwt-payload.interface';
 import { businessDayOf } from '../common/business-day';
+import { ShortCache } from '../common/short-cache';
 import { EmailIntelligenceService, TeamEmailMetric } from '../email-intelligence/email-intelligence.service';
+import { AreaSeconds, EmployeeUsageService, PersonUsage, SignInRow, UsageDay } from '../employee-usage/employee-usage.service';
+import { USAGE_AREA_LABELS, UsageArea } from '../employee-usage/usage-areas';
 import { NotificationsService } from '../notifications/notifications.service';
-import { PeriodRange, TeamPeriod, periodRange, shiftDay } from './team-period';
+import { PeriodRange, TeamPeriod, periodRange, previousDays, shiftDay } from './team-period';
 import { ScopedBusiness, TeamPerson, TeamScope, TeamScopeService } from './team-scope.service';
 
 type Doc = Record<string, any>;
@@ -17,6 +20,8 @@ export interface ActivityCounts {
   dealsWon: number;
   dealsLost: number;
   wonValue: number;
+  // Won ÷ (won + lost) in the period; null when none closed.
+  dealConversionPct: number | null;
   // Open deals they own right now (not tied to the period).
   openDeals: number;
   pipelineValue: number;
@@ -29,6 +34,10 @@ export interface ActivityCounts {
   emailsNotReplied: number;
   // Went 24 hours with no reply — counted on the day the 24 hours ran out.
   emailsMissed: number;
+  // Arrived in the period and still owed a reply now, however old (one per conversation).
+  emailsUnanswered: number;
+  // How long customers waited for the replies sent in the period, on average (written in HaiVE or Outlook).
+  avgResponseSeconds: number | null;
   // Customers writing back in a conversation.
   customerReplies: number;
   // We replied in the period and asked the customer something; no answer yet.
@@ -38,22 +47,32 @@ export interface ActivityCounts {
   callsMade: number;
   callsReceived: number;
   callsConnected: number;
+  // Incoming phone calls nobody answered.
   callsMissed: number;
+  // Outgoing phone calls the other side didn't pick up (no answer, busy, failed).
+  callsUnanswered: number;
+  // Phone calls that connected ÷ phone calls; incoming answered ÷ incoming.
+  callConnectionRatePct: number | null;
+  callAnswerRatePct: number | null;
   talkSeconds: number;
   avgCallSeconds: number | null;
   scoredCalls: number;
   // Mean AI Coach score (out of 10) of the scored calls; null when none was scored.
   avgCallScore: number | null;
   // Tasks & follow-ups: email follow-up reminders and tasks given to them
-  // (on a customer, a job, a deal, or straight from Agent Activity).
+  // (on a customer, a job, a deal, or straight from Employee Activity).
   followUpsCompleted: number;
   // Not done yet, now; of which started (a task they marked "In progress") and past their day.
   followUpsPending: number;
   followUpsInProgress: number;
   followUpsOverdue: number;
+  // Measured time (EmployeeUsageService): active in HaiVE or on a call, a minute counted once; and HaiVE alone.
+  activeSeconds: number;
+  haiveSeconds: number;
 }
 
-type RawCounts = Omit<ActivityCounts, 'avgCallSeconds' | 'avgCallScore'> & { scoreSum: number; timedCalls: number };
+type ComputedField = 'avgCallSeconds' | 'avgCallScore' | 'avgResponseSeconds' | 'dealConversionPct' | 'callConnectionRatePct' | 'callAnswerRatePct';
+type RawCounts = Omit<ActivityCounts, ComputedField> & { scoreSum: number; timedCalls: number; responseSecondsSum: number; timedReplies: number };
 
 export interface TeamActivityPersonRow extends ActivityCounts {
   userId: string;
@@ -66,6 +85,78 @@ export interface TeamActivityPersonRow extends ActivityCounts {
   businessId: string;
   businessName: string;
   currency: string;
+  // Last time they were really active in HaiVE (any day); absent when never measured.
+  lastActiveAt?: Date;
+}
+
+/** Where a source of the figures stands: how its data arrives, and when it last did. */
+export interface SourceFreshness {
+  businessId: string;
+  businessName: string;
+  key: string;
+  label: string;
+  // real_time: recorded as it happens · on_open: read when a page is opened (and on a timer) · nightly: read once a night.
+  mode: 'real_time' | 'on_open' | 'nightly';
+  status: 'ok' | 'failing' | 'never' | 'not_connected';
+  lastSuccessAt?: Date;
+}
+
+/** One person's measured time, for the App usage view. */
+export interface UsagePersonRow {
+  userId: string;
+  name: string;
+  role: string;
+  active: boolean;
+  mainAccountMember: boolean;
+  businessId: string;
+  businessName: string;
+  activeSeconds: number;
+  haiveSeconds: number;
+  callSeconds: number;
+  byArea: AreaSeconds;
+  activeDays: number;
+  avgActiveSecondsPerDay: number | null;
+  firstAt?: Date;
+  lastAt?: Date;
+  lastActiveAt?: Date;
+  topArea?: UsageArea;
+}
+
+/** An app people work in, and what HaiVE can tell about it: time measured, activity only, or nothing. */
+export interface ConnectedApp {
+  key: string;
+  label: string;
+  measure: 'time' | 'activity' | 'none';
+  connected: boolean;
+  seconds?: number;
+  activity: { label: string; count: number }[];
+  note: string;
+}
+
+export interface TeamUsageReport {
+  team: boolean;
+  acrossBusinesses: boolean;
+  businesses: { id: string; name: string; timeZone: string; from: string; to: string }[];
+  totals: {
+    activeSeconds: number;
+    haiveSeconds: number;
+    callSeconds: number;
+    byArea: AreaSeconds;
+    people: number;
+    activePeople: number;
+    // Average measured time per person per day they were active.
+    avgActiveSecondsPerPersonDay: number | null;
+  };
+  areas: { key: UsageArea; label: string; seconds: number }[];
+  // Every day of the period (quiet ones as zeros), all the people shown added up.
+  days: { date: string; activeSeconds: number; haiveSeconds: number; callSeconds: number; byArea: AreaSeconds; activePeople: number }[];
+  people: UsagePersonRow[];
+  apps: ConnectedApp[];
+  // One person asked for: each day with its first and last activity and work sessions, and their sign-ins.
+  person?: { days: UsageDay[]; signIns: SignInRow[] };
+  // App usage has been measured since then (null: not yet in these businesses).
+  measuredSince: Date | null;
+  generatedAt: Date;
 }
 
 /** Deals created in the CRM that no HaiVE login is credited with, by the CRM salesperson named on them. */
@@ -107,6 +198,10 @@ export interface TeamActivityOverview {
   attention: SupportItem[];
   // Each team (Settings → Users → Department) of each business, once anyone has one.
   departments: TeamDepartment[];
+  // How each source of these figures gets its data, and when it last did.
+  sources: SourceFreshness[];
+  // Asked for with compare: the same totals for the period before, each business in its own timezone.
+  previous?: { from: string; to: string; totals: ActivityCounts };
   generatedAt: Date;
 }
 
@@ -228,7 +323,7 @@ function needsSupport(people: TeamActivityPersonRow[], period: TeamPeriod, viewe
     if (p.emailsMissed > 0) push('warning', `${plural(p.emailsMissed, 'customer email')} went 24 hours without a reply.`, 'emails_missed');
     if (p.scoredCalls >= 3 && p.avgCallScore !== null && p.avgCallScore < 5)
       push('warning', `Calls score ${p.avgCallScore}/10 on average over ${p.scoredCalls} — a coaching session could help.`, 'calls', 'scored');
-    if (p.callsMissed >= 3) push('info', `${plural(p.callsMissed, 'missed call')}.`, 'calls', 'missed');
+    if (p.callsMissed >= 3) push('info', `${plural(p.callsMissed, 'incoming call')} nobody answered.`, 'calls', 'missed');
     // Much more open work than the others (twice their average, and at least five things).
     const others = staff.filter((o) => o !== p);
     const othersAverage = others.length ? others.reduce((s, o) => s + o.followUpsPending, 0) / others.length : null;
@@ -236,7 +331,7 @@ function needsSupport(people: TeamActivityPersonRow[], period: TeamPeriod, viewe
       push('info', `${p.followUpsPending} open tasks — more than twice the others’ average; may need help or a hand-over.`, 'follow_ups');
     // Nothing at all (not judged on "today", which may have barely begun).
     if (period !== 'today' && !ACTIVITY_FIELDS.some((f) => (p as unknown as RawCounts)[f] > 0))
-      push('info', 'Nothing recorded in this period — no calls, emails, deals or finished tasks.');
+      push('info', 'Nothing recorded in this period — no time in HaiVE, calls, emails, deals or finished tasks.');
   }
   const rank = { warning: 0, info: 1 } as const;
   return items.sort((a, b) => rank[a.severity] - rank[b.severity] || a.personName.localeCompare(b.personName));
@@ -296,6 +391,7 @@ export const TEAM_LIST_KINDS = [
   'emails_replied',
   'emails_not_replied',
   'emails_missed',
+  'emails_unanswered',
   'emails_customer_replies',
   'emails_awaiting_customer',
   'deals_created',
@@ -306,7 +402,8 @@ export const TEAM_LIST_KINDS = [
 ] as const;
 export type TeamListKind = (typeof TEAM_LIST_KINDS)[number];
 
-export const CALL_FILTERS = ['made', 'received', 'connected', 'missed', 'scored'] as const;
+// missed: incoming nobody answered · unanswered: outgoing the other side didn't pick up.
+export const CALL_FILTERS = ['made', 'received', 'connected', 'missed', 'unanswered', 'scored'] as const;
 export type CallFilter = (typeof CALL_FILTERS)[number];
 
 const EMAIL_METRIC: Partial<Record<TeamListKind, TeamEmailMetric>> = {
@@ -314,6 +411,7 @@ const EMAIL_METRIC: Partial<Record<TeamListKind, TeamEmailMetric>> = {
   emails_replied: 'replied',
   emails_not_replied: 'pending',
   emails_missed: 'missed',
+  emails_unanswered: 'unanswered',
   emails_customer_replies: 'customer_replies',
   emails_awaiting_customer: 'awaiting_customer',
 };
@@ -325,6 +423,8 @@ export interface TeamActivityQuery {
   organizationId?: string;
   userId?: string;
   callFilter?: CallFilter;
+  // Overview only: also the totals of the period before (see previousDays).
+  compare?: boolean;
 }
 
 /** One call in a list: a phone call (with its recording's summary and score once processed) or a call recorded in Call Copilot. */
@@ -361,6 +461,48 @@ const MAX_LIVE_CALL_SECONDS = 4 * 60 * 60;
 /** Daily trend points at most; a longer range is grouped by week. */
 const MAX_DAILY_POINTS = 62;
 
+/** One day (or week) of the trend. */
+export interface TrendPoint {
+  calls: number;
+  callsMade: number;
+  callsReceived: number;
+  callsMissed: number;
+  callsUnanswered: number;
+  talkSeconds: number;
+  emailsSent: number;
+  emailsReceived: number;
+  emailsReplied: number;
+  dealsCreated: number;
+  dealsWon: number;
+  dealsLost: number;
+  wonValue: number;
+  activeSeconds: number;
+  haiveSeconds: number;
+  // People with measured time that day (added up over a week).
+  activePeople: number;
+}
+
+function emptyPoint(): TrendPoint {
+  return {
+    calls: 0,
+    callsMade: 0,
+    callsReceived: 0,
+    callsMissed: 0,
+    callsUnanswered: 0,
+    talkSeconds: 0,
+    emailsSent: 0,
+    emailsReceived: 0,
+    emailsReplied: 0,
+    dealsCreated: 0,
+    dealsWon: 0,
+    dealsLost: 0,
+    wonValue: 0,
+    activeSeconds: 0,
+    haiveSeconds: 0,
+    activePeople: 0,
+  };
+}
+
 const ROLE_LABELS: Record<string, string> = {
   owner: 'Owner',
   admin: 'Admin',
@@ -388,6 +530,7 @@ function emptyRaw(): RawCounts {
     emailsReplied: 0,
     emailsNotReplied: 0,
     emailsMissed: 0,
+    emailsUnanswered: 0,
     customerReplies: 0,
     awaitingCustomer: 0,
     calls: 0,
@@ -395,14 +538,19 @@ function emptyRaw(): RawCounts {
     callsReceived: 0,
     callsConnected: 0,
     callsMissed: 0,
+    callsUnanswered: 0,
     talkSeconds: 0,
     scoredCalls: 0,
     followUpsCompleted: 0,
     followUpsPending: 0,
     followUpsInProgress: 0,
     followUpsOverdue: 0,
+    activeSeconds: 0,
+    haiveSeconds: 0,
     scoreSum: 0,
     timedCalls: 0,
+    responseSecondsSum: 0,
+    timedReplies: 0,
   };
 }
 
@@ -411,11 +559,17 @@ function addInto(target: RawCounts, source: RawCounts): void {
 }
 
 function finish(raw: RawCounts): ActivityCounts {
-  const { scoreSum, timedCalls, ...rest } = raw;
+  const { scoreSum, timedCalls, responseSecondsSum, timedReplies, ...rest } = raw;
+  // callsMade / callsReceived are phone calls only; Call Copilot recordings have no direction.
+  const phoneCalls = rest.callsMade + rest.callsReceived;
   return {
     ...rest,
     avgCallSeconds: timedCalls > 0 ? Math.round(rest.talkSeconds / timedCalls) : null,
     avgCallScore: rest.scoredCalls > 0 ? Math.round((scoreSum / rest.scoredCalls) * 10) / 10 : null,
+    avgResponseSeconds: timedReplies > 0 ? Math.round(responseSecondsSum / timedReplies) : null,
+    dealConversionPct: percent(rest.dealsWon, rest.dealsWon + rest.dealsLost),
+    callConnectionRatePct: percent(phoneCalls - rest.callsMissed - rest.callsUnanswered, phoneCalls),
+    callAnswerRatePct: percent(rest.callsReceived - rest.callsMissed, rest.callsReceived),
   };
 }
 
@@ -431,18 +585,23 @@ const ACTIVITY_FIELDS: (keyof RawCounts)[] = [
   'calls',
   'scoredCalls',
   'followUpsCompleted',
+  'activeSeconds',
 ];
 /** Did anything in the period (open deals and pending follow-ups are standing state, not activity). */
 const isActive = (raw: RawCounts) => ACTIVITY_FIELDS.some((f) => raw[f] > 0);
 
-const percent = (part: number, whole: number) => (whole > 0 ? Math.round((part / whole) * 1000) / 10 : null);
+function percent(part: number, whole: number): number | null {
+  return whole > 0 ? Math.round((part / whole) * 1000) / 10 : null;
+}
 
-// Agent Activity and the Dashboard's Team Performance: per person, what they
-// did in a period — deals created, won and lost; emails sent, answered, still
-// waiting and missed, customers' replies and our questions still unanswered;
-// calls made, received, connected and missed with talk time and AI Coach
-// scores; follow-ups done and pending — and the records behind every number.
-// Whose figures the caller sees is TeamScopeService's decision.
+// Employee Activity (formerly Agent Activity) and the Dashboard's Team
+// Performance: per person, what they did in a period — deals created, won and
+// lost; emails sent, answered (and how fast), still waiting, unanswered and
+// missed, customers' replies and our questions still unanswered; calls made,
+// received, connected, missed and unanswered with talk time and AI Coach
+// scores; follow-ups done and pending; measured time in HaiVE and on calls —
+// and the records behind every number. Whose figures the caller sees is
+// TeamScopeService's decision.
 //
 // Where each figure comes from:
 //  - deals created / won / lost: the CRM activity log (crm_activities),
@@ -457,7 +616,10 @@ const percent = (part: number, whole: number) => (whole > 0 ? Math.round((part /
 //    counts as talk time; an uploaded file's is unknown); scores are the AI
 //    Coach's, from every call it scored;
 //  - follow-ups: email follow-up reminders (by mailbox) and customer tasks
-//    (by assignee) — completed in the period, pending and overdue now.
+//    (by assignee) — completed in the period, pending and overdue now;
+//  - time: EmployeeUsageService — HaiVE in active use (measured in the
+//    browser) and calls, a minute counted once; other apps report what was
+//    done there, never for how long.
 @Injectable()
 export class TeamActivityService {
   constructor(
@@ -466,16 +628,38 @@ export class TeamActivityService {
     private emails: EmailIntelligenceService,
     // Tells someone they were given a task (the bell). Optional so the figures can be built without it.
     @Optional() private notifications?: NotificationsService,
+    // Measured time in HaiVE and on calls; without it those figures read zero.
+    @Optional() private measuredTime?: EmployeeUsageService,
   ) {}
 
   private col(name: string) {
     return this.connection.collection(name);
   }
 
+  // The page asks again every minute, and several parts of it ask at once: what
+  // was worked out in the last 30 seconds for the same person and question is
+  // given again. Giving or moving a task clears it, so that shows at once.
+  private readonly recent = new ShortCache<unknown>(30_000, 300);
+
+  /** The same answer for the same caller and question within 30 seconds (the controller's path; tests call the methods directly). */
+  cached<T>(kind: string, caller: JwtPayload, query: object, compute: () => Promise<T>): Promise<T> {
+    const who = [caller.sub, caller.organizationId, caller.loginUserId ?? '', [...(caller.roles ?? [])].sort().join(','), caller.storeId ?? '', (caller.permissions ?? []).join(',')];
+    return this.recent.get([kind, ...who, JSON.stringify(query)].join('|'), compute) as Promise<T>;
+  }
+
   async overview(caller: JwtPayload, query: TeamActivityQuery, now = new Date()): Promise<TeamActivityOverview> {
     const scope = await this.scopes.resolve(caller);
     const businesses = this.scopes.pick(scope, query.organizationId);
     const results = await Promise.all(businesses.map((b) => this.businessActivity(scope, b, query, now)));
+    // The period before, worked out from each business's own days.
+    const before = query.compare
+      ? await Promise.all(
+          results.map((r) => {
+            const days = previousDays(query.period, r.range);
+            return this.businessActivity(scope, r.business, { ...query, period: 'custom', from: days.from, to: days.to }, now);
+          }),
+        )
+      : null;
 
     const totals = emptyRaw();
     const people: TeamActivityPersonRow[] = [];
@@ -527,8 +711,74 @@ export class TeamActivityService {
       unattributedDeals: { total: byCrmOwner.reduce((sum, r) => sum + r.count, 0), byCrmOwner },
       attention,
       departments: scope.team && !query.userId ? departmentTotals(people, attention) : [],
+      sources: (await Promise.all(results.map((r) => this.sourceFreshness(r.business, r.people.map((p) => p.userId))))).flat(),
+      ...(before?.length ? { previous: { from: before[0].range.from, to: before[0].range.to, totals: this.totalsOf(before, query.userId) } } : {}),
       generatedAt: now,
     };
+  }
+
+  /** Everyone's figures added up (one person's when asked), with created deals nobody is credited with. */
+  private totalsOf(results: { raw: Map<string, RawCounts>; unattributed: { count: number }[] }[], userId?: string): ActivityCounts {
+    const totals = emptyRaw();
+    for (const result of results) {
+      for (const [key, raw] of result.raw) if (!userId || key === userId) addInto(totals, raw);
+      if (!userId) for (const item of result.unattributed) totals.dealsCreated += item.count;
+    }
+    return finish(totals);
+  }
+
+  /**
+   * Where each source of a business's figures stands: calls and app usage are recorded
+   * as they happen; Outlook mail is read when a page is opened and every half hour;
+   * each CRM is read when a page is opened, or once a night (Hoops).
+   */
+  private async sourceFreshness(business: ScopedBusiness, ids: string[]): Promise<SourceFreshness[]> {
+    const base = { businessId: business.id, businessName: business.name };
+    const [crms, mailboxes, lastMailRead] = await Promise.all([
+      this.col('crm_data_sources')
+        .find({ organizationId: business.id, provider: { $ne: 'haive_native' } }, { projection: { label: 1, provider: 1, sync: 1, isDefault: 1 } })
+        .sort({ isDefault: -1, 'sync.lastSuccessAt': -1 })
+        .toArray(),
+      ids.length ? this.col('outlook_connections').countDocuments({ userId: { $in: ids }, isActive: true }) : 0,
+      ids.length
+        ? this.col('email_sync_jobs')
+            .find({ userId: { $in: ids }, status: { $in: ['completed', 'completed_with_errors'] } }, { projection: { completedAt: 1, createdAt: 1 } })
+            .sort({ createdAt: -1 })
+            .limit(1)
+            .toArray()
+        : [],
+    ]);
+    const mailAt = lastMailRead[0]?.completedAt ?? lastMailRead[0]?.createdAt;
+    const out: SourceFreshness[] = [
+      { ...base, key: 'calls', label: 'Calls & Call Copilot', mode: 'real_time', status: 'ok' },
+      { ...base, key: 'usage', label: 'Time in HaiVE', mode: 'real_time', status: 'ok' },
+      {
+        ...base,
+        key: 'email',
+        label: 'Outlook mail',
+        mode: 'on_open',
+        status: mailboxes === 0 ? 'not_connected' : mailAt ? 'ok' : 'never',
+        ...(mailAt instanceof Date ? { lastSuccessAt: mailAt } : {}),
+      },
+    ];
+    // One line per CRM: the default (or last read) one when the same CRM is connected twice.
+    const seen = new Set<string>();
+    for (const crm of crms) {
+      if (seen.has(String(crm.provider))) continue;
+      seen.add(String(crm.provider));
+      const sync = (crm.sync ?? {}) as Doc;
+      const status: SourceFreshness['status'] = sync.lastStatus === 'error' || sync.lastStatus === 'failed' ? 'failing' : sync.lastSuccessAt ? 'ok' : 'never';
+      out.push({
+        ...base,
+        key: `crm:${crm._id.toString()}`,
+        label: String(crm.label ?? crm.provider ?? 'CRM'),
+        // A CRM read only inside a nightly window (Hoops) has a sync.window.
+        mode: sync.window ? 'nightly' : 'on_open',
+        status,
+        ...(sync.lastSuccessAt instanceof Date ? { lastSuccessAt: sync.lastSuccessAt } : {}),
+      });
+    }
+    return out;
   }
 
   /** One business: every visible person's counts. */
@@ -542,7 +792,7 @@ export class TeamActivityService {
       if (entry) entry[field] += amount;
     };
 
-    const [deals, pipeline, emailCounts, sentCounts, reminders, tasks, calls] = await Promise.all([
+    const [deals, pipeline, emailCounts, sentCounts, reminders, tasks, calls, replies, usage, lastActive] = await Promise.all([
       this.dealCounts(business.id, range, everyone),
       this.pipelineCounts(business.id, ids),
       this.emails.teamEmailCounts(business.id, range.start, range.end, ids, now),
@@ -550,6 +800,9 @@ export class TeamActivityService {
       this.emails.teamFollowUpCounts(business.id, range.start, range.end, ids, now),
       this.taskCounts(business.id, range, ids, now),
       this.callCounts(business.id, range, ids),
+      this.emails.teamReplyStats(business.id, range.start, range.end, ids, now),
+      this.measuredTime ? this.measuredTime.measure(business.id, business.timeZone, ids, range, now) : new Map<string, PersonUsage>(),
+      this.measuredTime ? this.measuredTime.lastActive(business.id, ids) : new Map<string, Date>(),
     ]);
 
     for (const [userId, c] of deals.byPerson) {
@@ -567,10 +820,19 @@ export class TeamActivityService {
       add(userId, 'emailsReplied', c.replied);
       add(userId, 'emailsNotReplied', c.pending);
       add(userId, 'emailsMissed', c.missed);
+      add(userId, 'emailsUnanswered', c.unanswered);
       add(userId, 'customerReplies', c.customer_replies);
       add(userId, 'awaitingCustomer', c.awaiting_customer);
     }
     for (const [userId, count] of sentCounts) add(userId, 'emailsSent', count);
+    for (const [userId, r] of replies) {
+      add(userId, 'responseSecondsSum', r.responseSecondsSum);
+      add(userId, 'timedReplies', r.timedReplies);
+    }
+    for (const [userId, u] of usage) {
+      add(userId, 'activeSeconds', u.activeSeconds);
+      add(userId, 'haiveSeconds', u.haiveSeconds);
+    }
     for (const source of [reminders, tasks]) {
       for (const [userId, c] of source) {
         add(userId, 'followUpsCompleted', c.completed);
@@ -610,6 +872,7 @@ export class TeamActivityService {
         businessId: business.id,
         businessName: business.name,
         currency: business.currency,
+        ...(lastActive.has(person.id) ? { lastActiveAt: lastActive.get(person.id) } : {}),
         ...finish(counts),
       });
     }
@@ -723,11 +986,11 @@ export class TeamActivityService {
   }
 
   private async callCounts(organizationId: string, range: PeriodRange, ids: string[]) {
-    type CallCounts = Pick<RawCounts, 'calls' | 'callsMade' | 'callsReceived' | 'callsConnected' | 'callsMissed' | 'talkSeconds' | 'timedCalls' | 'scoredCalls' | 'scoreSum'>;
+    type CallCounts = Pick<RawCounts, 'calls' | 'callsMade' | 'callsReceived' | 'callsConnected' | 'callsMissed' | 'callsUnanswered' | 'talkSeconds' | 'timedCalls' | 'scoredCalls' | 'scoreSum'>;
     const counts = new Map<string, CallCounts>();
     if (ids.length === 0) return counts;
     const entry = (userId: string) => {
-      const existing = counts.get(userId) ?? { calls: 0, callsMade: 0, callsReceived: 0, callsConnected: 0, callsMissed: 0, talkSeconds: 0, timedCalls: 0, scoredCalls: 0, scoreSum: 0 };
+      const existing = counts.get(userId) ?? { calls: 0, callsMade: 0, callsReceived: 0, callsConnected: 0, callsMissed: 0, callsUnanswered: 0, talkSeconds: 0, timedCalls: 0, scoredCalls: 0, scoreSum: 0 };
       counts.set(userId, existing);
       return existing;
     };
@@ -742,11 +1005,13 @@ export class TeamActivityService {
           made: { $sum: { $cond: [{ $eq: ['$direction', 'inbound'] }, 0, 1] } },
           received: { $sum: { $cond: [{ $eq: ['$direction', 'inbound'] }, 1, 0] } },
           connected: { $sum: answered },
+          // Incoming and not answered; the rest not answered were outgoing.
+          missed: { $sum: { $cond: [{ $and: [{ $eq: ['$direction', 'inbound'] }, { $not: [{ $ifNull: ['$answeredAt', false] }] }] }, 1, 0] } },
           talk: { $sum: { $cond: [{ $ifNull: ['$answeredAt', false] }, { $ifNull: ['$durationSeconds', 0] }, 0] } },
         },
       },
     ];
-    type PhoneRow = { _id: string; calls: number; made: number; received: number; connected: number; talk: number };
+    type PhoneRow = { _id: string; calls: number; made: number; received: number; connected: number; missed: number; talk: number };
     const [plivo, twilio, sessions, linked] = await Promise.all([
       this.col('plivo_calls').aggregate<PhoneRow>(phoneGroup).toArray(),
       this.col('twilio_calls').aggregate<PhoneRow>(phoneGroup).toArray(),
@@ -759,7 +1024,8 @@ export class TeamActivityService {
       e.callsMade += row.made;
       e.callsReceived += row.received;
       e.callsConnected += row.connected;
-      e.callsMissed += row.calls - row.connected;
+      e.callsMissed += row.missed;
+      e.callsUnanswered += row.calls - row.connected - row.missed;
       e.talkSeconds += row.talk;
       e.timedCalls += row.connected;
     }
@@ -783,15 +1049,16 @@ export class TeamActivityService {
   // ---- trends ------------------------------------------------------------------------------
 
   /**
-   * Day by day (week by week past two months): calls, talk time, emails sent and
-   * answered, deals created and won — for everyone the caller sees, or one person.
-   * Days are each business's own; across businesses the same calendar day is added up.
+   * Day by day (week by week past two months): calls (made, received, missed,
+   * unanswered), talk time, emails sent, received and answered, deals created, won
+   * and lost with the value won, and measured time — for everyone the caller sees,
+   * or one person. Days are each business's own; across businesses the same
+   * calendar day is added up.
    */
   async trend(caller: JwtPayload, query: TeamActivityQuery, now = new Date()) {
     const scope = await this.scopes.resolve(caller);
     const businesses = this.scopes.pick(scope, query.organizationId);
-    type Point = { calls: number; talkSeconds: number; emailsSent: number; emailsReplied: number; dealsCreated: number; dealsWon: number };
-    const points = new Map<string, Point>();
+    const points = new Map<string, TrendPoint>();
     let first = '';
     let last = '';
     for (const business of businesses) {
@@ -801,28 +1068,34 @@ export class TeamActivityService {
       const everyone = await this.scopes.people(scope, business);
       const ids = (query.userId ? everyone.filter((p) => p.id === query.userId) : everyone).map((p) => p.id);
       if (ids.length === 0) continue;
-      const day = (at: unknown) => (at instanceof Date ? businessDayOf(business.timeZone, at) : null);
-      const bump = (at: unknown, field: keyof Point, amount = 1) => {
-        const d = day(at);
-        if (!d) return;
-        const point = points.get(d) ?? { calls: 0, talkSeconds: 0, emailsSent: 0, emailsReplied: 0, dealsCreated: 0, dealsWon: 0 };
-        point[field] += amount;
-        points.set(d, point);
+      const point = (d: string) => {
+        const existing = points.get(d) ?? emptyPoint();
+        points.set(d, existing);
+        return existing;
+      };
+      const bump = (at: unknown, field: keyof TrendPoint, amount = 1) => {
+        if (at instanceof Date) point(businessDayOf(business.timeZone, at))[field] += amount;
       };
       const timeMatch = { $gte: range.start, $lt: range.end };
       const owners = { organizationId: business.id, userId: { $in: ids } };
-      const [plivo, twilio, sessions, linked, sent, replied, deals] = await Promise.all([
-        this.col('plivo_calls').find({ ...owners, createdAt: timeMatch }, { projection: { createdAt: 1, answeredAt: 1, durationSeconds: 1 } }).toArray(),
-        this.col('twilio_calls').find({ ...owners, createdAt: timeMatch }, { projection: { createdAt: 1, answeredAt: 1, durationSeconds: 1 } }).toArray(),
+      const phoneProjection = { createdAt: 1, answeredAt: 1, durationSeconds: 1, direction: 1 };
+      const [plivo, twilio, sessions, linked, sent, replied, received, deals, usage] = await Promise.all([
+        this.col('plivo_calls').find({ ...owners, createdAt: timeMatch }, { projection: phoneProjection }).toArray(),
+        this.col('twilio_calls').find({ ...owners, createdAt: timeMatch }, { projection: phoneProjection }).toArray(),
         this.col('call_sessions').find({ ...owners, createdAt: timeMatch }, { projection: { createdAt: 1, endedAt: 1, source: 1 } }).toArray(),
         this.linkedSessionIds(business.id),
         this.emails.teamSentList(business.id, range.start, range.end, ids, 5000),
         this.emails.teamEmailList(business.id, 'replied', range.start, range.end, ids, 5000, now),
-        this.dealActivityRows(business.id, range, ['created', 'won']),
+        this.emails.teamEmailList(business.id, 'received', range.start, range.end, ids, 5000, now),
+        this.dealActivityRows(business.id, range, ['created', 'won', 'lost']),
+        this.measuredTime ? this.measuredTime.measure(business.id, business.timeZone, ids, range, now) : new Map<string, PersonUsage>(),
       ]);
       for (const c of [...plivo, ...twilio]) {
+        const inbound = c.direction === 'inbound';
         bump(c.createdAt, 'calls');
+        bump(c.createdAt, inbound ? 'callsReceived' : 'callsMade');
         if (c.answeredAt) bump(c.createdAt, 'talkSeconds', Number(c.durationSeconds) || 0);
+        else bump(c.createdAt, inbound ? 'callsMissed' : 'callsUnanswered');
       }
       for (const s of sessions) {
         if (linked.has(s._id.toString())) continue;
@@ -831,28 +1104,255 @@ export class TeamActivityService {
       }
       for (const e of sent.items) bump(e.sentAt, 'emailsSent');
       for (const e of replied.items) bump(e.respondedAt ? new Date(e.respondedAt) : undefined, 'emailsReplied');
+      for (const e of received.items) bump(e.receivedAt ? new Date(e.receivedAt) : undefined, 'emailsReceived');
       const visible = new Set(ids);
       for (const d of deals) {
         const credited = d.creditedTo ? visible.has(d.creditedTo) : scope.team && !query.userId;
         if (!credited) continue;
-        bump(d.row.occurredAt, d.row.kind === 'won' ? 'dealsWon' : 'dealsCreated');
+        const kind = d.row.kind as 'created' | 'won' | 'lost';
+        bump(d.row.occurredAt, kind === 'won' ? 'dealsWon' : kind === 'lost' ? 'dealsLost' : 'dealsCreated');
+        if (kind === 'won') bump(d.row.occurredAt, 'wonValue', Number(d.deal?.monetaryValue ?? d.row.value ?? 0) || 0);
+      }
+      for (const person of usage.values()) {
+        for (const day of person.days) {
+          const p = point(day.date);
+          p.activeSeconds += day.activeSeconds;
+          p.haiveSeconds += day.haiveSeconds;
+          p.activePeople += 1;
+        }
       }
     }
     // Every day of the range, quiet ones as zeros; weeks (from the first day) when the range is long.
     const days: string[] = [];
     for (let d = first; d && d <= last; d = shiftDay(d, 1)) days.push(d);
     const weekly = days.length > MAX_DAILY_POINTS;
-    const series: (Point & { date: string; label: string })[] = [];
+    const series: (TrendPoint & { date: string; label: string })[] = [];
     days.forEach((d, i) => {
-      const point = points.get(d) ?? { calls: 0, talkSeconds: 0, emailsSent: 0, emailsReplied: 0, dealsCreated: 0, dealsWon: 0 };
+      const point = points.get(d) ?? emptyPoint();
       if (weekly && i % 7 !== 0) {
         const bucket = series[series.length - 1];
-        for (const key of Object.keys(point) as (keyof Point)[]) bucket[key] += point[key];
+        for (const key of Object.keys(point) as (keyof TrendPoint)[]) bucket[key] += point[key];
         return;
       }
       series.push({ date: d, label: weekly ? `Week of ${d}` : d, ...point });
     });
     return { granularity: weekly ? 'week' : 'day', points: series };
+  }
+
+  // ---- app usage ---------------------------------------------------------------------------
+
+  /**
+   * Where people's working time went: measured time in HaiVE by part of the app and
+   * on calls, day by day; each person's active days, first and last activity; the
+   * other apps they work in and what can honestly be said about each — time, activity
+   * only, or nothing; and for one person, each day's work sessions and their sign-ins.
+   */
+  async usage(caller: JwtPayload, query: TeamActivityQuery, now = new Date()): Promise<TeamUsageReport> {
+    const scope = await this.scopes.resolve(caller);
+    const businesses = this.scopes.pick(scope, query.organizationId);
+    const parts = await Promise.all(
+      businesses.map(async (business) => {
+        const range = periodRange(query.period, business.timeZone, now, { from: query.from, to: query.to });
+        const everyone = await this.scopes.people(scope, business);
+        const people = query.userId ? everyone.filter((p) => p.id === query.userId) : everyone;
+        const ids = people.map((p) => p.id);
+        const [measured, lastActive, sent, replies, deals, gmail, outlook, crms] = await Promise.all([
+          this.measuredTime ? this.measuredTime.measure(business.id, business.timeZone, ids, range, now) : new Map<string, PersonUsage>(),
+          this.measuredTime ? this.measuredTime.lastActive(business.id, ids) : new Map<string, Date>(),
+          this.emails.teamSentCounts(business.id, range.start, range.end, ids),
+          this.emails.teamReplyStats(business.id, range.start, range.end, ids, now),
+          ids.length ? this.dealActivityRows(business.id, range, ['created', 'won', 'lost']) : [],
+          ids.length ? this.col('gmail_connections').countDocuments({ userId: { $in: ids }, isActive: true }) : 0,
+          ids.length ? this.col('outlook_connections').countDocuments({ userId: { $in: ids }, isActive: true }) : 0,
+          this.col('crm_data_sources')
+            .find({ organizationId: business.id, provider: { $ne: 'haive_native' } }, { projection: { label: 1, provider: 1 } })
+            .toArray(),
+        ]);
+        return { business, range, people, ids, measured, lastActive, sent, replies, deals, gmail, outlook, crms };
+      }),
+    );
+
+    // People: everyone on the staff (a quiet period shows as zeros); the Main Account
+    // owner's own record and anyone switched off only when something was measured.
+    const rows: UsagePersonRow[] = [];
+    for (const part of parts) {
+      for (const person of part.people) {
+        const u = part.measured.get(person.id);
+        if ((person.mainAccountMember || !person.active) && !u) continue;
+        const top = u ? (Object.entries(u.byArea) as [UsageArea, number][]).sort((x, y) => y[1] - x[1])[0]?.[0] : undefined;
+        rows.push({
+          userId: person.id,
+          name: person.name,
+          role: roleOf(person),
+          active: person.active,
+          mainAccountMember: person.mainAccountMember,
+          businessId: part.business.id,
+          businessName: part.business.name,
+          activeSeconds: u?.activeSeconds ?? 0,
+          haiveSeconds: u?.haiveSeconds ?? 0,
+          callSeconds: u?.callSeconds ?? 0,
+          byArea: u?.byArea ?? {},
+          activeDays: u?.activeDays ?? 0,
+          avgActiveSecondsPerDay: u && u.activeDays ? Math.round(u.activeSeconds / u.activeDays) : null,
+          ...(u?.firstAt ? { firstAt: u.firstAt } : {}),
+          ...(u?.lastAt ? { lastAt: u.lastAt } : {}),
+          ...(part.lastActive.has(person.id) ? { lastActiveAt: part.lastActive.get(person.id) } : {}),
+          ...(top ? { topArea: top } : {}),
+        });
+      }
+    }
+    rows.sort((x, y) => y.activeSeconds - x.activeSeconds || x.name.localeCompare(y.name));
+
+    // Totals, the parts of the app, and every day of the period.
+    const byArea: AreaSeconds = {};
+    let activeDays = 0;
+    const totals = { activeSeconds: 0, haiveSeconds: 0, callSeconds: 0 };
+    for (const row of rows) {
+      totals.activeSeconds += row.activeSeconds;
+      totals.haiveSeconds += row.haiveSeconds;
+      totals.callSeconds += row.callSeconds;
+      activeDays += row.activeDays;
+      for (const [area, seconds] of Object.entries(row.byArea) as [UsageArea, number][]) byArea[area] = (byArea[area] ?? 0) + seconds;
+    }
+    const shown = new Set(rows.map((r) => `${r.businessId}|${r.userId}`));
+    const dayMap = new Map<string, TeamUsageReport['days'][number]>();
+    let first = '';
+    let last = '';
+    for (const part of parts) {
+      if (!first || part.range.from < first) first = part.range.from;
+      if (!last || part.range.to > last) last = part.range.to;
+      for (const [userId, u] of part.measured) {
+        if (!shown.has(`${part.business.id}|${userId}`)) continue;
+        for (const day of u.days) {
+          const entry = dayMap.get(day.date) ?? { date: day.date, activeSeconds: 0, haiveSeconds: 0, callSeconds: 0, byArea: {}, activePeople: 0 };
+          entry.activeSeconds += day.activeSeconds;
+          entry.haiveSeconds += day.haiveSeconds;
+          entry.callSeconds += day.callSeconds;
+          entry.activePeople += 1;
+          for (const [area, seconds] of Object.entries(day.byArea) as [UsageArea, number][]) entry.byArea[area] = (entry.byArea[area] ?? 0) + seconds;
+          dayMap.set(day.date, entry);
+        }
+      }
+    }
+    const days: TeamUsageReport['days'] = [];
+    for (let d = first; d && d <= last; d = shiftDay(d, 1)) days.push(dayMap.get(d) ?? { date: d, activeSeconds: 0, haiveSeconds: 0, callSeconds: 0, byArea: {}, activePeople: 0 });
+
+    // The apps people work in, and what HaiVE can say about each.
+    const sum = <T>(items: T[], pick: (t: T) => number) => items.reduce((total, t) => total + pick(t), 0);
+    const visibleIds = (part: (typeof parts)[number]) => new Set(part.ids);
+    const replies = parts.flatMap((p) => [...p.replies.values()]);
+    const crmCounts = new Map<string, { created: number; won: number; lost: number }>();
+    const crmLabels = new Map<string, string>();
+    for (const part of parts) {
+      const labelOf = new Map(part.crms.map((c) => [String(c.provider), String(c.label ?? c.provider)]));
+      for (const c of part.crms) crmLabels.set(String(c.label ?? c.provider), String(c.label ?? c.provider));
+      const ids = visibleIds(part);
+      for (const d of part.deals) {
+        if (!d.creditedTo || !ids.has(d.creditedTo) || !d.row.provider || d.row.provider === 'haive') continue;
+        const label = labelOf.get(String(d.row.provider)) ?? String(d.row.provider);
+        const entry = crmCounts.get(label) ?? { created: 0, won: 0, lost: 0 };
+        entry[d.row.kind as 'created' | 'won' | 'lost'] += 1;
+        crmCounts.set(label, entry);
+      }
+    }
+    const callCount = (label: string, count: number) => ({ label, count });
+    const apps: ConnectedApp[] = [
+      {
+        key: 'haive',
+        label: 'HaiVE',
+        measure: 'time',
+        connected: true,
+        seconds: totals.haiveSeconds,
+        activity: [],
+        note: 'Measured: time with HaiVE in front and in use — a click, key press, scroll or touch in the last 2 minutes. An open tab nobody touches doesn’t count.',
+      },
+      {
+        key: 'calls',
+        label: 'Phone & Call Copilot',
+        measure: 'time',
+        connected: true,
+        seconds: totals.callSeconds,
+        activity: [],
+        note: 'Measured from the calls themselves: a phone call from answer to hang-up, a live Call Copilot call from start to end.',
+      },
+      {
+        key: 'outlook',
+        label: 'Outlook',
+        measure: 'activity',
+        connected: sum(parts, (p) => p.outlook) > 0,
+        activity: [
+          callCount('Emails sent', sum(parts, (p) => sum([...p.sent.values()], (n) => n))),
+          callCount('Replies written in Outlook', sum(replies, (r) => r.viaOutlook)),
+          callCount('Replies written in HaiVE', sum(replies, (r) => r.viaApp)),
+        ],
+        note: 'Time spent in Outlook isn’t measured — only what was sent from the mailbox.',
+      },
+      ...[...crmLabels.keys()].map(
+        (label): ConnectedApp => ({
+          key: `crm:${label}`,
+          label,
+          measure: 'activity',
+          connected: true,
+          activity: [
+            callCount('Deals created', crmCounts.get(label)?.created ?? 0),
+            callCount('Deals won', crmCounts.get(label)?.won ?? 0),
+            callCount('Deals lost', crmCounts.get(label)?.lost ?? 0),
+          ],
+          note: 'Time in the CRM isn’t measured — deals created, won and lost there are counted, credited through Settings → Deal Assignment.',
+        }),
+      ),
+      {
+        key: 'gmail',
+        label: 'Gmail',
+        measure: 'none',
+        connected: sum(parts, (p) => p.gmail) > 0,
+        activity: [],
+        note: sum(parts, (p) => p.gmail) > 0 ? 'Connected for sending only: HaiVE doesn’t read Gmail activity, so nothing is counted.' : 'Not connected.',
+      },
+      {
+        key: 'pos',
+        label: 'POS',
+        measure: 'none',
+        connected: false,
+        activity: [],
+        note: 'No point-of-sale system is connected to HaiVE, so there is nothing to count.',
+      },
+    ];
+
+    // One person: each day's first and last activity and work sessions, and their sign-ins.
+    let person: TeamUsageReport['person'];
+    if (query.userId) {
+      const part = parts.find((p) => p.ids.includes(query.userId!));
+      if (part) {
+        person = {
+          days: part.measured.get(query.userId)?.days ?? [],
+          signIns: this.measuredTime ? await this.measuredTime.signInHistory(part.business.id, query.userId, part.range.start, part.range.end) : [],
+        };
+      }
+    }
+
+    return {
+      team: scope.team,
+      acrossBusinesses: scope.acrossBusinesses,
+      businesses: parts.map((p) => ({ id: p.business.id, name: p.business.name, timeZone: p.business.timeZone, from: p.range.from, to: p.range.to })),
+      totals: {
+        ...totals,
+        byArea,
+        people: rows.filter((r) => !r.mainAccountMember && r.active).length,
+        activePeople: rows.filter((r) => r.activeSeconds > 0).length,
+        avgActiveSecondsPerPersonDay: activeDays ? Math.round(totals.activeSeconds / activeDays) : null,
+      },
+      areas: (Object.entries(byArea) as [UsageArea, number][])
+        .filter(([, seconds]) => seconds > 0)
+        .sort((x, y) => y[1] - x[1])
+        .map(([key, seconds]) => ({ key, label: USAGE_AREA_LABELS[key], seconds })),
+      days,
+      people: rows,
+      apps,
+      ...(person ? { person } : {}),
+      measuredSince: this.measuredTime ? await this.measuredTime.measuredSince(parts.map((p) => p.business.id)) : null,
+      generatedAt: now,
+    };
   }
 
   // ---- the records behind a number -------------------------------------------------------
@@ -929,7 +1429,9 @@ export class TeamActivityService {
       case 'connected':
         return calls.filter((c) => c.connected);
       case 'missed':
-        return calls.filter((c) => c.kind === 'phone' && !c.connected);
+        return calls.filter((c) => c.kind === 'phone' && c.direction === 'inbound' && !c.connected);
+      case 'unanswered':
+        return calls.filter((c) => c.kind === 'phone' && c.direction !== 'inbound' && !c.connected);
       case 'scored':
         return calls.filter((c) => c.score !== undefined);
       default:
@@ -1039,6 +1541,7 @@ export class TeamActivityService {
    * manager, or the Main Account owner.
    */
   async giveTask(caller: JwtPayload, input: GiveTaskInput, now = new Date()): Promise<TeamTaskItem> {
+    this.recent.clear();
     const title = input.title?.trim();
     if (!title) throw new BadRequestException('Give the task a title.');
     const scope = await this.scopes.resolve(caller);
@@ -1083,6 +1586,7 @@ export class TeamActivityService {
    */
   async moveTask(caller: JwtPayload, taskId: string, change: TaskChange, now = new Date()): Promise<TeamTaskItem> {
     if (!isValidObjectId(taskId)) throw new NotFoundException('Task not found.');
+    this.recent.clear();
     const scope = await this.scopes.resolve(caller);
     const task = await this.col(TASKS).findOne({ _id: new Types.ObjectId(taskId), organizationId: { $in: scope.businesses.map((b) => b.id) } });
     if (!task) throw new NotFoundException('Task not found.');

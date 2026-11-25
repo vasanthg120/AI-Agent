@@ -9,9 +9,11 @@ import { useAuthStore } from '@/stores/authStore';
 import { useDebouncedValue } from '@/hooks/useDebouncedValue';
 import { Button, Input, PageHeader, SectionCard, Tabs } from '@/components/ui';
 import type { DateRange } from '@/components/ui';
-import { FiAlertCircle, FiClock, FiInbox, FiRefreshCw, FiSearch, FiSend } from 'react-icons/fi';
+import { FiClock, FiInbox, FiSearch, FiSend } from 'react-icons/fi';
 import { dayjs } from '@/utils/date';
 import { extractErrorMessage } from '@/utils/errors';
+import { LiveIndicator } from '@/components/live/LiveIndicator';
+import { useLiveData } from '@/hooks/useLiveData';
 import { isAiRoleAccount } from '@/utils/access';
 import { ROUTES } from '@/constants/routes';
 import {
@@ -19,11 +21,9 @@ import {
   type EmailInboxCounts,
   type EmailIntelligenceItem,
   type InboxBox,
-  type SyncPreviewResult,
 } from '@/services/emailIntelligenceService';
 import { EmailIntelligenceList } from './components/EmailIntelligenceList';
 import { EmailIntelligenceDetailModal } from './components/EmailIntelligenceDetailModal';
-import { EmailSyncPreviewModal } from './components/EmailSyncPreviewModal';
 import { FollowUpAnalysisSection } from './components/FollowUpAnalysisSection';
 import { FollowUpsSection } from './components/FollowUpsSection';
 import { DRAFT_SUMMARY_KEY, ReplyAssistBar } from './components/ReplyAssistBar';
@@ -37,8 +37,8 @@ const PROVIDER_LABEL: Record<string, string> = { anthropic: 'Anthropic', groq: '
 
 const PAGE_SIZE = 25;
 const QUERY_ROOT = 'email-intelligence-items';
-// How often an open inbox asks Outlook whether anything waiting has been answered.
-const REPLY_CHECK_MS = 60_000;
+// How often an open, visible inbox asks Outlook for new mail and replies (no AI).
+const LIVE_CHECK_MS = 60_000;
 
 type Section = 'inbox' | 'follow_ups' | 'history';
 
@@ -91,10 +91,6 @@ export function EmailIntelligencePage() {
   // the history tabs, until the person picks an order themselves.
   const [sortChoice, setSortChoice] = useState<SortKey | null>(null);
   const [selected, setSelected] = useState<EmailIntelligenceItem | null>(null);
-  const [previewing, setPreviewing] = useState(false);
-  const [syncing, setSyncing] = useState(false);
-  const [lastSyncedAt, setLastSyncedAt] = useState<Date | null>(null);
-  const [preview, setPreview] = useState<SyncPreviewResult | null>(null);
 
   // The mailbox owner's reply settings (shared with the reply assistant strip): does approving also send.
   const { data: draftSummary } = useQuery({
@@ -111,32 +107,11 @@ export function EmailIntelligencePage() {
     refetchInterval: 60_000,
   });
 
-  // A reply typed in Outlook should show up here without anyone pressing Sync.
-  // While this page is open and visible it asks the backend to look at Outlook's
-  // Sent Items (no new mail is read, no AI is called), and refreshes the lists
-  // the moment that finds something answered. The backend also does this on its
-  // own every couple of minutes, so the state is right even before the page opens.
-  useEffect(() => {
-    let cancelled = false;
-    const check = async () => {
-      if (document.visibilityState !== 'visible') return;
-      try {
-        const result = await emailIntelligenceService.refreshReplies();
-        if (!cancelled && result.answered > 0) void queryClient.invalidateQueries({ queryKey: [QUERY_ROOT] });
-      } catch {
-        // A failed background check is silent: the lists still refresh on their own timer.
-      }
-    };
-    void check();
-    const timer = window.setInterval(() => void check(), REPLY_CHECK_MS);
-    const onVisible = () => void check();
-    document.addEventListener('visibilitychange', onVisible);
-    return () => {
-      cancelled = true;
-      window.clearInterval(timer);
-      document.removeEventListener('visibilitychange', onVisible);
-    };
-  }, [queryClient]);
+  // Live: what Outlook has now. Opening the page (and every minute while it is
+  // visible) asks the mailbox for new mail and replies typed in Outlook — no AI,
+  // so new mail shows at once. The AI reads the new mail straight after, in the
+  // background; its notification (below) and this hook reload the lists.
+  const live = useLiveData({ crm: false, email: true, repeatMs: LIVE_CHECK_MS, invalidate: [[QUERY_ROOT], DRAFT_SUMMARY_KEY] });
 
   const debouncedSearch = useDebouncedValue(search.trim(), 300);
   const filters = useMemo(
@@ -252,68 +227,6 @@ export function EmailIntelligencePage() {
     void queryClient.invalidateQueries({ queryKey: DRAFT_SUMMARY_KEY });
   };
 
-  // The only place this page spends an LLM call — nothing runs in the
-  // background beyond the half-hourly sweep (see emailIntelligenceService.sync's
-  // own comment). "Last synced" is client-only/session-only, since it's purely a
-  // UX nicety telling the user their click actually did something. The cheap,
-  // LLM-free preview opens a real modal (EmailSyncPreviewModal) showing the full
-  // breakdown + a real token estimate, and is skipped entirely when there's
-  // genuinely nothing new to process. A sync also picks up replies made directly
-  // in Outlook, so the lists are refreshed even when no new mail arrived.
-  const handleOpenSyncPreview = async () => {
-    setPreviewing(true);
-    try {
-      const result = await emailIntelligenceService.previewSync();
-      if (!result.connected) {
-        toast.error('Outlook is not connected — connect it in Integrations to sync your inbox.');
-        return;
-      }
-      const newCount = result.scannedCount - result.alreadyAnalyzedCount;
-      if (newCount === 0) {
-        setLastSyncedAt(new Date());
-        toast.success('Synced — no new mail since last sync.');
-        void queryClient.invalidateQueries({ queryKey: [QUERY_ROOT] });
-        return;
-      }
-      setPreview(result);
-    } catch (err) {
-      toast.error(extractErrorMessage(err));
-    } finally {
-      setPreviewing(false);
-    }
-  };
-
-  const handleConfirmSync = async () => {
-    setSyncing(true);
-    try {
-      const result = await emailIntelligenceService.sync();
-      setLastSyncedAt(new Date());
-      setPreview(null);
-      if (!result.connected) {
-        toast.error('Outlook is not connected — connect it in Integrations to sync your inbox.');
-      } else if (result.alreadyRunning) {
-        toast('A sync of this mailbox is already running — it will finish shortly.');
-      } else if ((result.deferredCount ?? 0) > 0) {
-        // Stored and tracked, but the AI could not read them (usually: no credits left).
-        toast(
-          `Synced — ${result.newItemsCount} new email(s) added. ${result.deferredCount} could not be read by the AI yet and will be retried.`,
-          { duration: 8_000 },
-        );
-      } else if (result.newItemsCount > 0) {
-        toast.success(`Synced — ${result.newItemsCount} new email(s) processed.`);
-      } else {
-        toast.success('Synced — no new mail since last sync.');
-      }
-      void queryClient.invalidateQueries({ queryKey: [QUERY_ROOT] });
-    } catch (err) {
-      toast.error(extractErrorMessage(err), { duration: 8_000 });
-    } finally {
-      setSyncing(false);
-      // Worked or not, the mailbox's health line should say so now, not in a minute.
-      void queryClient.invalidateQueries({ queryKey: [QUERY_ROOT, 'sync-state'] });
-    }
-  };
-
   // Real-time nudge: once a synced item is analyzed, the backend notifies
   // the mailbox owner via the existing notification socket channel — same
   // established pattern as FinancePage.tsx's identical listener, no new
@@ -373,21 +286,7 @@ export function EmailIntelligencePage() {
         subtitle="Emails waiting for your reply, with drafts ready. Reply here or in Outlook — it is picked up automatically."
         meta={
           <>
-            {/* On the Inbox tab the agent panel says these. */}
-            {section !== 'inbox' && (lastSyncedAt || syncState?.lastSyncedAt) && (
-              <span className={styles.lastSynced}>
-                <FiClock /> {syncState?.running ? 'Syncing now · last synced ' : 'Last synced '}
-                {dayjs(lastSyncedAt ?? syncState?.lastSyncedAt).format('h:mm A')}
-              </span>
-            )}
-            {section !== 'inbox' && (syncState?.awaitingAnalysis ?? 0) > 0 && (
-              <span
-                className={styles.lastSynced}
-                title="These emails are stored and tracked. The AI will read them once it is available again (for example after credits are added)."
-              >
-                <FiAlertCircle /> {syncState?.awaitingAnalysis} not read by AI yet
-              </span>
-            )}
+            <LiveIndicator live={live} mailboxOnly />
             {/* Only worth a mention when something is wrong. */}
             {degradedProviders.map((p) => (
               <span key={p.provider} className={styles.providerPill} title={p.lastError ?? undefined}>
@@ -405,14 +304,6 @@ export function EmailIntelligencePage() {
                 Connect mailbox
               </Button>
             )}
-            <Button
-              type="button"
-              leftIcon={<FiRefreshCw />}
-              loading={previewing}
-              onClick={() => void handleOpenSyncPreview()}
-            >
-              Sync Inbox
-            </Button>
           </>
         }
       />
@@ -440,8 +331,8 @@ export function EmailIntelligencePage() {
             followUpsDue={followUpsDue}
             onOpenBox={setBoxChoice}
             onFollowUps={() => setSection('follow_ups')}
-            onRetry={() => void handleConfirmSync()}
-            retrying={syncing}
+            onRetry={live.refresh}
+            retrying={live.busy}
           />
 
           <InboxBoxes counts={counts?.boxes} active={box} onChange={setBoxChoice} />
@@ -584,13 +475,6 @@ export function EmailIntelligencePage() {
         onUpdated={applyUpdate}
       />
 
-      <EmailSyncPreviewModal
-        open={!!preview}
-        preview={preview}
-        syncing={syncing}
-        onCancel={() => setPreview(null)}
-        onConfirm={() => void handleConfirmSync()}
-      />
     </div>
   );
 }

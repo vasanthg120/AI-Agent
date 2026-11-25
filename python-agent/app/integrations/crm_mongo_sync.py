@@ -27,11 +27,11 @@ the customised CRM):
 - Owner labels: the customised CRM's deal list returns a bare owner id, but its
   quotes carry the same user's name — cross-referenced onto
   Deal.externalOwnerLabel. Real data, never guessed.
-- A deal's expected closing date is a forecast in most CRMs; when a deal turns
-  won/lost and the CRM didn't also send a new date, it is stamped with today so
-  won revenue lands in the month it was won.
-- closedAt records the moment a deal stored earlier turned won/lost (cleared if
-  it reopens) — when it closed, kept apart from the month its revenue counts in.
+- A deal's expected closing date is a forecast in most CRMs and is stored as the
+  CRM has it. closedAt records when a deal stored earlier turned won/lost
+  (cleared if it reopens): the CRM's own day when it dated the closing in that
+  change (Hoops: the job), else the moment the sync saw it. Won revenue counts
+  in the month of closedAt (the backend's deal-filter.util.ts).
 - lastActivityAt only moves when a meaningful field changes (these writes
   bypass Mongoose's updatedAt, and stamping every poll would make every record
   look "actioned today").
@@ -39,11 +39,16 @@ the customised CRM):
 - A source with a nightly window (Hoops) is read at most once a night, inside
   it, whatever asks for the sync (see "nightly sync window" below).
 - A quote turning "approved" auto-drafts a royalty invoice (Phase 20a).
+- Live, not polled (2026-11-25): a CRM is read when a page that shows its data
+  is opened (refresh_org_live — only what is stale, in the background, one read
+  at a time per source), never on a timer. The timer only drives sources with a
+  nightly window (Hoops: its API rules allow one read a night).
 """
 
 from __future__ import annotations
 
 import logging
+import threading
 from datetime import datetime, timedelta, timezone
 
 from bson import ObjectId
@@ -338,7 +343,23 @@ def _apply_quote_owners_to_deals(source: dict, owner_mapping_by_ref: dict) -> in
 # ---- deals -------------------------------------------------------------------
 
 
-def _deal_update(source, store_id, raw, existing_by_external_id, owner_mapping_by_ref, owner_label_by_ref, details=None, products=None):
+def _closed_at(new_closing: str | None, old_closing: str | None, tz_name: str | None, now: datetime | None = None) -> datetime:
+    """When a deal that has just turned won/lost was closed. The CRM's own day when
+    it dated the closing in that same change — a new closing date that isn't after
+    today (Hoops dates a won sale by its job, even one read a few nights late) — at
+    midday business time; otherwise now, when the sync saw it."""
+    now = now or _now()
+    if new_closing and new_closing != old_closing:
+        try:
+            at = _midday(tz_name or "Asia/Kolkata", new_closing)
+        except ValueError:  # not a real day
+            return now
+        if at <= now:
+            return at
+    return now
+
+
+def _deal_update(source, store_id, raw, existing_by_external_id, owner_mapping_by_ref, owner_label_by_ref, details=None, products=None, tz_name=None):
     c = to_canonical(raw, (source.get("fieldMappings") or {}).get("deals"))
     external_id = c.get("externalId")
     if not external_id:
@@ -367,21 +388,17 @@ def _deal_update(source, store_id, raw, existing_by_external_id, owner_mapping_b
     if products is not None:
         fields["products"] = products
 
-    if (
-        existing is not None
-        and existing.get("dealStatus") != new_status
-        and new_status in ("won", "lost")
-        and existing.get("expectedClosingDate") == raw_closing
-    ):
-        fields["expectedClosingDate"] = _now().strftime("%Y-%m-%d")
-
-    # When the deal was closed (closedAt, see the backend's deal.schema.ts): stamped
-    # when a deal stored earlier changes to won/lost, cleared when it reopens. A deal
-    # that first arrives already closed has no known closing time, so none is set.
+    # When the deal was closed (closedAt, see the backend's deal.schema.ts) — the date
+    # its revenue counts on. Set when a deal stored earlier changes to won/lost (see
+    # _closed_at), cleared when it reopens. A deal that first arrives already closed
+    # has no known closing time, so none is set (its closing date stands in).
+    # The expected closing date is left as the CRM has it. Until 2026-11-25 it was
+    # stamped with today here instead, but the next sync wrote the CRM's forecast
+    # back, so a deal expected in July and won in November went back to July.
     unset = {}
     if existing is not None and existing.get("dealStatus") != new_status:
         if new_status in ("won", "lost"):
-            fields["closedAt"] = _now()
+            fields["closedAt"] = _closed_at(raw_closing, existing.get("expectedClosingDate"), tz_name)
         else:
             unset["closedAt"] = ""
 
@@ -455,6 +472,7 @@ def _sync_deals(source: dict, adapter, seen_fields: set) -> int:
                 owner_label_by_ref,
                 adapter.details("deals", d),
                 adapter.products(d),
+                tz_name=tz_name,
             )
             if not op:
                 continue
@@ -890,7 +908,8 @@ def sync_source(source: dict, modules: tuple[str, ...] | None = None, trigger: s
         if not claimed:
             return {"status": "deferred", "message": f"{source.get('label') or 'This CRM'} is already being synced.", "nextRunAt": None}
     else:
-        db.crm_data_sources.update_one({"_id": source["_id"]}, {"$set": {"sync.lastStatus": "running"}})
+        # runningSince: a page's "being read now" line (and the live refresh) can tell a read in progress from a crashed one.
+        db.crm_data_sources.update_one({"_id": source["_id"]}, {"$set": {"sync.lastStatus": "running", "sync.runningSince": _now()}})
     counts: dict[str, int] = {}
     seen: dict[str, set] = {}
     # Incremental CRMs: fetch only what changed since the *start* of the last
@@ -1038,12 +1057,107 @@ def sync_org(organization_id: str) -> dict:
 
 
 def sync_all_due() -> dict:
-    """The scheduler's job: every source whose own sync interval has passed."""
+    """The scheduler's job — only sources read on a nightly window (Hoops), once a night.
+    Every other CRM is read live, when a page that shows its data is opened (refresh_org_live)."""
     summary = {}
     for source in _syncable_sources():
-        if _due(source):
+        if _window(source) and _due(source):
             summary[str(source["_id"])] = sync_source(source)
     return summary
+
+
+# ---- live reads, when a page is opened ---------------------------------------------------
+
+# How fresh a source must be before a page open reads it again. A CRM that returns only what
+# changed (Gorilla Dash) is cheap to ask often; one read in full each time (Pantheras CRM:
+# 30-100 s per read) is asked less often, so busy pages never hammer its API.
+LIVE_MIN_GAP_INCREMENTAL = timedelta(seconds=60)
+LIVE_MIN_GAP_FULL = timedelta(minutes=3)
+# A "running" left by a crashed read stops blocking after this.
+_LIVE_RUNNING_STALE = timedelta(minutes=15)
+_live_threads: dict[str, threading.Thread] = {}
+_live_lock = threading.Lock()
+
+
+def live_mode(source: dict) -> str:
+    """'nightly' for a source read on its nightly window (Hoops), else 'live'."""
+    return "nightly" if _window(source) else "live"
+
+
+def _live_gap(source: dict) -> timedelta:
+    try:
+        incremental = bool(adapter_for(source).incremental)
+    except Exception:
+        incremental = False
+    return LIVE_MIN_GAP_INCREMENTAL if incremental else LIVE_MIN_GAP_FULL
+
+
+def _live_state(source: dict, refreshing: bool) -> dict:
+    sync = source.get("sync") or {}
+    last = _parse_date(sync.get("lastSyncAt"))
+    window = _window(source)
+    return {
+        "id": str(source["_id"]),
+        "provider": source.get("provider"),
+        "label": source.get("label"),
+        "mode": live_mode(source),
+        "lastSyncAt": last.isoformat() if last else None,
+        "lastStatus": sync.get("lastStatus"),
+        "refreshing": refreshing,
+        "nextNightlyAt": next_window_opening(window, _now()).isoformat() if window else None,
+    }
+
+
+def refresh_org_live(organization_id: str) -> dict:
+    """A page showing this business's CRM data was opened: read every live source that is
+    stale, in the background, and say what is being read. Returns at once — the page shows
+    what it has and updates itself when the reads finish. Nightly sources (Hoops) are never
+    read here; a source already being read, or read moments ago, is left alone."""
+    now = _now()
+    states = []
+    db = get_db()
+    for source in _syncable_sources(organization_id):
+        key = str(source["_id"])
+        if _window(source):
+            states.append(_live_state(source, False))
+            continue
+        sync = source.get("sync") or {}
+        last = _parse_date(sync.get("lastSyncAt"))
+        with _live_lock:
+            busy = key in _live_threads and _live_threads[key].is_alive()
+        if busy:
+            states.append(_live_state(source, True))
+            continue
+        if last and now - last < _live_gap(source):
+            states.append(_live_state(source, False))
+            continue
+        # One read at a time per source, across every process: claim it.
+        claimed = db.crm_data_sources.find_one_and_update(
+            {
+                "_id": source["_id"],
+                "$or": [{"sync.lastStatus": {"$ne": "running"}}, {"sync.runningSince": {"$lt": now - _LIVE_RUNNING_STALE}}],
+            },
+            {"$set": {"sync.lastStatus": "running", "sync.runningSince": now}},
+        )
+        if not claimed:
+            states.append(_live_state(source, True))
+            continue
+
+        def run(src: dict = source, src_key: str = key) -> None:
+            try:
+                sync_source(src, trigger="live")
+            except Exception as exc:  # sync_source records its own failures; this is a last resort
+                logger.warning("Live read of %s failed: %s", src_key, exc)
+            finally:
+                with _live_lock:
+                    _live_threads.pop(src_key, None)
+
+        thread = threading.Thread(target=run, name=f"crm-live-{key}", daemon=True)
+        with _live_lock:
+            _live_threads[key] = thread
+        thread.start()
+        states.append(_live_state(source, True))
+    return {"sources": states}
 
 
 # ---- names kept for existing callers (routes/sync.py, main.py) -------------------

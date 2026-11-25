@@ -2,6 +2,8 @@ import { Injectable } from '@nestjs/common';
 import { InjectConnection, InjectModel } from '@nestjs/mongoose';
 import { Connection, Model, Types } from 'mongoose';
 import { currentDataSourceScope } from '../data-sources/data-source-context';
+import { businessTimeZone } from '../common/business-day';
+import { countedDayOf, countedInMonths } from '../crm/deal-filter.util';
 import { Deal, DealDocument } from '../crm/schemas/deal.schema';
 import { Quote, QuoteDocument } from '../crm/schemas/quote.schema';
 import { PreviousMonthClosedDeal, PreviousMonthClosures, ScopeInfo } from './analytics-dashboard.types';
@@ -21,14 +23,15 @@ const day = (d: Date) => d.toISOString().slice(0, 10);
 const tally = (rows: { value: number }[]) => ({ count: rows.length, value: Math.round(rows.reduce((sum, r) => sum + r.value, 0) * 100) / 100 });
 
 // "Deals from last month closed this month", shown beside Revenue against
-// target and never added to it. Three dates, kept apart:
+// target and never added to it. Two dates, kept apart:
 //
-//  - Revenue month — unchanged, SalesAnalyticsService.getAchievement's rule: a
-//    won deal counts in the month of its expectedClosingDate (stamped with the
-//    day it turned won unless the CRM sent its own date at the same time).
-//  - Closed — Deal.closedAt, the moment HaiVE saw the deal turn won; for a deal
-//    closed before that was recorded, its closing date (which, by the rule
-//    above, is the day it was won whenever HaiVE saw it happen).
+//  - Closed — the day the deal was won, which is also the month its revenue
+//    counts in (SalesAnalyticsService.getAchievement's rule since 2026-11-25,
+//    countedDayExpr in deal-filter.util.ts): Deal.closedAt in the business's
+//    time zone; for a deal closed before that was recorded, its closing date.
+//    So every deal listed is in this month's revenue (revenuePeriod = period;
+//    until 2026-11-25 revenue went by the expected closing date, and a deal
+//    could be listed here while its revenue sat in another month).
 //  - Started — the earliest date the deal or one of its quotes was recorded.
 //    A deal synced from a CRM that sends no creation date (ProspectConnect's
 //    deals) has as createdAt only when HaiVE first saw it; the first import
@@ -39,8 +42,7 @@ const tally = (rows: { value: number }[]) => ({ count: rows.length, value: Math.
 //
 // A deal reopened is no longer won, so it drops out; one closed twice counts
 // once, in the month of its latest closing. In a view of two or more CRMs at
-// once the same deal kept in both counts once (same key as the rest of the
-// dashboard: name, value, closing date).
+// once the same deal kept in both counts once (name, value and closing day).
 @Injectable()
 export class PreviousMonthClosuresService {
   constructor(
@@ -51,9 +53,7 @@ export class PreviousMonthClosuresService {
 
   async get(organizationId: string, scope: ScopeInfo, period: string): Promise<PreviousMonthClosures> {
     const previous = previousPeriod(period);
-    const start = new Date(`${period}-01T00:00:00.000Z`);
-    const end = new Date(start);
-    end.setUTCMonth(end.getUTCMonth() + 1);
+    const timeZone = await businessTimeZone(this.connection, organizationId);
 
     const deals = await this.dealModel
       .find({
@@ -61,9 +61,10 @@ export class PreviousMonthClosuresService {
         dealStatus: 'won',
         ...(scope.level === 'store' && scope.storeId ? { storeId: scope.storeId } : {}),
         ...(scope.level === 'user' && scope.userId ? { ownerId: scope.userId } : {}),
-        $or: [{ closedAt: { $gte: start, $lt: end } }, { closedAt: null, expectedClosingDate: { $regex: `^${period}` } }],
+        // Won in this month — the deals in this month's revenue.
+        ...countedInMonths(period, period, timeZone),
       })
-      .select({ name: 1, monetaryValue: 1, expectedClosingDate: 1, closedAt: 1, createdAt: 1, dataSourceId: 1 })
+      .select({ name: 1, dealStatus: 1, monetaryValue: 1, expectedClosingDate: 1, closedAt: 1, createdAt: 1, dataSourceId: 1 })
       .lean()
       .exec();
 
@@ -90,16 +91,17 @@ export class PreviousMonthClosuresService {
       const candidates = [...(quoteDates.get(id) ?? [])];
       if (d.createdAt) candidates.push({ date: d.createdAt, from: 'deal', real: isRealCreation('deals', d.dataSourceId, d.createdAt) });
       const earliest = candidates.sort((a, b) => a.date.getTime() - b.date.getTime())[0];
-      const closing = /^\d{4}-\d{2}/.test(d.expectedClosingDate ?? '') ? d.expectedClosingDate! : null;
+      // The query matched it on this day, so there is one.
+      const closedOn = countedDayOf(d, timeZone)!;
       return {
-        key: `${d.name.trim().toLowerCase()}|${d.monetaryValue}|${d.expectedClosingDate ?? ''}`,
+        key: `${d.name.trim().toLowerCase()}|${d.monetaryValue}|${closedOn}`,
         id,
         name: d.name.trim(),
         value: d.monetaryValue ?? 0,
         started: earliest?.real ? { on: day(earliest.date), from: earliest.from } : null,
-        closedOn: d.closedAt ? day(d.closedAt) : closing!.slice(0, 10),
+        closedOn,
         closedFrom: d.closedAt ? 'recorded' : 'closing-date',
-        revenuePeriod: closing ? closing.slice(0, 7) : null,
+        revenuePeriod: closedOn.slice(0, 7),
       };
     });
 

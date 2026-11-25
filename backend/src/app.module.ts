@@ -63,6 +63,7 @@ import { ApiTokensModule } from './api-tokens/api-tokens.module';
 import { BillingModule } from './billing/billing.module';
 import { AiUsageModule } from './ai-usage/ai-usage.module';
 import { ProviderFinanceModule } from './provider-finance/provider-finance.module';
+import { LiveDataModule } from './live-data/live-data.module';
 import { HealthController } from './health/health.controller';
 import { ModulePermissionInterceptor } from './common/permissions/module-permission.interceptor';
 
@@ -136,6 +137,7 @@ import { ModulePermissionInterceptor } from './common/permissions/module-permiss
     BillingModule,
     AiUsageModule,
     ProviderFinanceModule,
+    LiveDataModule,
     // Registers a global audit-logging interceptor (see AuditModule) in
     // addition to its own admin-only GET /audit-logs viewer.
     AuditModule,

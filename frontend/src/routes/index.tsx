@@ -34,8 +34,11 @@ const QuoteGuestViewPage = lazy(() =>
 const DashboardRouterPage = lazy(() =>
   import('@/features/business-dashboard/DashboardRouterPage').then((m) => ({ default: m.DashboardRouterPage })),
 );
-const AgentWorkforceDashboardPage = lazy(() =>
-  import('@/features/dashboard/DashboardPage').then((m) => ({ default: m.DashboardPage })),
+const EmployeeActivityPage = lazy(() =>
+  import('@/features/team-activity/EmployeeActivityPage').then((m) => ({ default: m.EmployeeActivityPage })),
+);
+const EmployeeProfilePage = lazy(() =>
+  import('@/features/team-activity/EmployeeProfilePage').then((m) => ({ default: m.EmployeeProfilePage })),
 );
 const TimelinePage = lazy(() => import('@/features/timeline/TimelinePage').then((m) => ({ default: m.TimelinePage })));
 const CallCopilotPage = lazy(() =>
@@ -176,7 +179,10 @@ export function AppRoutes() {
             <Route index element={<Navigate to={ROUTES.chat} replace />} />
             <Route path={ROUTES.dashboard} element={<DashboardRouterPage />} />
             <Route element={<RequireModule module="dashboard" />}>
-              <Route path={ROUTES.agentActivity} element={<AgentWorkforceDashboardPage />} />
+              <Route path={ROUTES.employeeActivity} element={<EmployeeActivityPage />} />
+              <Route path={ROUTES.employeeProfile} element={<EmployeeProfilePage />} />
+              {/* The page's old name: bookmarks and links land on Employee Activity. */}
+              <Route path={ROUTES.agentActivity} element={<Navigate to={ROUTES.employeeActivity} replace />} />
             </Route>
             <Route element={<RequireFeature feature="call_copilot" />}>
               <Route path={ROUTES.callCopilot} element={<CallCopilotPage />} />

@@ -6,7 +6,8 @@ import { CreateDealDto } from './dto/create-deal.dto';
 import { UpdateDealDto } from './dto/update-deal.dto';
 import { DealFilterQueryDto } from './dto/deal-filter-query.dto';
 import { ListDealsQueryDto } from './dto/list-deals-query.dto';
-import { buildDealMatchStage } from './deal-filter.util';
+import { businessTimeZone } from '../common/business-day';
+import { buildDealMatchStage, countedDayOf } from './deal-filter.util';
 import { CrmActivityService } from './crm-activity.service';
 
 /** Who changed a deal's owner, and why — kept for the deal panel and Deal Assignment. */
@@ -100,14 +101,10 @@ export class DealsService {
     // arrives, reserving 'ai_inferred' for a future inference job only.
     let update: Record<string, unknown> = dto.lostReason?.trim() ? { ...dto, lostReasonSource: 'rep_reported' as const } : { ...dto };
 
-    // expectedClosingDate is the only "closed date" this app has (see
-    // sales-analytics.service.ts's own comment — every revenue/achievement
-    // widget attributes a won deal to a month via this field's "YYYY-MM"
-    // prefix). Left alone, a deal marked won/lost today keeps whatever
-    // forecast date it had at creation, silently misattributing or hiding
-    // real revenue from the month it actually closed in. Only stamps
-    // "today" when the caller didn't already send an explicit new date in
-    // this same request — an explicit correction is always respected.
+    // A deal marked won/lost shows today as its closing date unless the caller
+    // sent one in this same request. Revenue no longer depends on it: it
+    // counts by closedAt below (deal-filter.util.ts's countedDayExpr); the
+    // closing date only stands in for a closed deal with no closedAt.
     if ((dto.dealStatus === 'won' || dto.dealStatus === 'lost') && dto.expectedClosingDate === undefined) {
       update = { ...update, expectedClosingDate: new Date().toISOString().slice(0, 10) };
     }
@@ -146,8 +143,24 @@ export class DealsService {
   // condition on the ownerId field, not a DealFilterQueryDto concept every
   // other caller of this method should have to know about) without
   // duplicating this method's own pagination logic.
+  /** The business's own time zone: the day a closed deal counts on depends on it (deal-filter.util.ts). */
+  timeZoneOf(organizationId: string): Promise<string> {
+    return businessTimeZone(this.dealModel.db, organizationId);
+  }
+
+  /** Deals as the app receives them, each won or lost one with closedOn: the
+   * "YYYY-MM-DD" day it closed — the day its revenue counts on (countedDayOf). */
+  async withClosingDay(organizationId: string, deals: DealDocument[]) {
+    const timeZone = await this.timeZoneOf(organizationId);
+    return deals.map((deal) => {
+      const json = deal.toJSON();
+      return deal.dealStatus === 'won' || deal.dealStatus === 'lost' ? { ...json, closedOn: countedDayOf(deal, timeZone) } : json;
+    });
+  }
+
   async listFiltered(organizationId: string, query: ListDealsQueryDto, storeConstraint?: string, extraMatch?: FilterQuery<Deal>) {
-    const match = { ...buildDealMatchStage(organizationId, query, storeConstraint), ...extraMatch };
+    const timeZone = await this.timeZoneOf(organizationId);
+    const match = { ...buildDealMatchStage(organizationId, query, storeConstraint, { timeZone }), ...extraMatch };
     const page = query.page ?? 1;
     const pageSize = query.pageSize ?? 25;
     const sortBy = query.sortBy ?? 'expectedClosingDate';
@@ -169,7 +182,7 @@ export class DealsService {
   // rows in one pass, with an explicit truncated flag rather than a silent
   // partial result.
   async listForExport(organizationId: string, filters: DealFilterQueryDto, storeConstraint: string | undefined, cap: number) {
-    const match = buildDealMatchStage(organizationId, filters, storeConstraint);
+    const match = buildDealMatchStage(organizationId, filters, storeConstraint, { timeZone: await this.timeZoneOf(organizationId) });
     const items = await this.dealModel
       .find(match)
       .sort({ expectedClosingDate: -1 })

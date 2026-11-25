@@ -42,12 +42,13 @@ export class DealFilterQueryDto {
   @Matches(DATE, { message: 'dateTo must be YYYY-MM-DD' })
   dateTo?: string;
 
-  // Which field dateFrom/dateTo range against. Defaults to createdAt (see
-  // deal-filter.util.ts). 'expectedClosingDate' exists so a caller can match
-  // the period-attribution semantics SalesAnalyticsService.getAchievement
-  // uses for the "Total Revenue" figure — a drill-down into that number must
-  // filter the same field it was summed over, or the list won't reconcile
-  // with the total the user clicked.
+  // Which date dateFrom/dateTo range against. Defaults to createdAt (see
+  // deal-filter.util.ts). 'expectedClosingDate' means the dashboard's period
+  // rule — a won or lost deal by the day it CLOSED (closedAt; its closing date
+  // when that isn't known), an open deal by its expected closing date — the
+  // rule SalesAnalyticsService.getAchievement sums "Total Revenue" by, so a
+  // drill-down into that number reconciles with the total the user clicked.
+  // (The name predates closedAt; kept so every existing caller works.)
   @IsOptional()
   @IsIn(['createdAt', 'expectedClosingDate'])
   dateField?: 'createdAt' | 'expectedClosingDate';

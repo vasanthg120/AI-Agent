@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Card } from '@/components/ui';
 import { pressable } from '@/utils/pressable';
-import { dealsService, type Deal } from '@/services/dealsService';
+import { closingDayOf, dealsService, type Deal } from '@/services/dealsService';
 import { usePipelineDecisionCounts } from './usePipelineDecisionCounts';
 import { DrillDownModal, type DrillDownRow } from './DrillDownModal';
 import styles from './DealFunnelCard.module.css';
@@ -15,7 +15,7 @@ export interface DealFunnelCardProps {
 }
 
 function toRows(items: Deal[]): DrillDownRow[] {
-  return items.map((d) => ({ id: d._id, dealId: d._id, title: d.name, subtitle: d.dealStatus, meta: d.expectedClosingDate, value: d.monetaryValue }));
+  return items.map((d) => ({ id: d._id, dealId: d._id, title: d.name, subtitle: d.dealStatus, meta: closingDayOf(d), value: d.monetaryValue }));
 }
 
 type StageKey = 'all' | 'open' | 'awaiting' | 'won';

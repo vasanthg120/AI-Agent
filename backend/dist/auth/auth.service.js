@@ -41,6 +41,9 @@ var __importStar = (this && this.__importStar) || (function () {
 var __metadata = (this && this.__metadata) || function (k, v) {
     if (typeof Reflect === "object" && typeof Reflect.metadata === "function") return Reflect.metadata(k, v);
 };
+var __param = (this && this.__param) || function (paramIndex, decorator) {
+    return function (target, key) { decorator(target, key, paramIndex); }
+};
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.AuthService = void 0;
 const crypto_1 = require("crypto");
@@ -48,6 +51,7 @@ const common_1 = require("@nestjs/common");
 const jwt_1 = require("@nestjs/jwt");
 const bcrypt = __importStar(require("bcrypt"));
 const audit_service_1 = require("../audit/audit.service");
+const employee_usage_service_1 = require("../employee-usage/employee-usage.service");
 const mail_service_1 = require("../mail/mail.service");
 const organizations_service_1 = require("../organizations/organizations.service");
 const organization_schema_1 = require("../organizations/schemas/organization.schema");
@@ -60,13 +64,14 @@ const VERIFY_OTP_TTL_MS = 10 * 60 * 1000;
 const RESET_OTP_TTL_MS = 15 * 60 * 1000;
 const GENERIC_OTP_ERROR = 'Invalid or expired code';
 let AuthService = class AuthService {
-    constructor(usersService, organizationsService, jwtService, mailService, auditService, invitations) {
+    constructor(usersService, organizationsService, jwtService, mailService, auditService, invitations, usage) {
         this.usersService = usersService;
         this.organizationsService = organizationsService;
         this.jwtService = jwtService;
         this.mailService = mailService;
         this.auditService = auditService;
         this.invitations = invitations;
+        this.usage = usage;
     }
     async register(email, password, name, organizationName, meta = {}) {
         const existing = await this.usersService.findByEmail(email);
@@ -199,15 +204,18 @@ let AuthService = class AuthService {
     async issueSessionToken(user, meta) {
         const jti = (0, crypto_1.randomUUID)();
         const now = new Date();
+        const device = (0, session_meta_util_1.parseDeviceLabel)(meta.userAgent);
+        const location = (0, session_meta_util_1.lookupLocation)(meta.ip);
         await this.usersService.addSession(user._id.toString(), {
             jti,
-            device: (0, session_meta_util_1.parseDeviceLabel)(meta.userAgent),
+            device,
             userAgent: meta.userAgent,
             ip: meta.ip,
-            location: (0, session_meta_util_1.lookupLocation)(meta.ip),
+            location,
             createdAt: now,
             lastSeenAt: now,
         });
+        void this.usage?.logSignIn({ organizationId: user.organizationId, userId: user._id.toString(), kind: 'sign_in', jti, device, location }, now);
         const payload = {
             sub: user._id.toString(),
             email: user.email,
@@ -247,6 +255,7 @@ let AuthService = class AuthService {
         };
         const secondsLeft = caller.exp ? caller.exp - Math.floor(Date.now() / 1000) : 0;
         const accessToken = secondsLeft > 0 ? this.jwtService.sign(payload, { expiresIn: secondsLeft }) : this.jwtService.sign(payload);
+        void this.usage?.logSignIn({ organizationId, userId: target._id.toString(), kind: 'switch_in', jti: caller.jti });
         void this.auditService.log({
             userId: loginId,
             organizationId,
@@ -287,19 +296,27 @@ let AuthService = class AuthService {
         const { accessToken } = await this.issueSessionToken(user, meta);
         return { status: 'ok', accessToken };
     }
-    logout(userId, jti) {
-        return this.usersService.revokeSession(userId, jti);
+    async logout(userId, jti) {
+        const result = await this.usersService.revokeSession(userId, jti);
+        if (this.usage) {
+            const login = await this.usersService.findById(userId);
+            if (login)
+                void this.usage.logSignIn({ organizationId: login.organizationId, userId, kind: 'sign_out', jti });
+        }
+        return result;
     }
 };
 exports.AuthService = AuthService;
 exports.AuthService = AuthService = __decorate([
     (0, common_1.Injectable)(),
+    __param(6, (0, common_1.Optional)()),
     __metadata("design:paramtypes", [users_service_1.UsersService,
         organizations_service_1.OrganizationsService,
         jwt_1.JwtService,
         mail_service_1.MailService,
         audit_service_1.AuditService,
-        invitations_service_1.InvitationsService])
+        invitations_service_1.InvitationsService,
+        employee_usage_service_1.EmployeeUsageService])
 ], AuthService);
 function generateOtp() {
     return String((0, crypto_1.randomInt)(100_000, 1_000_000));

@@ -13,6 +13,9 @@ export interface Deal {
   dealStatus: 'open' | 'won' | 'lost';
   monetaryValue: number;
   expectedClosingDate?: string;
+  // Won or lost deals from the filtered list: the "YYYY-MM-DD" day it closed, in
+  // the business's time zone — the day its revenue counts on (see closingDayOf).
+  closedOn?: string;
   externalId?: string;
   // The raw external-CRM owner reference this deal actually carries (see
   // backend deal.schema.ts's own comment) — present on the wire for every
@@ -52,10 +55,11 @@ export interface DealFilters {
   search?: string;
   dateFrom?: string;
   dateTo?: string;
-  // Which field dateFrom/dateTo range against — defaults server-side to
-  // createdAt. Pass 'expectedClosingDate' when reconciling against a figure
-  // computed from expectedClosingDate (e.g. the achievement/"Total Revenue"
-  // number), so the drill-down list matches what was actually summed.
+  // Which date dateFrom/dateTo range against — defaults server-side to
+  // createdAt. 'expectedClosingDate' is the dashboard's period rule (the
+  // name predates it): won and lost deals by the day they closed, open deals
+  // by their expected closing date — what "Total Revenue" is summed by, so a
+  // drill-down list matches the figure the user clicked.
   dateField?: 'createdAt' | 'expectedClosingDate';
   // Only deals expected to close before this day ("YYYY-MM-DD") — the past-due list.
   closingBefore?: string;
@@ -186,6 +190,12 @@ export function toDealFilterParams(filters: DealFilters, extra?: Record<string, 
     params[key] = Array.isArray(value) ? value.join(',') : value;
   }
   return params;
+}
+
+/** The "YYYY-MM-DD" day a deal counts on in the dashboard: a won or lost deal the day it
+ * closed (its expected closing date when that isn't known), an open deal its expected closing date. */
+export function closingDayOf(deal: Pick<Deal, 'dealStatus' | 'closedOn' | 'expectedClosingDate'>): string | undefined {
+  return (deal.dealStatus === 'open' ? undefined : deal.closedOn) ?? deal.expectedClosingDate?.slice(0, 10);
 }
 
 export const dealsService = {

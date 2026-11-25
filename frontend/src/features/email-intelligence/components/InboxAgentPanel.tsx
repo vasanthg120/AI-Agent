@@ -1,6 +1,7 @@
 import clsx from 'clsx';
 import { FiAlertTriangle, FiCheckCircle, FiCpu, FiEdit3, FiEye, FiInbox, FiRefreshCw, FiZap } from 'react-icons/fi';
 import { Button } from '@/components/ui';
+import { AiBadge } from '@/components/live/AiBadge';
 import { dayjs } from '@/utils/date';
 import type { EmailDraftSummary, EmailInboxCounts, EmailSyncState, InboxBox } from '@/services/emailIntelligenceService';
 import styles from './InboxAgentPanel.module.css';
@@ -42,7 +43,7 @@ export function InboxAgentPanel({
     <section className={styles.panel} aria-label="Inbox agent">
       <div className={styles.head}>
         <span className={styles.title}>
-          <FiCpu aria-hidden /> Inbox agent
+          <FiCpu aria-hidden /> Inbox agent <AiBadge title="What the AI does with your mail: sorts it, drafts replies, spots answers" />
         </span>
         {failing ? (
           <span className={clsx(styles.pill, styles.pillBad)}>
@@ -52,8 +53,8 @@ export function InboxAgentPanel({
           <span className={styles.pill}>Waiting for its first read of your mailbox</span>
         ) : (
           <span className={clsx(styles.pill, styles.pillOk)}>
-            <span className={styles.dot} aria-hidden /> {syncState?.running ? 'Reading your mailbox now' : 'Working'}
-            {lastRead && !syncState?.running ? ` · last read ${dayjs(lastRead).format('D MMM, h:mm A')}` : ''}
+            <span className={styles.dot} aria-hidden /> {syncState?.aiReading ? 'Reading new mail now' : 'Working'}
+            {lastRead && !syncState?.aiReading ? ` · mailbox checked ${dayjs(lastRead).format('D MMM, h:mm A')}` : ''}
           </span>
         )}
       </div>
@@ -84,7 +85,9 @@ export function InboxAgentPanel({
             <span className={styles.stepLabel}>Reads & sorts your mail</span>
             <span className={styles.stepValue}>{n(total)} sorted</span>
             <span className={styles.stepSub}>
-              {(syncState?.awaitingAnalysis ?? 0) > 0
+              {syncState?.aiReading
+                ? `Reading ${n(syncState?.awaitingAnalysis)} new email${syncState?.awaitingAnalysis === 1 ? '' : 's'}…`
+                : (syncState?.awaitingAnalysis ?? 0) > 0
                 ? `${n(syncState?.awaitingAnalysis)} still to be read by the AI`
                 : junk > 0
                   ? `${n(junk)} junk & automated set aside`

@@ -9,6 +9,10 @@ export const ROUTES = {
   quoteGuestView: '/quotes/guest/:token',
 
   dashboard: '/dashboard',
+  // Employee Activity (was Agent Activity; /agent-activity still lands here) and one employee's page.
+  employeeActivity: '/employee-activity',
+  employeeProfile: '/employee-activity/:userId',
+  employeeProfileOf: (userId: string) => `/employee-activity/${userId}`,
   agentActivity: '/agent-activity',
   callCopilot: '/call-copilot',
   timeline: '/timeline',

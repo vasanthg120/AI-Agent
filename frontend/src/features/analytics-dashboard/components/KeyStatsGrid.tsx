@@ -3,7 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { AreaChart, Area, ResponsiveContainer } from 'recharts';
 import { AnimatedNumber, Card } from '@/components/ui';
 import { formatINR as money } from '@/utils/currency';
-import { dealsService } from '@/services/dealsService';
+import { closingDayOf, dealsService } from '@/services/dealsService';
 import { DrillDownModal, type DrillDownRow } from './DrillDownModal';
 import { countedMonths } from '../countedMonths';
 import { usePipelineHealth } from '../usePipelineHealth';
@@ -79,7 +79,7 @@ export function KeyStatsGrid({ deals, businessHealthScore, revenueTrend, dateFro
     dealId: d._id,
     title: d.name,
     subtitle: d.dealStatus,
-    meta: d.expectedClosingDate,
+    meta: closingDayOf(d),
     value: d.monetaryValue,
   }));
 
@@ -88,7 +88,7 @@ export function KeyStatsGrid({ deals, businessHealthScore, revenueTrend, dateFro
     dealId: d._id,
     title: d.name,
     subtitle: d.dealStatus,
-    meta: d.expectedClosingDate,
+    meta: closingDayOf(d),
     value: d.monetaryValue,
   }));
 

@@ -2,7 +2,7 @@ import { HttpException } from '@nestjs/common';
 import { getModelToken, MongooseModule } from '@nestjs/mongoose';
 import { Test } from '@nestjs/testing';
 import { Connection, Model } from 'mongoose';
-import { of, throwError } from 'rxjs';
+import { from, of, switchMap, throwError } from 'rxjs';
 import { AgentExecution, AgentExecutionDocument, AgentExecutionSchema } from '../command-center/schemas/agent-execution.schema';
 import { OutlookConnection, OutlookConnectionDocument, OutlookConnectionSchema } from '../outlook/schemas/outlook-connection.schema';
 import { EmailConversationService } from './email-conversation.service';
@@ -73,9 +73,11 @@ describe('AI Email Inbox — Outlook sync to response state (real Mongo)', () =>
 
   const mailboxes = new Map<string, Mailbox>();
   let aiAvailable = true;
+  let aiHold: Promise<void> | null = null;
   let aiCalls: Record<string, unknown>[] = [];
   let replySends = 0;
   let seq = 0;
+  const notifications = { create: jest.fn(async (..._args: unknown[]) => undefined) };
   let org: string;
   let me: string;
 
@@ -102,6 +104,8 @@ describe('AI Email Inbox — Outlook sync to response state (real Mongo)', () =>
     post: jest.fn((url: string, body: Record<string, unknown>, config: { headers?: { Authorization?: string } }) => {
       if (url.endsWith('/email-intelligence/analyze')) {
         if (!aiAvailable) return throwError(() => new Error('connect ECONNREFUSED'));
+        // Held: the moment between "stored" and "read by the AI" can be looked at.
+        if (aiHold) return from(aiHold.then(() => (aiHold = null))).pipe(switchMap(() => http.post(url, body, config)));
         aiCalls.push(body);
         return of({
           data: {
@@ -201,7 +205,7 @@ describe('AI Email Inbox — Outlook sync to response state (real Mongo)', () =>
     inboxService = new EmailIntelligenceService(
       items,
       reminders,
-      { create: jest.fn(async () => undefined) } as never,
+      notifications as never,
       customerActivity as never,
       {} as never,
       users as never,
@@ -267,9 +271,11 @@ describe('AI Email Inbox — Outlook sync to response state (real Mongo)', () =>
     org = `${PREFIX}-org-${seq}`;
     me = `${PREFIX}-user-${seq}`;
     aiAvailable = true;
+    aiHold = null;
     creditsExhausted = false;
     aiCalls = [];
     replySends = 0;
+    notifications.create.mockClear();
     box = await connectMailbox(me, org, 'sam@fullypromoted.in');
   });
 
@@ -620,5 +626,86 @@ describe('AI Email Inbox — Outlook sync to response state (real Mongo)', () =>
     await sync.syncMyMailbox(me);
     expect(await waiting()).toHaveLength(1);
     expect(await jobs.countDocuments({ userId: me, failedCount: { $gt: 0 }, failuresRecovered: true })).toBe(1);
+  });
+
+  describe('live inbox (a page opens): Outlook’s mail at once, the AI reading after', () => {
+    // The AI pass runs in the background after the fetch; wait for it to finish.
+    const aiPassDone = async () => {
+      for (let i = 0; i < 100 && sync.isReadingWaiting(me); i += 1) await new Promise((r) => setTimeout(r, 20));
+    };
+    const titles = () => notifications.create.mock.calls.map((c) => (c[1] as { title: string }).title);
+
+    it('new mail is in the inbox before the AI reads it, then the AI reads it once and notifies once', async () => {
+      customerWrites(box, { receivedAt: ago(5) });
+      let release!: () => void;
+      aiHold = new Promise<void>((r) => (release = r));
+
+      const result = await sync.fetchLive(me);
+      expect(result).toMatchObject({ connected: true, newItemsCount: 1, checked: true });
+      let [row] = await waiting();
+      expect(row).toMatchObject({ responseStatus: 'needs_response', analysisState: 'pending', reason: 'Just arrived — the AI is reading it.' });
+      expect(row.draftReply).toBeFalsy();
+      expect(sync.isReadingWaiting(me)).toBe(true);
+      expect((await sync.syncState(me)).aiReading).toBe(true);
+      expect(await jobs.findOne({ userId: me })).toMatchObject({ triggeredBy: 'live', status: 'completed' });
+
+      release();
+      await aiPassDone();
+      [row] = await waiting();
+      expect(row.analysisState).toBeUndefined();
+      expect(row).toMatchObject({ intent: 'quotation_request', aiStatus: 'draft_ready' });
+      expect(aiCalls).toHaveLength(1);
+      expect(titles()).toEqual(['New quotation request email needs review']);
+
+      // A second look moments later asks Outlook nothing, and the AI reads nothing again.
+      expect(await sync.fetchLive(me)).toMatchObject({ checked: false, newItemsCount: 0 });
+      expect(aiCalls).toHaveLength(1);
+    });
+
+    it('a reply typed in Outlook shows on the next live look, with no AI call', async () => {
+      const question = customerWrites(box, { receivedAt: ago(5) });
+      await sync.fetchLive(me);
+      await aiPassDone();
+      aiCalls = [];
+      repliesInOutlook(box, question, { sentAt: ago(1) });
+      // Past the per-mailbox pause between looks.
+      (sync as unknown as { liveFetches: Map<string, unknown> }).liveFetches.delete(me);
+      expect(await sync.fetchLive(me)).toMatchObject({ checked: true, answeredCount: 1 });
+      expect(await waiting()).toHaveLength(0);
+      expect(aiCalls).toHaveLength(0);
+    });
+
+    it('with no AI credits the new mail still shows, says why the AI could not read it, and the half-hourly sync reads it later', async () => {
+      creditsExhausted = true;
+      customerWrites(box, { receivedAt: ago(5), subject: 'First' });
+      customerWrites(box, { receivedAt: ago(4), subject: 'Second', conversationId: `${PREFIX}-conv-${seq}-b` });
+      await sync.fetchLive(me);
+      await aiPassDone();
+      const rows = await waiting();
+      expect(rows).toHaveLength(2);
+      for (const row of rows) {
+        expect(row).toMatchObject({ analysisState: 'pending', analysisAttempts: 1 });
+        expect(row.reason).toMatch(/credits/i);
+      }
+      expect(titles().filter((t) => t === 'New email needs a reply')).toHaveLength(2);
+
+      creditsExhausted = false;
+      await sync.syncMyMailbox(me, 'scheduled');
+      for (const row of await waiting()) expect(row.analysisState).toBeUndefined();
+    });
+
+    it('mail a live fetch has just stored is left to its own AI pass by the half-hourly sync (never read twice)', async () => {
+      customerWrites(box, { receivedAt: ago(5) });
+      aiAvailable = false; // the background pass fails at once…
+      await sync.fetchLive(me);
+      await aiPassDone();
+      aiAvailable = true;
+      // …so it is marked tried (attempts 1) and becomes the half-hourly retry's.
+      expect((await waiting())[0]).toMatchObject({ analysisAttempts: 1 });
+      // A fresh live-stored email (attempts 0) is not taken by the retry.
+      await items.updateOne({ userId: me }, { $set: { analysisAttempts: 0 } });
+      expect(await inboxService.listAwaitingAnalysis(me, 10, { retriesOnly: true })).toHaveLength(0);
+      expect(await inboxService.listAwaitingAnalysis(me, 10)).toHaveLength(1);
+    });
   });
 });

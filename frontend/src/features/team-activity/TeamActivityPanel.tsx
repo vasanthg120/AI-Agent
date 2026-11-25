@@ -6,6 +6,7 @@ import { FiActivity, FiArrowRight, FiHome } from 'react-icons/fi';
 import { Button, SectionCard, SelectMenu, Skeleton } from '@/components/ui';
 import { ROUTES } from '@/constants/routes';
 import { teamActivityService, type TeamActivityPerson, type TeamPeriodValue } from '@/services/teamActivityService';
+import { periodToSearch } from './PeriodPicker';
 import { ActivityListModal } from './ActivityList';
 import { PeriodPicker, describePeriod } from './PeriodPicker';
 import { TeamActivityKpis } from './TeamActivityKpis';
@@ -13,17 +14,11 @@ import { TeamActivityTable } from './TeamActivityTable';
 import type { MetricDef } from './metrics';
 import styles from './TeamActivity.module.css';
 
-/** What Agent Activity opens on when a person is clicked here. */
-export interface AgentActivityLinkState {
-  person?: TeamActivityPerson;
-  period?: TeamPeriodValue;
-}
-
-// The Dashboard's Team Performance tab: the same figures as Agent Activity —
+// The Dashboard's Team Performance tab: the same figures as Employee Activity —
 // deals created, emails sent / replied / not replied / missed, calls, talk
 // time and call scores — for the whole team, with its own date filter (the
 // Dashboard's month filter counts whole months; this one starts on Today).
-// A person opens their page in Agent Activity.
+// A person opens their page in Employee Activity.
 export function TeamActivityPanel() {
   const navigate = useNavigate();
   const [period, setPeriod] = useState<TeamPeriodValue>({ period: 'today' });
@@ -42,7 +37,12 @@ export function TeamActivityPanel() {
     [data?.businesses],
   );
 
-  const openPerson = (person?: TeamActivityPerson) => navigate(ROUTES.agentActivity, { state: { person, period } satisfies AgentActivityLinkState });
+  const openPerson = (person?: TeamActivityPerson) =>
+    navigate(
+      person
+        ? { pathname: ROUTES.employeeProfileOf(person.userId), search: new URLSearchParams({ ...periodToSearch(period), business: person.businessId }).toString() }
+        : { pathname: ROUTES.employeeActivity, search: new URLSearchParams(periodToSearch(period)).toString() },
+    );
 
   return (
     <SectionCard
@@ -83,7 +83,7 @@ export function TeamActivityPanel() {
             )}
             <div className={styles.panelFoot}>
               <Button type="button" variant="ghost" size="sm" rightIcon={<FiArrowRight />} onClick={() => openPerson()}>
-                {data.team && data.people.length > 8 ? `All ${data.people.length} people in Agent Activity` : 'Open Agent Activity'}
+                {data.team && data.people.length > 8 ? `All ${data.people.length} employees in Employee Activity` : 'Open Employee Activity'}
               </Button>
             </div>
           </div>

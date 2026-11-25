@@ -108,6 +108,17 @@ export class EmailIntelligenceController {
     });
   }
 
+  // Live inbox: the page asks when it opens (and while it stays open) — new
+  // mail and replies typed in Outlook show at once, no AI; the AI reads the
+  // new mail right after, in the background. Rate-limited per mailbox server-side.
+  @Post('live')
+  @Permission('email', 'view')
+  fetchLive(@CurrentUser() user: JwtPayload) {
+    return this.emailIntelligenceSyncService.fetchLive(user.sub).catch((err: unknown) => {
+      throw readableSyncFailure(err);
+    });
+  }
+
   // When the caller's mailbox was last synced, whether a sync is running now,
   // and how many stored emails are still waiting for an AI reading.
   @Get('sync/state')

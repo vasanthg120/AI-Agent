@@ -1,4 +1,5 @@
 import { FiChevronRight } from 'react-icons/fi';
+import { useMediaQuery } from '@/hooks/useMediaQuery';
 import { formatAmountIn } from '@/utils/currency';
 import { formatTalkTime, type TeamActivityBusiness, type TeamActivityOverview } from '@/services/teamActivityService';
 import styles from './TeamActivity.module.css';
@@ -39,6 +40,44 @@ export function TeamSummaryStrip({ overview }: { overview: TeamActivityOverview 
 
 /** The Main Account owner's view of every business side by side; a row narrows the page to that business. */
 export function BusinessesTable({ businesses, onSelect }: { businesses: TeamActivityBusiness[]; onSelect: (id: string) => void }) {
+  // A card per business on a narrow screen: ten figures don't fit a phone's row.
+  const narrow = useMediaQuery('(max-width: 900px)');
+  if (narrow) {
+    return (
+      <ul className={styles.personCards}>
+        {businesses.map((b) => (
+          <li key={b.id}>
+            <button type="button" className={styles.personCard} onClick={() => onSelect(b.id)} aria-label={`Show only ${b.name}`}>
+              <span className={styles.personCell}>
+                <span className={styles.personText}>
+                  <span className={styles.personName}>{b.name}</span>
+                  <span className={styles.personSub}>{b.isMain ? 'Main Account' : 'Sub-account'}</span>
+                </span>
+                <FiChevronRight className={styles.rowChevron} aria-hidden />
+              </span>
+              <span className={styles.personFigures}>
+                {[
+                  ['People active', `${b.activeEmployees}/${b.employees}`],
+                  ['Deals created', String(b.totals.dealsCreated)],
+                  ['Won', String(b.totals.dealsWon)],
+                  ['Owned pipeline', formatAmountIn(b.totals.pipelineValue, b.currency)],
+                  ['Emails sent', String(b.totals.emailsSent)],
+                  ['Missed emails', String(b.totals.emailsMissed)],
+                  ['Calls', String(b.totals.calls)],
+                  ['Active time', formatTalkTime(b.totals.activeSeconds)],
+                ].map(([label, value]) => (
+                  <span key={label} className={styles.personFigure}>
+                    <span className={styles.personFigureLabel}>{label}</span>
+                    <strong>{value}</strong>
+                  </span>
+                ))}
+              </span>
+            </button>
+          </li>
+        ))}
+      </ul>
+    );
+  }
   return (
     <div className={styles.tableWrap}>
       <table className={styles.table}>

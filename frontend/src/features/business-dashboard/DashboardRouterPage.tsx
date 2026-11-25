@@ -4,7 +4,7 @@ import { useAccounts } from '@/features/sub-accounts/useAccounts';
 import { useAuthStore } from '@/stores/authStore';
 import { hasRole } from '@/utils/roles';
 import { can, isPermissionManaged } from '@/utils/access';
-import { DashboardPage as AgentWorkforceDashboardPage } from '@/features/dashboard/DashboardPage';
+import { EmployeeActivityPage } from '@/features/team-activity/EmployeeActivityPage';
 import { AnalyticsDashboardPage } from '@/features/analytics-dashboard/AnalyticsDashboardPage';
 
 // Phase 19 — the business-hierarchy roles (owner/manager/consultant) now all
@@ -18,10 +18,10 @@ import { AnalyticsDashboardPage } from '@/features/analytics-dashboard/Analytics
 // reviewed and explicitly confirmed"). They simply become unreachable via
 // this router the moment it stops calling them, same as this exact route
 // swap happened once before in this app's history (Phase 3). Deal
-// Performance and Agent Activity are NOT touched by this pass at all —
+// Performance and Employee Activity (then Agent Activity) are NOT touched by this pass at all —
 // both keep their own live routes/nav entries for direct comparison.
 // Accounts with no business-hierarchy role (a plain admin or agent_user
-// account) keep falling back to the original AI-workforce dashboard.
+// account) fall back to Employee Activity (2026-11-25: it replaced the AI-workforce page).
 export function DashboardRouterPage() {
   const user = useAuthStore((s) => s.user);
   const { data: accounts, isLoading } = useAccounts();
@@ -33,7 +33,7 @@ export function DashboardRouterPage() {
   // it, otherwise the agent dashboard if they were given that.
   if (isPermissionManaged(user)) {
     if (can(user, 'analytics')) return <AnalyticsDashboardPage />;
-    if (can(user, 'dashboard')) return <AgentWorkforceDashboardPage />;
+    if (can(user, 'dashboard')) return <EmployeeActivityPage />;
     return (
       <EmptyState
         icon={FiBarChart2}
@@ -50,5 +50,5 @@ export function DashboardRouterPage() {
   if (accounts && accounts.currentOrganizationId !== accounts.homeOrganizationId) {
     return <AnalyticsDashboardPage />;
   }
-  return <AgentWorkforceDashboardPage />;
+  return <EmployeeActivityPage />;
 }

@@ -1,11 +1,11 @@
 import { axiosClient } from '@/api/axiosClient';
 
-// Agent Activity and the Dashboard's Team Performance (backend/src/team-activity).
+// Employee Activity and the Dashboard's Team Performance (backend/src/team-activity).
 // Whose figures come back is decided by the server from who is signed in: the
 // Main Account owner every business, an owner/admin their team, a manager
 // their store, anyone else themselves.
 
-export type TeamPeriod = 'today' | 'yesterday' | 'last7' | 'last30' | 'month' | 'previous_month' | 'custom';
+export type TeamPeriod = 'today' | 'yesterday' | 'week' | 'last7' | 'last30' | 'month' | 'previous_month' | 'custom';
 
 export interface TeamPeriodValue {
   period: TeamPeriod;
@@ -19,6 +19,8 @@ export interface ActivityCounts {
   dealsWon: number;
   dealsLost: number;
   wonValue: number;
+  // Won ÷ (won + lost) in the period.
+  dealConversionPct: number | null;
   openDeals: number;
   pipelineValue: number;
   emailsSent: number;
@@ -26,13 +28,22 @@ export interface ActivityCounts {
   emailsReplied: number;
   emailsNotReplied: number;
   emailsMissed: number;
+  // Arrived in the period, still owed a reply now (however old).
+  emailsUnanswered: number;
+  // Average wait for the replies sent in the period (written in HaiVE or Outlook).
+  avgResponseSeconds: number | null;
   customerReplies: number;
   awaitingCustomer: number;
   calls: number;
   callsMade: number;
   callsReceived: number;
   callsConnected: number;
+  // Incoming nobody answered.
   callsMissed: number;
+  // Outgoing the other side didn't pick up.
+  callsUnanswered: number;
+  callConnectionRatePct: number | null;
+  callAnswerRatePct: number | null;
   talkSeconds: number;
   avgCallSeconds: number | null;
   scoredCalls: number;
@@ -42,6 +53,9 @@ export interface ActivityCounts {
   followUpsPending: number;
   followUpsInProgress: number;
   followUpsOverdue: number;
+  // Measured time: HaiVE in active use or on a call (a minute counted once), and HaiVE alone.
+  activeSeconds: number;
+  haiveSeconds: number;
 }
 
 export interface TeamActivityPerson extends ActivityCounts {
@@ -55,6 +69,19 @@ export interface TeamActivityPerson extends ActivityCounts {
   businessId: string;
   businessName: string;
   currency: string;
+  // Last time they were really active in HaiVE (any day).
+  lastActiveAt?: string;
+}
+
+/** How one source of the figures gets its data, and when it last did. */
+export interface SourceFreshness {
+  businessId: string;
+  businessName: string;
+  key: string;
+  label: string;
+  mode: 'real_time' | 'on_open' | 'nightly';
+  status: 'ok' | 'failing' | 'never' | 'not_connected';
+  lastSuccessAt?: string;
 }
 
 /** Why someone may need a hand, in a line, with the list that shows it. */
@@ -124,6 +151,91 @@ export interface TeamActivityOverview {
   unattributedDeals: { total: number; byCrmOwner: { label: string; shared: boolean; count: number }[] };
   attention: TeamSupportItem[];
   departments: TeamDepartment[];
+  sources: SourceFreshness[];
+  // Asked for with compare: the same totals for the period before.
+  previous?: { from: string; to: string; totals: ActivityCounts };
+  generatedAt: string;
+}
+
+export type UsageArea = 'crm' | 'email' | 'calls' | 'analytics' | 'assistant' | 'tasks' | 'files' | 'knowledge' | 'admin' | 'other';
+export type AreaSeconds = Partial<Record<UsageArea, number>>;
+
+export interface WorkSession {
+  start: string;
+  end: string;
+  activeSeconds: number;
+}
+
+export interface UsageDay {
+  date: string;
+  activeSeconds: number;
+  haiveSeconds: number;
+  callSeconds: number;
+  byArea: AreaSeconds;
+  firstAt: string;
+  lastAt: string;
+  sessions: WorkSession[];
+}
+
+export interface SignInRow {
+  at: string;
+  kind: 'sign_in' | 'switch_in';
+  device?: string;
+  location?: string;
+  signedOutAt?: string;
+  open: boolean;
+}
+
+export interface UsagePerson {
+  userId: string;
+  name: string;
+  role: string;
+  active: boolean;
+  mainAccountMember: boolean;
+  businessId: string;
+  businessName: string;
+  activeSeconds: number;
+  haiveSeconds: number;
+  callSeconds: number;
+  byArea: AreaSeconds;
+  activeDays: number;
+  avgActiveSecondsPerDay: number | null;
+  firstAt?: string;
+  lastAt?: string;
+  lastActiveAt?: string;
+  topArea?: UsageArea;
+}
+
+/** An app people work in, and what HaiVE can say about it: time measured, activity only, or nothing. */
+export interface ConnectedApp {
+  key: string;
+  label: string;
+  measure: 'time' | 'activity' | 'none';
+  connected: boolean;
+  seconds?: number;
+  activity: { label: string; count: number }[];
+  note: string;
+}
+
+export interface TeamUsageReport {
+  team: boolean;
+  acrossBusinesses: boolean;
+  businesses: { id: string; name: string; timeZone: string; from: string; to: string }[];
+  totals: {
+    activeSeconds: number;
+    haiveSeconds: number;
+    callSeconds: number;
+    byArea: AreaSeconds;
+    people: number;
+    activePeople: number;
+    avgActiveSecondsPerPersonDay: number | null;
+  };
+  areas: { key: UsageArea; label: string; seconds: number }[];
+  days: { date: string; activeSeconds: number; haiveSeconds: number; callSeconds: number; byArea: AreaSeconds; activePeople: number }[];
+  people: UsagePerson[];
+  apps: ConnectedApp[];
+  person?: { days: UsageDay[]; signIns: SignInRow[] };
+  measuredSince: string | null;
   generatedAt: string;
 }
 
@@ -134,6 +246,7 @@ export type TeamListKind =
   | 'emails_replied'
   | 'emails_not_replied'
   | 'emails_missed'
+  | 'emails_unanswered'
   | 'emails_customer_replies'
   | 'emails_awaiting_customer'
   | 'deals_created'
@@ -142,7 +255,8 @@ export type TeamListKind =
   | 'pipeline'
   | 'follow_ups';
 
-export type CallFilter = 'made' | 'received' | 'connected' | 'missed' | 'scored';
+// missed: incoming nobody answered · unanswered: outgoing the other side didn't pick up.
+export type CallFilter = 'made' | 'received' | 'connected' | 'missed' | 'unanswered' | 'scored';
 
 interface ListedBy {
   personId?: string;
@@ -239,11 +353,21 @@ export interface TeamTrendPoint {
   date: string;
   label: string;
   calls: number;
+  callsMade: number;
+  callsReceived: number;
+  callsMissed: number;
+  callsUnanswered: number;
   talkSeconds: number;
   emailsSent: number;
+  emailsReceived: number;
   emailsReplied: number;
   dealsCreated: number;
   dealsWon: number;
+  dealsLost: number;
+  wonValue: number;
+  activeSeconds: number;
+  haiveSeconds: number;
+  activePeople: number;
 }
 
 export interface TeamScopeInfo {
@@ -252,13 +376,14 @@ export interface TeamScopeInfo {
   businesses: { id: string; name: string; isMain: boolean; isCurrent: boolean; timeZone: string }[];
 }
 
-function params(value: TeamPeriodValue, extra: { organizationId?: string; userId?: string; callFilter?: CallFilter } = {}) {
+function params(value: TeamPeriodValue, extra: { organizationId?: string; userId?: string; callFilter?: CallFilter; compare?: boolean } = {}) {
   return {
     period: value.period,
     ...(value.period === 'custom' ? { from: value.from, to: value.to } : {}),
     ...(extra.organizationId && extra.organizationId !== 'all' ? { organizationId: extra.organizationId } : {}),
     ...(extra.userId ? { userId: extra.userId } : {}),
     ...(extra.callFilter ? { callFilter: extra.callFilter } : {}),
+    ...(extra.compare ? { compare: 'true' } : {}),
   };
 }
 
@@ -268,13 +393,19 @@ export const teamActivityService = {
     return data;
   },
 
-  async overview(value: TeamPeriodValue, filters: { organizationId?: string; userId?: string } = {}): Promise<TeamActivityOverview> {
+  async overview(value: TeamPeriodValue, filters: { organizationId?: string; userId?: string; compare?: boolean } = {}): Promise<TeamActivityOverview> {
     const { data } = await axiosClient.get<TeamActivityOverview>('/team-activity/overview', { params: params(value, filters) });
     return data;
   },
 
   async trend(value: TeamPeriodValue, filters: { organizationId?: string; userId?: string } = {}): Promise<{ granularity: 'day' | 'week'; points: TeamTrendPoint[] }> {
     const { data } = await axiosClient.get<{ granularity: 'day' | 'week'; points: TeamTrendPoint[] }>('/team-activity/trend', { params: params(value, filters) });
+    return data;
+  },
+
+  /** Measured time in HaiVE and on calls, the other apps people use, and (one person) work sessions and sign-ins. */
+  async usage(value: TeamPeriodValue, filters: { organizationId?: string; userId?: string } = {}): Promise<TeamUsageReport> {
+    const { data } = await axiosClient.get<TeamUsageReport>('/team-activity/usage', { params: params(value, filters) });
     return data;
   },
 
@@ -306,6 +437,18 @@ export const teamActivityService = {
     return data;
   },
 };
+
+/** "2d 4h", "3h 20m", "12m", "under a minute" — how long a customer waited for a reply. */
+export function formatWait(seconds: number | null | undefined): string {
+  if (seconds === null || seconds === undefined) return '—';
+  if (seconds < 60) return 'under a minute';
+  const days = Math.floor(seconds / 86_400);
+  const hours = Math.floor((seconds % 86_400) / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  if (days > 0) return hours ? `${days}d ${hours}h` : `${days}d`;
+  if (hours > 0) return minutes ? `${hours}h ${String(minutes).padStart(2, '0')}m` : `${hours}h`;
+  return `${minutes}m`;
+}
 
 /** "1h 05m", "12m", "45s" — talk time. */
 export function formatTalkTime(seconds: number): string {

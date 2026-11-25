@@ -61,13 +61,15 @@ export class DealsController {
   @Get('query')
   @UseGuards(RolesGuard)
   @Roles('owner', 'admin', 'manager', 'consultant')
-  listFiltered(@CurrentUser() user: JwtPayload, @Query() query: ListDealsQueryDto) {
+  async listFiltered(@CurrentUser() user: JwtPayload, @Query() query: ListDealsQueryDto) {
     const canOverride = user.roles.includes('admin') || user.roles.includes('owner');
     const storeConstraint = canOverride ? undefined : user.roles.includes('manager') ? user.storeId : undefined;
     if (!canOverride && user.roles.includes('consultant')) {
       query.ownerId = [user.sub];
     }
-    return this.dealsService.listFiltered(user.organizationId, query, storeConstraint);
+    const result = await this.dealsService.listFiltered(user.organizationId, query, storeConstraint);
+    // Won and lost deals carry closedOn, the day they count on in revenue (the dashboard lists show it).
+    return { ...result, items: await this.dealsService.withClosingDay(user.organizationId, result.items) };
   }
 
   @Get('export')

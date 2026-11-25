@@ -37,12 +37,12 @@ export const NAV_GROUPS: NavGroup[] = [
         hint: 'Key numbers and trends at a glance',
       },
       {
-        id: 'agent-activity',
-        label: 'Agent Activity',
-        path: ROUTES.agentActivity,
+        id: 'employee-activity',
+        label: 'Employee Activity',
+        path: ROUTES.employeeActivity,
         icon: FiActivity,
         module: 'dashboard',
-        hint: 'What everyone did — deals, emails, calls and scores',
+        hint: 'Sales, email, calls and working time — per employee',
       },
       {
         id: 'timeline',

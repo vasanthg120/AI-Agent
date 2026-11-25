@@ -13,7 +13,7 @@ import { hasRole } from '@/utils/roles';
 import { formatINR as money } from '@/utils/currency';
 import { organizationsService } from '@/services/organizationsService';
 import { analyticsDashboardService, type AnalyticsDashboardOverview } from '@/services/analyticsDashboardService';
-import { dealsService } from '@/services/dealsService';
+import { closingDayOf, dealsService } from '@/services/dealsService';
 import { quotesService } from '@/services/quotesService';
 import { teamActivityService } from '@/services/teamActivityService';
 import { DealSplitDonut } from './components/DealSplitDonut'; 
@@ -40,6 +40,8 @@ import { SlaDashboardSection } from './components/SlaDashboardSection';
 import styles from './analytics-dashboard.module.css';
 import { countedMonths } from './countedMonths';
 import { can, isPermissionManaged } from '@/utils/access';
+import { LiveIndicator } from '@/components/live/LiveIndicator';
+import { useLiveData } from '@/hooks/useLiveData';
 
 // Local-calendar-date formatter — deliberately NOT `.toISOString().slice(0,10)`,
 // which converts to UTC first: a Date constructed at LOCAL midnight on the
@@ -176,6 +178,9 @@ export function AnalyticsDashboardPage() {
     ),
   ];
   const ownName = teamScope?.businesses.find((b) => b.isCurrent)?.name;
+  // Live: opening the Dashboard asks each connected CRM for what changed (every business's, on
+  // the All businesses tab); the figures on screen reload the moment a read lands. No timer.
+  const live = useLiveData({ scope: activeTab === 'businesses' ? 'all' : 'business', invalidate: 'all' });
 
   useEffect(() => {
     if (!canOverrideStore) return;
@@ -239,7 +244,7 @@ export function AnalyticsDashboardPage() {
           dealId: d._id,
           title: d.name,
           subtitle: d.dealStatus,
-          meta: d.expectedClosingDate,
+          meta: closingDayOf(d),
           value: d.monetaryValue,
         }));
       }
@@ -286,6 +291,9 @@ export function AnalyticsDashboardPage() {
           {TAB_INTRO[activeTab]}
           {acrossBusinesses && activeTab !== 'businesses' && ownName ? ` These figures are ${ownName}’s own.` : ''} <span className={styles.tabHint}>{CLICK_HINT}</span>
         </motion.p>
+        <div className={styles.liveRow}>
+          <LiveIndicator live={live} showBusiness={activeTab === 'businesses'} />
+        </div>
       </div>
 
       {activeTab === 'businesses' ? (
@@ -338,11 +346,11 @@ export function AnalyticsDashboardPage() {
                           kind: 'deals',
                           title: 'Won Deals (Revenue)',
                           dealStatus: ['won'],
-                          // Total Revenue itself is summed by expectedClosingDate
+                          // Total Revenue is summed by the day each won deal closed
                           // (SalesAnalyticsService.getAchievement), not createdAt —
-                          // match that field here so the list reconciles with the
-                          // figure that was clicked, instead of showing a
-                          // createdAt-scoped set that can span unrelated months.
+                          // 'expectedClosingDate' is that period rule on the server
+                          // (deal-filter.util.ts), so the list reconciles with the
+                          // figure that was clicked.
                           dateField: 'expectedClosingDate',
                         })
                       }
@@ -426,10 +434,10 @@ export function AnalyticsDashboardPage() {
                           title: key === 'won' ? 'Won Deals' : key === 'lost' ? 'Lost Deals' : 'Open Pipeline',
                           dealStatus: [key as 'won' | 'lost' | 'open'],
                           // Same fix as the Won vs Lost Revenue chart above —
-                          // this donut's own won/lost/open counts are now
-                          // expectedClosingDate-scoped, so the drill-down must
-                          // match or it shows every deal instead of this
-                          // period's.
+                          // this donut's won/lost counts go by the day each deal
+                          // closed and its open count by expected closing date,
+                          // so the drill-down must match or it shows every deal
+                          // instead of this period's.
                           dateField: 'expectedClosingDate',
                         })
                       }
@@ -482,8 +490,8 @@ export function AnalyticsDashboardPage() {
                             title: `${r.userName}'s Won Deals`,
                             dealStatus: ['won'],
                             ownerId: [r.userId],
-                            // Leaderboard revenue is now expectedClosingDate-
-                            // scoped too (same getConsultantPerformance call,
+                            // Leaderboard revenue goes by the closing day
+                            // too (same getConsultantPerformance call,
                             // fed the fixed dealMatch) — same fix as the two
                             // drill-downs above, for the same reason.
                             dateField: 'expectedClosingDate',

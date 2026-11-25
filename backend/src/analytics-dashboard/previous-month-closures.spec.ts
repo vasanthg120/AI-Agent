@@ -107,7 +107,7 @@ describe('Dashboard: deals from last month closed this month (real Mongo)', () =
       { name: 'LAPIZ - Pens', value: 5900, closing: '2026-10-31', createdAt: IMPORT, quotes: [at('2026-10-01')] },
       // Started two months back: not last month either.
       { name: 'CKV Sarees', value: 68040, closing: '2026-10-12', createdAt: IMPORT, quotes: [at('2026-08-04')] },
-      // Made in HaiVE in September, closed (recorded) on 3 Oct, but its closing date puts its revenue in September.
+      // Made in HaiVE in September, expected to close 30 Sep, closed (recorded) on 3 Oct: October's revenue.
       { name: 'Blazers', value: 78223.95, closing: '2026-09-30', createdAt: at('2026-09-10'), closedAt: at('2026-10-03'), source: native },
       // Recorded as closed in September: not closed this month, even though its closing date is in October.
       { name: 'Kikon', value: 19897.5, closing: '2026-10-02', createdAt: at('2026-08-20'), closedAt: at('2026-09-28'), source: native },
@@ -124,18 +124,19 @@ describe('Dashboard: deals from last month closed this month (real Mongo)', () =
       previousPeriod: '2026-09',
       count: 3,
       value: 18898.95 + 7138.95 + 78223.95,
-      inThisMonthRevenue: { count: 2, value: 18898.95 + 7138.95 },
-      outsideThisMonthRevenue: { count: 1, value: 78223.95 },
+      // Revenue counts in the month a deal closed, so everything closed in October is October's.
+      inThisMonthRevenue: { count: 3, value: 18898.95 + 7138.95 + 78223.95 },
+      outsideThisMonthRevenue: { count: 0, value: 0 },
       unknownStart: { count: 0, value: 0 },
       deals: [
-        expect.objectContaining({ name: 'Blazers', startedOn: '2026-09-10', startedFrom: 'deal', closedOn: '2026-10-03', closedFrom: 'recorded', revenuePeriod: '2026-09' }),
+        expect.objectContaining({ name: 'Blazers', startedOn: '2026-09-10', startedFrom: 'deal', closedOn: '2026-10-03', closedFrom: 'recorded', revenuePeriod: '2026-10' }),
         expect.objectContaining({ name: 'REV Mech - Polo', startedOn: '2026-09-30', startedFrom: 'quote', closedOn: '2026-10-31', closedFrom: 'closing-date', revenuePeriod: '2026-10' }),
         expect.objectContaining({ name: 'Delta Decors', startedOn: '2026-09-25', startedFrom: 'quote', closedOn: '2026-10-31', closedFrom: 'closing-date', revenuePeriod: '2026-10' }),
       ],
     });
   });
 
-  it('never changes the revenue figure: it counts by closing date, this list only explains part of it', async () => {
+  it('is part of the revenue figure, never added to it: revenue counts each deal in the month it closed', async () => {
     await seed([
       { name: 'REV Mech - Polo', value: 18898.95, closing: '2026-10-31', createdAt: IMPORT, quotes: [at('2026-09-30')] },
       { name: 'LAPIZ - Pens', value: 5900, closing: '2026-10-31', createdAt: IMPORT, quotes: [at('2026-10-01')] },
@@ -146,11 +147,11 @@ describe('Dashboard: deals from last month closed this month (real Mongo)', () =
       sales.getAchievement(org, 'org', undefined, '2026-09'),
       service.get(org, { level: 'org' }, '2026-10'),
     ]);
-    expect(october.achieved).toBe(18898.95 + 5900);
-    expect(september.achieved).toBe(78223.95);
-    // Blazers closed in October but counts in September's revenue: listed as outside October's, never added to it.
-    expect(listed.inThisMonthRevenue.value).toBe(18898.95);
-    expect(listed.outsideThisMonthRevenue.value).toBe(78223.95);
+    // Blazers was expected in September and closed on 3 Oct: October's revenue, not September's.
+    expect(october.achieved).toBe(18898.95 + 5900 + 78223.95);
+    expect(september.achieved).toBe(0);
+    expect(listed.inThisMonthRevenue.value).toBe(18898.95 + 78223.95);
+    expect(listed.outsideThisMonthRevenue.value).toBe(0);
   });
 
   it('a start it cannot know is reported as unknown, never guessed into a month', async () => {

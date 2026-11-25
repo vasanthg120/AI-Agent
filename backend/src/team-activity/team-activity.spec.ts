@@ -6,8 +6,11 @@ import { JwtPayload } from '../auth/jwt-payload.interface';
 import { EmailIntelligenceService } from '../email-intelligence/email-intelligence.service';
 import { EmailIntelligenceItem, EmailIntelligenceItemDocument, EmailIntelligenceItemSchema } from '../email-intelligence/schemas/email-intelligence-item.schema';
 import { EmailFollowUpReminder, EmailFollowUpReminderSchema } from '../email-intelligence/schemas/email-follow-up-reminder.schema';
+import { EmployeeUsageService } from '../employee-usage/employee-usage.service';
+import { EmployeeSignIn, EmployeeSignInSchema } from '../employee-usage/schemas/employee-sign-in.schema';
+import { EmployeeUsageHour, EmployeeUsageHourSchema } from '../employee-usage/schemas/employee-usage-hour.schema';
 import { TeamActivityService } from './team-activity.service';
-import { periodDays, periodRange } from './team-period';
+import { periodDays, periodRange, previousDays } from './team-period';
 import { TeamScopeService } from './team-scope.service';
 
 describe('team period', () => {
@@ -26,6 +29,24 @@ describe('team period', () => {
     expect(periodDays('month', 'Asia/Kolkata', now)).toEqual({ from: '2026-11-01', to: '2026-11-12' });
     expect(periodDays('previous_month', 'Asia/Kolkata', now)).toEqual({ from: '2026-10-01', to: '2026-10-31' });
     expect(periodDays('previous_month', 'Asia/Kolkata', new Date('2026-01-05T06:00:00Z'))).toEqual({ from: '2025-12-01', to: '2025-12-31' });
+  });
+
+  it('"This week" runs from Monday to today, in each business’s own week', () => {
+    // Thursday the 12th in India; already Friday the 13th in Sydney.
+    expect(periodDays('week', 'Asia/Kolkata', now)).toEqual({ from: '2026-11-09', to: '2026-11-12' });
+    expect(periodDays('week', 'Australia/Sydney', now)).toEqual({ from: '2026-11-09', to: '2026-11-13' });
+    // On a Monday the week is that one day; on a Sunday, the six days before it too.
+    expect(periodDays('week', 'Asia/Kolkata', new Date('2026-11-09T06:00:00Z'))).toEqual({ from: '2026-11-09', to: '2026-11-09' });
+    expect(periodDays('week', 'Asia/Kolkata', new Date('2026-11-15T06:00:00Z'))).toEqual({ from: '2026-11-09', to: '2026-11-15' });
+  });
+
+  it('compares with the period before: yesterday, the same weekdays last week, the same days last month', () => {
+    expect(previousDays('today', { from: '2026-11-12', to: '2026-11-12' })).toEqual({ from: '2026-11-11', to: '2026-11-11' });
+    expect(previousDays('week', { from: '2026-11-09', to: '2026-11-12' })).toEqual({ from: '2026-11-02', to: '2026-11-05' });
+    expect(previousDays('month', { from: '2026-11-01', to: '2026-11-12' })).toEqual({ from: '2026-10-01', to: '2026-10-12' });
+    expect(previousDays('month', { from: '2026-03-01', to: '2026-03-31' })).toEqual({ from: '2026-02-01', to: '2026-02-28' });
+    expect(previousDays('previous_month', { from: '2026-10-01', to: '2026-10-31' })).toEqual({ from: '2026-09-01', to: '2026-09-30' });
+    expect(previousDays('custom', { from: '2026-11-01', to: '2026-11-05' })).toEqual({ from: '2026-10-27', to: '2026-10-31' });
   });
 
   it('turns days into the instants of the business’s midnights', () => {
@@ -51,6 +72,7 @@ describe('team activity (real Mongo)', () => {
   let itemModel: Model<EmailIntelligenceItemDocument>;
   let scopes: TeamScopeService;
   let activity: TeamActivityService;
+  let usage: EmployeeUsageService;
 
   // 15:30 in India on 2026-11-12: "today" there is 2026-11-11T18:30Z – 2026-11-12T18:30Z.
   const now = new Date('2026-11-12T10:00:00.000Z');
@@ -83,6 +105,8 @@ describe('team activity (real Mongo)', () => {
         MongooseModule.forFeature([
           { name: EmailIntelligenceItem.name, schema: EmailIntelligenceItemSchema },
           { name: EmailFollowUpReminder.name, schema: EmailFollowUpReminderSchema },
+          { name: EmployeeUsageHour.name, schema: EmployeeUsageHourSchema },
+          { name: EmployeeSignIn.name, schema: EmployeeSignInSchema },
         ]),
       ],
     }).compile();
@@ -102,7 +126,8 @@ describe('team activity (real Mongo)', () => {
       {} as never,
     );
     scopes = new TeamScopeService(connection);
-    activity = new TeamActivityService(connection, scopes, emails);
+    usage = new EmployeeUsageService(moduleRef.get(getModelToken(EmployeeUsageHour.name)), moduleRef.get(getModelToken(EmployeeSignIn.name)), connection);
+    activity = new TeamActivityService(connection, scopes, emails, undefined, usage);
 
     const db = connection;
     await db.collection('organizations').insertMany([
@@ -216,7 +241,20 @@ describe('team activity (real Mongo)', () => {
   afterAll(async () => {
     const ids = Object.values(orgs).map((o) => o.toString());
     await connection.collection('organizations').deleteMany({ _id: { $in: Object.values(orgs) } });
-    for (const name of ['users', 'plivo_calls', 'call_sessions', 'email_sent_items', 'email_intelligence_items', 'email_follow_up_reminders', 'customer_tasks', 'crm_deals', 'crm_deal_owner_mappings', 'crm_activities']) {
+    for (const name of [
+      'users',
+      'plivo_calls',
+      'call_sessions',
+      'email_sent_items',
+      'email_intelligence_items',
+      'email_follow_up_reminders',
+      'customer_tasks',
+      'crm_deals',
+      'crm_deal_owner_mappings',
+      'crm_activities',
+      'employee_usage_hours',
+      'employee_sign_ins',
+    ]) {
       await connection.collection(name).deleteMany({ organizationId: { $in: ids } });
     }
     await connection.close();
@@ -227,6 +265,7 @@ describe('team activity (real Mongo)', () => {
     dealsWon: 1,
     dealsLost: 0,
     wonValue: 300,
+    dealConversionPct: 100,
     openDeals: 1,
     pipelineValue: 100,
     emailsSent: 2,
@@ -234,13 +273,21 @@ describe('team activity (real Mongo)', () => {
     emailsReplied: 2,
     emailsNotReplied: 1,
     emailsMissed: 1,
+    // Only "waiting" arrived today and is still owed ("missed" arrived yesterday).
+    emailsUnanswered: 1,
+    // "answered" waited 1 hour (replied in HaiVE); "asked" 19.5 hours (replied in Outlook).
+    avgResponseSeconds: (3600 + 70200) / 2,
     customerReplies: 1,
     awaitingCustomer: 1,
     calls: 3,
     callsMade: 2,
     callsReceived: 0,
     callsConnected: 2,
-    callsMissed: 1,
+    // The call nobody picked up was outgoing: unanswered, not missed.
+    callsMissed: 0,
+    callsUnanswered: 1,
+    callConnectionRatePct: 50,
+    callAnswerRatePct: null,
     talkSeconds: 900,
     avgCallSeconds: 450,
     scoredCalls: 2,
@@ -333,6 +380,12 @@ describe('team activity (real Mongo)', () => {
       expect(result.unattributedDeals.total).toBe(0);
     });
 
+    it('with the period before, to compare', async () => {
+      const result = await activity.overview(caller('subAdmin', org('sub'), ['admin']), { period: 'today', userId: who('rep'), compare: true }, now);
+      expect(result.previous).toMatchObject({ from: '2026-11-11', to: '2026-11-11', totals: { calls: 1, talkSeconds: 120, dealsCreated: 1, emailsSent: 1 } });
+      expect((await activity.overview(caller('subAdmin', org('sub'), ['admin']), { period: 'today' }, now)).previous).toBeUndefined();
+    });
+
     it('a wider period takes in yesterday', async () => {
       const result = await activity.overview(caller('subAdmin', org('sub'), ['admin']), { period: 'last7', userId: who('rep') }, now);
       expect(result.totals).toMatchObject({ dealsCreated: 3, emailsSent: 3, calls: 4, talkSeconds: 1020 });
@@ -390,7 +443,9 @@ describe('team activity (real Mongo)', () => {
         ['Quote Delta', 'done', false],
         ['Send Beta the sample', 'done', false],
       ]);
-      expect((await activity.list(admin, 'calls', { period: 'today', userId: who('rep'), callFilter: 'missed' }, now)).items).toHaveLength(1);
+      expect((await activity.list(admin, 'calls', { period: 'today', userId: who('rep'), callFilter: 'missed' }, now)).items).toHaveLength(0);
+      expect((await activity.list(admin, 'calls', { period: 'today', userId: who('rep'), callFilter: 'unanswered' }, now)).items).toHaveLength(1);
+      expect((await activity.list(admin, 'emails_unanswered', { period: 'today' }, now)).items.map((e) => e.subject)).toEqual(['waiting']);
       expect((await activity.list(admin, 'calls', { period: 'today', userId: who('rep'), callFilter: 'made' }, now)).items).toHaveLength(2);
       expect((await activity.list(admin, 'emails_customer_replies', { period: 'today' }, now)).items.map((e) => e.subject)).toEqual(['answered']);
       expect((await activity.list(admin, 'emails_awaiting_customer', { period: 'today' }, now)).items.map((e) => e.subject)).toEqual(['asked']);
@@ -402,7 +457,9 @@ describe('team activity (real Mongo)', () => {
       expect(trend.points.map((p) => p.date)).toEqual(['2026-11-06', '2026-11-07', '2026-11-08', '2026-11-09', '2026-11-10', '2026-11-11', '2026-11-12']);
       const today = trend.points.find((p) => p.date === '2026-11-12')!;
       const yesterday = trend.points.find((p) => p.date === '2026-11-11')!;
-      expect(today).toMatchObject({ calls: 3, talkSeconds: 900, emailsSent: 2, emailsReplied: 2, dealsCreated: 2, dealsWon: 1 });
+      expect(today).toMatchObject({ calls: 3, callsMade: 2, callsUnanswered: 1, callsMissed: 0, talkSeconds: 900, emailsSent: 2, emailsReplied: 2, emailsReceived: 2, dealsCreated: 2, dealsWon: 1, wonValue: 300 });
+      // Time on calls is measured time too: the 10-minute live call and the 5-minute phone call.
+      expect(today).toMatchObject({ activeSeconds: 900, haiveSeconds: 0, activePeople: 1 });
       expect(yesterday).toMatchObject({ calls: 1, talkSeconds: 120, emailsSent: 1, dealsCreated: 1 });
     });
 
@@ -436,7 +493,7 @@ describe('team activity (real Mongo)', () => {
       expect(lines.some((l) => l.includes('Nothing recorded'))).toBe(false);
       // Over a week, the branch admin did nothing at all.
       const week = await activity.overview(mainOwner(), { period: 'last7' }, now);
-      expect(week.attention.map((a) => `${a.personName}: ${a.text}`)).toContain('Branch Admin: Nothing recorded in this period — no calls, emails, deals or finished tasks.');
+      expect(week.attention.map((a) => `${a.personName}: ${a.text}`)).toContain('Branch Admin: Nothing recorded in this period — no time in HaiVE, calls, emails, deals or finished tasks.');
       // The Main Account owner's own record in the sub-account is never among them.
       expect(week.attention.some((a) => a.personName === 'Main Owner')).toBe(false);
       // Only for someone who sees the team.
@@ -501,6 +558,164 @@ describe('team activity (real Mongo)', () => {
       expect(result.departments.map((d) => d.name)).toEqual(['Sales', 'No department']);
       expect(result.departments[0]).toMatchObject({ people: 1, businessName: 'jest-team Branch', calls: 3, emailsMissed: 1, needSupport: 1 });
       expect(result.people.find((p) => p.name === 'Rep One')!.department).toBe('Sales');
+    });
+  });
+
+  // Employee Activity's measured time: HaiVE in active use (sent by the browser) and
+  // calls, a minute counted once; sign-ins; and the App usage report.
+  describe('measured time, sign-ins and app usage', () => {
+    const session = (key: keyof typeof people, organizationId: string, roles: string[]) => caller(key, organizationId, roles, { authMethod: 'session' });
+    const admin = () => caller('subAdmin', org('sub'), ['admin']);
+    const hourDoc = (userId: string, hour: string) => connection.collection('employee_usage_hours').findOne({ organizationId: org('sub'), userId, hour: at(hour) });
+
+    beforeAll(async () => {
+      // Rep One: 11:30–11:32 in India in the CRM and the inbox (two tabs: 45 + 30 seconds in one minute),
+      // the inbox again at 12:00, and 20 seconds in Call Copilot during their phone call.
+      await usage.record(
+        session('rep', org('sub'), ['agent_user']),
+        {
+          sentAt: now.toISOString(),
+          beats: [
+            { minute: '2026-11-12T06:00:00Z', area: 'crm', seconds: 45 },
+            { minute: '2026-11-12T06:00:00Z', area: 'email', seconds: 30 },
+            { minute: '2026-11-12T06:01:00Z', area: 'crm', seconds: 40 },
+            { minute: '2026-11-12T06:30:00Z', area: 'email', seconds: 60 },
+            { minute: '2026-11-12T09:02:00Z', area: 'calls', seconds: 20 },
+          ],
+        },
+        now,
+      );
+    });
+
+    it('stores only real, signed-in, sensible minutes', async () => {
+      const rep = session('rep', org('sub'), ['agent_user']);
+      // An API token or a service never records anyone's time.
+      expect(await usage.record(caller('rep', org('sub'), ['agent_user']), { beats: [{ minute: '2026-11-12T07:00:00Z', area: 'crm', seconds: 30 }] }, now)).toEqual({ recorded: 0 });
+      expect(await usage.record(caller('rep', org('sub'), ['agent_user'], { authMethod: 'api_token' }), { beats: [{ minute: '2026-11-12T07:00:00Z', area: 'crm', seconds: 30 }] }, now)).toEqual({ recorded: 0 });
+      // In the future, over a day old, an unknown part of the app, nothing measured: dropped.
+      const dropped = await usage.record(
+        rep,
+        {
+          sentAt: now.toISOString(),
+          beats: [
+            { minute: '2026-11-12T10:05:00Z', area: 'crm', seconds: 30 },
+            { minute: '2026-11-10T06:00:00Z', area: 'crm', seconds: 30 },
+            { minute: '2026-11-12T06:02:00Z', area: 'games', seconds: 30 },
+            { minute: '2026-11-12T06:03:00Z', area: 'crm', seconds: 0 },
+          ],
+        },
+        now,
+      );
+      expect(dropped).toEqual({ recorded: 0 });
+      // Sent again, and a lower running total for a minute already stored: nothing doubles or shrinks.
+      await usage.record(rep, { sentAt: now.toISOString(), beats: [{ minute: '2026-11-12T06:00:00Z', area: 'crm', seconds: 10 }, { minute: '2026-11-12T06:01:00Z', area: 'crm', seconds: 40 }] }, now);
+      const stored = await hourDoc(who('rep'), '2026-11-12T06:00:00Z');
+      expect(stored!.m).toEqual({ '00': { crm: 45, email: 30 }, '01': { crm: 40 }, '30': { email: 60 } });
+      expect(stored!.firstAt).toEqual(at('2026-11-12T06:00:00Z'));
+      expect(stored!.lastAt).toEqual(at('2026-11-12T06:31:00Z'));
+    });
+
+    it('corrects a browser clock that is off', async () => {
+      // The browser's clock reads 9:57 when the server's reads 10:00: its 9:50 was really 9:53.
+      await usage.record(session('rep2', org('sub'), ['consultant']), { sentAt: '2026-11-12T09:57:00Z', beats: [{ minute: '2026-11-12T09:50:00Z', area: 'tasks', seconds: 30 }] }, now);
+      expect((await hourDoc(who('rep2'), '2026-11-12T09:00:00Z'))!.m).toEqual({ '53': { tasks: 30 } });
+    });
+
+    it('measures each day: HaiVE and calls, a minute counted once, in work sessions', async () => {
+      const report = await activity.usage(admin(), { period: 'today', userId: who('rep') }, now);
+      // HaiVE: 60 (two tabs capped) + 40 + 60 + 20. Calls: 300 (phone) + 600 (live).
+      // Active: 60 + 40 + 60 + 600 + 300 (the minute in Call Copilot during the phone call counts once).
+      expect(report.totals).toMatchObject({ activeSeconds: 1060, haiveSeconds: 180, callSeconds: 900, activePeople: 1, avgActiveSecondsPerPersonDay: 1060 });
+      // The capped minute is shared out between the two parts in proportion (45:30 → 36:24).
+      expect(report.areas).toEqual([
+        { key: 'email', label: 'Email inbox', seconds: 84 },
+        { key: 'crm', label: 'CRM & customers', seconds: 76 },
+        { key: 'calls', label: 'Call Copilot', seconds: 20 },
+      ]);
+      const day = report.person!.days[0];
+      expect(day).toMatchObject({ date: '2026-11-12', activeSeconds: 1060, firstAt: at('2026-11-12T06:00:00Z'), lastAt: at('2026-11-12T09:06:00Z') });
+      // A break of more than 15 minutes starts a new session.
+      expect(day.sessions.map((s) => [s.start.toISOString(), s.end.toISOString(), s.activeSeconds])).toEqual([
+        ['2026-11-12T06:00:00.000Z', '2026-11-12T06:02:00.000Z', 100],
+        ['2026-11-12T06:30:00.000Z', '2026-11-12T06:31:00.000Z', 60],
+        ['2026-11-12T08:00:00.000Z', '2026-11-12T08:10:00.000Z', 600],
+        ['2026-11-12T09:00:00.000Z', '2026-11-12T09:06:00.000Z', 300],
+      ]);
+      expect(report.people).toEqual([expect.objectContaining({ name: 'Rep One', activeDays: 1, topArea: 'email', lastActiveAt: at('2026-11-12T09:03:00Z') })]);
+      // Every day of the period is in the series (here, one).
+      expect(report.days).toEqual([expect.objectContaining({ date: '2026-11-12', activeSeconds: 1060, activePeople: 1 })]);
+    });
+
+    it('puts measured time in the figures, with when each person was last active', async () => {
+      const result = await activity.overview(admin(), { period: 'today' }, now);
+      const rep = result.people.find((p) => p.name === 'Rep One')!;
+      expect(rep).toMatchObject({ activeSeconds: 1060, haiveSeconds: 180, lastActiveAt: at('2026-11-12T09:03:00Z') });
+      expect(result.people.find((p) => p.name === 'Rep Two')).toMatchObject({ activeSeconds: 30, haiveSeconds: 30 });
+      expect(result.totals.activeSeconds).toBe(1090);
+      // Calls and app usage are recorded as they happen; Outlook isn't connected here.
+      expect(result.sources.map((s) => [s.key, s.mode, s.status])).toEqual([
+        ['calls', 'real_time', 'ok'],
+        ['usage', 'real_time', 'ok'],
+        ['email', 'on_open', 'not_connected'],
+      ]);
+    });
+
+    it('says what can be known about each app: time, activity only, or nothing', async () => {
+      const report = await activity.usage(admin(), { period: 'today' }, now);
+      const app = (key: string) => report.apps.find((a) => a.key === key)!;
+      expect(app('haive')).toMatchObject({ measure: 'time', seconds: 210 });
+      expect(app('calls')).toMatchObject({ measure: 'time', seconds: 900 });
+      expect(app('outlook')).toMatchObject({
+        measure: 'activity',
+        connected: false,
+        activity: [
+          { label: 'Emails sent', count: 2 },
+          { label: 'Replies written in Outlook', count: 1 },
+          { label: 'Replies written in HaiVE', count: 1 },
+        ],
+      });
+      expect(app('pos')).toMatchObject({ measure: 'none', connected: false });
+      expect(app('gmail')).toMatchObject({ measure: 'none', connected: false });
+      expect(report.measuredSince).toEqual(at('2026-11-12T06:00:00Z'));
+    });
+
+    it('sign-ins: logged ones with their sign-out, and sessions still open', async () => {
+      await usage.logSignIn({ organizationId: org('sub'), userId: who('rep'), kind: 'sign_in', jti: 'jest-j1', device: 'Chrome on Windows' }, at('2026-11-12T05:00:00Z'));
+      await usage.logSignIn({ organizationId: org('sub'), userId: who('rep'), kind: 'sign_out', jti: 'jest-j1' }, at('2026-11-12T07:00:00Z'));
+      await usage.logSignIn({ organizationId: org('sub'), userId: who('rep'), kind: 'sign_in', jti: 'jest-j2', device: 'Chrome on Windows' }, at('2026-11-12T08:00:00Z'));
+      // j2 is still open; j3 was opened before the log existed and is still open too.
+      await connection.collection('users').updateOne(
+        { _id: people.rep },
+        {
+          $set: {
+            sessions: [
+              { jti: 'jest-j2', device: 'Chrome on Windows', createdAt: at('2026-11-12T08:00:00Z'), lastSeenAt: at('2026-11-12T09:00:00Z') },
+              { jti: 'jest-j3', device: 'Safari on iPhone', createdAt: at('2026-11-12T09:30:00Z'), lastSeenAt: at('2026-11-12T09:40:00Z') },
+            ],
+          },
+        },
+      );
+      const report = await activity.usage(admin(), { period: 'today', userId: who('rep') }, now);
+      expect(report.person!.signIns.map((s) => [s.at.toISOString(), s.device, s.open, s.signedOutAt?.toISOString()])).toEqual([
+        ['2026-11-12T09:30:00.000Z', 'Safari on iPhone', true, undefined],
+        ['2026-11-12T08:00:00.000Z', 'Chrome on Windows', true, undefined],
+        ['2026-11-12T05:00:00.000Z', 'Chrome on Windows', false, '2026-11-12T07:00:00.000Z'],
+      ]);
+      await connection.collection('users').updateOne({ _id: people.rep }, { $unset: { sessions: '' } });
+    });
+
+    it('never shows anyone outside the caller’s view', async () => {
+      // Another company's time never reaches this business.
+      await usage.record(session('otherOwner', org('other'), ['owner']), { sentAt: now.toISOString(), beats: [{ minute: '2026-11-12T06:00:00Z', area: 'crm', seconds: 60 }] }, now);
+      const team = await activity.usage(admin(), { period: 'today' }, now);
+      expect(team.people.map((p) => p.name)).not.toContain('Other Owner');
+      await expect(activity.usage(admin(), { period: 'today', organizationId: org('other') }, now)).rejects.toThrow(ForbiddenException);
+      // A team member sees only their own, and no one's sign-ins but theirs.
+      const mine = await activity.usage(caller('rep', org('sub'), ['agent_user']), { period: 'today' }, now);
+      expect(mine.people.map((p) => p.name)).toEqual(['Rep One']);
+      const theirs = await activity.usage(caller('rep', org('sub'), ['agent_user']), { period: 'today', userId: who('rep2') }, now);
+      expect(theirs.people).toEqual([]);
+      expect(theirs.person).toBeUndefined();
     });
   });
 });

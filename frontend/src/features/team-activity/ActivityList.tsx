@@ -8,6 +8,7 @@ import { EmptyState, Modal, Skeleton } from '@/components/ui';
 import { formatAmountIn, formatINR } from '@/utils/currency';
 import {
   formatTalkTime,
+  formatWait,
   teamActivityService,
   type TeamCallItem,
   type TeamDealItem,
@@ -296,10 +297,13 @@ function SentRow({ email, showPerson }: { email: TeamSentEmailItem; showPerson: 
 }
 
 function EmailRow({ email, kind, showPerson }: { email: TeamEmailItem; kind: TeamListKind; showPerson: boolean }) {
-  const waitingSince = kind === 'emails_not_replied' || kind === 'emails_missed' ? dayjs(email.receivedAt).fromNow(true) : undefined;
+  const waitingSince = kind === 'emails_not_replied' || kind === 'emails_missed' || kind === 'emails_unanswered' ? dayjs(email.receivedAt).fromNow(true) : undefined;
+  // How long the customer waited (a reply only marked as sent has no real time).
+  const waited =
+    email.respondedAt && (email.respondedVia === 'app' || email.respondedVia === 'outlook') ? (new Date(email.respondedAt).getTime() - new Date(email.receivedAt).getTime()) / 1000 : null;
   return (
     <div className={styles.record}>
-      <span className={clsx(styles.recordIcon, kind === 'emails_missed' ? styles.recordIconDanger : kind === 'emails_not_replied' ? styles.recordIconWarning : styles.recordIconIn)} aria-hidden>
+      <span className={clsx(styles.recordIcon, kind === 'emails_missed' ? styles.recordIconDanger : kind === 'emails_not_replied' || kind === 'emails_unanswered' ? styles.recordIconWarning : styles.recordIconIn)} aria-hidden>
         {kind === 'emails_replied' ? <FiCornerUpLeft /> : <FiInbox />}
       </span>
       <span className={styles.recordMain}>
@@ -317,6 +321,7 @@ function EmailRow({ email, kind, showPerson }: { email: TeamEmailItem; kind: Tea
         <span className={styles.recordChips}>
           <Who item={email} showPerson={showPerson} />
           {waitingSince && <span className={clsx(styles.chip, kind === 'emails_missed' ? styles.chip_danger : styles.chip_warning)}>Waiting {waitingSince}</span>}
+          {!waitingSince && waited !== null && waited >= 0 && <span className={styles.chip}>Replied after {formatWait(waited)}</span>}
           {!waitingSince && CATEGORY_LABEL[email.category] && <span className={styles.chip}>{CATEGORY_LABEL[email.category]}</span>}
         </span>
       </span>

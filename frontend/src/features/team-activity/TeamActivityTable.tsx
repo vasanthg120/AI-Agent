@@ -1,18 +1,35 @@
 import { useMemo, useState } from 'react';
 import clsx from 'clsx';
 import { FiArrowDown, FiArrowUp, FiChevronRight, FiSearch } from 'react-icons/fi';
-import { Avatar, EmptyState } from '@/components/ui';
+import { Avatar, EmptyState, SelectMenu } from '@/components/ui';
 import { useMediaQuery } from '@/hooks/useMediaQuery';
 import type { TeamActivityPerson } from '@/services/teamActivityService';
 import { COLUMN_SETS, METRIC_BY_KEY, type MetricKey } from './metrics';
+import { StatusLabel } from './EmployeeParts';
+import { activityStatus } from './status';
 import styles from './TeamActivity.module.css';
+import eaStyles from './EmployeeActivity.module.css';
 
 type SortKey = MetricKey | 'name';
-type ColumnSet = (typeof COLUMN_SETS)[number]['id'];
+export type ColumnSet = (typeof COLUMN_SETS)[number]['id'];
+type StatusFilter = 'all' | 'now' | 'active' | 'quiet';
 
-// Everyone the caller may see, one row each — a short overview, or every
-// figure of one kind (deals, email, calls, follow-ups) — sorted by whatever is
-// clicked. A row opens that person's page. On a phone the rows become cards.
+const STATUS_OPTIONS: { value: StatusFilter; label: string }[] = [
+  { value: 'all', label: 'Everyone' },
+  { value: 'now', label: 'Active now' },
+  { value: 'active', label: 'Active in this period' },
+  { value: 'quiet', label: 'Nothing in this period' },
+];
+
+/** Did anything in the period: time measured, a call, an email, a deal, a finished task. */
+function didSomething(p: TeamActivityPerson): boolean {
+  return p.activeSeconds + p.calls + p.emailsSent + p.emailsReplied + p.dealsCreated + p.dealsWon + p.dealsLost + p.followUpsCompleted > 0;
+}
+
+// Everyone the caller may see, one row each — a short overview, or every figure
+// of one kind (deals, email, calls, tasks, time) — searchable, filtered by status,
+// role and team, sorted by whatever is clicked. A row opens that person's page;
+// each shows whether they are active now. On a phone the rows become cards.
 export function TeamActivityTable({
   people,
   onSelect,
@@ -20,6 +37,8 @@ export function TeamActivityTable({
   limit,
   searchable = true,
   columnSwitch = true,
+  initialSet = 'overview',
+  filters = false,
 }: {
   people: TeamActivityPerson[];
   onSelect: (person: TeamActivityPerson) => void;
@@ -27,16 +46,34 @@ export function TeamActivityTable({
   limit?: number;
   searchable?: boolean;
   columnSwitch?: boolean;
+  initialSet?: ColumnSet;
+  /** Status, role and team filters above the table. */
+  filters?: boolean;
 }) {
-  const [sort, setSort] = useState<{ key: SortKey; desc: boolean }>({ key: 'calls', desc: true });
+  const startSort: SortKey = (COLUMN_SETS.find((c) => c.id === initialSet) ?? COLUMN_SETS[0]).keys[0];
+  const [sort, setSort] = useState<{ key: SortKey; desc: boolean }>({ key: startSort, desc: true });
   const [query, setQuery] = useState('');
-  const [set, setSet] = useState<ColumnSet>('overview');
-  const narrow = useMediaQuery('(max-width: 760px)');
+  const [set, setSet] = useState<ColumnSet>(initialSet);
+  const [status, setStatus] = useState<StatusFilter>('all');
+  const [role, setRole] = useState('');
+  const [team, setTeam] = useState('');
+  // Cards below a laptop's width: nine figures don't fit a tablet's row.
+  const narrow = useMediaQuery('(max-width: 900px)');
   const columns = (COLUMN_SETS.find((c) => c.id === set) ?? COLUMN_SETS[0]).keys.map((k) => METRIC_BY_KEY[k]);
+  const roles = useMemo(() => [...new Set(people.map((p) => p.role))].sort(), [people]);
+  const teams = useMemo(() => [...new Set(people.map((p) => p.department).filter((d): d is string => !!d))].sort(), [people]);
 
   const rows = useMemo(() => {
     const q = query.trim().toLowerCase();
-    const filtered = q ? people.filter((p) => [p.name, p.email, p.businessName, p.role].some((f) => f?.toLowerCase().includes(q))) : people;
+    const filtered = people.filter((p) => {
+      if (q && ![p.name, p.email, p.businessName, p.role, p.department].some((f) => f?.toLowerCase().includes(q))) return false;
+      if (role && p.role !== role) return false;
+      if (team && p.department !== team) return false;
+      if (status === 'now' && activityStatus(p.lastActiveAt).tone !== 'now') return false;
+      if (status === 'active' && !didSomething(p)) return false;
+      if (status === 'quiet' && didSomething(p)) return false;
+      return true;
+    });
     const sorted = [...filtered].sort((a, b) => {
       if (sort.key === 'name') return sort.desc ? b.name.localeCompare(a.name) : a.name.localeCompare(b.name);
       const metric = METRIC_BY_KEY[sort.key];
@@ -44,17 +81,19 @@ export function TeamActivityTable({
       return (sort.desc ? diff : -diff) || a.name.localeCompare(b.name);
     });
     return limit ? sorted.slice(0, limit) : sorted;
-  }, [people, query, sort, limit]);
+  }, [people, query, sort, limit, role, team, status]);
 
   const toggleSort = (key: SortKey) => setSort((prev) => (prev.key === key ? { key, desc: !prev.desc } : { key, desc: key !== 'name' }));
 
   if (people.length === 0) {
-    return <EmptyState compact title="Nobody to show yet" description="People appear here once they have a login in this business." />;
+    return <EmptyState compact title="Nobody to show yet" description="Employees appear here once they have a login in this business." />;
   }
+
+  const sub = (p: TeamActivityPerson) => [p.role, showBusiness ? p.businessName : undefined, p.department, !p.active ? 'Deactivated' : undefined].filter(Boolean).join(' · ');
 
   return (
     <div className={styles.tableBlock}>
-      {(columnSwitch || (searchable && people.length > 6)) && (
+      {(columnSwitch || filters || (searchable && people.length > 6)) && (
         <div className={styles.tableBar}>
           {columnSwitch && (
             <div className={styles.subTabs} role="tablist" aria-label="Which figures">
@@ -65,27 +104,43 @@ export function TeamActivityTable({
               ))}
             </div>
           )}
-          {searchable && people.length > 6 && (
-            <label className={styles.tableSearch}>
-              <FiSearch aria-hidden />
-              <input value={query} placeholder="Search people" onChange={(e) => setQuery(e.target.value)} />
-            </label>
-          )}
+          <div className={eaStyles.filtersRow}>
+            {filters && (
+              <>
+                <SelectMenu value={status} options={STATUS_OPTIONS} onChange={(v) => setStatus(v as StatusFilter)} ariaLabel="Status" size="sm" className={eaStyles.filterSelect} />
+                {roles.length > 1 && (
+                  <SelectMenu value={role} options={roles.map((r) => ({ value: r, label: r }))} emptyOption="Every role" onChange={setRole} ariaLabel="Role" size="sm" className={eaStyles.filterSelect} />
+                )}
+                {teams.length > 0 && (
+                  <SelectMenu value={team} options={teams.map((t) => ({ value: t, label: t }))} emptyOption="Every team" onChange={setTeam} ariaLabel="Team" size="sm" className={eaStyles.filterSelect} />
+                )}
+              </>
+            )}
+            {searchable && (filters || people.length > 6) && (
+              <label className={styles.tableSearch}>
+                <FiSearch aria-hidden />
+                <input value={query} placeholder="Search employees" aria-label="Search employees" onChange={(e) => setQuery(e.target.value)} />
+              </label>
+            )}
+          </div>
         </div>
       )}
 
       {rows.length === 0 ? (
-        <EmptyState compact icon={FiSearch} title="Nobody matches that search" />
+        <EmptyState compact icon={FiSearch} title="Nobody matches" description="Try another search or filter." />
       ) : narrow ? (
         <ul className={styles.personCards}>
           {rows.map((p) => (
             <li key={`${p.businessId}-${p.userId}`}>
               <button type="button" className={styles.personCard} onClick={() => onSelect(p)}>
                 <span className={styles.personCell}>
-                  <Avatar name={p.name} size="sm" />
+                  <Avatar name={p.name} size="sm" status={activityStatus(p.lastActiveAt).tone === 'now' ? 'online' : undefined} />
                   <span className={styles.personText}>
                     <span className={styles.personName}>{p.name}</span>
-                    <span className={styles.personSub}>{[p.role, showBusiness ? p.businessName : undefined].filter(Boolean).join(' · ')}</span>
+                    <span className={styles.personSub}>{sub(p)}</span>
+                    <span className={styles.personSub}>
+                      <StatusLabel lastActiveAt={p.lastActiveAt} />
+                    </span>
                   </span>
                   <FiChevronRight className={styles.rowChevron} aria-hidden />
                 </span>
@@ -106,7 +161,7 @@ export function TeamActivityTable({
           <table className={styles.table}>
             <thead>
               <tr>
-                <SortHeader label="Person" sortKey="name" sort={sort} onSort={toggleSort} align="left" />
+                <SortHeader label="Employee" sortKey="name" sort={sort} onSort={toggleSort} align="left" />
                 {columns.map((m) => (
                   <SortHeader key={m.key} label={m.column} title={m.meaning} sortKey={m.key} sort={sort} onSort={toggleSort} />
                 ))}
@@ -130,11 +185,12 @@ export function TeamActivityTable({
                 >
                   <td>
                     <span className={styles.personCell}>
-                      <Avatar name={p.name} size="sm" />
+                      <Avatar name={p.name} size="sm" status={activityStatus(p.lastActiveAt).tone === 'now' ? 'online' : undefined} />
                       <span className={styles.personText}>
                         <span className={styles.personName}>{p.name}</span>
+                        <span className={styles.personSub}>{sub(p)}</span>
                         <span className={styles.personSub}>
-                          {[p.role, showBusiness ? p.businessName : undefined, !p.active ? 'Deactivated' : undefined].filter(Boolean).join(' · ')}
+                          <StatusLabel lastActiveAt={p.lastActiveAt} />
                         </span>
                       </span>
                     </span>

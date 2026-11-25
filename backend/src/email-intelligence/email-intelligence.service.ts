@@ -83,9 +83,18 @@ const FOLLOW_UP_DEFAULT_DAYS = 3;
 export { RELEVANT_EMAIL_INTENTS };
 
 /** Team Performance's email figures (see teamEmailMatch). */
-export type TeamEmailMetric = 'received' | 'replied' | 'pending' | 'missed' | 'customer_replies' | 'awaiting_customer';
+export type TeamEmailMetric = 'received' | 'replied' | 'pending' | 'missed' | 'unanswered' | 'customer_replies' | 'awaiting_customer';
 
-export const TEAM_EMAIL_METRICS: TeamEmailMetric[] = ['received', 'replied', 'pending', 'missed', 'customer_replies', 'awaiting_customer'];
+export const TEAM_EMAIL_METRICS: TeamEmailMetric[] = ['received', 'replied', 'pending', 'missed', 'unanswered', 'customer_replies', 'awaiting_customer'];
+
+/** How someone's replies in a period went: how fast (timed replies only), and where they were written. */
+export interface TeamReplyStats {
+  // Replies whose wait is known: written in HaiVE or in Outlook (a reply only marked as sent has no real time).
+  timedReplies: number;
+  responseSecondsSum: number;
+  viaApp: number;
+  viaOutlook: number;
+}
 
 /** One follow-up reminder in a Team Performance list. */
 export interface TeamFollowUpRow {
@@ -171,7 +180,15 @@ export interface IngestExtras {
   thread?: ThreadMessage[];
   /** Set when a sent message already answers this email (see EmailConversationService.answeredFields). */
   answered?: Record<string, unknown>;
+  /**
+   * Live inbox fetch: store the email now, as Outlook has it, and let the AI read it straight
+   * afterwards (EmailIntelligenceSyncService.readWaiting) — the inbox never waits on the AI.
+   */
+  deferAnalysis?: boolean;
 }
+
+/** What a live-fetched email waiting for its AI reading says (analysisAttempts 0: not tried yet). */
+export const AWAITING_AI_REASON = 'Just arrived — the AI is reading it.';
 
 export type EmailInboxCounts = Record<EmailResponseStatus, number> & { categories: Record<EmailCategory, number>; boxes: Record<InboxBox, number> };
 
@@ -179,6 +196,9 @@ const CATEGORIES: EmailCategory[] = ['urgent', 'needs_response', 'waiting_for_cu
 // An approved draft's send is given this long before another attempt may start.
 const SEND_CLAIM_MS = 2 * 60_000;
 const MAX_ANALYSIS_ATTEMPTS = 4;
+// How long mail a live fetch stored belongs to the AI pass that follows that fetch, before the
+// half-hourly sync's retry may pick it up too (a crashed pass never leaves it unread).
+const LIVE_READ_GRACE_MS = 10 * 60_000;
 
 /** Why the AI could not read an email, in words a person can act on. Never message content. */
 export function analysisFailureReason(err: unknown): string {
@@ -318,11 +338,43 @@ export class EmailIntelligenceService {
   }
 
   /** Stored messages the AI has not managed to read yet and that still wait on a reply — oldest first. */
-  async listAwaitingAnalysis(userId: string, limit: number): Promise<EmailIntelligenceItemDocument[]> {
+  /**
+   * Mail waiting for an AI reading. `retriesOnly`: leave out what a live fetch stored in the last
+   * few minutes — the AI pass that follows that fetch reads it (EmailIntelligenceSyncService.readWaiting),
+   * and reading it twice would bill it twice.
+   */
+  async listAwaitingAnalysis(userId: string, limit: number, options: { retriesOnly?: boolean } = {}): Promise<EmailIntelligenceItemDocument[]> {
+    const justFetched = { analysisAttempts: 0, createdAt: { $gte: new Date(Date.now() - LIVE_READ_GRACE_MS) } };
     return this.itemModel
-      .find({ userId, analysisState: 'pending', analysisAttempts: { $lt: MAX_ANALYSIS_ATTEMPTS }, ...needsResponseMatch() })
+      .find({
+        userId,
+        analysisState: 'pending',
+        analysisAttempts: { $lt: MAX_ANALYSIS_ATTEMPTS },
+        ...needsResponseMatch(),
+        ...(options.retriesOnly ? { $nor: [justFetched] } : {}),
+      })
       .sort({ receivedAt: -1 })
       .limit(limit)
+      .exec();
+  }
+
+  /** Mail a live fetch stored that the AI has not tried to read yet, newest first. */
+  async listAwaitingFirstReading(userId: string, limit: number): Promise<EmailIntelligenceItemDocument[]> {
+    return this.itemModel
+      .find({ userId, analysisState: 'pending', analysisAttempts: 0, ...needsResponseMatch() })
+      .sort({ receivedAt: -1 })
+      .limit(limit)
+      .exec();
+  }
+
+  /** The AI could not read these live-fetched emails: they say why, and wait for the next retry. */
+  async markNotReadByAi(ids: Types.ObjectId[], reason: string): Promise<void> {
+    if (ids.length === 0) return;
+    await this.itemModel
+      .updateMany(
+        { _id: { $in: ids }, analysisState: 'pending', analysisAttempts: 0 },
+        { $set: { analysisAttempts: 1, analysisError: reason, reason, recommendedAction: 'Reply to this email. ' + reason } },
+      )
       .exec();
   }
 
@@ -633,6 +685,26 @@ export class EmailIntelligenceService {
         });
       }
 
+      // Live fetch: shown now as Outlook has it; the AI reading (and its notification) follows.
+      if (extras.deferAnalysis) {
+        return await this.itemModel.create({
+          ...baseFields,
+          intent: correlation ? 'existing_customer' : 'other',
+          priority: email.importance === 'high' ? 'high' : 'medium',
+          urgency: email.importance === 'high' ? 'high' : 'medium',
+          sentiment: 'neutral',
+          recommendedAction: 'Reply to this email.',
+          shouldDraft: false,
+          fromRole: correlation ? 'customer' : 'external_other',
+          expectedNextAction: 'company_reply',
+          reason: AWAITING_AI_REASON,
+          analysisState: 'pending',
+          analysisAttempts: 0,
+          deterministicInput: { skippedLlmCall: true, reasonForSkip: 'stored live; the AI reads it next' },
+          result: {},
+        });
+      }
+
       const salesperson = await this.usersService.findById(userId);
       const deterministicInput = this.buildAnalysisPayload(email, correlation, matchedBusinessSummary, mailboxEmail, salesperson?.name, extras.thread);
       let result: Record<string, unknown>;
@@ -734,6 +806,38 @@ export class EmailIntelligenceService {
       if ((err as { code?: number }).code === DUPLICATE_KEY_ERROR) return null;
       throw err;
     }
+  }
+
+  /**
+   * The notification analyzeAndCreate raises, for an email stored live and read by the AI
+   * afterwards: "needs review" once read, "needs a reply — not yet read by the AI" when the AI
+   * could not read it. Nothing for one that turned out to need no AI (own mail, automated mail).
+   */
+  async announceNewEmail(item: EmailIntelligenceItemDocument, read: boolean): Promise<void> {
+    if (read && (item.deterministicInput as { skippedLlmCall?: boolean } | undefined)?.skippedLlmCall) return;
+    await this.notificationsService
+      .create(
+        item.userId,
+        read
+          ? {
+              kind: 'system',
+              title: `New ${intentLabel(item.intent).toLowerCase()} email needs review`,
+              description: `${item.subject || '(no subject)'} — ${item.priority} priority`,
+              source: 'email-intelligence',
+              entityType: 'email',
+              entityId: item._id.toString(),
+            }
+          : {
+              kind: 'system',
+              title: 'New email needs a reply',
+              description: `${item.subject || '(no subject)'} — not yet read by the AI`,
+              source: 'email-intelligence',
+              entityType: 'email',
+              entityId: item._id.toString(),
+            },
+        item.organizationId,
+      )
+      .catch(() => undefined);
   }
 
   private deriveFromRole(intent: string): 'customer' | 'vendor' | 'external_other' {
@@ -1183,6 +1287,7 @@ export class EmailIntelligenceService {
   //  - pending: owed and unanswered (needsResponseMatch), still inside its 24 hours;
   //  - missed: owed and unanswered, its 24 hours ran out inside the period — so
   //    "missed today" is what became overdue today, not always zero;
+  //  - unanswered: arrived in the period and still owed a reply now, however old;
   //  - customer_replies: customers writing back in a conversation (the message
   //    answers an earlier one) that arrived in the period;
   //  - awaiting_customer: we replied in the period and asked the customer
@@ -1209,6 +1314,7 @@ export class EmailIntelligenceService {
       };
     if (metric === 'pending')
       return { ...base, intent: { $in: RELEVANT_EMAIL_INTENTS }, ...needsResponseMatch(), receivedAt: { $gte: start, $lt: end, $gt: new Date(now.getTime() - day) } };
+    if (metric === 'unanswered') return { ...base, intent: { $in: RELEVANT_EMAIL_INTENTS }, ...needsResponseMatch(), receivedAt: { $gte: start, $lt: end } };
     const upTo = Math.min(end.getTime(), now.getTime());
     return {
       ...base,
@@ -1238,12 +1344,45 @@ export class EmailIntelligenceService {
     metrics.forEach((metric, i) => {
       for (const row of grouped[i]) {
         const employee = attribution.employeeOf(String(row._id));
-        const entry = counts.get(employee) ?? { received: 0, replied: 0, pending: 0, missed: 0, customer_replies: 0, awaiting_customer: 0 };
+        const entry = counts.get(employee) ?? { received: 0, replied: 0, pending: 0, missed: 0, unanswered: 0, customer_replies: 0, awaiting_customer: 0 };
         entry[metric] += row.count;
         counts.set(employee, entry);
       }
     });
     return counts;
+  }
+
+  /**
+   * Per employee: the customer emails they answered in the period (the "replied"
+   * figure), how long each customer waited — from the email arriving to the reply
+   * being sent, in HaiVE or in Outlook — and where the replies were written. A reply
+   * someone only marked as sent ("I already replied") counts as replied, but has no
+   * real time, so it is left out of the wait.
+   */
+  async teamReplyStats(organizationId: string, start: Date, end: Date, employeeIds: string[], now = new Date()): Promise<Map<string, TeamReplyStats>> {
+    const stats = new Map<string, TeamReplyStats>();
+    if (employeeIds.length === 0) return stats;
+    const attribution = await this.mailboxAttribution(employeeIds);
+    if (attribution.mailboxOwnerIds.length === 0) return stats;
+    const docs = await this.itemModel
+      .find(this.teamEmailMatch(organizationId, 'replied', start, end, attribution.mailboxOwnerIds, now))
+      .select({ userId: 1, receivedAt: 1, sentAt: 1, externalReplyDetectedAt: 1, replyMatchedVia: 1, threadRespondedAt: 1 })
+      .lean<Record<string, any>[]>()
+      .exec();
+    for (const d of docs) {
+      const employee = attribution.employeeOf(String(d.userId));
+      const entry = stats.get(employee) ?? { timedReplies: 0, responseSecondsSum: 0, viaApp: 0, viaOutlook: 0 };
+      const { respondedAt, respondedVia } = deriveRespondedInfo(d);
+      if (respondedVia === 'app') entry.viaApp += 1;
+      if (respondedVia === 'outlook') entry.viaOutlook += 1;
+      const waited = respondedAt && d.receivedAt instanceof Date ? new Date(respondedAt).getTime() - d.receivedAt.getTime() : Number.NaN;
+      if ((respondedVia === 'app' || respondedVia === 'outlook') && waited >= 0) {
+        entry.timedReplies += 1;
+        entry.responseSecondsSum += Math.round(waited / 1000);
+      }
+      stats.set(employee, entry);
+    }
+    return stats;
   }
 
   /**
@@ -2625,7 +2764,10 @@ export class EmailIntelligenceService {
         result = await this.callAnalyze(item.organizationId, userId, deterministicInput);
       } catch (err) {
         if (item.analysisState === 'pending') {
-          await this.itemModel.updateOne({ _id: item._id }, { $inc: { analysisAttempts: 1 }, $set: { analysisError: analysisFailureReason(err) } }).exec();
+          const reason = analysisFailureReason(err);
+          // A live-fetched email said "the AI is reading it": now it says why it couldn't.
+          const said = item.reason === AWAITING_AI_REASON ? { reason, recommendedAction: 'Reply to this email. ' + reason } : {};
+          await this.itemModel.updateOne({ _id: item._id }, { $inc: { analysisAttempts: 1 }, $set: { analysisError: reason, ...said } }).exec();
         }
         throw err;
       }

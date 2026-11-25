@@ -1,18 +1,15 @@
 import { useState } from 'react';
-import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query';
-import toast from 'react-hot-toast';
-import { FiAlertTriangle, FiCornerUpLeft, FiMail, FiRefreshCw, FiSend, FiUserPlus } from 'react-icons/fi';
+import { keepPreviousData, useQuery } from '@tanstack/react-query';
+import { FiAlertTriangle, FiCornerUpLeft, FiMail, FiSend, FiUserPlus } from 'react-icons/fi';
 import type { IconType } from 'react-icons';
-import { AnimatedNumber, Button, Card, Skeleton } from '@/components/ui';
+import { AnimatedNumber, Card, Skeleton } from '@/components/ui';
 import { useAuthStore } from '@/stores/authStore';
 import { hasRole } from '@/utils/roles';
-import { dayjs } from '@/utils/date';
-import { extractErrorMessage } from '@/utils/errors';
 import { customerActivityService } from '@/services/customerActivityService';
 import { emailAnalyticsService, type BiFilters } from '@/services/emailAnalyticsService';
-import { emailIntelligenceService, type SyncPreviewResult } from '@/services/emailIntelligenceService';
 import { EmailDetailModal } from '@/features/business-intelligence/components/EmailDetailModal';
-import { EmailSyncPreviewModal } from '@/features/email-intelligence/components/EmailSyncPreviewModal';
+import { LiveIndicator } from '@/components/live/LiveIndicator';
+import { useLiveData } from '@/hooks/useLiveData';
 import { CustomerMixCard } from './CustomerMixCard';
 import { InboxIntentCard } from './InboxIntentCard';
 import { PendingConversationsCard } from './PendingConversationsCard';
@@ -69,7 +66,6 @@ function StatCard({
 export function CustomersAndEmailSection({ dateFrom, dateTo, storeId }: { dateFrom: string; dateTo: string; storeId?: string }) {
   const filters: BiFilters = { dateFrom, dateTo, employeeId: [], storeId: storeId ? [storeId] : [] };
   const user = useAuthStore((s) => s.user);
-  const queryClient = useQueryClient();
   // Mirrors customer-activity.controller.ts's breakdown-stats branching:
   // owner/admin/manager get the org/store-scoped relationship endpoint,
   // everyone else (consultant) is forced onto the self-scoped one.
@@ -110,75 +106,13 @@ export function CustomersAndEmailSection({ dateFrom, dateTo, storeId }: { dateFr
     staleTime: STALE_TIME,
   });
 
-  // Counts above are as fresh as the last time THIS user's own mailbox was
-  // synced — a background sweep now runs every 30 minutes for every
-  // connected mailbox (see email-intelligence-sync.service.ts's
-  // runScheduledSync), so this should rarely be more than half an hour
-  // stale, but someone who only ever visits the dashboard still has no way
-  // to see that without this indicator, or to force an immediate refresh
-  // without leaving this tab (the Sync button below does that on demand).
-  const { data: syncJobs } = useQuery({
-    queryKey: ['dash-email-sync-jobs'],
-    queryFn: () => emailIntelligenceService.getRecentSyncJobs(),
-    staleTime: STALE_TIME,
+  // Live: opening this tab asks the caller's own mailbox for new mail and replies
+  // (no AI); the Dashboard itself asks the CRMs. Every number here reloads the moment either lands.
+  const live = useLiveData({
+    crm: false,
+    email: true,
+    invalidate: [['dash-email-summary'], ['dash-email-list'], ['analytics-dashboard-customer-breakdown'], ['dash-business-timeline']],
   });
-  const lastSync = syncJobs?.[0];
-  const lastSyncedAt = lastSync?.createdAt;
-
-  const [previewing, setPreviewing] = useState(false);
-  const [syncing, setSyncing] = useState(false);
-  const [syncPreview, setSyncPreview] = useState<SyncPreviewResult | null>(null);
-
-  // Same two-step preview-then-confirm flow as EmailIntelligencePage.tsx's
-  // own Sync Inbox button (never a bare one-click sync — a real LLM spend
-  // needs a real confirm-before-spend count, not a blind trigger).
-  const handleOpenSyncPreview = async () => {
-    setPreviewing(true);
-    try {
-      const result = await emailIntelligenceService.previewSync();
-      if (!result.connected) {
-        toast.error('Outlook is not connected — connect it in Integrations to sync your inbox.');
-        return;
-      }
-      const newCount = result.scannedCount - result.alreadyAnalyzedCount;
-      if (newCount === 0) {
-        void queryClient.invalidateQueries({ queryKey: ['dash-email-sync-jobs'] });
-        toast.success('Synced — no new mail since last sync.');
-        return;
-      }
-      setSyncPreview(result);
-    } catch (err) {
-      toast.error(extractErrorMessage(err));
-    } finally {
-      setPreviewing(false);
-    }
-  };
-
-  const handleConfirmSync = async () => {
-    setSyncing(true);
-    try {
-      const result = await emailIntelligenceService.sync();
-      setSyncPreview(null);
-      if (!result.connected) {
-        toast.error('Outlook is not connected — connect it in Integrations to sync your inbox.');
-      } else if (result.newItemsCount > 0) {
-        toast.success(`Synced — ${result.newItemsCount} new email(s) processed.`);
-      } else {
-        toast.success('Synced — no new mail since last sync.');
-      }
-      // Refresh every number this tab shows, not just the sync-job timestamp
-      // — a fresh sync can change Sent/Replied/Missed/New enquiries and the
-      // New/Existing/Lost customer breakdown alike.
-      void queryClient.invalidateQueries({ queryKey: ['dash-email-sync-jobs'] });
-      void queryClient.invalidateQueries({ queryKey: ['dash-email-summary'] });
-      void queryClient.invalidateQueries({ queryKey: ['dash-email-list'] });
-      void queryClient.invalidateQueries({ queryKey: ['analytics-dashboard-customer-breakdown'] });
-    } catch (err) {
-      toast.error(extractErrorMessage(err));
-    } finally {
-      setSyncing(false);
-    }
-  };
 
   const { data: emailListResult, isLoading: emailListLoading } = useQuery({
     queryKey: ['dash-email-list', filters, emailListQuery?.kind, emailListQuery?.intent],
@@ -227,13 +161,7 @@ export function CustomersAndEmailSection({ dateFrom, dateTo, storeId }: { dateFr
   return (
     <div className={styles.tabContent}>
       <div className={statStyles.syncRow}>
-        <span className={statStyles.lastSynced}>
-          Your inbox {lastSyncedAt ? `last synced ${dayjs(lastSyncedAt).fromNow()}` : 'has never been synced'}
-          {lastSync?.triggeredBy === 'scheduled' ? ' (auto)' : ''} · auto-syncs every 30 min
-        </span>
-        <Button type="button" size="sm" variant="ghost" leftIcon={<FiRefreshCw />} loading={previewing} onClick={() => void handleOpenSyncPreview()}>
-          Sync now
-        </Button>
+        <LiveIndicator live={live} mailboxOnly />
       </div>
 
       {summaryLoading || !summary || customersLoading || !customers ? (
@@ -331,13 +259,6 @@ export function CustomersAndEmailSection({ dateFrom, dateTo, storeId }: { dateFr
 
       <EmailDetailModal id={selectedEmailId} onClose={() => setSelectedEmailId(null)} />
 
-      <EmailSyncPreviewModal
-        open={!!syncPreview}
-        preview={syncPreview}
-        syncing={syncing}
-        onCancel={() => setSyncPreview(null)}
-        onConfirm={() => void handleConfirmSync()}
-      />
     </div>
   );
 }

@@ -3,7 +3,7 @@ import { InjectConnection, InjectModel } from '@nestjs/mongoose';
 import { Connection, Model, isValidObjectId } from 'mongoose';
 import { JwtPayload } from '../auth/jwt-payload.interface';
 import { businessDayOf } from '../common/business-day';
-import { countedMonths, expectedClosingMonthsMatch } from '../crm/deal-filter.util';
+import { countedDayOf, countedInMonths, countedMonths } from '../crm/deal-filter.util';
 import { SalesAnalyticsService } from '../crm/sales-analytics.service';
 import { Deal, DealDocument } from '../crm/schemas/deal.schema';
 import { Quote, QuoteDocument } from '../crm/schemas/quote.schema';
@@ -340,7 +340,8 @@ export class BusinessesOverviewService {
     const [byStatus, openNow, quotes, achievement, inbox, health, locked] = await Promise.all([
       this.dealModel
         .aggregate<Group>([
-          { $match: { organizationId, expectedClosingDate: expectedClosingMonthsMatch(first, last) } },
+          // As the Dashboard: won/lost deals by the day they closed, open deals by their expected closing date.
+          { $match: { organizationId, ...countedInMonths(first, last, business.timeZone) } },
           { $group: { _id: '$dealStatus', count: { $sum: 1 }, value: { $sum: { $ifNull: ['$monetaryValue', 0] } } } },
         ])
         .exec(),
@@ -578,11 +579,11 @@ export class BusinessesOverviewService {
         ? { organizationId, dealStatus: 'open' }
         : kind === 'past_due'
           ? { organizationId, dealStatus: 'open', expectedClosingDate: { $gt: '', $lt: today } }
-          : { organizationId, dealStatus: kind, expectedClosingDate: expectedClosingMonthsMatch(first, last) };
+          : { organizationId, dealStatus: kind, ...countedInMonths(first, last, business.timeZone) };
     const [docs, total] = await Promise.all([
       this.dealModel
         .find(match)
-        .select({ name: 1, monetaryValue: 1, dealStatus: 1, expectedClosingDate: 1 })
+        .select({ name: 1, monetaryValue: 1, dealStatus: 1, expectedClosingDate: 1, closedAt: 1 })
         .sort({ monetaryValue: -1 })
         .limit(LIST_LIMIT)
         .lean<Doc[]>()
@@ -592,7 +593,8 @@ export class BusinessesOverviewService {
     return {
       total,
       items: docs.map((d) => {
-        const closes = typeof d.expectedClosingDate === 'string' ? d.expectedClosingDate.slice(0, 10) : '';
+        // A won or lost deal: the day it closed; an open one: the day it is expected to.
+        const closes = countedDayOf(d, business.timeZone) ?? '';
         return {
           ...base,
           id: d._id.toString(),

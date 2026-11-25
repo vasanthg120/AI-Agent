@@ -209,6 +209,8 @@ export interface EmailSyncState {
   lastSyncedAt: string | null;
   running: boolean;
   awaitingAnalysis: number;
+  /** The AI is reading newly fetched mail right now. */
+  aiReading?: boolean;
   health?: MailboxHealth;
 }
 

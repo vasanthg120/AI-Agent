@@ -5,6 +5,7 @@ import { JwtModule } from '@nestjs/jwt';
 import { MongooseModule } from '@nestjs/mongoose';
 import { PassportModule } from '@nestjs/passport';
 import { AuditModule } from '../audit/audit.module';
+import { EmployeeUsageModule } from '../employee-usage/employee-usage.module';
 import { OrganizationsModule } from '../organizations/organizations.module';
 import { UsersModule } from '../users/users.module';
 import { AuthController } from './auth.controller';
@@ -25,6 +26,8 @@ import { AdminAuthService } from './admin-auth.service';
     UsersModule,
     OrganizationsModule,
     AuditModule,
+    // Sign-ins and sign-outs for Employee Activity.
+    EmployeeUsageModule,
     MongooseModule.forFeature([{ name: AdminAccount.name, schema: AdminAccountSchema }]),
     PassportModule.register({ defaultStrategy: 'jwt' }),
     HttpModule.register({ timeout: 15_000 }),

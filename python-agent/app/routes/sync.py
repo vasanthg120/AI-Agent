@@ -3,7 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from app.integrations.crm_mongo_sync import sync_all_orgs as sync_crm_deals_to_mongo
 from app.integrations.crm_mongo_sync import discover_source_by_id  # noqa: E402
 from app.integrations.crm_mongo_sync import sync_all_quote_orgs as sync_crm_quotes_to_mongo
-from app.integrations.crm_mongo_sync import sync_org, sync_source_by_id
+from app.integrations.crm_mongo_sync import refresh_org_live, sync_org, sync_source_by_id
 from app.rag.business_sync import sync_all
 from app.security import get_current_user
 
@@ -42,6 +42,17 @@ def run_crm_sync_for_org(user: dict = Depends(get_current_user)):
         "quotesSynced": sum(int(r.get("quotes", 0)) for r in results.values()),
         "sources": results,
     }
+
+
+# Live data: a page showing this business's CRM data was opened. Reads every stale live
+# source in the background and returns at once with what is being read (Hoops, read on its
+# nightly window, is listed but never read here).
+@router.post("/sync/crm/refresh-live")
+def refresh_crm_live(user: dict = Depends(get_current_user)):
+    organization_id = user.get("organizationId")
+    if not organization_id:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Token has no organizationId")
+    return refresh_org_live(organization_id)
 
 
 # "Sync now" for one data source (Settings -> Data Sources). The source must

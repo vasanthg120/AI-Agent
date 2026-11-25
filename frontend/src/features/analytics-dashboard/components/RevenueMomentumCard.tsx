@@ -6,7 +6,7 @@ import { AreaChart, Area, XAxis, ResponsiveContainer, Tooltip } from 'recharts';
 import { FiArrowUpRight, FiArrowDownRight } from 'react-icons/fi';
 import { AnimatedNumber, Card } from '@/components/ui';
 import { formatINR as money } from '@/utils/currency';
-import { dealsService } from '@/services/dealsService';
+import { closingDayOf, dealsService } from '@/services/dealsService';
 import { DrillDownModal, type DrillDownRow } from './DrillDownModal';
 import styles from './RevenueMomentumCard.module.css';
 
@@ -19,8 +19,9 @@ export interface RevenueMomentumCardProps {
 // Day-by-day series for the selected reporting period — there's no daily-
 // granularity endpoint anywhere in this app (only monthly trends), so this
 // fetches the same real won-deal records the drill-down modal already shows
-// (dealsService.listFiltered) and buckets them by expectedClosingDate
-// client-side. Every point is a real deal total, never invented; days with
+// (dealsService.listFiltered) and buckets them by the day each closed
+// (closingDayOf — the day its revenue counts on) client-side. Every point is
+// a real deal total, never invented; days with
 // no won deals genuinely show zero rather than being skipped, so the chart
 // doesn't imply activity that didn't happen.
 export function RevenueMomentumCard({ dateFrom, dateTo, storeId }: RevenueMomentumCardProps) {
@@ -44,8 +45,9 @@ export function RevenueMomentumCard({ dateFrom, dateTo, storeId }: RevenueMoment
       cursor = cursor.add(1, 'day');
     }
     for (const deal of wonDeals?.items ?? []) {
-      if (!deal.expectedClosingDate || !byDay.has(deal.expectedClosingDate)) continue;
-      byDay.set(deal.expectedClosingDate, (byDay.get(deal.expectedClosingDate) ?? 0) + deal.monetaryValue);
+      const closed = closingDayOf(deal);
+      if (!closed || !byDay.has(closed)) continue;
+      byDay.set(closed, (byDay.get(closed) ?? 0) + deal.monetaryValue);
     }
     const points = [...byDay.entries()].map(([date, value]) => ({ date, value }));
     const totalValue = points.reduce((s, p) => s + p.value, 0);
@@ -65,7 +67,7 @@ export function RevenueMomentumCard({ dateFrom, dateTo, storeId }: RevenueMoment
     id: d._id,
     dealId: d._id,
     title: d.name,
-    subtitle: d.expectedClosingDate,
+    subtitle: closingDayOf(d),
     value: d.monetaryValue,
   }));
 

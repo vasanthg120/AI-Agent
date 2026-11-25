@@ -3,6 +3,7 @@ import {
   FiAlertCircle,
   FiArrowDownLeft,
   FiArrowUpRight,
+  FiActivity,
   FiAward,
   FiBriefcase,
   FiCheckCircle,
@@ -10,25 +11,36 @@ import {
   FiClock,
   FiCornerUpLeft,
   FiHelpCircle,
+  FiDollarSign,
   FiInbox,
+  FiMail,
+  FiMonitor,
+  FiPercent,
   FiPhone,
+  FiPhoneCall,
   FiPhoneMissed,
+  FiPhoneOff,
   FiSend,
   FiTrendingUp,
   FiWatch,
   FiXCircle,
 } from 'react-icons/fi';
 import { formatAmountIn } from '@/utils/currency';
-import { formatTalkTime, type ActivityCounts, type CallFilter, type TeamListKind } from '@/services/teamActivityService';
+import { formatTalkTime, formatWait, type ActivityCounts, type CallFilter, type TeamListKind } from '@/services/teamActivityService';
 
 export type MetricKey =
   | 'dealsCreated'
   | 'dealsWon'
   | 'dealsLost'
+  | 'wonValue'
+  | 'dealConversionPct'
   | 'pipelineValue'
   | 'emailsSent'
+  | 'emailsReceived'
   | 'emailsReplied'
+  | 'avgResponseSeconds'
   | 'emailsNotReplied'
+  | 'emailsUnanswered'
   | 'emailsMissed'
   | 'customerReplies'
   | 'awaitingCustomer'
@@ -36,20 +48,26 @@ export type MetricKey =
   | 'callsMade'
   | 'callsReceived'
   | 'callsMissed'
+  | 'callsUnanswered'
+  | 'callConnectionRatePct'
+  | 'callAnswerRatePct'
   | 'talkSeconds'
   | 'avgCallSeconds'
   | 'avgCallScore'
   | 'followUpsCompleted'
   | 'followUpsPending'
-  | 'followUpsOverdue';
+  | 'followUpsOverdue'
+  | 'activeSeconds'
+  | 'haiveSeconds';
 
-export type MetricGroup = 'sales' | 'email' | 'calls' | 'followups';
+export type MetricGroup = 'sales' | 'email' | 'calls' | 'followups' | 'time';
 
 export const GROUP_LABELS: Record<MetricGroup, string> = {
   sales: 'Deals',
   email: 'Email',
   calls: 'Calls',
   followups: 'Tasks',
+  time: 'Time',
 };
 
 export interface MetricDef {
@@ -59,7 +77,8 @@ export interface MetricDef {
   /** Column heading in the people table. */
   column: string;
   icon: IconType;
-  list: TeamListKind;
+  /** The records behind it; none for measured time (the App usage view shows that). */
+  list?: TeamListKind;
   callFilter?: CallFilter;
   /** What the number counts, in one sentence (the tile's tooltip and the list's subtitle). */
   meaning: string;
@@ -71,9 +90,10 @@ export interface MetricDef {
 }
 
 const money = (value: number, currency?: string | null) => (currency ? formatAmountIn(value, currency) : value.toLocaleString());
+const pct = (value: number | null) => (value === null ? '—' : `${value}%`);
 const minutes = (seconds: number | null) => (seconds === null ? '—' : seconds >= 60 ? `${Math.floor(seconds / 60)}m ${String(seconds % 60).padStart(2, '0')}s` : `${seconds}s`);
 
-// Every figure Agent Activity and Team Performance show, defined once — the
+// Every figure Employee Activity and Team Performance show, defined once — the
 // tiles, the table's columns and the lists behind them all read from here.
 export const METRICS: MetricDef[] = [
   // ---- deals ----
@@ -112,6 +132,30 @@ export const METRICS: MetricDef[] = [
     sortValue: (c) => c.dealsLost,
   },
   {
+    key: 'wonValue',
+    group: 'sales',
+    label: 'Revenue won',
+    column: 'Revenue',
+    icon: FiDollarSign,
+    list: 'deals_won',
+    meaning: 'The value of the deals won in the period.',
+    value: (c, currency) => money(c.wonValue, currency),
+    sortValue: (c) => c.wonValue,
+    sub: (c) => (c.dealsWon ? `${c.dealsWon} deal${c.dealsWon === 1 ? '' : 's'} won` : undefined),
+  },
+  {
+    key: 'dealConversionPct',
+    group: 'sales',
+    label: 'Win rate',
+    column: 'Win rate',
+    icon: FiPercent,
+    list: 'deals_won',
+    meaning: 'Of the deals closed in the period, the share won: won ÷ (won + lost).',
+    value: (c) => pct(c.dealConversionPct),
+    sortValue: (c) => c.dealConversionPct ?? -1,
+    sub: (c) => (c.dealsWon + c.dealsLost ? `${c.dealsWon} of ${c.dealsWon + c.dealsLost} closed` : 'none closed'),
+  },
+  {
     key: 'pipelineValue',
     group: 'sales',
     label: 'Active pipeline',
@@ -136,6 +180,17 @@ export const METRICS: MetricDef[] = [
     sortValue: (c) => c.emailsSent,
   },
   {
+    key: 'emailsReceived',
+    group: 'email',
+    label: 'Customer emails received',
+    column: 'Received',
+    icon: FiMail,
+    list: 'emails_received',
+    meaning: 'Business emails that arrived in their mailbox in the period (one conversation’s messages each count).',
+    value: (c) => String(c.emailsReceived),
+    sortValue: (c) => c.emailsReceived,
+  },
+  {
     key: 'emailsReplied',
     group: 'email',
     label: 'Replied to customers',
@@ -148,9 +203,21 @@ export const METRICS: MetricDef[] = [
     sub: (c) => (c.emailsReceived ? `${c.emailsReceived} received` : undefined),
   },
   {
+    key: 'avgResponseSeconds',
+    group: 'email',
+    label: 'Average reply time',
+    column: 'Avg reply',
+    icon: FiClock,
+    list: 'emails_replied',
+    meaning: 'How long customers waited for the replies sent in the period, on average — from the email arriving to the reply, written in HaiVE or Outlook.',
+    value: (c) => formatWait(c.avgResponseSeconds),
+    // Faster is better: sorting "high to low" puts the quickest first.
+    sortValue: (c) => (c.avgResponseSeconds === null ? -1 : 1 / (1 + c.avgResponseSeconds)),
+  },
+  {
     key: 'emailsNotReplied',
     group: 'email',
-    label: 'Not replied yet',
+    label: 'Awaiting reply',
     column: 'Waiting',
     icon: FiInbox,
     list: 'emails_not_replied',
@@ -161,10 +228,23 @@ export const METRICS: MetricDef[] = [
     sub: () => 'under 24 hours',
   },
   {
+    key: 'emailsUnanswered',
+    group: 'email',
+    label: 'Unanswered',
+    column: 'Unanswered',
+    icon: FiHelpCircle,
+    list: 'emails_unanswered',
+    meaning: 'Customer emails that arrived in the period and still have no reply now, however old (one per conversation).',
+    alert: 'warning',
+    value: (c) => String(c.emailsUnanswered),
+    sortValue: (c) => c.emailsUnanswered,
+    sub: () => 'still owed a reply',
+  },
+  {
     key: 'emailsMissed',
     group: 'email',
     label: 'Missed',
-    column: 'Missed',
+    column: 'Missed emails',
     icon: FiAlertCircle,
     list: 'emails_missed',
     meaning: 'Customer emails that went 24 hours without a reply (counted on the day the 24 hours ran out).',
@@ -236,14 +316,52 @@ export const METRICS: MetricDef[] = [
     key: 'callsMissed',
     group: 'calls',
     label: 'Missed calls',
-    column: 'Missed',
+    column: 'Missed calls',
     icon: FiPhoneMissed,
     list: 'calls',
     callFilter: 'missed',
-    meaning: 'Phone calls nobody answered — outgoing or incoming.',
+    meaning: 'Incoming phone calls nobody answered.',
     alert: 'warning',
     value: (c) => String(c.callsMissed),
     sortValue: (c) => c.callsMissed,
+    sub: (c) => (c.callAnswerRatePct !== null ? `${c.callAnswerRatePct}% of incoming answered` : undefined),
+  },
+  {
+    key: 'callsUnanswered',
+    group: 'calls',
+    label: 'Unanswered calls',
+    column: 'Unanswered',
+    icon: FiPhoneOff,
+    list: 'calls',
+    callFilter: 'unanswered',
+    meaning: 'Outgoing phone calls the other side didn’t pick up — no answer, busy or failed.',
+    value: (c) => String(c.callsUnanswered),
+    sortValue: (c) => c.callsUnanswered,
+  },
+  {
+    key: 'callConnectionRatePct',
+    group: 'calls',
+    label: 'Connection rate',
+    column: 'Connected',
+    icon: FiPhoneCall,
+    list: 'calls',
+    callFilter: 'connected',
+    meaning: 'Of the phone calls made and received, the share that connected.',
+    value: (c) => pct(c.callConnectionRatePct),
+    sortValue: (c) => c.callConnectionRatePct ?? -1,
+    sub: (c) => (c.callsMade + c.callsReceived ? `${c.callsMade + c.callsReceived - c.callsMissed - c.callsUnanswered} of ${c.callsMade + c.callsReceived} phone calls` : undefined),
+  },
+  {
+    key: 'callAnswerRatePct',
+    group: 'calls',
+    label: 'Answer rate',
+    column: 'Answered',
+    icon: FiPhoneCall,
+    list: 'calls',
+    callFilter: 'received',
+    meaning: 'Of the incoming phone calls, the share someone answered.',
+    value: (c) => pct(c.callAnswerRatePct),
+    sortValue: (c) => c.callAnswerRatePct ?? -1,
   },
   {
     key: 'talkSeconds',
@@ -318,17 +436,39 @@ export const METRICS: MetricDef[] = [
     value: (c) => String(c.followUpsOverdue),
     sortValue: (c) => c.followUpsOverdue,
   },
+  // ---- measured time ----
+  {
+    key: 'activeSeconds',
+    group: 'time',
+    label: 'Active time',
+    column: 'Active time',
+    icon: FiActivity,
+    meaning: 'Measured working time: HaiVE in active use (a click, key press or scroll in the last 2 minutes) or on a call — a minute doing both counts once.',
+    value: (c) => formatTalkTime(c.activeSeconds),
+    sortValue: (c) => c.activeSeconds,
+  },
+  {
+    key: 'haiveSeconds',
+    group: 'time',
+    label: 'Time in HaiVE',
+    column: 'In HaiVE',
+    icon: FiMonitor,
+    meaning: 'Time with HaiVE in front and in use. An open tab nobody touches doesn’t count.',
+    value: (c) => formatTalkTime(c.haiveSeconds),
+    sortValue: (c) => c.haiveSeconds,
+  },
 ];
 
 export const METRIC_BY_KEY = Object.fromEntries(METRICS.map((m) => [m.key, m])) as Record<MetricKey, MetricDef>;
 
 /** The people table's column sets: a short overview, then every figure of one kind. */
 export const COLUMN_SETS: { id: 'overview' | MetricGroup; label: string; keys: MetricKey[] }[] = [
-  { id: 'overview', label: 'Overview', keys: ['dealsCreated', 'dealsWon', 'emailsSent', 'emailsReplied', 'emailsMissed', 'calls', 'talkSeconds', 'avgCallScore', 'followUpsOverdue'] },
-  { id: 'sales', label: 'Deals', keys: ['dealsCreated', 'dealsWon', 'dealsLost', 'pipelineValue'] },
-  { id: 'email', label: 'Email', keys: ['emailsSent', 'emailsReplied', 'emailsNotReplied', 'emailsMissed', 'customerReplies', 'awaitingCustomer'] },
-  { id: 'calls', label: 'Calls', keys: ['calls', 'callsMade', 'callsReceived', 'callsMissed', 'talkSeconds', 'avgCallSeconds', 'avgCallScore'] },
+  { id: 'overview', label: 'Overview', keys: ['activeSeconds', 'dealsCreated', 'dealsWon', 'emailsSent', 'emailsReplied', 'emailsMissed', 'calls', 'callsMissed', 'followUpsOverdue'] },
+  { id: 'sales', label: 'Deals', keys: ['dealsCreated', 'dealsWon', 'dealsLost', 'dealConversionPct', 'wonValue', 'pipelineValue'] },
+  { id: 'email', label: 'Email', keys: ['emailsSent', 'emailsReceived', 'emailsReplied', 'avgResponseSeconds', 'emailsNotReplied', 'emailsUnanswered', 'emailsMissed'] },
+  { id: 'calls', label: 'Calls', keys: ['calls', 'callsMade', 'callsReceived', 'callsMissed', 'callsUnanswered', 'callConnectionRatePct', 'talkSeconds', 'avgCallScore'] },
   { id: 'followups', label: 'Tasks', keys: ['followUpsCompleted', 'followUpsPending', 'followUpsOverdue'] },
+  { id: 'time', label: 'Time', keys: ['activeSeconds', 'haiveSeconds', 'talkSeconds'] },
 ];
 
 export const LIST_TITLES: Record<TeamListKind, string> = {
@@ -338,6 +478,7 @@ export const LIST_TITLES: Record<TeamListKind, string> = {
   emails_replied: 'Customer emails replied to',
   emails_not_replied: 'Waiting for a reply',
   emails_missed: 'Missed emails',
+  emails_unanswered: 'Unanswered emails',
   emails_customer_replies: 'Customer replies',
   emails_awaiting_customer: 'Awaiting the customer',
   deals_created: 'Deals created',
@@ -351,7 +492,8 @@ export const CALL_FILTER_TITLES: Record<CallFilter, string> = {
   made: 'Calls made',
   received: 'Calls received',
   connected: 'Completed calls',
-  missed: 'Missed calls',
+  missed: 'Missed calls (incoming)',
+  unanswered: 'Unanswered calls (outgoing)',
   scored: 'Scored calls',
 };
 

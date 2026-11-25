@@ -6,6 +6,8 @@
 // Built on Intl (full ICU ships with Node), no date library: the offset of a
 // zone at an instant is read back from Intl's own wall-clock parts.
 
+import { Connection, Types } from 'mongoose';
+
 export const DEFAULT_BUSINESS_TIMEZONE = 'Asia/Kolkata';
 
 /** The zone if Intl knows it, else the default (a typo in settings must never break a report). */
@@ -17,6 +19,17 @@ export function validTimeZone(timeZone: string | undefined | null): string {
   } catch {
     return DEFAULT_BUSINESS_TIMEZONE;
   }
+}
+
+/**
+ * A business's own time zone (Organization.timezone, checked by validTimeZone).
+ * `db` is any Mongo connection (a model's `.db`); without one (unit tests with a
+ * stand-in model) it is the default zone.
+ */
+export async function businessTimeZone(db: Pick<Connection, 'collection'> | undefined, organizationId: string): Promise<string> {
+  if (!db?.collection || !Types.ObjectId.isValid(organizationId)) return DEFAULT_BUSINESS_TIMEZONE;
+  const org = await db.collection('organizations').findOne({ _id: new Types.ObjectId(organizationId) }, { projection: { timezone: 1 } });
+  return validTimeZone(typeof org?.timezone === 'string' ? org.timezone : undefined);
 }
 
 /** Wall-clock parts of an instant in a zone. */

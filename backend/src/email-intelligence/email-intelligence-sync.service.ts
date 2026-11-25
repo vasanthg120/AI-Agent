@@ -28,6 +28,21 @@ export interface SyncMailboxResult {
   alreadyRunning?: boolean;
 }
 
+/** What a live fetch (a page showing the mailbox was opened) found. */
+export interface LiveFetchResult {
+  connected: boolean;
+  /** New emails now in the inbox (the AI reads them next). */
+  newItemsCount: number;
+  /** Emails found to have been answered in Outlook. */
+  answeredCount: number;
+  /** False when the mailbox was read moments ago (or is being read): nothing was asked of Outlook. */
+  checked: boolean;
+  /** Another read of this mailbox (the half-hourly AI sync) is under way. */
+  alreadyRunning?: boolean;
+}
+
+export type SyncTrigger = 'user' | 'scheduled' | 'live';
+
 export interface ReplyRefreshResult {
   connected: boolean;
   /** Emails newly found answered. */
@@ -124,6 +139,8 @@ const SYNC_OVERLAP_MINUTES = 15;
 const SYNC_LOCK_STALE_MS = 15 * 60_000;
 // The reply check (Sent Items only, no AI) runs at most this often per mailbox.
 const REPLY_REFRESH_MIN_INTERVAL_MS = 45_000;
+// A live fetch (an open inbox, a page opening) asks Outlook at most this often per mailbox.
+const LIVE_FETCH_MIN_INTERVAL_MS = 30_000;
 // AI readings retried per sync for mail stored while the AI was unavailable.
 const ANALYSIS_RETRY_BATCH = 15;
 // Open conversations checked against the mailbox (deleted / moved) per sync.
@@ -372,7 +389,7 @@ export class EmailIntelligenceSyncService {
   private async acquireSyncLock(
     organizationId: string,
     userId: string,
-    triggeredBy: 'user' | 'scheduled',
+    triggeredBy: SyncTrigger,
     startedAt: Date,
     windowStart: Date,
   ): Promise<EmailSyncJobDocument | null> {
@@ -491,7 +508,10 @@ export class EmailIntelligenceSyncService {
   //      and groups each conversation under its newest customer message.
   //   4. Housekeeping: read state, deleted/moved mail, AI retries, follow-ups.
   // Each later step is best-effort — one failing never undoes the ones before.
-  async syncMyMailbox(userId: string, triggeredBy: 'user' | 'scheduled' = 'user'): Promise<SyncMailboxResult> {
+  // 'live' (fetchLive): new mail is stored as Outlook has it, without waiting on
+  // the AI, and the AI pass (readWaiting) reads it straight after, in the background.
+  async syncMyMailbox(userId: string, triggeredBy: SyncTrigger = 'user'): Promise<SyncMailboxResult> {
+    const live = triggeredBy === 'live';
     const startedAt = new Date();
     const user = await this.usersService.findById(userId);
     const connection = await this.connectionModel.findOne({ userId, isActive: true }).exec();
@@ -560,7 +580,9 @@ export class EmailIntelligenceSyncService {
           const created = await this.emailIntelligenceService.analyzeAndCreate(user.organizationId, userId, connection.email, email, context, {
             ownAddresses,
             answered: reply ? this.conversations.answeredFields(reply) : undefined,
-            thread: reply ? undefined : await this.conversations.threadContext(userId, email.conversationId, receivedAt),
+            // The AI pass after a live fetch gathers the conversation itself.
+            thread: reply || live ? undefined : await this.conversations.threadContext(userId, email.conversationId, receivedAt),
+            deferAnalysis: live || undefined,
           });
           if (created?.analysisState === 'pending') deferredCount += 1;
           succeededCount += 1;
@@ -593,14 +615,17 @@ export class EmailIntelligenceSyncService {
         // a message already sent to that customer answers them now, not on the next check.
         answeredCount += await this.conversations.applyReplies(userId);
       });
-      await step('AI retry', async () => {
-        deferredCount = Math.max(0, deferredCount - (await this.retryDeferredAnalysis(userId, context, ownAddresses, deferredCount > 0)));
-      });
-      // Only for a mailbox whose owner switched it on: drafts for recent mail still waiting without one.
-      await step('Auto-draft', async () => {
-        if (!(await this.emailIntelligenceService.getInboxSettings(userId)).autoDraft) return;
-        await this.draftWaiting(userId, { limit: AUTO_DRAFT_BATCH, maxAgeDays: AUTO_DRAFT_MAX_AGE_DAYS, context, ownAddresses });
-      });
+      // A live fetch leaves the AI work to readWaiting, started below once the mail is stored.
+      if (!live) {
+        await step('AI retry', async () => {
+          deferredCount = Math.max(0, deferredCount - (await this.retryDeferredAnalysis(userId, context, ownAddresses, deferredCount > 0)));
+        });
+        // Only for a mailbox whose owner switched it on: drafts for recent mail still waiting without one.
+        await step('Auto-draft', async () => {
+          if (!(await this.emailIntelligenceService.getInboxSettings(userId)).autoDraft) return;
+          await this.draftWaiting(userId, { limit: AUTO_DRAFT_BATCH, maxAgeDays: AUTO_DRAFT_MAX_AGE_DAYS, context, ownAddresses });
+        });
+      }
       // Promised follow-ups that never went out, and reminders the mailbox
       // shows are no longer needed — read from the threads, no AI call.
       await step('Follow-up maintenance', () => this.emailHistory.maintainFollowUps(userId));
@@ -629,6 +654,7 @@ export class EmailIntelligenceSyncService {
       this.logger.log(
         `Mailbox sync for user ${userId} (${triggeredBy}): ${data.emails.length} read, ${newItemsCount} new, ${deferredCount} awaiting AI, ${answeredCount} found answered, ${failedCount} failed`,
       );
+      if (live && deferredCount > 0) this.startReadingWaiting(userId, context, ownAddresses);
       return result;
     } catch (err) {
       // The sync itself failed (python-agent unreachable, Outlook refused) — the
@@ -725,7 +751,7 @@ export class EmailIntelligenceSyncService {
     justFailed: boolean,
   ): Promise<number> {
     if (justFailed) return 0; // the AI was unavailable seconds ago in this very run
-    const waiting = await this.emailIntelligenceService.listAwaitingAnalysis(userId, ANALYSIS_RETRY_BATCH);
+    const waiting = await this.emailIntelligenceService.listAwaitingAnalysis(userId, ANALYSIS_RETRY_BATCH, { retriesOnly: true });
     let read = 0;
     for (const item of waiting) {
       try {
@@ -738,6 +764,98 @@ export class EmailIntelligenceSyncService {
       }
     }
     return read;
+  }
+
+  // ---- Live inbox: what Outlook has now, the AI reading after -------------------------
+  //
+  // A page showing this mailbox asks for it when it opens (and every half minute
+  // or so while it stays open): one Outlook read of what arrived and what was
+  // answered since the last look — no AI. New mail shows at once; the AI reads
+  // it straight after, in the background, and its notification refreshes the page.
+
+  private readonly liveFetches = new Map<string, { at: number; connected?: boolean; running?: Promise<LiveFetchResult> }>();
+  private readonly aiReading = new Set<string>();
+
+  async fetchLive(userId: string): Promise<LiveFetchResult> {
+    const state = this.liveFetches.get(userId);
+    if (state?.running) return state.running;
+    if (state && Date.now() - state.at < LIVE_FETCH_MIN_INTERVAL_MS) return { connected: state.connected ?? true, newItemsCount: 0, answeredCount: 0, checked: false };
+
+    const running = (async (): Promise<LiveFetchResult> => {
+      const result = await this.syncMyMailbox(userId, 'live');
+      return {
+        connected: result.connected,
+        newItemsCount: result.newItemsCount,
+        answeredCount: result.answeredCount ?? 0,
+        checked: result.connected && !result.alreadyRunning,
+        ...(result.alreadyRunning ? { alreadyRunning: true } : {}),
+      };
+    })();
+    this.liveFetches.set(userId, { at: Date.now(), running });
+    try {
+      const result = await running;
+      this.liveFetches.set(userId, { at: Date.now(), connected: result.connected });
+      return result;
+    } catch (err) {
+      // A failed read is not a fresh one: "Try again now" (and the next look) asks again at once.
+      this.liveFetches.delete(userId);
+      throw err;
+    }
+  }
+
+  /** Whether the AI is reading this mailbox's newly fetched mail right now. */
+  isReadingWaiting(userId: string): boolean {
+    return this.aiReading.has(userId);
+  }
+
+  private startReadingWaiting(userId: string, context?: Awaited<ReturnType<CustomerActivityService['gatherCorrelationContext']>>, ownAddresses?: string[]): void {
+    void this.readWaiting(userId, context, ownAddresses).catch((err) => this.logger.error(`AI reading failed for user ${userId}: ${(err as Error).message}`));
+  }
+
+  /**
+   * The AI pass over mail a live fetch stored: each email still waiting for its first AI reading,
+   * newest first — one billed AI call each, as when mail was read during the sync — then the
+   * notification the sync raised. Stops at the first failure (no credits, an outage): that email and
+   * the rest of the batch say the AI could not read them, and the half-hourly sync retries them.
+   * One pass per mailbox at a time. Returns how many were read.
+   */
+  async readWaiting(
+    userId: string,
+    context?: Awaited<ReturnType<CustomerActivityService['gatherCorrelationContext']>>,
+    ownAddresses?: string[],
+  ): Promise<number> {
+    if (this.aiReading.has(userId)) return 0;
+    this.aiReading.add(userId);
+    let read = 0;
+    try {
+      // Mail that keeps arriving while the AI reads is picked up by the next round.
+      for (let round = 0; round < 5; round += 1) {
+        const waiting = await this.emailIntelligenceService.listAwaitingFirstReading(userId, ANALYSIS_RETRY_BATCH);
+        if (waiting.length === 0) break;
+        const user = await this.usersService.findById(userId);
+        if (!user) break;
+        context ??= await this.customerActivityService.gatherCorrelationContext(user.organizationId);
+        ownAddresses ??= await this.conversations.ownAddresses(userId);
+        for (let i = 0; i < waiting.length; i += 1) {
+          const item = waiting[i];
+          try {
+            const thread = await this.conversations.threadContext(userId, item.conversationId, item.receivedAt, item._id.toString());
+            const result = await this.emailIntelligenceService.regenerate(userId, item._id.toString(), context, { ownAddresses, thread });
+            read += 1;
+            await this.emailIntelligenceService.announceNewEmail(result, true);
+          } catch (err) {
+            // The rest of the batch would fail the same way (regenerate has usually marked this one already).
+            await this.emailIntelligenceService.markNotReadByAi(waiting.slice(i).map((w) => w._id), analysisFailureReason(err));
+            for (const unread of waiting.slice(i)) await this.emailIntelligenceService.announceNewEmail(unread, false);
+            this.logger.warn(`AI could not read new mail for user ${userId}: ${(err as Error).message}`);
+            return read;
+          }
+        }
+      }
+      return read;
+    } finally {
+      this.aiReading.delete(userId);
+    }
   }
 
   // Background sync of every connected mailbox, every 30 minutes — the same
@@ -765,7 +883,9 @@ export class EmailIntelligenceSyncService {
   }
 
   /** When this mailbox last finished a sync, whether one is running now, and — when the syncs keep failing — since when and why, in words. */
-  async syncState(userId: string): Promise<{ lastSyncedAt: Date | null; running: boolean; awaitingAnalysis: number; health: MailboxHealth }> {
+  async syncState(
+    userId: string,
+  ): Promise<{ lastSyncedAt: Date | null; running: boolean; awaitingAnalysis: number; aiReading: boolean; health: MailboxHealth }> {
     const [last, running, awaiting] = await Promise.all([
       this.syncJobModel
         .findOne({ userId, status: { $in: ['completed', 'completed_with_errors'] } })
@@ -776,7 +896,13 @@ export class EmailIntelligenceSyncService {
       this.syncJobModel.exists({ userId, status: 'running' }),
       this.emailIntelligenceService.listAwaitingAnalysis(userId, 200),
     ]);
-    return { lastSyncedAt: last?.completedAt ?? null, running: !!running, awaitingAnalysis: awaiting.length, health: await this.mailboxHealth(userId) };
+    return {
+      lastSyncedAt: last?.completedAt ?? null,
+      running: !!running,
+      awaitingAnalysis: awaiting.length,
+      aiReading: this.aiReading.has(userId),
+      health: await this.mailboxHealth(userId),
+    };
   }
 
   /**

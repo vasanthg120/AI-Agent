@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { EmailIntelligenceModule } from '../email-intelligence/email-intelligence.module';
+import { EmployeeUsageModule } from '../employee-usage/employee-usage.module';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { TeamActivityController } from './team-activity.controller';
 import { TeamActivityService } from './team-activity.service';
@@ -7,7 +8,7 @@ import { TeamScopeModule } from './team-scope.module';
 import { TeamTasksController } from './team-tasks.controller';
 
 @Module({
-  imports: [EmailIntelligenceModule, TeamScopeModule, NotificationsModule],
+  imports: [EmailIntelligenceModule, TeamScopeModule, NotificationsModule, EmployeeUsageModule],
   controllers: [TeamActivityController, TeamTasksController],
   providers: [TeamActivityService],
   exports: [TeamActivityService],

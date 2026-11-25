@@ -63,8 +63,9 @@ export interface AnalyticsDashboardOverview {
 }
 
 // Won deals that started in the month before the selected one and were closed
-// in the selected one. Three dates are kept apart (previous-month-closures.service.ts):
-// when a deal started, when it was closed, and the month its revenue counts in.
+// in the selected one (previous-month-closures.service.ts). Since 2026-11-25 a
+// deal's revenue counts in the month it closed, so revenuePeriod is always the
+// selected month and outsideThisMonthRevenue is empty; both are kept for the app.
 export interface PreviousMonthClosedDeal {
   id: string;
   name: string;
@@ -72,10 +73,10 @@ export interface PreviousMonthClosedDeal {
   /** "YYYY-MM-DD": the earliest date the deal or one of its quotes was recorded in the CRM or HaiVE. */
   startedOn: string;
   startedFrom: 'deal' | 'quote';
-  /** "YYYY-MM-DD": when it was closed — recorded when it turned won, or (for deals closed before that was recorded) its closing date. */
+  /** "YYYY-MM-DD": when it was closed (business time) — recorded when it turned won, or (for deals closed before that was recorded) its closing date. */
   closedOn: string;
   closedFrom: 'recorded' | 'closing-date';
-  /** "YYYY-MM" of its closing date — the month its revenue counts in; null when it has no closing date (then it counts in no month). */
+  /** "YYYY-MM" the month its revenue counts in: the month of closedOn. */
   revenuePeriod: string | null;
 }
 
@@ -86,9 +87,9 @@ export interface PreviousMonthClosures {
   previousPeriod: string;
   count: number;
   value: number;
-  /** Of those, the ones already inside the selected month's revenue (their closing date is in it). */
+  /** Of those, the ones inside the selected month's revenue: all of them (revenue counts by the day a deal closed). */
   inThisMonthRevenue: { count: number; value: number };
-  /** Of those, the ones whose closing date puts their revenue in another month (or none). */
+  /** Of those, the ones whose revenue counts in another month: none since 2026-11-25. */
   outsideThisMonthRevenue: { count: number; value: number };
   /** Won deals closed in the selected month whose start is unknown — not counted above. */
   unknownStart: { count: number; value: number };

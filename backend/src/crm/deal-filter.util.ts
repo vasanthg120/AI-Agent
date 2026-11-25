@@ -1,7 +1,105 @@
-import { FilterQuery } from 'mongoose';
+import { FilterQuery, PipelineStage } from 'mongoose';
+import { businessDayOf, DEFAULT_BUSINESS_TIMEZONE } from '../common/business-day';
+import { currentDataSourceScope } from '../data-sources/data-source-context';
 import { Deal } from './schemas/deal.schema';
 import { DealFilterQueryDto } from './dto/deal-filter-query.dto';
 import { HOOPS_SALESPERSON_PREFIX, isHoopsSalesperson, unlinkedHoopsSales } from './hoops-salespeople';
+
+// ---- The day a deal counts on ---------------------------------------------------
+//
+// Revenue is a won deal's value in the month the deal was CLOSED: never the
+// month it was created, nor the month it was once expected to close. A deal
+// quoted in July and won on 16 November is November's revenue, whatever its
+// expected closing date still says (a CRM such as Pantheras keeps the forecast
+// it had, and HaiVE's sync re-reads it).
+//
+//  - Won or lost: the day of closedAt (deal.schema.ts: when it turned won or
+//    lost, the CRM's own date when it gives one) in the business's own time
+//    zone. A deal with no closedAt (closed before HaiVE recorded it on
+//    21 Oct 2026, or first seen already closed) goes by its closing date
+//    (expectedClosingDate), the only date known for it.
+//  - Open: its expected closing date (the pipeline), as before.
+//
+// One definition for revenue and target, the revenue trend, won/lost counts,
+// conversion, the leaderboards, Reporting and every drill-down list, so a
+// figure and the list behind it always hold the same deals. Open and lost deals
+// never add to revenue: every revenue sum also requires dealStatus 'won'.
+
+/** Aggregation expression: the "YYYY-MM-DD" day a deal counts on ('' when it has none). */
+export function countedDayExpr(timeZone: string): Record<string, unknown> {
+  return {
+    $cond: [
+      { $and: [{ $in: ['$dealStatus', ['won', 'lost']] }, { $eq: [{ $type: '$closedAt' }, 'date'] }] },
+      { $dateToString: { date: '$closedAt', format: '%Y-%m-%d', timezone: timeZone } },
+      { $substrBytes: [{ $ifNull: ['$expectedClosingDate', ''] }, 0, 10] },
+    ],
+  };
+}
+
+/** Aggregation expression: the "YYYY-MM" month a deal counts in ('' when it has none). */
+export function countedMonthExpr(timeZone: string): Record<string, unknown> {
+  return { $substrBytes: [countedDayExpr(timeZone), 0, 7] };
+}
+
+/** Match condition: the deals that count in the months first..last ("YYYY-MM", both included). */
+export function countedInMonths(first: string, last: string, timeZone: string): FilterQuery<Deal> {
+  const month = countedMonthExpr(timeZone);
+  return { $expr: { $and: [{ $gte: [month, first] }, { $lte: [month, last] }] } };
+}
+
+/** Match condition: the deals that count on the days from..to ("YYYY-MM-DD", both included). */
+export function countedOnDays(from: string, to: string, timeZone: string): FilterQuery<Deal> {
+  const day = countedDayExpr(timeZone);
+  return { $expr: { $and: [{ $gte: [day, from] }, { $lte: [day, to] }] } };
+}
+
+/** countedDayExpr for a deal already read: the "YYYY-MM-DD" day it counts on, or undefined. */
+export function countedDayOf(
+  deal: { dealStatus?: string; closedAt?: Date | string | null; expectedClosingDate?: string | null },
+  timeZone: string,
+): string | undefined {
+  if ((deal.dealStatus === 'won' || deal.dealStatus === 'lost') && deal.closedAt) {
+    const at = new Date(deal.closedAt);
+    if (!Number.isNaN(at.getTime())) return businessDayOf(timeZone, at);
+  }
+  return typeof deal.expectedClosingDate === 'string' && deal.expectedClosingDate ? deal.expectedClosingDate.slice(0, 10) : undefined;
+}
+
+// Two or more CRMs read together (the 'unified' selection; a dashboard
+// normally reads one CRM): the same deal kept in both counts once. A copy is a
+// deal with the same name, value, status and counted month in ANOTHER source;
+// look-alike deals within one source are all real and all counted (each name
+// keeps as many as its fullest source has). No stage at all for one source.
+// `keep`: the fields the stages after it read.
+export function sameDealOnceAcrossSources(timeZone: string, keep: string[]): PipelineStage[] {
+  if ((currentDataSourceScope()?.sourceIds.length ?? 0) < 2) return [];
+  const firstOf = Object.fromEntries(keep.map((field) => [field, { $first: `$${field}` }]));
+  return [
+    {
+      $group: {
+        _id: {
+          name: { $toLower: { $trim: { input: { $ifNull: ['$name', ''] } } } },
+          value: '$monetaryValue',
+          status: '$dealStatus',
+          month: countedMonthExpr(timeZone),
+          source: '$dataSourceId',
+        },
+        copies: { $sum: 1 },
+        ...firstOf,
+      },
+    },
+    {
+      $group: {
+        _id: { name: '$_id.name', value: '$_id.value', status: '$_id.status', month: '$_id.month' },
+        copies: { $max: '$copies' },
+        ...firstOf,
+      },
+    },
+    // Back to one document per deal, so the stages after it count as they would without this.
+    { $set: { copy: { $range: [0, '$copies'] } } },
+    { $unwind: '$copy' },
+  ];
+}
 
 // Single place the Mongo match stage gets built from a DealFilterQueryDto —
 // reused by deals.service.ts's listFiltered/listForExport and
@@ -15,7 +113,8 @@ export function buildDealMatchStage(
   organizationId: string,
   filters: DealFilterQueryDto,
   storeConstraint?: string,
-  options?: { includeDateRange?: boolean },
+  // timeZone: the business's own (businessTimeZone) — the day a closed deal counts on depends on it.
+  options?: { includeDateRange?: boolean; timeZone?: string },
 ): FilterQuery<Deal> {
   const includeDateRange = options?.includeDateRange ?? true;
   const match: FilterQuery<Deal> = { organizationId };
@@ -61,23 +160,23 @@ export function buildDealMatchStage(
   // strings; dateTo is pushed to end-of-day so a date-only value doesn't
   // mean midnight and silently exclude that entire day's own records.
   //
-  // filters.dateField opts a caller into expectedClosingDate instead —
-  // needed by callers reconciling against SalesAnalyticsService.getAchievement,
-  // which sums won deals by expectedClosingDate's own YYYY-MM prefix, not
-  // createdAt. Deliberately NOT a $gte/$lte range against dateFrom/dateTo:
-  // MonthYearFilterPopup caps dateTo at "today" for the current month
-  // (rangeForMonth — correct for createdAt, which can't be in the future),
-  // but expectedClosingDate is a forecast field that can legitimately fall
-  // later in the month than today. Ranging against the capped dateTo would
-  // silently exclude those deals from the drill-down while getAchievement's
-  // own regex still counts them — so this matches getAchievement exactly:
-  // every whole month the dates touch, from dateFrom's month to dateTo's
+  // filters.dateField 'expectedClosingDate' opts a caller into the dashboard's
+  // period rule instead: the month each deal counts in (countedDayExpr above —
+  // a won or lost deal by the day it closed, an open one by its expected
+  // closing date). Every dashboard drill-down sends it, so the list behind
+  // Revenue, Won Deals, the leaderboards… holds exactly the deals
+  // SalesAnalyticsService.getAchievement and the overview counted. The value's
+  // name predates closedAt and is kept so links and callers keep working.
+  // Deliberately NOT a range against dateFrom/dateTo: MonthYearFilterPopup
+  // caps dateTo at "today" for the current month (right for createdAt), but an
+  // expected closing date can fall later in the month — so this is every
+  // whole month the dates touch, from dateFrom's month to dateTo's
   // (countedMonths below — one month from the month picker, several from the
   // dashboard's Advanced start/end dates).
   if (includeDateRange && (filters.dateFrom || filters.dateTo)) {
     if (filters.dateField === 'expectedClosingDate') {
       const { first, last } = countedMonths((filters.dateFrom ?? filters.dateTo)!, (filters.dateTo ?? filters.dateFrom)!);
-      match.expectedClosingDate = expectedClosingMonthsMatch(first, last);
+      Object.assign(match, countedInMonths(first, last, options?.timeZone ?? DEFAULT_BUSINESS_TIMEZONE));
     } else {
       // Explicit 'Z' (UTC) end-of-day, not `.setHours(23,59,59,999)` — that
       // mutates in the server process's LOCAL timezone, so on any server not
@@ -94,9 +193,8 @@ export function buildDealMatchStage(
     }
   }
 
-  // Past their expected closing day (the past-due list). Added to any
-  // expectedClosingDate condition above — MongoDB takes several operators on
-  // one field — and "YYYY-MM-DD" strings compare correctly as text.
+  // Past their expected closing day (the past-due list, with dealStatus open).
+  // "YYYY-MM-DD" strings compare correctly as text.
   if (filters.closingBefore) {
     const existing = match.expectedClosingDate as Record<string, unknown> | undefined;
     match.expectedClosingDate = { ...(existing ?? {}), $lt: filters.closingBefore };
@@ -113,12 +211,12 @@ export function buildDealMatchStage(
 }
 
 
-// The months a dashboard date range counts, by expected closing date: every
-// whole month it touches, from the start date's month to the end date's month
-// (a range inside one month is that whole month). Whole months, not exact
-// days, because the current month's range ends "today" while its expected
-// closing dates run to the month's end, and because sales targets are set per
-// month. One definition for the dashboard overview (revenue, target, deals,
+// The months a dashboard date range counts (by the day each deal counts on,
+// countedDayExpr): every whole month it touches, from the start date's month
+// to the end date's month (a range inside one month is that whole month).
+// Whole months, not exact days, because the current month's range ends
+// "today" while open deals' expected closing dates run to the month's end,
+// and because sales targets are set per month. One definition for the dashboard overview (revenue, target, deals,
 // conversion), SalesAnalyticsService.getAchievement and every deal list, so a
 // figure and the list behind it always cover the same deals. An end before
 // the start counts the start month only.
@@ -139,7 +237,9 @@ export function countedMonths(dateFrom: string, dateTo: string): { first: string
   return { first, last, months };
 }
 
-// "YYYY-MM-DD" expectedClosingDate strings compare correctly as text.
+// Open deals expected to close in the months first..last ("YYYY-MM-DD"
+// expectedClosingDate strings compare correctly as text). For anything that
+// includes won or lost deals use countedInMonths.
 export function expectedClosingMonthsMatch(first: string, last: string): Record<string, string> {
   return last > first ? { $gte: `${first}-01`, $lte: `${last}-31` } : { $regex: `^${first}` };
 }

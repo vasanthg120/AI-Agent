@@ -5,7 +5,7 @@ import { businessDayOf, businessDayRange } from '../common/business-day';
 // out in each business's own timezone, so "Today" for the Sydney business is
 // Sydney's today even when the Main Account looks at it from India.
 
-export const TEAM_PERIODS = ['today', 'yesterday', 'last7', 'last30', 'month', 'previous_month', 'custom'] as const;
+export const TEAM_PERIODS = ['today', 'yesterday', 'week', 'last7', 'last30', 'month', 'previous_month', 'custom'] as const;
 export type TeamPeriod = (typeof TEAM_PERIODS)[number];
 
 const YMD = /^\d{4}-\d{2}-\d{2}$/;
@@ -33,6 +33,11 @@ export function periodDays(period: TeamPeriod, timeZone: string, now: Date, cust
       const yesterday = shiftDay(today, -1);
       return { from: yesterday, to: yesterday };
     }
+    case 'week': {
+      // Monday to today: the working week so far.
+      const weekday = new Date(`${today}T00:00:00.000Z`).getUTCDay();
+      return { from: shiftDay(today, -((weekday + 6) % 7)), to: today };
+    }
     case 'last7':
       return { from: shiftDay(today, -6), to: today };
     case 'last30':
@@ -51,6 +56,24 @@ export function periodDays(period: TeamPeriod, timeZone: string, now: Date, cust
       return { from: custom.from, to };
     }
   }
+}
+
+/**
+ * The period to compare a period with, as business days: the week before for
+ * "This week" (the same weekdays), the month before for a month (its first days,
+ * as many as this one has, never past its end), otherwise the same number of days
+ * just before — so Today compares with yesterday.
+ */
+export function previousDays(period: TeamPeriod, days: { from: string; to: string }): { from: string; to: string } {
+  const length = daysBetween(days.from, days.to);
+  if (period === 'week') return { from: shiftDay(days.from, -7), to: shiftDay(days.to, -7) };
+  if (period === 'month' || period === 'previous_month') {
+    const lastOfPrevious = shiftDay(`${days.from.slice(0, 8)}01`, -1);
+    const firstOfPrevious = `${lastOfPrevious.slice(0, 8)}01`;
+    const to = shiftDay(firstOfPrevious, length - 1);
+    return { from: firstOfPrevious, to: to < lastOfPrevious ? to : lastOfPrevious };
+  }
+  return { from: shiftDay(days.from, -length), to: shiftDay(days.from, -1) };
 }
 
 export interface PeriodRange {

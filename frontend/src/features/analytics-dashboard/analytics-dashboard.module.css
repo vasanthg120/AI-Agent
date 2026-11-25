@@ -160,6 +160,12 @@
   color: var(--color-text-muted);
 }
 
+.liveRow {
+  display: flex;
+  margin-top: var(--space-2);
+  min-width: 0;
+}
+
 @media (max-width: 720px) {
   .tabHint {
     display: none;

@@ -1,7 +1,7 @@
 import type { KeyboardEvent } from 'react';
 import { motion } from 'framer-motion';
 import clsx from 'clsx';
-import { FiCheckCircle, FiInbox } from 'react-icons/fi';
+import { FiCheckCircle, FiInbox, FiZap } from 'react-icons/fi';
 import { Avatar, Badge, EmptyState, Skeleton } from '@/components/ui';
 import type { BadgeVariant } from '@/components/ui';
 import type { EmailIntelligenceItem } from '@/services/emailIntelligenceService';
@@ -124,12 +124,24 @@ export function EmailIntelligenceList({
                   <Badge variant={CATEGORY_VARIANT[item.category]}>{CATEGORY_LABEL[item.category]}</Badge>
                 )}
               {unsorted
-                ? waiting && <Badge variant="neutral">Not read by AI yet</Badge>
+                ? waiting &&
+                  // Fetched live moments ago (no failed attempt yet): the AI is reading it now.
+                  (item.analysisState === 'pending' && !item.analysisError ? (
+                    <Badge variant="accent" title="New from Outlook — the AI is reading it now">
+                      <FiZap size={10} aria-hidden /> AI reading…
+                    </Badge>
+                  ) : (
+                    <Badge variant="neutral">Not read by AI yet</Badge>
+                  ))
                 : waiting &&
                   (item.sentiment === 'frustrated' || item.sentiment === 'negative') && (
                     <Badge variant="danger">Unhappy</Badge>
                   )}
-              {!unsorted && <span className={styles.inboxIntent}>{intentLabel(item.intent)}</span>}
+              {!unsorted && (
+                <span className={styles.inboxIntent} title="Sorted by the AI">
+                  <FiZap size={9} aria-hidden className={styles.aiMark} /> {intentLabel(item.intent)}
+                </span>
+              )}
             </div>
           </motion.div>
         );

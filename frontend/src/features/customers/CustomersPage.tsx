@@ -36,7 +36,6 @@ import {
   FiPackage,
   FiPhone,
   FiPlus,
-  FiRefreshCw,
   FiRotateCcw,
   FiSearch,
   FiShoppingBag,
@@ -76,6 +75,8 @@ import {
   type StageKey,
 } from '@/services/customersService';
 import { formatRelativeTime } from '@/utils/date';
+import { LiveIndicator } from '@/components/live/LiveIndicator';
+import { useLiveData } from '@/hooks/useLiveData';
 import { extractErrorMessage } from '@/utils/errors';
 import { AddCustomerModal } from './AddCustomerModal';
 import { ImportCustomersModal } from './ImportCustomersModal';
@@ -522,8 +523,9 @@ const CustomersBoard = memo(function CustomersBoard({
     remembered<RowHeight>(HEIGHT_KEY, 'comfortable') === 'compact' ? 'compact' : 'comfortable',
   );
   const [page, setPage] = useState(1);
-  const [syncing, setSyncing] = useState(false);
   const [exporting, setExporting] = useState(false);
+  // Live: opening the page asks each connected CRM for what changed; the board reloads when it lands.
+  const live = useLiveData({ invalidate: [['customers'], ['sales-board']] });
   const listRef = useRef<HTMLDivElement>(null);
   const paged = useRef(false);
 
@@ -567,27 +569,7 @@ const CustomersBoard = memo(function CustomersBoard({
       }
     });
 
-  // "Sync now" pulls from the selected source, or from every connected CRM that can be synced.
   const shown = data?.sources.filter((s) => source === 'all' || s.id === source) ?? [];
-  const canSync = shown.some((s) => s.canSync);
-  const sync = async () => {
-    setSyncing(true);
-    try {
-      const { results } = await customersService.sync(source);
-      const failed = results.filter((r) => !r.ok);
-      for (const r of failed) toast.error(`${r.source}: ${r.error ?? 'The sync failed.'}`, { duration: 8_000 });
-      // A CRM read once a night (Hoops): when it will be read.
-      for (const r of results.filter((x) => x.ok && x.note)) toast(`${r.source}: ${r.note}`, { duration: 8_000 });
-      const synced = results.filter((r) => r.ok && !r.note).length;
-      if (synced > 0) toast.success(failed.length ? 'The other sources are up to date' : 'Customers are up to date');
-      await queryClient.invalidateQueries({ queryKey: ['customers'] });
-    } catch (err) {
-      toast.error(extractErrorMessage(err), { duration: 8_000 });
-    } finally {
-      setSyncing(false);
-    }
-  };
-  const synced = shown.filter((s) => s.lastSyncAt).map((s) => `${s.label} synced ${formatRelativeTime(s.lastSyncAt!)}`);
 
   // The board as a spreadsheet: what is on screen now, every page of it.
   const exportBoard = async () => {
@@ -630,13 +612,7 @@ const CustomersBoard = memo(function CustomersBoard({
         icon={FiUsers}
         title="Customers"
         subtitle="Every customer across your connected CRMs and email, in one view."
-        meta={
-          synced.length > 0 ? (
-            <span className={styles.meta} title={synced.join(' · ')}>
-              {synced.join(' · ')}
-            </span>
-          ) : undefined
-        }
+        meta={<LiveIndicator live={live} />}
         actions={
           <div className={styles.headerActions}>
             {data && data.sources.length > 0 && (
@@ -651,17 +627,6 @@ const CustomersBoard = memo(function CustomersBoard({
                   ))}
                 </select>
               </label>
-            )}
-            {canSync && can(me, 'customers', 'edit') && (
-              <Button
-                type="button"
-                variant="secondary"
-                leftIcon={<FiRefreshCw />}
-                loading={syncing}
-                onClick={() => void sync()}
-              >
-                Sync now
-              </Button>
             )}
             {can(me, 'customers', 'create') && (
               <Button type="button" leftIcon={<FiPlus />} onClick={() => setAddingCustomer(true)}>
@@ -795,7 +760,7 @@ const CustomersBoard = memo(function CustomersBoard({
               <div key={`error-${s.id}`} className={styles.notice} role="alert">
                 <FiAlertCircle aria-hidden />
                 <span>
-                  The last sync with {s.label} failed: {s.lastError} Showing what the last successful sync brought in.
+                  {s.label} couldn’t be read just now: {s.lastError} Showing what was last read from it.
                 </span>
               </div>
             ))}
@@ -958,7 +923,7 @@ const CustomersBoard = memo(function CustomersBoard({
               ? 'Try another filter or a different search.'
               : periodSet
                 ? 'No customer had an inquiry, quotation, invoice, payment or email in these dates. Try a wider period.'
-                : 'Customers appear here once this source has synced its records.'
+                : 'Customers appear here as soon as this source’s records are read.'
           }
           action={
             filtered ? (

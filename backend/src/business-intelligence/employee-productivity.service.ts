@@ -53,8 +53,9 @@ export class EmployeeProductivityService {
     // createdAt reflects only "when this org's sync first ran", identical
     // across every synced deal regardless of real timing, which would make
     // this column's Deals numbers show every synced deal for one month and
-    // none for any other. expectedClosingDate is the real close date and the
-    // same field SalesAnalyticsService.getAchievement already trusts.
+    // none for any other. 'expectedClosingDate' is the dashboard's period rule
+    // (deal-filter.util.ts): won/lost deals by the day they closed, open deals
+    // by their expected closing date — what getAchievement's revenue counts.
     const dateFrom = start.toISOString().slice(0, 10);
     const dateTo = new Date(end.getTime() - 86_400_000).toISOString().slice(0, 10);
     const storeConstraint = filters.storeId?.length === 1 ? filters.storeId[0] : undefined;
@@ -65,7 +66,8 @@ export class EmployeeProductivityService {
       storeId: filters.storeId,
       ownerId: filters.employeeId,
     } as DealFilterQueryDto;
-    const dealMatch = buildDealMatchStage(organizationId, dealFilters, storeConstraint);
+    const timeZone = await this.dealPerformanceDashboardService.timeZoneOf(organizationId);
+    const dealMatch = buildDealMatchStage(organizationId, dealFilters, storeConstraint, { timeZone });
 
     const [dealRows, dealAging, quoteStats, emailStats] = await Promise.all([
       // Called verbatim — never reimplemented — so this column can never

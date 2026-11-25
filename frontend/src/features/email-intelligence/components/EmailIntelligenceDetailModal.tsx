@@ -257,7 +257,11 @@ export function EmailIntelligenceDetailModal({
               </span>
             </div>
             <div className={styles.badgeRow}>
-              {!notReadByAi && <Badge variant="accent">{item.intent.replace(/_/g, ' ')}</Badge>}
+              {!notReadByAi && (
+                <Badge variant="accent" title="Sorted by the AI">
+                  <FiZap size={10} aria-hidden /> {item.intent.replace(/_/g, ' ')}
+                </Badge>
+              )}
               {item.urgency === 'urgent' || item.urgency === 'high' ? (
                 <Badge variant={URGENCY_VARIANT[item.urgency]}>{URGENCY_LABEL[item.urgency]}</Badge>
               ) : (
@@ -311,7 +315,16 @@ export function EmailIntelligenceDetailModal({
             </div>
           )}
 
-        {/* 2 — what the AI makes of it, in plain words */}
+        {/* 2 — what the AI makes of it, in plain words (just fetched from Outlook: still reading it) */}
+        {item.analysisState === 'pending' && !item.analysisError && (
+          <div className={styles.aiInsightCard} role="status">
+            <div className={styles.fieldLabel}>
+              <FiZap aria-hidden style={{ verticalAlign: 'middle', marginRight: 4 }} />
+              The AI is reading this email
+            </div>
+            <div>Its suggestion and a draft reply appear here in a moment. You can reply now without waiting.</div>
+          </div>
+        )}
         {!notReadByAi && (
           <div className={styles.aiInsightCard}>
             <div className={styles.fieldLabel}>

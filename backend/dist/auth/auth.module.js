@@ -14,6 +14,7 @@ const jwt_1 = require("@nestjs/jwt");
 const mongoose_1 = require("@nestjs/mongoose");
 const passport_1 = require("@nestjs/passport");
 const audit_module_1 = require("../audit/audit.module");
+const employee_usage_module_1 = require("../employee-usage/employee-usage.module");
 const organizations_module_1 = require("../organizations/organizations.module");
 const users_module_1 = require("../users/users.module");
 const auth_controller_1 = require("./auth.controller");
@@ -37,6 +38,7 @@ exports.AuthModule = AuthModule = __decorate([
             users_module_1.UsersModule,
             organizations_module_1.OrganizationsModule,
             audit_module_1.AuditModule,
+            employee_usage_module_1.EmployeeUsageModule,
             mongoose_1.MongooseModule.forFeature([{ name: admin_account_schema_1.AdminAccount.name, schema: admin_account_schema_1.AdminAccountSchema }]),
             passport_1.PassportModule.register({ defaultStrategy: 'jwt' }),
             axios_1.HttpModule.register({ timeout: 15_000 }),

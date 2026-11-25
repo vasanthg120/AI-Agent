@@ -1,4 +1,4 @@
-import { IsIn, IsOptional, IsString, Matches } from 'class-validator';
+import { IsBooleanString, IsIn, IsOptional, IsString, Matches } from 'class-validator';
 import { TEAM_PERIODS, TeamPeriod } from '../team-period';
 import { CALL_FILTERS, CallFilter, TEAM_LIST_KINDS, TeamListKind } from '../team-activity.service';
 
@@ -24,6 +24,11 @@ export class TeamActivityQueryDto {
   @IsOptional()
   @IsString()
   userId?: string;
+
+  // "true": also the figures of the period before (yesterday, last week…), to compare.
+  @IsOptional()
+  @IsBooleanString()
+  compare?: string;
 }
 
 export class TeamActivityListQueryDto extends TeamActivityQueryDto {

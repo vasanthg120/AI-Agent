@@ -3,7 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import clsx from 'clsx';
 import { Card } from '@/components/ui';
 import { pressable } from '@/utils/pressable';
-import { dealsService, type Deal } from '@/services/dealsService';
+import { closingDayOf, dealsService, type Deal } from '@/services/dealsService';
 import { usePipelineDecisionCounts } from './usePipelineDecisionCounts';
 import { DrillDownModal, type DrillDownRow } from './DrillDownModal';
 import styles from './DealStatusDistributionCard.module.css';
@@ -16,7 +16,7 @@ export interface DealStatusDistributionCardProps {
 }
 
 function toRows(items: Deal[]): DrillDownRow[] {
-  return items.map((d) => ({ id: d._id, dealId: d._id, title: d.name, subtitle: d.dealStatus, meta: d.expectedClosingDate, value: d.monetaryValue }));
+  return items.map((d) => ({ id: d._id, dealId: d._id, title: d.name, subtitle: d.dealStatus, meta: closingDayOf(d), value: d.monetaryValue }));
 }
 
 // "In review" = open deals with no unapproved quote out yet (i.e. not

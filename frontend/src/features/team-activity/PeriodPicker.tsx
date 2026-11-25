@@ -9,12 +9,49 @@ import styles from './TeamActivity.module.css';
 const PERIODS: { id: TeamPeriod; label: string; short: string }[] = [
   { id: 'today', label: 'Today', short: 'Today' },
   { id: 'yesterday', label: 'Yesterday', short: 'Yest.' },
-  { id: 'last7', label: '7 days', short: '7d' },
-  { id: 'last30', label: '30 days', short: '30d' },
+  { id: 'week', label: 'This week', short: 'Week' },
   { id: 'month', label: 'This month', short: 'Month' },
   { id: 'previous_month', label: 'Last month', short: 'Last mo.' },
   { id: 'custom', label: 'Custom', short: 'Custom' },
 ];
+
+const KNOWN: TeamPeriod[] = ['today', 'yesterday', 'week', 'last7', 'last30', 'month', 'previous_month', 'custom'];
+const YMD = /^\d{4}-\d{2}-\d{2}$/;
+
+/** The period kept in a page's address (?period=week, ?period=custom&from=…&to=…); Today when absent or wrong. */
+export function periodFromSearch(search: URLSearchParams): TeamPeriodValue {
+  const period = search.get('period') as TeamPeriod | null;
+  if (!period || !KNOWN.includes(period)) return { period: 'today' };
+  if (period !== 'custom') return { period };
+  const from = search.get('from');
+  const to = search.get('to');
+  return from && YMD.test(from) ? { period, from, to: to && YMD.test(to) ? to : from } : { period: 'today' };
+}
+
+/** The address parameters of a period (none for Today). */
+export function periodToSearch(value: TeamPeriodValue): Record<string, string> {
+  if (value.period === 'today') return {};
+  if (value.period !== 'custom') return { period: value.period };
+  return { period: 'custom', ...(value.from ? { from: value.from } : {}), ...(value.to ? { to: value.to } : {}) };
+}
+
+/** What the period before reads as: "yesterday", "last week", "last month"… */
+export function describePrevious(value: TeamPeriodValue): string {
+  switch (value.period) {
+    case 'today':
+      return 'yesterday';
+    case 'yesterday':
+      return 'the day before';
+    case 'week':
+      return 'the same days last week';
+    case 'month':
+      return 'the same days last month';
+    case 'previous_month':
+      return 'the month before';
+    default:
+      return 'the days before';
+  }
+}
 
 /** "Today", "Last 7 days", "3 Nov – 9 Nov" — what a period reads as in a sentence. */
 export function describePeriod(value: TeamPeriodValue): string {
@@ -23,6 +60,8 @@ export function describePeriod(value: TeamPeriodValue): string {
       return 'today';
     case 'yesterday':
       return 'yesterday';
+    case 'week':
+      return 'this week';
     case 'last7':
       return 'in the last 7 days';
     case 'last30':
@@ -40,7 +79,7 @@ export function describePeriod(value: TeamPeriodValue): string {
   }
 }
 
-// Today / Yesterday / 7 days / 30 days / This month / Custom. The server works
+// Today / Yesterday / This week / This month / Last month / Custom. The server works
 // each one out in every business's own timezone ("Today" in Sydney is
 // Sydney's today), so only the choice is sent — never a computed date.
 export function PeriodPicker({ value, onChange, id = 'period' }: { value: TeamPeriodValue; onChange: (value: TeamPeriodValue) => void; id?: string }) {

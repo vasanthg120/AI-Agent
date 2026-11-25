@@ -110,17 +110,23 @@ export class Deal {
   @Prop({ default: 0 })
   monetaryValue: number;
 
-  // "YYYY-MM-DD" — also doubles as the period-attribution date for sales
-  // analytics (a won deal counts toward the month it was expected to close).
+  // "YYYY-MM-DD" — when an open deal is expected to close (the pipeline's
+  // month). A CRM keeps it as a forecast, so it is not when a deal was won:
+  // that is closedAt below. It stands in for closedAt only on a closed deal
+  // that has none.
   @Prop()
   expectedClosingDate?: string;
 
-  // When the deal was closed: the moment HaiVE saw it turn won or lost (a CRM
-  // sync or push seeing the status change, or someone changing it in HaiVE).
-  // Cleared when the deal is reopened; a deal closed again gets the newer time.
-  // Recorded from 2026-10-21 on — a deal closed before that, or one that first
-  // arrived already closed, has none. Revenue is still attributed by
-  // expectedClosingDate; this only says when the closing happened.
+  // When the deal was closed (won or lost) — the date its revenue counts on:
+  // a won deal is revenue in the month of closedAt in the business's own time
+  // zone (countedDayExpr in crm/deal-filter.util.ts), however long ago it was
+  // created or expected to close. Set when the status changes to won/lost: the
+  // CRM's own date when the CRM dates the closing in that same change (Hoops:
+  // the day of the job), otherwise the moment HaiVE saw it (a CRM sync or push,
+  // or someone changing it in HaiVE). Cleared when the deal is reopened; a deal
+  // closed again gets the newer time. Recorded from 2026-10-21 on — a deal
+  // closed before that, or one that first arrived already closed, has none, and
+  // its expectedClosingDate is used instead.
   @Prop()
   closedAt?: Date;
 
