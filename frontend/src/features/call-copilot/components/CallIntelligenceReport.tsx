@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react';
+import { createContext, useContext, useState, type ReactNode } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import clsx from 'clsx';
 import {
@@ -12,6 +12,7 @@ import {
   FiFlag,
   FiHelpCircle,
   FiList,
+  FiPlay,
   FiShield,
   FiTarget,
   FiTrendingUp,
@@ -71,12 +72,34 @@ const CHECK_LABEL: Record<string, string> = {
   recommendations_relevant: 'Recommendations fit this call',
 };
 
+/** A review's 0–100 as the app shows scores everywhere: out of 10, one decimal at most ("3.4", "7"). */
+export function outOf10(score100: number): string {
+  return String(Math.round(score100) / 10);
+}
+
 /** "01:42" — time into the call. */
 export function clock(seconds: number | null | undefined): string | null {
   if (seconds === null || seconds === undefined || !Number.isFinite(seconds)) return null;
   const s = Math.max(0, Math.round(seconds));
   const m = Math.floor(s / 60);
   return m >= 60 ? `${Math.floor(m / 60)}:${String(m % 60).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}` : `${String(m).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
+}
+
+// Jumps the call's recording to a moment (CallSummaryModal opens the Transcript tab and plays from
+// there). Absent — no recording, or the Dialer — the times are plain labels.
+const SeekContext = createContext<((seconds: number) => void) | null>(null);
+
+/** A time into the call; a button that plays the recording from there when the recording can be played. */
+function Time({ at }: { at: number | null | undefined }) {
+  const seek = useContext(SeekContext);
+  const label = clock(at);
+  if (!label) return null;
+  if (!seek) return <span className={styles.time}>{label}</span>;
+  return (
+    <button type="button" className={clsx(styles.time, styles.timeSeek)} onClick={() => seek(at!)} aria-label={`Play the recording from ${label}`} title="Play the recording from here">
+      <FiPlay aria-hidden /> {label}
+    </button>
+  );
 }
 
 /** "Agent (Speaker 1)" when the evaluation worked out who that speaker is. */
@@ -98,7 +121,7 @@ function Evidence({ evidence, speaker }: { evidence: EvaluationEvidence; speaker
     <blockquote className={clsx(styles.quote, evidence.judgement === 'negative' && styles.quoteNegative)}>
       {(time || who) && (
         <span className={styles.quoteMeta}>
-          {time && <span className={styles.time}>{time}</span>}
+          {time && <Time at={evidence.at} />}
           {who && <span>{who}</span>}
         </span>
       )}
@@ -122,7 +145,18 @@ function Section({ icon, title, hint, tone, children }: { icon: ReactNode; title
   );
 }
 
-export function CallIntelligenceReport({ evaluation, voice, actions }: { evaluation: CallEvaluation; voice?: ReactNode; actions?: ReactNode }) {
+export function CallIntelligenceReport({
+  evaluation,
+  voice,
+  actions,
+  onSeek,
+}: {
+  evaluation: CallEvaluation;
+  voice?: ReactNode;
+  actions?: ReactNode;
+  // Play the call's recording from a moment (the report's quote and moment times become buttons).
+  onSeek?: (seconds: number) => void;
+}) {
   const [openCategory, setOpenCategory] = useState<string | null>(null);
   const [showChecks, setShowChecks] = useState(false);
   const speaker = useSpeakerNames(evaluation);
@@ -158,12 +192,14 @@ export function CallIntelligenceReport({ evaluation, voice, actions }: { evaluat
   const duration = clock(evaluation.recording?.durationSeconds ?? null);
 
   return (
+    <SeekContext.Provider value={onSeek ?? null}>
     <motion.div className={styles.report} variants={staggerChildren(0.06)} initial="hidden" animate="show">
       {/* ---- the verdict ---- */}
       <motion.section variants={FADE_UP} className={clsx(styles.hero, styles[`tone_${tone}`])}>
-        <div className={styles.dial} style={{ ['--pct' as string]: `${evaluation.score ?? 0}%` }} aria-label={evaluation.score === null ? 'Not assessable' : `Score ${evaluation.score} out of 100`}>
-          <span className={styles.dialValue}>{evaluation.score ?? '—'}</span>
-          <span className={styles.dialOutOf}>/100</span>
+        {/* Out of 10, as every list and average shows it (the review works in 0–100; the dial fills by it). */}
+        <div className={styles.dial} style={{ ['--pct' as string]: `${evaluation.score ?? 0}%` }} aria-label={evaluation.score === null ? 'Not assessable' : `Score ${outOf10(evaluation.score)} out of 10`}>
+          <span className={styles.dialValue}>{evaluation.score === null ? '—' : outOf10(evaluation.score)}</span>
+          <span className={styles.dialOutOf}>/10</span>
         </div>
         <div className={styles.heroText}>
           <span className={clsx(styles.band, styles[`band_${tone}`])}>{evaluation.bandLabel}</span>
@@ -230,7 +266,7 @@ export function CallIntelligenceReport({ evaluation, voice, actions }: { evaluat
           )}
 
           {/* ---- the scorecard ---- */}
-          <Section icon={<FiList />} title="Scorecard" hint="Weighted out of 100 · select a row for the evidence">
+          <Section icon={<FiList />} title="Scorecard" hint="Each skill out of 10, weighted into the score · select a row for the evidence">
             <ul className={styles.scorecard}>
               {evaluation.categories.map((c, index) => {
                 const open = openCategory === c.key;
@@ -287,7 +323,7 @@ export function CallIntelligenceReport({ evaluation, voice, actions }: { evaluat
               <ul className={styles.caps}>
                 {capsOnTotal.map((a, i) => (
                   <li key={i}>
-                    <FiShield aria-hidden /> Overall held at {a.to}: {a.reason}
+                    <FiShield aria-hidden /> Overall held at {outOf10(a.to!)}/10: {a.reason}
                   </li>
                 ))}
               </ul>
@@ -338,7 +374,7 @@ export function CallIntelligenceReport({ evaluation, voice, actions }: { evaluat
                   <li key={i}>
                     <p>
                       <span className={styles.kind}>{MISSED_LABEL[m.kind] ?? 'Missed opportunity'}</span>
-                      {clock(m.at) && <span className={styles.time}>{clock(m.at)}</span>} {m.text}
+                      <Time at={m.at} /> {m.text}
                     </p>
                     {m.evidence && <Evidence evidence={m.evidence} speaker={speaker} />}
                     {m.betterApproach && (
@@ -464,6 +500,7 @@ export function CallIntelligenceReport({ evaluation, voice, actions }: { evaluat
         </>
       )}
     </motion.div>
+    </SeekContext.Provider>
   );
 }
 
@@ -478,7 +515,7 @@ function SignalList({ title, rows }: { title: string; rows: { at: number | null;
           <li key={i}>
             <span className={clsx(styles.state, styles[`state_${r.state}`])}>{r.stateLabel}</span>
             <span className={styles.signalText}>
-              {clock(r.at) && <span className={styles.time}>{clock(r.at)}</span>} {r.text}
+              <Time at={r.at} /> {r.text}
               {r.note && <small>{r.note}</small>}
             </span>
           </li>

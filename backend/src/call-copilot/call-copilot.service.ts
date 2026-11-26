@@ -1,9 +1,18 @@
 import { HttpService } from '@nestjs/axios';
-import { BadRequestException, Injectable, Logger } from '@nestjs/common';
+import {
+  BadGatewayException,
+  BadRequestException,
+  GatewayTimeoutException,
+  HttpException,
+  Injectable,
+  Logger,
+  ServiceUnavailableException,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, isValidObjectId } from 'mongoose';
+import { AxiosError } from 'axios';
 import { firstValueFrom } from 'rxjs';
 import { randomUUID } from 'crypto';
 import FormData from 'form-data';
@@ -13,8 +22,80 @@ import { CallSession, CallSessionDocument } from './schemas/call-session.schema'
 import { sessionRangeEnd, sessionRangeStart } from './session-date-range';
 import { AI_REPORT_TIMEOUT_MS, COACHING_ABANDONED_AFTER_MS, describeCoachingFailure } from './processing-failure';
 import { EvaluateReply, RECORDING_LABEL, callDurationSeconds, recordingCategory, speakersSeparated, transcriptLines } from './call-intelligence';
+import { CoachReportSource, NarrationPart, NarrationSection, buildCoachNarration, narrationKey, narrationParts } from './coach-narration';
+import { CallPerformance, PerformanceCall, buildCallPerformance } from './call-performance';
+import { CallPerformanceQueryDto } from './dto/call-performance-query.dto';
 
 const AUDIO_BUCKET = 'call_recordings';
+
+// The Performance tab reads at most this many calls per period (newest first); it says so when cut.
+const PERFORMANCE_MAX_CALLS = 3000;
+const PERFORMANCE_DEFAULT_DAYS = 30;
+
+// What the Performance tab reads of a call: the review's figures, never the transcript.
+const PERFORMANCE_FIELDS = {
+  organizationId: 1,
+  userId: 1,
+  createdAt: 1,
+  source: 1,
+  originalFilename: 1,
+  headline: 1,
+  overallScore: 1,
+  sentiment: 1,
+  'evaluation.version': 1,
+  'evaluation.assessable': 1,
+  'evaluation.bandLabel': 1,
+  'evaluation.categories.key': 1,
+  'evaluation.categories.label': 1,
+  'evaluation.categories.score': 1,
+  'evaluation.conclusion.outcome.result': 1,
+  'evaluation.conclusion.strengths.text': 1,
+  'evaluation.conclusion.nextActions.text': 1,
+  'evaluation.analysis.customerSentiment.end': 1,
+  'evaluation.analysis.customerQuestions.answered': 1,
+  'evaluation.analysis.objections.handling': 1,
+  'evaluation.challenge.seriousConcerns.text': 1,
+  'evaluation.challenge.missedOpportunities.kind': 1,
+} as const;
+
+/** Live, uploaded or phone (a Plivo/Twilio recording is stored as an upload), as a Mongo condition. */
+export function callKindMatch(kind?: 'live' | 'upload' | 'phone'): Record<string, unknown>[] {
+  const phone = /^(plivo|twilio)-/;
+  if (kind === 'live') return [{ $or: [{ source: 'live' }, { source: { $exists: false } }] }];
+  if (kind === 'phone') return [{ source: 'upload', originalFilename: phone }];
+  if (kind === 'upload') return [{ source: 'upload', originalFilename: { $not: phone } }];
+  return [];
+}
+
+// Rewriting a full report in another language runs one short AI call per section, side by side.
+const NARRATION_TIMEOUT_MS = 3 * 60_000;
+
+/** The AI Coach's spoken narration as the panel plays it. */
+export interface CoachNarration {
+  languageCode: string;
+  // Changes when the report (or the narration's wording) changes: the panel's audio is cached against it.
+  narrationKey: string;
+  sections: NarrationSection[];
+  // What /voice/speak is sent, in order: each under its limit, never cut mid-sentence.
+  parts: NarrationPart[];
+  // The whole narration as one text (the field's earlier meaning, kept for older callers).
+  voiceScript: string;
+}
+
+/** Why the narration couldn't be prepared, in words for the person (python-agent's own words when it gave some). */
+export function narrationFailure(err: unknown): HttpException {
+  const axiosErr = err as AxiosError<{ detail?: unknown }>;
+  const detail = axiosErr?.response?.data?.detail;
+  if (typeof detail === 'string' && detail.trim()) return new BadGatewayException(detail);
+  const code = axiosErr?.code ?? '';
+  if (code === 'ECONNABORTED' || code === 'ETIMEDOUT') {
+    return new GatewayTimeoutException('Preparing the AI Coach report in this language took too long. Please try again.');
+  }
+  if (!axiosErr?.response) {
+    return new ServiceUnavailableException('HaiVE’s AI service isn’t running, so the report can’t be prepared in this language right now.');
+  }
+  return new BadGatewayException('The AI Coach report couldn’t be prepared in this language. Please try again.');
+}
 
 /** The Call Library's status and score filters, as a Mongo condition. */
 export function callFilterMatch(options: { status?: string; score?: string }): Record<string, unknown>[] {
@@ -203,6 +284,48 @@ export class CallCopilotService {
     ]);
     const avg = scores[0]?.avg;
     return { total, last7Days, live, uploaded, avgScore: typeof avg === 'number' ? Math.round(avg * 10) / 10 : null, scored: scores[0]?.n ?? 0 };
+  }
+
+  /** The Performance tab: the AI Coach's reviews of these people's calls over a period, against the
+   * period of the same length just before it (see call-performance.ts). Reads only saved reviews. */
+  async getPerformance(
+    owners: Record<string, unknown>,
+    query: CallPerformanceQueryDto,
+    context: { names: Map<string, string>; businessNames: Map<string, string>; viewer: { organizationId: string; userId: string } },
+  ): Promise<CallPerformance> {
+    const to = query.dateTo ? new Date(query.dateTo) : new Date();
+    const from = query.dateFrom ? new Date(query.dateFrom) : new Date(to.getTime() - PERFORMANCE_DEFAULT_DAYS * 86_400_000);
+    if (from.getTime() > to.getTime()) throw new BadRequestException('The start date is after the end date.');
+    const span = to.getTime() - from.getTime();
+    const previousFrom = new Date(from.getTime() - span - 1);
+    const filters = [owners, ...callKindMatch(query.kind), ...callFilterMatch({ score: query.score })];
+    const [found, previous] = await Promise.all([
+      this.sessionModel
+        .find({ $and: [...filters, { createdAt: { $gte: from, $lte: to } }] })
+        .select(PERFORMANCE_FIELDS)
+        .sort({ createdAt: -1 })
+        .limit(PERFORMANCE_MAX_CALLS + 1)
+        .lean()
+        .exec(),
+      this.sessionModel
+        .find({ $and: [...filters, { createdAt: { $gte: previousFrom, $lt: from } }, { overallScore: { $gt: 0 } }] })
+        .select({ organizationId: 1, userId: 1, overallScore: 1, createdAt: 1 })
+        .limit(PERFORMANCE_MAX_CALLS)
+        .lean()
+        .exec(),
+    ]);
+    const capped = found.length > PERFORMANCE_MAX_CALLS;
+    return buildCallPerformance(found.slice(0, PERFORMANCE_MAX_CALLS) as unknown as PerformanceCall[], previous as unknown as PerformanceCall[], {
+      from,
+      to,
+      previousFrom,
+      previousTo: new Date(from.getTime() - 1),
+      utcOffsetMinutes: query.utcOffsetMinutes ?? 0,
+      names: context.names,
+      businessNames: context.businessNames,
+      viewer: context.viewer,
+      capped,
+    });
   }
 
   /** Backs the Call Library's StatTile summary row — computed independently
@@ -655,44 +778,75 @@ export class CallCopilotService {
     return session;
   }
 
-  /** The AI Coach's spoken script in the language the user picked. English is
-   * the script generateCoaching already produced; any other language is that
-   * coaching rewritten natively (not machine-translated word for word) by
-   * python-agent's /call-copilot/voice-script, then cached on the session per
-   * language so replaying or re-selecting it costs nothing. The caller then
-   * speaks it through the existing /voice/speak with the same languageCode. */
-  async getVoiceScript(session: CallSessionDocument, languageCode: string): Promise<string> {
-    if (!session.voiceScript || session.overallScore === undefined) {
+  /** The AI Coach's complete spoken narration in the language picked in the panel:
+   * every part of the report saved on this call (coach-narration.ts), never a
+   * summary of it. English is built from the report each time (no AI); any other
+   * language is that English rewritten natively by python-agent, section for
+   * section, then cached on the call per language and report version
+   * (narrationKey), so replaying or re-selecting a language costs nothing and a
+   * changed report is never read out in its old words. Each part is under
+   * /voice/speak's limit and ends at a sentence, for the panel to speak in order. */
+  async getCoachNarration(session: CallSessionDocument, languageCode: string): Promise<CoachNarration> {
+    if (session.overallScore === undefined || session.overallScore === null) {
       throw new BadRequestException('This call has no coaching report yet — generate one first.');
     }
-    if (languageCode === 'en') return session.voiceScript;
+    const english = buildCoachNarration({
+      ...(typeof session.toObject === 'function' ? session.toObject() : session),
+      createdAt: (session as unknown as { createdAt?: Date }).createdAt,
+    } as CoachReportSource);
+    if (english.length === 0) throw new BadRequestException('This call’s coaching report has nothing to read out.');
+    const key = narrationKey(english);
+    const reply = (sections: NarrationSection[]): CoachNarration => ({
+      languageCode,
+      narrationKey: key,
+      sections,
+      parts: narrationParts(sections),
+      voiceScript: sections.map((s) => s.text).join(' '),
+    });
+    if (languageCode === 'en') return reply(english);
 
-    const cached = session.voiceScripts.find((v) => v.languageCode === languageCode);
-    if (cached) return cached.script;
+    const cached = (session.voiceScripts ?? []).find((v) => v.languageCode === languageCode && v.narrationKey === key && v.sections?.length);
+    if (cached?.sections) return reply(cached.sections as NarrationSection[]);
 
-    const token = this.bridgeToken(session.userId, session.organizationId);
-    const { data } = await firstValueFrom(
-      this.http.post<{ languageCode: string; voiceScript: string }>(
-        `${this.pythonAgentUrl}/call-copilot/voice-script`,
+    let data: { sections?: { id: string; title?: string; text: string }[] };
+    try {
+      ({ data } = await firstValueFrom(
+        this.http.post<{ sections?: { id: string; title?: string; text: string }[] }>(
+          `${this.pythonAgentUrl}/call-copilot/voice-script`,
+          { sessionId: session._id.toString(), languageCode, sections: english },
+          { headers: { Authorization: `Bearer ${this.bridgeToken(session.userId, session.organizationId)}` }, timeout: NARRATION_TIMEOUT_MS },
+        ),
+      ));
+    } catch (err) {
+      throw narrationFailure(err);
+    }
+    // Every English section must come back, in order, with words: a partial narration is never spoken as the whole report.
+    const byId = new Map((data?.sections ?? []).map((s) => [s.id, s]));
+    const translated = english.map((s) => ({ id: s.id, title: s.title, text: (byId.get(s.id)?.text ?? '').trim() }));
+    if (translated.some((s) => !s.text)) {
+      this.logger.warn(`Coach narration ${languageCode} for session ${session._id} came back incomplete`);
+      throw new BadGatewayException('The AI Coach report couldn’t be prepared in this language. Please try again.');
+    }
+
+    const entry = { languageCode, narrationKey: key, sections: translated, script: translated.map((s) => s.text).join(' ') };
+    // One atomic write: this language's older entries out, this one in — and only while the
+    // report is still the one this was written from (a review run meanwhile starts a fresh cache).
+    await this.sessionModel
+      .updateOne({ _id: session._id, coachingGeneratedAt: session.coachingGeneratedAt ?? null }, [
         {
-          sessionId: session._id.toString(),
-          languageCode,
-          overallScore: session.overallScore,
-          categoryScores: session.categoryScores,
-          whatWentWell: session.whatWentWell,
-          whatToImprove: session.whatToImprove,
-          whatWouldHaveDoneDifferently: session.whatWouldHaveDoneDifferently,
-          nextCallFocus: session.nextCallFocus,
-          coachingSummary: session.coachingSummary ?? '',
-          voiceScript: session.voiceScript,
+          $set: {
+            voiceScripts: {
+              $concatArrays: [
+                { $filter: { input: { $ifNull: ['$voiceScripts', []] }, cond: { $ne: ['$$this.languageCode', languageCode] } } },
+                [entry],
+              ],
+            },
+          },
         },
-        { headers: { Authorization: `Bearer ${token}` } },
-      ),
-    );
-
-    session.voiceScripts.push({ languageCode, script: data.voiceScript });
-    await session.save();
-    return data.voiceScript;
+      ])
+      .exec()
+      .catch((err: Error) => this.logger.warn(`Coach narration cache not saved for session ${session._id}: ${err.message}`));
+    return reply(translated);
   }
 
   /** A session that errors out (client disconnect mid-call, an unhandled

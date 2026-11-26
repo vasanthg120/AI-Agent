@@ -109,10 +109,13 @@ export class CallCategoryScore {
   rationale: string;
 }
 
-// The coach's spoken script rewritten in a specific language, cached so
+// The coach's spoken narration rewritten in a specific language, cached so
 // replaying (or re-selecting) a language never re-runs the LLM — see
-// CallCopilotService.getVoiceScript. English is never stored here (it's just
-// CallSession.voiceScript itself).
+// CallCopilotService.getCoachNarration. English is never stored here (it is
+// built from the report each time). `narrationKey` identifies the English it
+// was written from (coach-narration.ts narrationKey): a different report or
+// narration wording gets a new key, and an entry without one (the earlier short
+// script) is never reused.
 @Schema({ _id: false })
 export class CallVoiceScript {
   @Prop({ required: true })
@@ -120,6 +123,12 @@ export class CallVoiceScript {
 
   @Prop({ required: true })
   script: string;
+
+  @Prop()
+  narrationKey?: string;
+
+  @Prop({ type: [Object], default: undefined })
+  sections?: { id: string; title: string; text: string }[];
 }
 
 // A coaching-selected highlight from the call — distinct from CallEvent above

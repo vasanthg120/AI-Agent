@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { MotionConfig, motion } from 'framer-motion';
-import { FiFolder, FiMic, FiRadio, FiUploadCloud, FiVolume2 } from 'react-icons/fi';
+import { FiBarChart2, FiFolder, FiMic, FiRadio, FiUploadCloud, FiVolume2 } from 'react-icons/fi';
 import { Button, PageHeader } from '@/components/ui';
 import { ROUTES } from '@/constants/routes';
 import { useCallSessionStore } from '@/stores/callSessionStore';
@@ -14,6 +14,7 @@ import type { SelectedCustomer } from './components/CustomerPicker';
 import { CallSummaryModal } from './components/CallSummaryModal';
 import { UploadRecordingModal } from './components/UploadRecordingModal';
 import { CallLibraryListView } from './components/CallLibraryListView';
+import { PerformanceView } from './components/PerformanceView';
 import { useSegmentedRecording, micErrorMessage } from './hooks/useSegmentedRecording';
 import styles from './CallCopilotPage.module.css';
 
@@ -180,11 +181,16 @@ export function CallCopilotPage() {
             items={[
               { id: 'live', label: 'Live Call', icon: <FiRadio aria-hidden />, live: isLive },
               { id: 'library', label: 'Call Library', icon: <FiFolder aria-hidden /> },
+              { id: 'performance', label: 'Performance', icon: <FiBarChart2 aria-hidden /> },
             ]}
           />
 
           <>
-            {activeTab === 'library' ? (
+            {activeTab === 'performance' ? (
+              <motion.div key="performance" {...SCREEN}>
+                <PerformanceView />
+              </motion.div>
+            ) : activeTab === 'library' ? (
               <motion.div key="library" {...SCREEN}>
                 <CallLibraryListView key={librarySwitch} onStartCall={() => setActiveTab('live')} />
               </motion.div>

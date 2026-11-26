@@ -575,13 +575,13 @@ function CallRow({ item, opening, showOwner, onOpen }: { item: CallSessionSummar
                 notScored
                   ? 'Not scored — too little conversation to judge'
                   : item.score100 !== undefined
-                    ? `Call Intelligence score ${item.score100} out of 100`
+                    ? `AI Coach score ${item.score100 / 10} out of 10`
                     : `Coach score ${item.overallScore} out of 10 (earlier scoring)`
               }
             >
-              {/* Call Intelligence scores out of 100; calls reviewed before it keep their score out of 10. */}
+              {/* Every score out of 10: Call Intelligence's 0–100 divided by 10; earlier reviews were already out of 10. */}
               {item.score100 !== undefined && !notScored ? (
-                <ScoreRing value={item.score100} max={100} size={46} strokeWidth={5} showOutOf={false} />
+                <ScoreRing value={Math.round(item.score100) / 10} size={46} strokeWidth={5} showOutOf={false} />
               ) : (
                 <ScoreRing value={item.overallScore ?? 0} size={46} strokeWidth={5} showOutOf={false} muted={notScored} />
               )}

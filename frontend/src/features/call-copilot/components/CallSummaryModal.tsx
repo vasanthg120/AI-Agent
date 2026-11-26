@@ -143,6 +143,13 @@ export function CallSummaryModal({
   }, [hasOverview, hasCustomer, hasTranscript, coachingPending, coaching]);
 
   const activeTab = tabs.some((t) => t.id === tab) ? tab : tabs[0].id;
+  // A moment the AI Coach report points to, played in the Transcript tab's recording.
+  const hasRecording = !!sessionId && !!segments?.some((s) => s.audioFileId);
+  const [seekTo, setSeekTo] = useState<{ at: number; n: number } | null>(null);
+  const playFrom = (at: number) => {
+    setTab('transcript');
+    setSeekTo((prev) => ({ at, n: (prev?.n ?? 0) + 1 }));
+  };
   const kind = describeSource(source, originalFilename);
   const outcome = summaryResult?.outcome ? OUTCOME_META[summaryResult.outcome] : undefined;
 
@@ -177,7 +184,17 @@ export function CallSummaryModal({
         )}
 
         {tabs.length > 1 && (
-          <PillTabs ariaLabel="Call summary sections" items={tabs} activeId={activeTab} onChange={setTab} size="sm" />
+          <PillTabs
+            ariaLabel="Call summary sections"
+            items={tabs}
+            activeId={activeTab}
+            onChange={(id) => {
+              // Opening a tab by hand never replays a moment asked for earlier.
+              setSeekTo(null);
+              setTab(id);
+            }}
+            size="sm"
+          />
         )}
 
         <>
@@ -200,6 +217,7 @@ export function CallSummaryModal({
                 onGenerated={onCoachingGenerated}
                 readOnly={readOnly}
                 ownerName={ownerName}
+                onSeek={hasRecording && hasTranscript ? playFrom : undefined}
               />
             )}
 
@@ -211,6 +229,7 @@ export function CallSummaryModal({
                 isUpload={source === 'upload'}
                 createdAt={createdAt}
                 speakerRoles={coaching?.evaluation?.understanding?.speakers}
+                seekTo={seekTo}
               />
             )}
           </motion.div>
@@ -452,6 +471,7 @@ function TranscriptTab({
   isUpload,
   createdAt,
   speakerRoles,
+  seekTo,
 }: {
   transcript?: string;
   segments?: CallTranscriptSegment[];
@@ -460,6 +480,8 @@ function TranscriptTab({
   createdAt?: string;
   // Who each speaker is, as the Call Intelligence review worked out.
   speakerRoles?: { label: string; role: string }[];
+  // A moment to play from, asked for by the AI Coach report (n changes on every ask).
+  seekTo?: { at: number; n: number } | null;
 }) {
   const [query, setQuery] = useState('');
   const player = useRef<RecordingPlayerHandle | null>(null);
@@ -494,6 +516,25 @@ function TranscriptTab({
     });
     return active;
   }, [turns, playhead]);
+  // The report asked to play from a moment: asked again until the recording has loaded and is there.
+  const reached = useRef(0);
+  useEffect(() => {
+    if (!seekTo) return undefined;
+    const attempt = () => player.current?.seek(seekTo.at, true);
+    attempt();
+    let tries = 0;
+    const timer = setInterval(() => {
+      tries += 1;
+      if (reached.current === seekTo.n || tries > 60) clearInterval(timer);
+      else attempt();
+    }, 250);
+    return () => clearInterval(timer);
+  }, [seekTo]);
+  const onTime = (seconds: number) => {
+    if (seekTo && Math.abs(seconds - seekTo.at) < 1.5) reached.current = seekTo.n;
+    setPlayhead(seconds);
+  };
+
   const turnRefs = useRef<Array<HTMLDivElement | null>>([]);
   useEffect(() => {
     if (activeTurn >= 0) turnRefs.current[activeTurn]?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
@@ -511,7 +552,7 @@ function TranscriptTab({
             sessionId={sessionId}
             fallbackParts={audioFileIds}
             onInfo={(info) => setStarts(info.segmentStarts)}
-            onTime={setPlayhead}
+            onTime={onTime}
             downloadName={`call-${(createdAt ?? '').slice(0, 10) || sessionId}`}
           />
         </div>

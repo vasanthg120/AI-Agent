@@ -110,6 +110,116 @@ export interface CoachingReport {
   scoreBand?: string;
 }
 
+// ---- Performance tab (backend call-copilot/call-performance.ts): saved reviews summed up, scores out of 10 ----
+
+export interface PerformanceTrendPoint {
+  start: string;
+  label: string;
+  calls: number;
+  averageScore: number | null;
+}
+
+export interface PerformanceCategory {
+  key: string;
+  label: string;
+  average: number;
+  calls: number;
+}
+
+export interface PerformanceCallItem {
+  id: string;
+  organizationId: string;
+  ownerId: string;
+  ownerName: string;
+  businessName?: string;
+  headline: string;
+  createdAt: string;
+  kind: 'live' | 'upload' | 'phone';
+  score: number | null;
+  band: string | null;
+  reasons: string[];
+  // The viewer's own call (opens with coaching and voice); otherwise opened read-only.
+  mine: boolean;
+}
+
+export interface PersonPerformance {
+  userId: string;
+  organizationId: string;
+  name: string;
+  businessName?: string;
+  // The viewer themselves; and whether they are in the viewer's own business (Employee Activity is per business).
+  isViewer: boolean;
+  sameBusiness: boolean;
+  calls: number;
+  analysed: number;
+  averageScore: number | null;
+  previousAverage: number | null;
+  change: number | null;
+  direction: 'improving' | 'declining' | 'steady' | null;
+  // too_few: fewer reviewed calls than limits.minCallsToRank — never ranked or labelled.
+  standing: 'high' | 'coaching' | 'steady' | 'too_few';
+  rank: number | null;
+  successRate: number | null;
+  satisfaction: number | null;
+  communication: number | null;
+  listening: number | null;
+  categories: PerformanceCategory[];
+  strengths: PerformanceCategory[];
+  focus: (PerformanceCategory & { training: string })[];
+  recurring: { kind: string; label: string; count: number }[];
+  recognition: { sessionId: string; score: number; text: string; createdAt: string }[];
+  trend: PerformanceTrendPoint[];
+}
+
+export type PerformanceListKey = 'attention' | 'top' | 'negative' | 'unresolved' | 'noFollowUp' | 'recent';
+
+export interface CallPerformance {
+  range: { from: string; to: string; previousFrom: string; previousTo: string; bucket: 'day' | 'week' | 'month' };
+  overview: {
+    calls: number;
+    analysed: number;
+    averageScore: number | null;
+    previousAverage: number | null;
+    change: number | null;
+    successful: number;
+    successRate: number | null;
+    highPerformers: number;
+    needCoaching: number;
+    people: number;
+    sentiment: Record<'positive' | 'neutral' | 'negative' | 'mixed' | 'unclear', number>;
+    trend: PerformanceTrendPoint[];
+  };
+  categories: PerformanceCategory[];
+  people: PersonPerformance[];
+  lists: Record<PerformanceListKey, PerformanceCallItem[]>;
+  limits: { minCallsToRank: number; capped: boolean };
+}
+
+export interface CallPerformanceParams extends CallTeamFilter {
+  dateFrom?: string;
+  dateTo?: string;
+  kind?: 'live' | 'upload' | 'phone';
+  score?: 'good' | 'fair' | 'low';
+  department?: string;
+}
+
+/** The AI Coach's spoken narration (backend call-copilot/coach-narration.ts): the whole report, section by section. */
+export interface CoachNarrationSection {
+  id: 'overview' | 'strengths' | 'improvements' | 'skills' | 'concerns' | 'coaching' | 'next_steps';
+  title: string;
+  text: string;
+}
+
+export interface CoachNarration {
+  languageCode: string;
+  // Changes when the report changes: audio made for one key is never played for another.
+  narrationKey: string;
+  sections: CoachNarrationSection[];
+  // What the voice is sent, in order: each under its limit, never cut mid-sentence.
+  parts: { sectionId: CoachNarrationSection['id']; title: string; text: string }[];
+  voiceScript: string;
+}
+
 // ---- Call Intelligence (python-agent app/agent/call_intelligence.py) ------------------
 
 /** A quote from the call, checked against the transcript: its line, time into the call and speaker. */
@@ -304,7 +414,7 @@ export interface CallTeamInfo {
   team: boolean;
   acrossBusinesses: boolean;
   businesses: { id: string; name: string; isMain: boolean; isCurrent: boolean }[];
-  people: { id: string; name: string; businessId: string; active: boolean }[];
+  people: { id: string; name: string; businessId: string; active: boolean; department?: string }[];
 }
 
 export interface StartCallParams {
@@ -480,15 +590,26 @@ export const callCopilotService = {
     throw new Error('The AI Coach is still reviewing this call. Its report will appear in Call Library when it’s ready.');
   },
 
-  // The AI Coach's spoken script rewritten natively in the chosen language
-  // (cached server-side per language) — the caller then speaks the returned
-  // text via voiceService.speak(script, languageCode).
-  async getVoiceScript(sessionId: string, languageCode: string): Promise<string> {
-    const { data } = await axiosClient.post<{ languageCode: string; voiceScript: string }>(
-      `/call-copilot/sessions/${sessionId}/voice-script`,
-      { languageCode },
-    );
-    return data.voiceScript;
+  // The AI Coach's complete spoken narration of this call's report in the
+  // chosen language: every section, in parts the caller speaks in order via
+  // voiceService.speak(part.text, languageCode). Other languages are rewritten
+  // natively once per report (cached server-side per language and report).
+  // The Performance tab: the AI Coach's saved reviews summed up for a period (no AI is run).
+  async getPerformance(params: CallPerformanceParams): Promise<CallPerformance> {
+    const { data } = await axiosClient.get<CallPerformance>('/call-copilot/performance', {
+      params: { ...params, utcOffsetMinutes: -new Date().getTimezoneOffset() },
+    });
+    return data;
+  },
+
+  async getCoachNarration(sessionId: string, languageCode: string): Promise<CoachNarration> {
+    const { data } = await axiosClient.post<Partial<CoachNarration>>(`/call-copilot/sessions/${sessionId}/voice-script`, { languageCode });
+    // A backend from before the full narration answers with its short script only: that is spoken, as one part.
+    if (!data.parts?.length && data.voiceScript) {
+      const part = { sectionId: 'overview' as const, title: 'AI Coach report', text: data.voiceScript };
+      return { languageCode, narrationKey: '', sections: [{ id: part.sectionId, title: part.title, text: part.text }], parts: [part], voiceScript: data.voiceScript };
+    }
+    return data as CoachNarration;
   },
 
   // Deliberately NOT a plain URL string for an <audio src="..."> to hit

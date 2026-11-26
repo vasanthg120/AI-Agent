@@ -9,7 +9,7 @@ import logging
 from typing import Literal
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from starlette.concurrency import run_in_threadpool
 
 from app.agent.call_copilot_analysis import (
@@ -19,6 +19,7 @@ from app.agent.call_copilot_analysis import (
     summarize_call,
 )
 from app.agent.call_intelligence import evaluate_call, legacy_fields
+from app.agent.coach_narration import translate_narration
 from app.config import settings
 from app.integrations.sarvam_client import (
     SUPPORTED_LANGUAGES,
@@ -335,9 +336,18 @@ def evaluate(body: EvaluateRequest, user: dict = Depends(get_current_user)) -> d
     )
     return {"evaluation": evaluation, **legacy_fields(evaluation)}
 
+class NarrationSection(BaseModel):
+    id: str = Field(..., min_length=1, max_length=40)
+    title: str = Field("", max_length=120)
+    text: str = Field(..., min_length=1, max_length=20000)
+
+
 class VoiceScriptRequest(BaseModel):
     sessionId: str
     languageCode: str
+    # The complete narration NestJS built from the saved report (coach-narration.ts). When given,
+    # every section is rewritten in the language; without it, the earlier short script is written.
+    sections: list[NarrationSection] = Field(default_factory=list, max_length=12)
     overallScore: float | None = None
     categoryScores: list[CoachCategoryScore] = []
     whatWentWell: list[str] = []
@@ -351,6 +361,7 @@ class VoiceScriptRequest(BaseModel):
 class VoiceScriptResponse(BaseModel):
     languageCode: str
     voiceScript: str
+    sections: list[NarrationSection] = []
 
 
 @router.post("/call-copilot/voice-script", response_model=VoiceScriptResponse)
@@ -361,6 +372,23 @@ def voice_script(body: VoiceScriptRequest, user: dict = Depends(get_current_user
     languageCode."""
     if body.languageCode not in SUPPORTED_LANGUAGES:
         raise HTTPException(status_code=400, detail=f"'{body.languageCode}' is not a supported voice language.")
+
+    if body.sections:
+        try:
+            sections = translate_narration(
+                body.languageCode,
+                [s.model_dump() for s in body.sections],
+                organization_id=user.get("organizationId"),
+                user_id=user["sub"],
+            )
+        except Exception as exc:  # noqa: BLE001 - worded for the person; the cause is logged
+            logger.warning("Coach narration %s for session %s failed: %s", body.languageCode, body.sessionId, exc)
+            raise HTTPException(status_code=502, detail="The AI Coach report couldn't be prepared in this language. Please try again.") from None
+        return VoiceScriptResponse(
+            languageCode=body.languageCode,
+            voiceScript=" ".join(s["text"] for s in sections),
+            sections=[NarrationSection(**s) for s in sections],
+        )
 
     script = localize_voice_script(
         body.languageCode,

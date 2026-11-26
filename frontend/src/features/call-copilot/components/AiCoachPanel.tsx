@@ -28,7 +28,7 @@ import {
 import { VOICE_LANGUAGES } from '@/services/voiceService';
 import { EASE_OUT, FADE_UP, ROW_IN, SPRING_SOFT, staggerChildren } from '../motion';
 import { ScoreRing, scoreBand, scoreTone } from './ScoreRing';
-import { VoiceCoachButton } from './VoiceCoachButton';
+import { CoachVoicePanel } from './CoachVoicePanel';
 import { CallIntelligenceReport } from './CallIntelligenceReport';
 import styles from './AiCoachPanel.module.css';
 
@@ -102,9 +102,11 @@ export interface AiCoachPanelProps {
   // A teammate's call: the report is shown, but only its owner can ask for one or hear it spoken.
   readOnly?: boolean;
   ownerName?: string;
+  // Play the call's recording from a moment the report points to (its quote times become buttons).
+  onSeek?: (seconds: number) => void;
 }
 
-export function AiCoachPanel({ sessionId, createdAt, pending, coaching, onGenerated, readOnly, ownerName }: AiCoachPanelProps) {
+export function AiCoachPanel({ sessionId, createdAt, pending, coaching, onGenerated, readOnly, ownerName, onSeek }: AiCoachPanelProps) {
   const [generating, setGenerating] = useState(false);
   const [voiceLanguage, setVoiceLanguage] = useState(readStoredCoachLanguage);
   const [openCategory, setOpenCategory] = useState<CallScoreCategory | null>(null);
@@ -162,7 +164,7 @@ export function AiCoachPanel({ sessionId, createdAt, pending, coaching, onGenera
         <div className={styles.emptyText}>
           <strong>This call hasn&apos;t been coached yet</strong>
           <span>
-            Your AI Coach reviews the conversation like a demanding sales manager — nine weighted skills, out of 100,
+            Your AI Coach reviews the conversation like a demanding sales manager — nine weighted skills, scored out of 10,
             every mark backed by a quote — and tells you exactly what to change.
           </span>
         </div>
@@ -184,35 +186,13 @@ export function AiCoachPanel({ sessionId, createdAt, pending, coaching, onGenera
   const notScored = report.categoryScores.length > 0 && report.categoryScores.every((c) => c.score === 0);
   const tone = scoreTone(overall);
 
+  // The whole report read aloud, in the picked language, for the person whose call it is.
   const voiceRow =
-    report.voiceScript && !readOnly ? (
-      <div className={styles.voiceRow}>
-        <span className={styles.voiceLabel}>Hear it from your coach</span>
-        <select
-          className={styles.languageSelect}
-          value={voiceLanguage}
-          onChange={(e) => changeVoiceLanguage(e.target.value)}
-          aria-label="Language for the spoken coaching"
-          title="Language for the spoken coaching"
-        >
-          {VOICE_LANGUAGES.map((l) => (
-            <option key={l.code} value={l.code}>
-              {l.label}
-            </option>
-          ))}
-        </select>
-        <VoiceCoachButton
-          sessionId={sessionId}
-          englishScript={report.voiceScript}
-          languageCode={voiceLanguage}
-          languageLabel={VOICE_LANGUAGES.find((l) => l.code === voiceLanguage)?.label ?? voiceLanguage}
-        />
-      </div>
-    ) : null;
+    sessionId && !readOnly ? <CoachVoicePanel sessionId={sessionId} languageCode={voiceLanguage} onLanguageChange={changeVoiceLanguage} /> : null;
 
   // Call Intelligence: the full, evidence-checked report (every call reviewed from 2026-11).
   if (report.evaluation && report.evaluation.version >= 2) {
-    return <CallIntelligenceReport evaluation={report.evaluation} voice={voiceRow} />;
+    return <CallIntelligenceReport evaluation={report.evaluation} voice={voiceRow} onSeek={onSeek} />;
   }
 
   return (

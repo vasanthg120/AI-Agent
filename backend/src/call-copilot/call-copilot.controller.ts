@@ -16,6 +16,7 @@ import {
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { Response } from 'express';
+import { isValidObjectId } from 'mongoose';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { JwtPayload } from '../auth/jwt-payload.interface';
@@ -29,6 +30,7 @@ import { TeamScopeService } from '../team-activity/team-scope.service';
 import { RetryCallSessionDto } from './dto/retry-call-session.dto';
 import { UploadCallRecordingDto } from './dto/upload-call-recording.dto';
 import { VoiceScriptDto } from './dto/voice-script.dto';
+import { CallPerformanceQueryDto } from './dto/call-performance-query.dto';
 import { Feature } from '../common/app-features';
 import { FeatureGuard } from '../common/guards/feature.guard';
 import { Permission } from '../common/permissions/permission.decorator';
@@ -92,7 +94,13 @@ export class CallCopilotController {
     if (!scope.team) return { team: false, acrossBusinesses: false, businesses: [], people: [] };
     const people = await Promise.all(
       scope.businesses.map(async (b) =>
-        (await this.scopes.people(scope, b)).map((p) => ({ id: p.id, name: p.mainAccountMember ? `${p.name} (Main Account)` : p.name, businessId: b.id, active: p.active })),
+        (await this.scopes.people(scope, b)).map((p) => ({
+          id: p.id,
+          name: p.mainAccountMember ? `${p.name} (Main Account)` : p.name,
+          businessId: b.id,
+          active: p.active,
+          department: p.department?.trim() || undefined,
+        })),
       ),
     );
     return {
@@ -129,8 +137,26 @@ export class CallCopilotController {
     return this.callCopilotService.getStats(user.organizationId, user.sub);
   }
 
-  /** The filter for the team's calls the caller may see (one business / one person if asked), or null when they only see their own. */
-  private async teamOwners(user: JwtPayload, query: CallTeamQueryDto) {
+  // The Performance tab: the AI Coach's reviews summed up for the caller's own calls, or (scope=team)
+  // the team's they may see — the same people the Call Library's team view shows, optionally one
+  // team (department), one business or one person. Reads saved reviews only (no AI call).
+  @Get('performance')
+  async performance(@CurrentUser() user: JwtPayload, @Query() query: CallPerformanceQueryDto) {
+    const viewer = { organizationId: user.organizationId, userId: user.sub };
+    if (query.scope === 'team') {
+      const team = await this.teamOwners(user, query, query.department);
+      if (team) return this.callCopilotService.getPerformance(team.match, query, { names: team.names, businessNames: team.businessNames, viewer });
+    }
+    const me = await this.scopes.describeOwner(user.organizationId, user.sub);
+    return this.callCopilotService.getPerformance({ organizationId: user.organizationId, userId: user.sub }, query, {
+      names: new Map([[user.sub, me.ownerName]]),
+      businessNames: new Map([[user.organizationId, me.businessName]]),
+      viewer,
+    });
+  }
+
+  /** The filter for the team's calls the caller may see (one business / one person / one department if asked), or null when they only see their own. */
+  private async teamOwners(user: JwtPayload, query: CallTeamQueryDto, department?: string) {
     const scope = await this.scopes.resolve(user);
     if (!scope.team) return null;
     const businesses = this.scopes.pick(scope, query.organizationId);
@@ -139,7 +165,11 @@ export class CallCopilotController {
     for (const business of businesses) {
       const people = await this.scopes.people(scope, business);
       for (const p of people) names.set(p.id, p.name);
-      const ids = people.map((p) => p.id).filter((id) => !query.userId || id === query.userId);
+      const team = department?.trim().toLowerCase();
+      const ids = people
+        .filter((p) => !team || (p.department ?? '').trim().toLowerCase() === team)
+        .map((p) => p.id)
+        .filter((id) => !query.userId || id === query.userId);
       if (ids.length) clauses.push({ organizationId: business.id, userId: { $in: ids } });
     }
     // Nobody in reach (a person of another business asked for): a filter that matches nothing.
@@ -224,15 +254,17 @@ export class CallCopilotController {
     return this.callCopilotService.requestCoaching(session, fullTranscript);
   }
 
-  // The AI Coach's spoken script in the language picked in the panel — the
-  // frontend then speaks the returned text via the existing /voice/speak with
-  // the same languageCode. Cached per language on the session.
+  // The AI Coach's complete spoken narration in the language picked in the
+  // panel: the whole report, section by section, in parts the frontend speaks in
+  // order via the existing /voice/speak with the same languageCode. Only the
+  // person whose call it is (same organization and user): anyone else's call,
+  // or an id that isn't one, is "not found". Cached per language and report
+  // version on the session.
   @Post('sessions/:id/voice-script')
   async voiceScript(@CurrentUser() user: JwtPayload, @Param('id') id: string, @Body() dto: VoiceScriptDto) {
-    const session = await this.callCopilotService.getSession(user.organizationId, user.sub, id);
+    const session = isValidObjectId(id) ? await this.callCopilotService.getSession(user.organizationId, user.sub, id) : null;
     if (!session) throw new NotFoundException('Call session not found');
-    const voiceScript = await this.callCopilotService.getVoiceScript(session, dto.languageCode);
-    return { languageCode: dto.languageCode, voiceScript };
+    return this.callCopilotService.getCoachNarration(session, dto.languageCode);
   }
 
   /**
