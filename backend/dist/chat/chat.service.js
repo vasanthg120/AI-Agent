@@ -24,6 +24,7 @@ const mongoose_2 = require("mongoose");
 const redis_cache_service_1 = require("../common/redis/redis-cache.service");
 const agent_role_schema_1 = require("../agent-roles/schemas/agent-role.schema");
 const agents_1 = require("./agents");
+const stream_events_1 = require("./stream-events");
 const chat_attachments_service_1 = require("./chat-attachments.service");
 const conversation_schema_1 = require("./schemas/conversation.schema");
 class AgentUserFacingError extends Error {
@@ -246,13 +247,11 @@ let ChatService = ChatService_1 = class ChatService {
                             this.logger.warn(`Skipping malformed SSE frame: ${parseErr.message}`);
                             continue;
                         }
-                        if (event.type === 'delta' ||
-                            event.type === 'progress' ||
-                            event.type === 'reasoning' ||
-                            event.type === 'plan' ||
-                            event.type === 'agent_done' ||
-                            event.type === 'reflecting') {
-                            onEvent(event);
+                        if (!event || typeof event !== 'object')
+                            continue;
+                        const relayed = (0, stream_events_1.toStreamEvent)(event);
+                        if (relayed) {
+                            onEvent(relayed);
                         }
                         else if (event.type === 'done') {
                             settled = true;

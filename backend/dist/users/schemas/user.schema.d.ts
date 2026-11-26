@@ -38,6 +38,7 @@ export declare class User {
     assignedAgentId?: string;
     permissions?: string[];
     department?: string;
+    reportingManagerId?: string;
     active: boolean;
     voiceAccessEnabled: boolean;
     aiAccessEnabled: boolean;

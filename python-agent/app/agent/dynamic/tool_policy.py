@@ -1,68 +1,125 @@
-"""Write-action lockdown for dynamically-created sub-agents (Phase 2.5,
-Sub-step A of the approved plan).
+"""What a dynamically-created sub-agent may do with each registered tool.
 
-Why this exists: several tools already have a "preview-then-confirm" gate
-(call once without `confirmed` to preview, once more with `confirmed=true`
-to actually commit — see app.tools.crm_write_tool/gorilladash_action_tool/
-zapier_tool) that relies on a HUMAN seeing the preview in the chat turn and
-replying next turn to confirm. A dynamically-delegated sub-agent has no such
-turn — it runs one-shot inside master_agent._execute_leaf with nobody in
-that loop — so the model alone deciding to pass confirmed=true is not a
-real approval. Separately, a few tools (send_email, send_whatsapp_message,
-calendar_tool's schedule_meeting, integration_execute) have NO confirmation
-gate of any kind — a pre-existing, system-wide gap that also affects the
-main single-agent chat path and is explicitly NOT fixed here (a bigger,
-separate decision); for dynamic agents specifically, this module blocks
-them outright instead.
+A dynamic sub-agent runs with no human in its own execution turn. The
+preview-then-confirm gate some tools have relies on a person reading the
+preview and replying, so a model passing confirmed=true there is not an
+approval, and some write tools have no gate at all.
 
-Verified directly against every tool module in app/tools/ (not guessed) —
-see the Phase 2.5 plan's Sub-step A for the inventory. Everything not
-listed below (CRM/calendar/email/document lookups, search, memory, etc.)
-is read-only and unrestricted.
+EVERY registered tool must appear in TOOL_CLASSIFICATION. A tool that doesn't
+(newly added, renamed) is refused for dynamic agents: default deny. A test
+fails until it is classified, so adding a tool forces this decision.
 
-Only ever consulted when context.get("agent_instance_id") is set (see
-app.tools.registry.execute_tool) — the main single-agent chat path's
-behavior is completely untouched.
+Classes (each checked against the tool's handler, not guessed from its name):
+
+READ_ONLY      Only reads data. Allowed as-is.
+READ_ACTIONS   Mixes reads and writes. Only the actions in _READ_ACTIONS are
+               allowed; any other action, a new one or a missing one is
+               refused.
+PREVIEW_ONLY   Writes only when confirmed. `confirmed` is forced to False, so
+               the agent gets the preview and can never commit. zapier goes
+               further and previews every action for a dynamic agent, reads
+               included (see app.tools.zapier_tool): read/write is inferred
+               from names, so it isn't relied on with no human present.
+MEMORY_WRITE   Writes the user's long-term memory. Blocked, see below.
+BUSINESS_WRITE Commits to an external or business system with no confirmation
+               gate. Blocked.
+
+Why `remember` is blocked: it writes memory keyed by user only (no
+organization), Mem0 may update or delete existing memories while saving, and
+saved text is fed back into later system prompts, so text planted in a tool
+result could persist. Normal chat keeps `remember`, and the automatic memory
+extraction after each turn (app.routes.chat) is unaffected.
+
+Applied only when context carries agent_instance_id (see
+app.tools.registry.execute_tool); the normal chat path never consults it.
 """
 
-# Always refused outright for a dynamic agent — no confirmation flag exists
-# to downgrade these to a safe preview (they commit unconditionally), and
-# unlike the CRM write below, there's no separate read-only action to keep
-# allowed. integration_execute can reach an arbitrary POST/PUT/PATCH on any
-# connected integration depending on that org's own capability catalog, not
-# knowable safely from this module alone — blocked entirely rather than
-# guessed at.
-_ALWAYS_BLOCKED_TOOLS = {"send_email", "send_whatsapp_message", "integration_execute"}
+READ_ONLY = "read_only"
+READ_ACTIONS = "read_actions"
+PREVIEW_ONLY = "preview_only"
+MEMORY_WRITE = "memory_write"
+BUSINESS_WRITE = "business_write"
 
-# A specific action within an otherwise read-only/allowed tool that itself
-# commits unconditionally (no confirmed flag) — only that action is
-# refused, the tool's other actions stay allowed.
-_BLOCKED_ACTIONS = {
-    "crm_contact": {"upsert"},
-    "calendar_tool": {"schedule_meeting"},
+TOOL_CLASSIFICATION: dict[str, str] = {
+    "crm_account": READ_ONLY,
+    "crm_deal": READ_ONLY,
+    "crm_note": READ_ONLY,
+    "crm_product": READ_ONLY,
+    "crm_quote": READ_ONLY,
+    "crm_source_records": READ_ONLY,
+    "crm_tag": READ_ONLY,
+    "employee_lookup": READ_ONLY,
+    "gmail_lookup": READ_ONLY,
+    "gorilladash_lookup": READ_ONLY,
+    "integration_capabilities": READ_ONLY,
+    "outlook_lookup": READ_ONLY,
+    "query_database": READ_ONLY,
+    "search_business_context": READ_ONLY,
+    "search_documents": READ_ONLY,
+    "web_search": READ_ONLY,
+    "calendar_tool": READ_ACTIONS,
+    "crm_contact": READ_ACTIONS,
+    "crm_create_task": PREVIEW_ONLY,
+    "gorilladash_action": PREVIEW_ONLY,
+    "zapier": PREVIEW_ONLY,
+    "remember": MEMORY_WRITE,
+    "integration_execute": BUSINESS_WRITE,
+    "send_email": BUSINESS_WRITE,
+    "send_whatsapp_message": BUSINESS_WRITE,
 }
 
-# These tools already refuse to commit unless tool_input["confirmed"] is
-# True (see each module's own SPEC) — forcing it to False here means a
-# dynamic agent can still get the same preview text a normal chat turn
-# would, it just can never actually complete the action, regardless of
-# what the model itself decided to pass.
-_FORCE_PREVIEW_TOOLS = {"crm_create_task", "gorilladash_action", "zapier"}
+_READ_ACTIONS = {
+    "calendar_tool": {"list_events"},
+    "crm_contact": {"list", "search_by_ids"},
+}
+
+_GRANTABLE = {READ_ONLY, READ_ACTIONS, PREVIEW_ONLY}
+
+_BLOCK_REASONS = {
+    MEMORY_WRITE: "autonomous sub-agents may not write to long-term memory",
+    BUSINESS_WRITE: "this action has no safe preview mode for an autonomous sub-agent; a human must perform it directly",
+    None: "this tool has not been classified as safe for autonomous sub-agents",
+}
+
+
+def is_grantable(name: str) -> bool:
+    return TOOL_CLASSIFICATION.get(name) in _GRANTABLE
+
+
+def permitted_tools(parent_allowed: list[str] | None) -> list[str]:
+    """The tools a dynamic agent may hold: the parent's own scope (None means
+    the parent is unrestricted; an empty list means it has no tools) minus
+    everything this policy refuses outright. Always returns an explicit list."""
+    from app.tools.registry import TOOL_DEFINITIONS  # lazy: the registry imports this module
+
+    registered = [d["name"] for d in TOOL_DEFINITIONS]
+    parent = registered if parent_allowed is None else parent_allowed
+    return narrow(parent, [name for name in registered if is_grantable(name)])
+
+
+def narrow(requested: list[str] | None, scope: list[str]) -> list[str]:
+    """`requested` limited to `scope` — a child can only ever lose tools,
+    never gain one its parent doesn't hold. Nothing requested means nothing,
+    and so does anything that isn't a list of names (the planner writes it)."""
+    allowed = set(scope)
+    names = [n for n in requested if isinstance(n, str)] if isinstance(requested, list) else []
+    return [name for name in dict.fromkeys(names) if name in allowed]
 
 
 def check(name: str, tool_input: dict) -> tuple[dict | None, str | None]:
-    """Returns (safe_tool_input, None) if the call may proceed (with
-    `confirmed` forced to False for the preview-gated tools above), or
-    (None, reason) if it must be refused outright, before the real tool
-    handler is ever reached."""
-    if name in _ALWAYS_BLOCKED_TOOLS:
-        return None, "this action has no safe preview mode for an autonomous sub-agent — a human must perform it directly"
-
-    blocked_actions = _BLOCKED_ACTIONS.get(name)
-    if blocked_actions and tool_input.get("action") in blocked_actions:
-        return None, f"the '{tool_input.get('action')}' action has no safe preview mode for an autonomous sub-agent"
-
-    if name in _FORCE_PREVIEW_TOOLS and tool_input.get("confirmed"):
-        return {**tool_input, "confirmed": False}, None
-
-    return tool_input, None
+    """Returns (safe_tool_input, None) if the call may proceed, or
+    (None, reason) if it must be refused before the real handler is reached.
+    Looks only at the tool name and its input, never at surrounding text."""
+    kind = TOOL_CLASSIFICATION.get(name)
+    if kind == READ_ONLY:
+        return tool_input, None
+    if kind == READ_ACTIONS:
+        action = tool_input.get("action")
+        if action in _READ_ACTIONS.get(name, set()):
+            return tool_input, None
+        return None, f"only read actions are allowed here, not '{action}'"
+    if kind == PREVIEW_ONLY:
+        if tool_input.get("confirmed"):
+            return {**tool_input, "confirmed": False}, None
+        return tool_input, None
+    return None, _BLOCK_REASONS.get(kind, _BLOCK_REASONS[None])

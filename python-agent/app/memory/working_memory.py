@@ -55,7 +55,10 @@ def _is_cacheable(name: str, tool_input: dict) -> bool:
 def cached_execute_tool(
     name: str, tool_input: dict, context: dict, allowed_tools: list[str] | None = None
 ) -> str:
-    if not _is_cacheable(name, tool_input):
+    # A cached result must never answer a caller that isn't permitted the tool:
+    # fall through to execute_tool, which refuses it.
+    permitted = allowed_tools is None or name in allowed_tools
+    if not permitted or not _is_cacheable(name, tool_input):
         return execute_tool(name, tool_input, context, allowed_tools=allowed_tools)
 
     # Scoped by user_id so one user's cached result can never leak into

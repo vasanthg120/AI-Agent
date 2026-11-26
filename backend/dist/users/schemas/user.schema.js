@@ -145,6 +145,10 @@ __decorate([
     __metadata("design:type", String)
 ], User.prototype, "department", void 0);
 __decorate([
+    (0, mongoose_1.Prop)({ index: true, sparse: true }),
+    __metadata("design:type", String)
+], User.prototype, "reportingManagerId", void 0);
+__decorate([
     (0, mongoose_1.Prop)({ default: true }),
     __metadata("design:type", Boolean)
 ], User.prototype, "active", void 0);

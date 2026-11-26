@@ -12,8 +12,11 @@ How it's wired:
   (Authorization: Bearer <token>, Streamable HTTP), lists the tools, works out
   which app each action belongs to and whether it reads or writes, and caches
   that catalog in Mongo (zapier_catalogs) for the UI and the AI.
-- `call()` runs one catalogued action. Nothing outside the catalog can be run,
-  and write actions are gated by the AI tool behind explicit user confirmation.
+- `call()` runs one catalogued action. Nothing outside the catalog can be run.
+  Whether an action is a read is decided again here, at execution time
+  (`action_kind`), never taken from the cached catalog. Anything not provably a
+  read is refused unless the caller passes approved=True, which only the AI tool
+  does, after app.memory.zapier_approvals matches a preview from an earlier turn.
 
 Zapier bills two tasks per successful call; failures are free.
 """
@@ -57,7 +60,28 @@ META_TOOLS = {
     "write_code_action",
 }
 
-_READ_WORDS = ("find", "search", "get", "list", "lookup", "look_up", "retrieve", "read", "fetch")
+# Action classification (see kind_of). Zapier actions are whatever an
+# administrator enabled, so there is no fixed list to review: "read" has to be
+# shown by the action's name and title, and everything else is a write.
+_READ_VERBS = {"find", "search", "get", "list", "lookup", "retrieve", "read", "fetch"}
+# Change data wherever they appear: "find_or_create_contact", "get_and_delete_item".
+_MUTATION_WORDS = {
+    "add", "append", "approve", "archive", "assign", "cancel", "create", "creates", "delete", "destroy",
+    "disable", "duplicate", "edit", "enable", "execute", "forward", "grant", "insert", "invite", "merge",
+    "modify", "overwrite", "publish", "purge", "refund", "register", "reject", "remove", "rename", "reply",
+    "reschedule", "revoke", "send", "submit", "subscribe", "trigger", "unarchive", "unassign",
+    "unregister", "unsubscribe", "update", "upload", "upsert", "void", "wipe", "write",
+}
+# Also nouns ("find_record", "get_comment"), so they only count as a verb when
+# they lead the action or follow "and" / "or" / "then".
+_VERB_OR_NOUN = {
+    "activate", "apply", "attach", "book", "build", "call", "change", "charge", "clear", "clone", "close",
+    "comment", "complete", "convert", "copy", "deactivate", "deploy", "detach", "draft", "drop", "export",
+    "follow", "generate", "import", "issue", "label", "like", "link", "lock", "log", "make", "mark", "move",
+    "new", "notify", "open", "patch", "pause", "pay", "post", "push", "put", "record", "request", "reset",
+    "restore", "resume", "run", "save", "schedule", "set", "share", "start", "stop", "sync", "tag", "text",
+    "transfer", "trash", "unlink", "unlock", "vote",
+}
 _VERBS = (
     "find", "search", "get", "list", "lookup", "retrieve", "fetch", "create", "update", "add", "send", "delete",
     "remove", "upsert", "set", "post", "run", "start", "stop", "copy", "move", "archive",
@@ -147,11 +171,79 @@ def app_of(name: str, title: str | None, description: str | None) -> str:
     return match.group(1).strip() if match else "Other"
 
 
-def kind_of(name: str, annotations: dict | None) -> str:
-    if annotations and annotations.get("readOnlyHint") is True:
+def _words(text: str) -> list[str]:
+    spaced = re.sub(r"([a-z0-9])([A-Z])", r"\1 \2", text or "")
+    words: list[str] = []
+    for word in (w for w in re.split(r"[^a-z0-9]+", spaced.lower()) if w):
+        if word == "up" and words and words[-1] == "look":
+            words[-1] = "lookup"
+        else:
+            words.append(word)
+    return words
+
+
+def _may_change_data(words: list[str]) -> bool:
+    present = set(words)
+    if present & _MUTATION_WORDS:
+        return True
+    # Raw/custom API actions can send any HTTP method, whatever they're called.
+    if ("api" in present and present & {"request", "call"}) or (
+        "request" in present and present & {"raw", "custom", "http", "graphql"}
+    ):
+        return True
+    return any(
+        word in ("and", "or", "then") and following in _VERB_OR_NOUN for word, following in zip(words, words[1:])
+    )
+
+
+def _leading_verb(words: list[str]) -> str | None:
+    for index, word in enumerate(words):
+        # A trailing "list"/"read" names a thing or a state, not what's done.
+        if word in ("list", "read") and index and index == len(words) - 1:
+            continue
+        if word in _READ_VERBS or word in _MUTATION_WORDS or word in _VERB_OR_NOUN:
+            return word
+    return None
+
+
+def kind_of(name: str, annotations: dict | None = None, title: str | None = None) -> str:
+    """"read" or "write". Fails closed: an action is a read only when nothing
+    about it suggests a change AND either its verb is a read verb or, with no
+    known verb at all, Zapier marks it read-only. Anything unrecognised is a
+    write. Zapier's hint never overrides a name or title that says it changes
+    data."""
+    annotations = annotations or {}
+    if annotations.get("destructiveHint") is True or annotations.get("readOnlyHint") is False:
+        return "write"
+    app_prefix, separator, action_title = (title or "").partition(":")
+    if not separator:
+        app_prefix, action_title = "", title or ""
+    name_words = _words(name)
+    # Drop the app's own name, so e.g. "Follow Up Boss" isn't read as a verb.
+    prefix = _words(app_prefix)
+    if prefix and name_words[: len(prefix)] == prefix:
+        name_words = name_words[len(prefix):]
+    if _may_change_data(name_words) or _may_change_data(_words(action_title)):
+        return "write"
+    verb = _leading_verb(name_words)
+    if verb in _READ_VERBS:
         return "read"
-    lowered = name.lower()
-    return "read" if any(re.search(rf"(^|_){w}(_|$)", lowered) for w in _READ_WORDS) else "write"
+    return "read" if verb is None and annotations.get("readOnlyHint") is True else "write"
+
+
+def action_kind(tool: dict) -> str:
+    """The kind of a catalogued action, decided now. The cached "kind" is never
+    trusted: catalogs saved by earlier versions labelled some writes "read"."""
+    return kind_of(tool.get("name") or "", tool.get("annotations"), tool.get("title"))
+
+
+def apps_of(tools: list[dict]) -> list[dict]:
+    """Action titles per app, split into read and write."""
+    apps: dict[str, dict] = {}
+    for tool in tools:
+        entry = apps.setdefault(tool["app"], {"app": tool["app"], "read": [], "write": []})
+        entry[action_kind(tool)].append(tool["title"])
+    return sorted(apps.values(), key=lambda a: a["app"].lower())
 
 
 def discover(organization_id: str) -> dict:
@@ -189,20 +281,17 @@ def discover(organization_id: str) -> dict:
                 "title": title or tool.name.replace("_", " ").capitalize(),
                 "description": (tool.description or "")[:500],
                 "app": app_of(tool.name, title, tool.description),
-                "kind": kind_of(tool.name, annotations),
+                "kind": kind_of(tool.name, annotations, title),
+                "annotations": {k: annotations[k] for k in ("readOnlyHint", "destructiveHint") if k in annotations},
                 "inputSchema": tool.inputSchema or {"type": "object"},
             }
         )
     mode = "agentic" if meta and not tools else "managed"
-    apps: dict[str, dict] = {}
-    for tool in tools:
-        entry = apps.setdefault(tool["app"], {"app": tool["app"], "read": [], "write": []})
-        entry[tool["kind"]].append(tool["title"])
     catalog = {
         "organizationId": organization_id,
         "mode": mode,
         "tools": tools,
-        "apps": sorted(apps.values(), key=lambda a: a["app"].lower()),
+        "apps": apps_of(tools),
         "refreshedAt": datetime.now(timezone.utc),
         "error": None,
     }
@@ -214,14 +303,18 @@ def catalog_for(organization_id: str) -> dict | None:
     return get_db().zapier_catalogs.find_one({"organizationId": organization_id}, {"_id": 0})
 
 
-def call(organization_id: str, tool_name: str, arguments: dict) -> str:
-    """Runs one catalogued Zapier action and returns its result as text."""
+def call(organization_id: str, tool_name: str, arguments: dict, *, approved: bool = False) -> str:
+    """Runs one catalogued Zapier action and returns its result as text. This is
+    the only place an action reaches Zapier: anything but a read needs
+    approved=True."""
     catalog = catalog_for(organization_id) or {}
     tool = next((t for t in catalog.get("tools") or [] if t["name"] == tool_name), None)
-    if not tool:
+    if not tool or tool_name in META_TOOLS:
         raise ZapierError(
             f"'{tool_name}' isn't one of the Zapier actions enabled for HaiVE. Use the 'actions' listing to see what is."
         )
+    if not approved and action_kind(tool) != "read":
+        raise ZapierError(f"'{tool['title']}' can change data, so it can't run without the user's approval.")
     token = connection_token(organization_id)
     if not token:
         raise ZapierError("Zapier isn't connected. Connect it in Settings → Data Sources.")

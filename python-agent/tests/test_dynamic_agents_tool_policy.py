@@ -72,7 +72,7 @@ class ToolPolicyCheckTests(unittest.TestCase):
         self.assertEqual(safe_input, {"subject": "call back"})
 
     def test_ordinary_read_only_tools_pass_through_entirely_unrestricted(self):
-        for name in ("crm_deal", "crm_note", "outlook_lookup", "web_search", "remember"):
+        for name in ("crm_deal", "crm_note", "outlook_lookup", "web_search"):
             with self.subTest(tool=name):
                 tool_input = {"whatever": "value"}
                 safe_input, reason = tool_policy.check(name, tool_input)

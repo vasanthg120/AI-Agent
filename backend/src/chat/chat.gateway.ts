@@ -177,6 +177,10 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
             client.emit('agentDone', { conversationId, agent: event.agent });
           } else if (event.type === 'reflecting') {
             client.emit('reflecting', { conversationId, reason: event.reason });
+          } else if (event.type === 'agent_created' || event.type === 'agent_progress' || event.type === 'validation') {
+            // Dynamic-agent lifecycle, one socket event for all three. The
+            // fields are already limited to safe ones by toStreamEvent.
+            client.emit('agentActivity', { conversationId, ...event });
           }
         },
         agentId,

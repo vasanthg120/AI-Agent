@@ -22,6 +22,9 @@ class DynamicAgent:
     status: str = "pending"  # pending | running | done | failed
     result: str | None = None
     error: str | None = None
+    # Set with `error` when an attempt raises (see retry_policy.classify).
+    error_category: str | None = None
+    error_retryable: bool = False
     # Populated only for an agent that actually ran as a leaf (see
     # master_agent._execute_leaf) — the real tool names its own
     # get_graph().invoke() call used, needed by app.agent.orchestrator's
@@ -59,3 +62,8 @@ class DynamicAgent:
     # restricts this to the single enum value "anthropic" for the same
     # reason, never fabricating support that doesn't exist.
     provider: str = "anthropic"
+    # True for a sub-agent created by a parent's decomposition. Its slot in
+    # the request-wide agent budget is taken at creation, so running it must
+    # never take a second one. False only for the request's root agent, which
+    # takes its slot only if it executes directly.
+    created_by_parent: bool = False

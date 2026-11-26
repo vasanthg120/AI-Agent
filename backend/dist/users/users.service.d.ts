@@ -113,6 +113,7 @@ export declare class UsersService {
         roles: string[];
         assignedAgentId: string | undefined;
         department: string | undefined;
+        reportingManagerId: string | undefined;
         active: boolean;
         voiceAccessEnabled: boolean;
         aiAccessEnabled: boolean;
@@ -139,6 +140,7 @@ export declare class UsersService {
         roles: string[];
         assignedAgentId: string | undefined;
         department: string | undefined;
+        reportingManagerId: string | undefined;
         active: boolean;
         voiceAccessEnabled: boolean;
         aiAccessEnabled: boolean;
@@ -164,6 +166,7 @@ export declare class UsersService {
         roles: string[];
         assignedAgentId: string | undefined;
         department: string | undefined;
+        reportingManagerId: string | undefined;
         active: boolean;
         voiceAccessEnabled: boolean;
         aiAccessEnabled: boolean;
@@ -407,6 +410,7 @@ export declare class UsersService {
             roles: string[];
             assignedAgentId: string | undefined;
             department: string | undefined;
+            reportingManagerId: string | undefined;
             active: boolean;
             voiceAccessEnabled: boolean;
             aiAccessEnabled: boolean;
@@ -434,6 +438,7 @@ export declare class UsersService {
         roles: string[];
         assignedAgentId: string | undefined;
         department: string | undefined;
+        reportingManagerId: string | undefined;
         active: boolean;
         voiceAccessEnabled: boolean;
         aiAccessEnabled: boolean;
@@ -444,6 +449,14 @@ export declare class UsersService {
         language: string | undefined;
         createdAt: Date | undefined;
     }>;
+    assertValidReportingManager(organizationId: string, userId: string, managerId: string): Promise<void>;
+    hierarchy(organizationId: string): Promise<{
+        id: string;
+        name: string;
+        email: string;
+        active: boolean;
+        reportingManagerId?: string;
+    }[]>;
     deleteByAdmin(id: string, organizationId: string, caller?: JwtPayload): Promise<void>;
     updateOwnProfile(userId: string, dto: UpdateProfileDto): Promise<{
         avatarUrl: string | undefined;
@@ -455,6 +468,7 @@ export declare class UsersService {
         roles: string[];
         assignedAgentId: string | undefined;
         department: string | undefined;
+        reportingManagerId: string | undefined;
         active: boolean;
         voiceAccessEnabled: boolean;
         aiAccessEnabled: boolean;
@@ -475,6 +489,7 @@ export declare class UsersService {
         roles: string[];
         assignedAgentId: string | undefined;
         department: string | undefined;
+        reportingManagerId: string | undefined;
         active: boolean;
         voiceAccessEnabled: boolean;
         aiAccessEnabled: boolean;

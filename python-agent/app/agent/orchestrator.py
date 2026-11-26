@@ -29,14 +29,20 @@ through to the unchanged fixed-specialist/single-loop path below, so this
 is strictly additive — see _run_dynamic_delegation.
 """
 
+import logging
+import uuid
 from concurrent.futures import ThreadPoolExecutor
 
 from app.agent import anthropic_client, cancellation, groq_client, trivial_router
 from app.agent.dynamic import runner as dynamic_runner
+from app.agent.dynamic import stream_events, tool_policy
 from app.agent.graph import final_text, get_graph
 from app.agent.llm_client import SYSTEM_PROMPT
 from app.agent.specialists import SPECIALISTS
 from app.core import provider_account_status
+from app.observability.guardrails import redact_secrets
+
+logger = logging.getLogger(__name__)
 
 MAX_ASSIGNMENTS = len(SPECIALISTS)
 
@@ -46,7 +52,9 @@ def _last_user_text(messages: list[dict]) -> str:
     return content if isinstance(content, str) else str(content)
 
 
-def _reflect(state_input: dict, output_items: list[dict], tools_used: list[str]) -> dict:
+def _reflect(
+    state_input: dict, output_items: list[dict], tools_used: list[str], corrective_overrides: dict | None = None
+) -> dict:
     """Bounded self-critique: judges the draft reply against the original
     request, and if it finds a concrete gap, runs exactly one corrective
     round (the plain single-loop graph, full tool access) before returning.
@@ -112,6 +120,8 @@ def _reflect(state_input: dict, output_items: list[dict], tools_used: list[str])
                 "rounds": 0,
                 "provider": "",
                 "allowed_tools": None,
+                # Only the dynamic path passes these (see _dynamic_review_scope).
+                **(corrective_overrides or {}),
             }
         )
     except Exception:
@@ -159,7 +169,9 @@ voice — don't mention the sub-agents or that work was delegated, just answer a
 gathered this yourself."""
 
 
-def _synthesize_and_finish(state_input: dict, on_event, cancel_event, findings: list[dict]) -> dict:
+def _synthesize_and_finish(
+    state_input: dict, on_event, cancel_event, findings: list[dict], corrective_overrides: dict | None = None
+) -> dict:
     """Shared tail for every delegation path in this module (fixed-specialist
     below, and the dynamic engine in _run_dynamic_delegation): merge 2+
     sub-agent findings into one final-voice reply via the same synthesis
@@ -188,39 +200,38 @@ def _synthesize_and_finish(state_input: dict, on_event, cancel_event, findings: 
         request_id=state_input.get("request_id", ""),
     )
     tools_used = [tool for f in findings for tool in f["tools_used"]]
-    return _attach_suggestions(state_input, _reflect(state_input, output_items, tools_used))
+    return _attach_suggestions(state_input, _reflect(state_input, output_items, tools_used, corrective_overrides))
 
 
 def _dynamic_event_adapter(on_event):
-    """Wraps the real on_event so app.agent.dynamic's own event types
-    (delegation_started/agent_created/agent_progress/understanding/
-    tool_execution/agent_completed/validation — Phases 3 and 2.5's
-    Sub-step E) keep flowing through unchanged (future frontend work can
-    render them directly) while ALSO translating the ones that have a
-    direct existing-UI equivalent into the plan/agent_done/reasoning/
-    progress shapes the existing single-agent and fixed-specialist paths
-    already emit — so this path renders using the SAME, already-working
-    frontend handling, with no frontend change needed for this phase."""
+    """Turns app.agent.dynamic's internal events into client events (see
+    app.agent.dynamic.stream_events for the contract). Internal events are
+    never passed through, and each yields at most one client event: the
+    existing plan/agent_done/reasoning/progress shapes where one applies, so
+    current UI handling keeps working, else a status-only event."""
     if on_event is None:
         return None
 
     def adapter(event: dict) -> None:
-        on_event(event)
-        event_type = event.get("type")
-        if event_type == "delegation_started":
-            on_event({"type": "plan", "agents": event.get("agents", [])})
-        elif event_type == "agent_progress" and event.get("status") == "done":
-            on_event({"type": "agent_done", "agent": event.get("agent")})
-        elif event_type == "understanding":
-            # Same shape classify_request's own "reasoning" event already
-            # uses (see run() below) — the frontend already renders it.
-            on_event({"type": "reasoning", "text": event.get("text")})
-        elif event_type == "tool_execution":
-            # Same shape anthropic_client.call's own "progress" event
-            # already uses for the single-agent path.
-            on_event({"type": "progress", "tool": event.get("tool")})
+        client_event = stream_events.to_client_event(event)
+        if client_event is not None:
+            on_event(client_event)
 
     return adapter
+
+
+def _dynamic_review_scope(state_input: dict) -> dict:
+    """Reflection's corrective round after dynamic delegation also runs with no
+    human in the loop, over findings built from untrusted tool output, so it is
+    held to the same rules as the sub-agents: the selected agent's tools minus
+    what app.agent.dynamic.tool_policy refuses, and that policy enforced at
+    execution (switched on by agent_instance_id)."""
+    return {
+        "allowed_tools": tool_policy.permitted_tools(state_input.get("allowed_tools")),
+        "agent_instance_id": f"dyn-review-{uuid.uuid4().hex[:12]}",
+        "parent_agent_id": None,
+        "delegation_depth": 0,
+    }
 
 
 def _run_dynamic_delegation(state_input: dict, on_event, cancel_event) -> dict | None:
@@ -244,6 +255,9 @@ def _run_dynamic_delegation(state_input: dict, on_event, cancel_event) -> dict |
             base_messages=state_input["messages"],
             cancel_event=cancel_event,
             on_event=_dynamic_event_adapter(on_event),
+            parent_allowed_tools=state_input.get("allowed_tools"),
+            system_prompt=state_input.get("system_prompt"),
+            model_tier=state_input.get("model_tier"),
         )
         agents_run = result["agents"]
         if not agents_run:
@@ -257,15 +271,36 @@ def _run_dynamic_delegation(state_input: dict, on_event, cancel_event) -> dict |
             output_items = [
                 {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": only.result or ""}]}
             ]
-            return _attach_suggestions(state_input, _reflect(state_input, output_items, only.tools_used))
+            return _attach_suggestions(
+                state_input,
+                _reflect(state_input, output_items, only.tools_used, _dynamic_review_scope(state_input)),
+            )
 
         findings = [
             {"agent": a.name, "task": a.task_description, "output": a.result or "", "tools_used": a.tools_used}
             for a in agents_run
         ]
-        return _synthesize_and_finish(state_input, on_event, cancel_event, findings)
-    except Exception:
+        return _synthesize_and_finish(
+            state_input, on_event, cancel_event, findings, _dynamic_review_scope(state_input)
+        )
+    except dynamic_runner.DynamicAgentsDisabledError:
+        return None  # this organization hasn't opted in: expected, not a failure
+    except Exception as exc:
+        logger.warning(
+            "Dynamic delegation failed; falling back. request_id=%s organization_id=%s conversation_id=%s error=%s: %s",
+            state_input.get("request_id", ""),
+            state_input.get("organization_id"),
+            state_input.get("conversation_id", ""),
+            type(exc).__name__,
+            redact_secrets(str(exc))[:300],
+        )
         return None
+
+
+def _specialist_tools(agent_key: str, role_tools: list[str] | None) -> list[str]:
+    """The specialist's tools, limited to the selected role's when it has a limit."""
+    tools = SPECIALISTS[agent_key]["tools"]
+    return tools if role_tools is None else [t for t in tools if t in role_tools]
 
 
 def _run_specialist(
@@ -277,6 +312,7 @@ def _run_specialist(
     conversation_id: str,
     cancel_event,
     request_id: str = "",
+    role_tools: list[str] | None = None,
 ) -> dict:
     spec = SPECIALISTS[agent_key]
     result = get_graph().invoke(
@@ -291,7 +327,7 @@ def _run_specialist(
             "conversation_id": conversation_id,
             "on_event": None,  # concurrent specialists share one SSE stream; only coarse start/done markers go out, from run() below
             "system_prompt": spec["system_prompt"],
-            "allowed_tools": spec["tools"],
+            "allowed_tools": _specialist_tools(agent_key, role_tools),
             "cancel_event": cancel_event,
             "request_id": request_id,
         }
@@ -306,7 +342,11 @@ def run(state_input: dict) -> dict:
     """
     on_event = state_input.get("on_event")
     conversation_id = state_input.get("conversation_id", "")
-    cancel_event = cancellation.start(conversation_id) if conversation_id else None
+    cancel_event = (
+        cancellation.start(conversation_id, state_input.get("user_id", ""), state_input.get("organization_id"))
+        if conversation_id
+        else None
+    )
     state_input = {**state_input, "cancel_event": cancel_event}
 
     try:
@@ -376,7 +416,15 @@ def run(state_input: dict) -> dict:
             if dynamic_result is not None:
                 return dynamic_result
 
-        assignments = [a for a in plan.get("assignments", []) if a.get("agent") in SPECIALISTS][:MAX_ASSIGNMENTS]
+        # A custom role restricted to certain tools stays restricted when its
+        # request is delegated. A specialist left with none of them is dropped,
+        # never run with an empty list (the graph reads that as "all tools").
+        role_tools = state_input.get("allowed_tools") or None
+        assignments = [
+            a
+            for a in plan.get("assignments", [])
+            if a.get("agent") in SPECIALISTS and _specialist_tools(a["agent"], role_tools)
+        ][:MAX_ASSIGNMENTS]
         if plan.get("mode") != "delegate" or not assignments:
             result = get_graph().invoke(state_input)
             return _attach_suggestions(state_input, _reflect(state_input, result["messages"], result.get("tools_used", [])))
@@ -396,6 +444,7 @@ def run(state_input: dict) -> dict:
                     state_input["conversation_id"],
                     cancel_event,
                     state_input.get("request_id", ""),
+                    role_tools,
                 )
                 for a in assignments
             ]
@@ -405,7 +454,9 @@ def run(state_input: dict) -> dict:
             if on_event:
                 on_event({"type": "agent_done", "agent": finding["agent"]})
 
-        return _synthesize_and_finish(state_input, on_event, cancel_event, findings)
+        return _synthesize_and_finish(
+            state_input, on_event, cancel_event, findings, {"allowed_tools": role_tools} if role_tools else None
+        )
     finally:
         if conversation_id:
-            cancellation.finish(conversation_id)
+            cancellation.finish(conversation_id, cancel_event)

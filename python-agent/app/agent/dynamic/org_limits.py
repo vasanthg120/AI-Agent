@@ -76,7 +76,8 @@ def _clamp(value, ceiling, min_value):
     whatever numeric type the ceiling itself is (int for counts, float for
     max_cost_usd) — never forces an int cast, which would silently truncate
     a legitimate fractional cost ceiling."""
-    if not isinstance(value, (int, float)) or isinstance(value, bool) or value < min_value:
+    # `not value >= min_value` also rejects NaN, which every `<` test lets through.
+    if not isinstance(value, (int, float)) or isinstance(value, bool) or not value >= min_value:
         return ceiling
     return min(value, ceiling)
 

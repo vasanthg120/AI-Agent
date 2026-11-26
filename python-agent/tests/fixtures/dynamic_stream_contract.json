@@ -1,0 +1,68 @@
+[
+  {
+    "type": "reasoning",
+    "text": "Planning…"
+  },
+  {
+    "type": "plan",
+    "agents": [
+      "CRM lookup",
+      "Copy [redacted]"
+    ]
+  },
+  {
+    "type": "agent_created",
+    "agent": "CRM lookup",
+    "agent_id": "dyn-000000000001",
+    "depth": 1
+  },
+  {
+    "type": "agent_created",
+    "agent": "Copy [redacted]",
+    "agent_id": "dyn-000000000002",
+    "depth": 1
+  },
+  {
+    "type": "agent_progress",
+    "agent": "Copy [redacted]",
+    "agent_id": "dyn-000000000002",
+    "status": "failed"
+  },
+  {
+    "type": "reasoning",
+    "text": "Planning…"
+  },
+  {
+    "type": "agent_progress",
+    "agent": "CRM lookup",
+    "agent_id": "dyn-000000000001",
+    "status": "running"
+  },
+  {
+    "type": "agent_progress",
+    "agent": "CRM lookup",
+    "agent_id": "dyn-000000000001",
+    "status": "retrying",
+    "attempt": 1
+  },
+  {
+    "type": "agent_progress",
+    "agent": "CRM lookup",
+    "agent_id": "dyn-000000000001",
+    "status": "running"
+  },
+  {
+    "type": "progress",
+    "tool": "crm_deal"
+  },
+  {
+    "type": "validation",
+    "agent": "CRM lookup",
+    "agent_id": "dyn-000000000001",
+    "status": "passed"
+  },
+  {
+    "type": "agent_done",
+    "agent": "CRM lookup"
+  }
+]

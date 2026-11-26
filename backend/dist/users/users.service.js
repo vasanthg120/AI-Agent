@@ -58,6 +58,7 @@ const bcrypt = __importStar(require("bcrypt"));
 const mongoose_2 = require("mongoose");
 const agent_role_schema_1 = require("../agent-roles/schemas/agent-role.schema");
 const agents_1 = require("../chat/agents");
+const reporting_hierarchy_1 = require("./reporting-hierarchy");
 const user_schema_1 = require("./schemas/user.schema");
 const SALT_ROUNDS = 12;
 const MAX_SESSIONS = 10;
@@ -466,6 +467,17 @@ let UsersService = class UsersService {
             set.voiceAccessEnabled = dto.voiceAccessEnabled;
         if (dto.aiAccessEnabled !== undefined)
             set.aiAccessEnabled = dto.aiAccessEnabled;
+        if (dto.reportingManagerId !== undefined) {
+            const managerId = (dto.reportingManagerId ?? '').trim();
+            if (!managerId) {
+                if (target.reportingManagerId)
+                    unset.reportingManagerId = '';
+            }
+            else {
+                await this.assertValidReportingManager(organizationId, id, managerId);
+                set.reportingManagerId = managerId;
+            }
+        }
         if (dto.active === false)
             set.sessions = [];
         const updated = await this.userModel
@@ -475,6 +487,26 @@ let UsersService = class UsersService {
             throw new common_1.NotFoundException('User not found');
         return this.describeUser(updated, await this.aiRolesOf(organizationId));
     }
+    async assertValidReportingManager(organizationId, userId, managerId) {
+        if (!(0, mongoose_2.isValidObjectId)(managerId))
+            throw new common_1.BadRequestException('Choose a reporting manager from this business.');
+        if (managerId === userId)
+            throw new common_1.BadRequestException('A person can’t report to themself.');
+        const manager = await this.userModel.findOne({ _id: managerId, organizationId }).select('active').lean().exec();
+        if (!manager)
+            throw new common_1.BadRequestException('The reporting manager must be a person in this business.');
+        if (!manager.active)
+            throw new common_1.BadRequestException('The reporting manager must be an active account.');
+        const linked = await this.userModel.find({ organizationId, reportingManagerId: { $exists: true } }).select('reportingManagerId').lean().exec();
+        const managerOf = new Map(linked.map((u) => [u._id.toString(), u.reportingManagerId]));
+        if ((0, reporting_hierarchy_1.wouldCreateCycle)(userId, managerId, (id) => managerOf.get(id))) {
+            throw new common_1.BadRequestException('That would create a reporting loop: the chosen manager already reports to this person.');
+        }
+    }
+    async hierarchy(organizationId) {
+        const rows = await this.userModel.find({ organizationId }).select('name email active reportingManagerId').lean().exec();
+        return rows.map((u) => ({ id: u._id.toString(), name: u.name, email: u.email, active: u.active, reportingManagerId: u.reportingManagerId }));
+    }
     async deleteByAdmin(id, organizationId, caller) {
         await this.assertNotOwner(id, organizationId);
         if (caller && !caller.roles.includes('owner') && !caller.roles.includes('admin'))
@@ -483,6 +515,7 @@ let UsersService = class UsersService {
         if (!deleted)
             throw new common_1.NotFoundException('User not found');
         await this.userModel.deleteMany({ linkedLoginUserId: id }).exec();
+        await this.userModel.updateMany({ organizationId, reportingManagerId: id }, { $unset: { reportingManagerId: '' } }).exec();
     }
     async updateOwnProfile(userId, dto) {
         const update = {};
@@ -531,6 +564,7 @@ let UsersService = class UsersService {
             roles: user.roles,
             assignedAgentId: user.assignedAgentId,
             department: user.department,
+            reportingManagerId: user.reportingManagerId,
             active: user.active,
             voiceAccessEnabled: user.voiceAccessEnabled,
             aiAccessEnabled: user.aiAccessEnabled,

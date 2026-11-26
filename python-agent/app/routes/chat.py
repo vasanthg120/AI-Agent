@@ -230,5 +230,6 @@ class CancelRequest(BaseModel):
 def cancel_stream(payload: CancelRequest, user: dict = Depends(get_current_user)):
     """Signals app.agent.cancellation for an in-flight /chat/stream request on
     this conversation — a no-op (cancelled: false) if nothing is running for
-    it, e.g. it already finished before this arrived."""
-    return {"cancelled": cancellation.request_cancel(payload.conversation_id)}
+    it, e.g. it already finished before this arrived. Only the caller's own
+    turns, in their own organization, are cancelled."""
+    return {"cancelled": cancellation.request_cancel(payload.conversation_id, user["sub"], user.get("organizationId"))}

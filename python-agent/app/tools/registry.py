@@ -81,6 +81,18 @@ def _validate_input(name: str, tool_input: dict) -> str | None:
     return f"Invalid input for '{name}': {error.message}" if error else None
 
 
+def _traced(name: str, context: dict):
+    return traced_tool_call(
+        name,
+        user_id=context.get("user_id", ""),
+        organization_id=context.get("organization_id"),
+        conversation_id=context.get("conversation_id", ""),
+        agent_instance_id=context.get("agent_instance_id"),
+        parent_agent_id=context.get("parent_agent_id"),
+        delegation_depth=context.get("delegation_depth"),
+    )
+
+
 def execute_tool(name: str, tool_input: dict, context: dict, allowed_tools: list[str] | None = None) -> str:
     """The single real execution boundary for every tool call — reached from
     the live chat loop (app.agent.graph, via app.memory.working_memory), the
@@ -98,6 +110,11 @@ def execute_tool(name: str, tool_input: dict, context: dict, allowed_tools: list
         return f"Unknown tool: {name}"
 
     if allowed_tools is not None and name not in allowed_tools:
+        if context.get("agent_instance_id"):
+            # A sub-agent asking for a tool outside its scope (a prompt
+            # injection, for instance) must still leave an audit row.
+            with _traced(name, context) as outcome:
+                outcome.update(success=False, blocked=True, block_reason="outside this sub-agent's permitted tools")
         return f"Tool '{name}' is not permitted in this context."
 
     invalid = _validate_input(name, tool_input)
@@ -108,15 +125,7 @@ def execute_tool(name: str, tool_input: dict, context: dict, allowed_tools: list
     if not rate_limit_allow(rate_limit_key, TOOL_CALLS_PER_MINUTE, 60):
         return f"Tool '{name}' rate limit exceeded — try again in a minute."
 
-    with traced_tool_call(
-        name,
-        user_id=context.get("user_id", ""),
-        organization_id=context.get("organization_id"),
-        conversation_id=context.get("conversation_id", ""),
-        agent_instance_id=context.get("agent_instance_id"),
-        parent_agent_id=context.get("parent_agent_id"),
-        delegation_depth=context.get("delegation_depth"),
-    ) as outcome:
+    with _traced(name, context) as outcome:
         if context.get("agent_instance_id"):
             # A dynamically-created sub-agent (see app.agent.dynamic) — the
             # one real execution boundary for its own write-action lockdown

@@ -10,22 +10,33 @@ recursing further: exceeding MAX_DEPTH or MAX_AGENTS_PER_REQUEST falls that
 branch back to a single direct attempt (or a clearly-marked "budget
 exhausted" result) rather than ever silently dropping part of the task.
 
-MAX_EXECUTION_SECONDS bounds the whole request-wide call tree (checked at
-every recursion/branch boundary in master_agent) — it does NOT wrap a
-single leaf's app.agent.graph.get_graph().invoke() call in its own timeout,
-since that would need a bigger change (running the synchronous LangGraph
-loop under a cancellable timeout) out of scope for this phase. A single
-very slow leaf can still run past the deadline; only documented here, not
-silently claimed as fully enforced.
+MAX_EXECUTION_SECONDS bounds the whole request-wide call tree: checked at
+every recursion/branch boundary in master_agent, and by usage_limiter before
+each model or tool call a running leaf makes. It does NOT wrap a leaf in its
+own timeout, since that would need a bigger change (running the synchronous
+LangGraph loop under a cancellable timeout). A single very slow call can
+still run past the deadline; only documented here, not silently claimed as
+fully enforced.
 
 MAX_RETRIES bounds how many times master_agent._execute_leaf_with_retry may
 retry ONE leaf's own transient failure (Phase 2.5, Sub-step B) — never a
 re-decomposition, never applied to a structural "skipped" result.
 
-MAX_MODEL_CALLS/MAX_TOOL_CALLS/MAX_TOKENS/MAX_COST_USD (Sub-step C) bound
-the whole request-wide tree the same way MAX_EXECUTION_SECONDS does —
-checked before starting the NEXT agent/branch, not a mid-call cutoff for
-whichever leaf is already running.
+How strictly each is enforced across parallel sub-agents:
+
+HARD  MAX_DEPTH, MAX_AGENTS_PER_REQUEST (slot taken under a lock when an agent
+      is created), MAX_MODEL_CALLS and MAX_TOOL_CALLS (each call reserved
+      under a lock before it is made; see usage_limiter for exactly which
+      calls are counted). MAX_RETRIES is a hard per-agent bound.
+SOFT  MAX_TOKENS and MAX_COST_USD: a call's usage is only known after it
+      finishes, so they are checked from recorded usage before an agent
+      starts. Agents already running (at most MAX_AGENTS_PER_REQUEST, each up
+      to MAX_TOOL_ROUNDS + 1 rounds, within MAX_MODEL_CALLS in total) can
+      take the request past them, and there is no fixed bound in tokens or
+      dollars. A failed usage lookup counts as zero usage.
+SOFT  MAX_EXECUTION_SECONDS: checked before an agent starts, around each
+      retry and before each sub-agent model or tool call. A call already in
+      flight is not interrupted.
 """
 
 from app.config import settings

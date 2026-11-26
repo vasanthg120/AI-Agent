@@ -44,6 +44,9 @@ def run(
     base_messages: list[dict] | None = None,
     cancel_event=None,
     on_event=None,
+    parent_allowed_tools: list[str] | None = None,
+    system_prompt: str | None = None,
+    model_tier: str | None = None,
 ) -> dict:
     if not ENABLED:
         raise DynamicAgentsDisabledError(
@@ -63,4 +66,7 @@ def run(
         base_messages=base_messages,
         cancel_event=cancel_event,
         on_event=on_event,
+        parent_allowed_tools=parent_allowed_tools,
+        system_prompt=system_prompt,
+        model_tier=model_tier,
     )

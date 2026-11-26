@@ -1318,14 +1318,17 @@ def classify_request(
     return block.input
 
 
-def _dynamic_plan_tool() -> dict:
+def _dynamic_plan_tool(available_tools: list[str] | None = None) -> dict:
     """Built fresh from the REAL tool registry (TOOL_DEFINITIONS), not a
     hardcoded list — so a sub-agent's tools enum can never drift out of sync
     with app.tools.registry, and a tool added/removed there is picked up
     automatically. Unlike PLAN_TOOL's fixed SPECIALISTS enum above, this
     lets the planner assemble an arbitrary, task-specific toolset per
     dynamic agent — app.agent.dynamic's whole reason for existing."""
-    tool_names = sorted(d["name"] for d in TOOL_DEFINITIONS)
+    registered = sorted(d["name"] for d in TOOL_DEFINITIONS)
+    tool_names = registered if available_tools is None else [n for n in registered if n in set(available_tools)]
+    # An empty enum isn't a valid schema: with nothing available, only an empty list is.
+    tool_list: dict = {"items": {"type": "string", "enum": tool_names}} if tool_names else {"items": {"type": "string"}, "maxItems": 0}
     return {
         "name": "plan_dynamic_delegation",
         "description": (
@@ -1347,8 +1350,11 @@ def _dynamic_plan_tool() -> dict:
                 },
                 "direct_tools": {
                     "type": "array",
-                    "description": "Only populated when decompose is false — the tools this single agent needs for the whole task.",
-                    "items": {"type": "string", "enum": tool_names},
+                    "description": (
+                        "Only populated when decompose is false — every tool this single agent needs for the whole task. "
+                        "It receives only the tools listed here; an empty list means it gets no tools."
+                    ),
+                    **tool_list,
                 },
                 "sub_agents": {
                     "type": "array",
@@ -1360,8 +1366,11 @@ def _dynamic_plan_tool() -> dict:
                             "task_description": {"type": "string", "description": "The specific sub-task this agent is responsible for."},
                             "tools": {
                                 "type": "array",
-                                "description": "The tools this sub-agent needs for its sub-task — only what it needs, not the full catalog.",
-                                "items": {"type": "string", "enum": tool_names},
+                                "description": (
+                                    "Every tool this sub-agent needs for its sub-task — only what it needs, not the full catalog. "
+                                    "It receives only the tools listed here; an empty list means it gets no tools."
+                                ),
+                                **tool_list,
                             },
                             "output_schema": {
                                 "type": "object",
@@ -1408,6 +1417,7 @@ def plan_dynamic_delegation(
     user_id: str = "",
     conversation_id: str = "",
     request_id: str = "",
+    available_tools: list[str] | None = None,
 ) -> dict:
     """One-shot forced-tool-choice planning pass for app.agent.dynamic — the
     same mechanics as classify_request above (forced tool_choice, one
@@ -1420,7 +1430,7 @@ def plan_dynamic_delegation(
     if not api_key:
         raise RuntimeError("No Anthropic API key configured")
 
-    plan_tool = _dynamic_plan_tool()
+    plan_tool = _dynamic_plan_tool(available_tools)
     with traced_llm_call(
         "dynamic_plan",
         organization_id=organization_id,

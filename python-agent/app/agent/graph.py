@@ -21,14 +21,25 @@ MAX_TOOL_ROUNDS = settings.max_tool_rounds
 
 
 def planner_node(state: AgentState) -> dict:
+    cancel_event = state.get("cancel_event")
+    if state.get("agent_instance_id") is not None and cancel_event is not None and cancel_event.is_set():
+        # Cancelled while its tools ran: a dynamic sub-agent opens no further
+        # model call. Normal chat keeps its existing behaviour.
+        return {"messages": [], "pending_calls": []}
     provider = state.get("provider") or choose_provider(state)
     allowed_tools = state.get("allowed_tools")
+    # For a dynamic sub-agent an empty list means "no tools". Every other
+    # caller keeps the original rule (None or empty = the full registry).
+    scoped = bool(allowed_tools) or (state.get("agent_instance_id") is not None and allowed_tools is not None)
+    limiter = state.get("usage_limiter")
+    if limiter is not None:
+        limiter.reserve_model_call()  # raises before the call is made
     output_items, used_provider = call_llm(
         state["messages"],
         provider=provider,
         on_event=state.get("on_event"),
         system_prompt=state.get("system_prompt"),
-        tools=get_tool_definitions(allowed_tools) if allowed_tools else None,
+        tools=get_tool_definitions(allowed_tools) if scoped else None,
         cancel_event=state.get("cancel_event"),
         model=choose_model(state),
         organization_id=state.get("organization_id"),
@@ -48,6 +59,9 @@ def tools_node(state: AgentState) -> dict:
         "user_id": state["user_id"],
         "organization_id": state.get("organization_id"),
         "conversation_id": state["conversation_id"],
+        # One per user message (app.routes.chat). Zapier writes use it to
+        # require that the approved preview came from an earlier turn.
+        "request_id": state.get("request_id", ""),
         # Delegation-tree identity (see AgentState's own field comments) —
         # execute_tool reads these straight off context, no signature change
         # needed there; None for every non-dynamic-agent caller.
@@ -62,15 +76,24 @@ def tools_node(state: AgentState) -> dict:
         args = json.loads(call.get("arguments") or "{}")
         return cached_execute_tool(call["name"], args, context, allowed_tools=allowed_tools)
 
+    # Reserved here, before anything runs and in one thread, so a batch can
+    # never overshoot the request-wide tool-call limit.
+    limiter = state.get("usage_limiter")
+    reserved = [limiter is None or limiter.try_reserve_tool_call() for _ in pending_calls]
+
     # Claude often requests several independent lookups in one turn (e.g. one
     # crm_note call per contact) — those are I/O-bound HTTP calls with no
     # dependency on each other, so run them concurrently instead of one at a
     # time. executor.map preserves input order, so zip pairs each call with
     # its own result correctly.
     with ThreadPoolExecutor(max_workers=min(len(pending_calls), 8) or 1) as executor:
-        results = list(executor.map(run_call, pending_calls))
+        results = list(executor.map(
+            lambda pair: run_call(pair[0]) if pair[1] else
+            "Not run: the tool-call budget for this request is used up. Answer with the information you already have.",
+            zip(pending_calls, reserved),
+        ))
 
-    tools_used = [call["name"] for call in pending_calls]
+    tools_used = [call["name"] for call, ran in zip(pending_calls, reserved) if ran]
     result_items = [
         {"type": "function_call_output", "call_id": call["call_id"], "output": result}
         for call, result in zip(pending_calls, results)

@@ -26,16 +26,20 @@ import json
 import logging
 import threading
 import time
+import traceback
 from concurrent.futures import ThreadPoolExecutor
 
 from jsonschema import Draft7Validator
-from jsonschema.exceptions import best_match
+from jsonschema.exceptions import SchemaError, best_match
 
 from app.agent import anthropic_client
-from app.agent.dynamic import limits, org_limits, usage_tracker
+from app.agent.dynamic import limits, org_limits, retry_policy, tool_policy, usage_tracker
 from app.agent.dynamic.dynamic_agent import DynamicAgent
+from app.agent.dynamic.usage_limiter import RunningTotal as _RunningTotal
+from app.agent.dynamic.usage_limiter import UsageLimiter
 from app.agent.graph import final_text, get_graph
 from app.agent.llm_client import SYSTEM_PROMPT
+from app.observability.guardrails import redact_secrets
 
 logger = logging.getLogger(__name__)
 
@@ -75,28 +79,6 @@ class _Budget:
             return False
 
 
-class _RunningTotal:
-    """Shared across one top-level run_task() call's whole recursion tree —
-    a CUMULATIVE total (model calls or tool calls so far, Phase 2.5,
-    Sub-step C) checked against a ceiling before allowing the NEXT
-    agent/branch to start, unlike _Budget's upfront take() — the total is
-    only known after a leaf actually finishes. Lock-protected since
-    sibling branches update it concurrently."""
-
-    def __init__(self, ceiling: int):
-        self.ceiling = ceiling
-        self.total = 0
-        self._lock = threading.Lock()
-
-    def add(self, amount: int) -> None:
-        with self._lock:
-            self.total += amount
-
-    def exceeded(self) -> bool:
-        with self._lock:
-            return self.total >= self.ceiling
-
-
 def _leaf_on_event(on_event, agent: DynamicAgent):
     """Wraps the real on_event for one leaf's OWN graph execution (Phase
     2.5, Sub-step E) — forwards only tool-starting activity, re-tagged with
@@ -117,27 +99,50 @@ def _leaf_on_event(on_event, agent: DynamicAgent):
 
 
 def _validate_structured_output(text: str, schema: dict) -> None:
-    """Raises ValueError (caught by _execute_leaf's own except block,
-    making a validation failure retry-eligible exactly like any other
-    transient leaf failure — Sub-step B) when `text` isn't valid JSON
-    matching `schema`. Reuses the SAME Draft7Validator/best_match pair
+    """Raises StructuredOutputError (a permanent failure, never retried) when
+    `schema` is unusable or `text` isn't valid JSON matching it. Reuses the SAME Draft7Validator/best_match pair
     app.tools.registry already uses for tool-input validation — not a
     second, divergent validation approach."""
     try:
+        Draft7Validator.check_schema(schema)
+    except SchemaError as exc:
+        raise retry_policy.StructuredOutputError(f"the required output schema is invalid: {exc.message}") from exc
+    try:
         parsed = json.loads(text)
     except json.JSONDecodeError as exc:
-        raise ValueError(f"expected JSON output matching the given schema, but the reply wasn't valid JSON: {exc}") from exc
+        raise retry_policy.StructuredOutputError(
+            f"expected JSON output matching the given schema, but the reply wasn't valid JSON: {exc}"
+        ) from exc
     validator = Draft7Validator(schema)
     error = best_match(validator.iter_errors(parsed))
     if error:
-        raise ValueError(f"structured output did not match the expected schema: {error.message}")
+        raise retry_policy.StructuredOutputError(f"structured output did not match the expected schema: {error.message}")
+
+
+def _normalize_task(task: str) -> str:
+    return " ".join(task.split()).lower()
+
+
+def _trace_ids(agent: DynamicAgent, request_id: str, organization_id: str | None) -> str:
+    """Identifiers only: never task text, results or tool input. The agent id
+    is also this delegated task's id."""
+    return (
+        f"request_id={request_id} organization_id={organization_id} agent_id={agent.id} "
+        f"parent_id={agent.parent_id} depth={agent.depth}"
+    )
+
+
+def _redacted_traceback(exc: BaseException) -> str:
+    return redact_secrets("".join(traceback.format_exception(exc)))[-4000:]
 
 
 def _execute_leaf(
     agent, base_messages, user_id, organization_id, conversation_id, request_id, cancel_event, on_event,
     model_calls: "_RunningTotal | None" = None, tool_calls: "_RunningTotal | None" = None,
+    system_prompt: str | None = None, model_tier: str | None = None, deadline: float | None = None,
 ):
     agent.status = "running"
+    agent.error, agent.error_category, agent.error_retryable = None, None, False
     if on_event:
         on_event({"type": "agent_progress", "agent": agent.name, "agent_id": agent.id, "status": "running"})
     try:
@@ -162,11 +167,12 @@ def _execute_leaf(
             # tool_execution (re-tagged with this agent's own identity, see
             # _leaf_on_event) is forwarded; raw per-token deltas are not.
             "on_event": _leaf_on_event(on_event, agent),
-            "system_prompt": SYSTEM_PROMPT + _UNTRUSTED_CONTENT_ADDENDUM,
-            # None means the full tool registry (see app.agent.state's own
-            # field comment) — never an explicit "every tool name" list.
-            "allowed_tools": agent.allowed_tools or None,
-            "model_tier": None,
+            # The selected agent's own instructions, memories and attached
+            # context (built by app.routes.chat), with the addendum after them.
+            "system_prompt": (system_prompt or SYSTEM_PROMPT) + _UNTRUSTED_CONTENT_ADDENDUM,
+            # Always an explicit list for a dynamic agent; empty = no tools.
+            "allowed_tools": list(agent.allowed_tools),
+            "model_tier": model_tier,
             "cancel_event": cancel_event,
             # Delegation-tree identity (Phase 4) — threaded all the way
             # through planner_node/tools_node into every agent_executions
@@ -175,19 +181,18 @@ def _execute_leaf(
             "agent_instance_id": agent.id,
             "parent_agent_id": agent.parent_id,
             "delegation_depth": agent.depth,
+            # Every planner round and tool call reserves from the request-wide
+            # counters before it happens (see app.agent.graph).
+            "usage_limiter": UsageLimiter(model_calls, tool_calls, deadline),
         }
         result_state = get_graph().invoke(state)
         agent.result = final_text(result_state)
         agent.tools_used = result_state.get("tools_used", [])
-        # Only countable on success — a raised exception below means
-        # get_graph().invoke() never returned a state to read rounds/
-        # tools_used from at all; this leaf's partial model/tool-call count
-        # on a failed attempt is an accepted, documented gap (Sub-step C),
-        # same honesty rule MAX_EXECUTION_SECONDS already applies to itself.
-        if model_calls is not None:
-            model_calls.add(result_state.get("rounds", 0) + 1)
-        if tool_calls is not None:
-            tool_calls.add(len(agent.tools_used))
+        if cancel_event is not None and cancel_event.is_set():
+            # Cut short, so never reported as done or validated. The partial
+            # text is kept, like any other cancelled reply.
+            agent.status, agent.error, agent.error_category = "failed", "cancelled", "cancelled"
+            return
         if agent.expected_output_schema is not None:
             try:
                 _validate_structured_output(agent.result, agent.expected_output_schema)
@@ -199,32 +204,55 @@ def _execute_leaf(
                 on_event({"type": "validation", "agent": agent.name, "agent_id": agent.id, "status": "passed"})
         agent.status = "done"
     except Exception as exc:  # a failed leaf must never crash the whole request
-        logger.exception("Dynamic agent %s (%s) failed", agent.name, agent.id)
+        logger.error(
+            "Dynamic agent failed: %s\n%s", _trace_ids(agent, request_id, organization_id), _redacted_traceback(exc)
+        )
+        decision = retry_policy.classify(exc)
         agent.status = "failed"
         agent.error = str(exc)
-        agent.result = f"[agent '{agent.name}' failed: {exc}]"
+        agent.error_category, agent.error_retryable = decision.category, decision.retryable
+        # The category only, never the raw exception: this text is read by the
+        # parent/synthesis step and can end up in the reply.
+        agent.result = f"[agent '{agent.name}' failed: {decision.category}]"
+    # "failed" is reported by _execute_leaf_with_retry, once no attempt is left.
+    if on_event and agent.status == "done":
+        on_event({"type": "agent_progress", "agent": agent.name, "agent_id": agent.id, "status": "done"})
+        on_event({"type": "agent_completed", "agent": agent.name, "agent_id": agent.id, "result": agent.result})
+
+
+def _report_failed(agent: DynamicAgent, on_event) -> None:
     if on_event:
-        on_event({"type": "agent_progress", "agent": agent.name, "agent_id": agent.id, "status": agent.status})
-        if agent.status == "done":
-            on_event({"type": "agent_completed", "agent": agent.name, "agent_id": agent.id, "result": agent.result})
+        on_event({"type": "agent_progress", "agent": agent.name, "agent_id": agent.id, "status": "failed"})
+
+
+def _skip(agent: DynamicAgent, error: str, result: str, on_event) -> None:
+    """Marks an agent that will never execute."""
+    agent.status, agent.error, agent.result = "failed", error, result
+    _report_failed(agent, on_event)
+
+
+def _stop_reason(cancel_event, deadline: float) -> str | None:
+    if cancel_event is not None and cancel_event.is_set():
+        return "cancelled"
+    if time.monotonic() > deadline:
+        return "execution deadline reached"
+    return None
 
 
 def _execute_leaf_with_retry(
     agent, base_messages, user_id, organization_id, conversation_id, request_id, cancel_event, on_event, deadline,
     max_retries: int | None = None, model_calls: "_RunningTotal | None" = None, tool_calls: "_RunningTotal | None" = None,
+    system_prompt: str | None = None, model_tier: str | None = None,
 ):
-    """Retries ONE leaf's own execution on a genuine transient failure
-    (Phase 2.5, Sub-step B) — every path into agent.status=="failed" inside
-    _execute_leaf above comes from that function's own except block (a real
-    exception from get_graph().invoke()), never from a structural "skipped"
-    reason (those are set in _run_agent and never reach this function at
-    all), so any failure seen here is retry-eligible by construction — no
-    separate classification needed.
+    """Retries ONE leaf's own execution, only for failures
+    retry_policy.classify calls transient, at most max_retries times with
+    exponential backoff. Cancellation and the deadline are checked before the
+    backoff and again after it, so neither can be followed by a new attempt.
 
     Safe to retry the WHOLE leaf from scratch specifically because
-    app.agent.dynamic.tool_policy already guarantees a dynamic leaf can
-    never have completed an irreversible action on an earlier attempt —
-    retrying never risks a duplicate real-world side effect.
+    app.agent.dynamic.tool_policy lets a dynamic leaf only read or preview
+    (long-term memory writes included in what it refuses), so an earlier
+    attempt can't have committed anything.
 
     max_retries defaults to the GLOBAL limits.MAX_RETRIES when not given
     (every caller before Sub-step C, and this module's own tests) — real
@@ -235,22 +263,45 @@ def _execute_leaf_with_retry(
     while True:
         _execute_leaf(
             agent, base_messages, user_id, organization_id, conversation_id, request_id, cancel_event, on_event,
-            model_calls=model_calls, tool_calls=tool_calls,
+            model_calls=model_calls, tool_calls=tool_calls, system_prompt=system_prompt, model_tier=model_tier,
+            deadline=deadline,
         )
         if agent.status != "failed":
             return
-        if (
-            attempt >= retry_ceiling
-            or (cancel_event is not None and cancel_event.is_set())
-            or time.monotonic() > deadline
-        ):
+        if agent.error_category == "cancelled":
+            _report_failed(agent, on_event)  # keeps the partial result
             return
-        agent.retry_history.append(agent.error or "")
+        if not agent.error_retryable:
+            stop = "not retryable"
+        elif attempt >= retry_ceiling:
+            stop = "retries exhausted"
+        else:
+            stop = _stop_reason(cancel_event, deadline)
+        logger.warning(
+            "Dynamic agent %s attempt %d failed: category=%s retryable=%s decision=%s reason=%s",
+            agent.id, attempt + 1, agent.error_category, agent.error_retryable,
+            stop or "retry", redact_secrets(agent.error or "")[:300],
+        )
+        if stop is None:
+            delay = min(2 ** (attempt + 1), 10)
+            if on_event:
+                on_event({"type": "agent_progress", "agent": agent.name, "agent_id": agent.id, "status": "retrying", "attempt": attempt + 1})
+            if cancel_event is not None:
+                cancel_event.wait(delay)  # returns as soon as the request is cancelled
+            else:
+                time.sleep(delay)
+            stop = _stop_reason(cancel_event, deadline)
+        if stop is not None:
+            agent.result = (
+                f"[agent '{agent.name}' failed after {attempt + 1} attempt(s): {agent.error_category} ({stop}). "
+                "This part of the task has no result.]"
+            )
+            if on_event:
+                on_event({"type": "agent_progress", "agent": agent.name, "agent_id": agent.id, "status": "failed", "attempt": attempt + 1})
+            return
+        agent.retry_history.append(f"attempt {attempt + 1} [{agent.error_category}]: {agent.error or ''}")
         attempt += 1
         agent.retry_count = attempt
-        if on_event:
-            on_event({"type": "agent_progress", "agent": agent.name, "agent_id": agent.id, "status": "retrying", "attempt": attempt})
-        time.sleep(min(2**attempt, 10))
 
 
 def _run_agent(
@@ -272,10 +323,12 @@ def _run_agent(
     tool_calls: "_RunningTotal | None" = None,
     max_tokens: int | None = None,
     max_cost_usd: float | None = None,
+    system_prompt: str | None = None,
+    model_tier: str | None = None,
 ) -> None:
     """Runs `agent` to completion IN PLACE — either as a direct leaf (using
-    agent.allowed_tools, if this agent was already scoped by its parent's
-    own decomposition decision) or by recursively re-planning its own
+    agent.allowed_tools, which is both its own tool set and the ceiling for
+    any sub-agent it creates) or by recursively re-planning its own
     task_description into further sub-agents, attached as agent.children.
     Never raises — every failure is recorded on `agent` itself, so one
     branch failing never crashes the rest of the tree.
@@ -303,34 +356,31 @@ def _run_agent(
     # corrupts partial results — children already collected on an ancestor
     # agent are untouched.
     if cancel_event is not None and cancel_event.is_set():
-        agent.status, agent.error = "failed", "cancelled"
-        agent.result = "[skipped: request was cancelled]"
+        _skip(agent, "cancelled", "[skipped: request was cancelled]", on_event)
         return
 
     if time.monotonic() > deadline:
-        agent.status, agent.error = "failed", "execution time budget exceeded"
-        agent.result = "[skipped: request-wide dynamic-agent execution time budget exceeded]"
+        _skip(agent, "execution time budget exceeded", "[skipped: request-wide dynamic-agent execution time budget exceeded]", on_event)
         return
 
     if model_calls is not None and model_calls.exceeded():
-        agent.status, agent.error = "failed", "model-call budget exceeded"
-        agent.result = "[skipped: request-wide dynamic-agent model-call budget exceeded]"
+        _skip(agent, "model-call budget exceeded", "[skipped: request-wide dynamic-agent model-call budget exceeded]", on_event)
         return
 
     if tool_calls is not None and tool_calls.exceeded():
-        agent.status, agent.error = "failed", "tool-call budget exceeded"
-        agent.result = "[skipped: request-wide dynamic-agent tool-call budget exceeded]"
+        _skip(agent, "tool-call budget exceeded", "[skipped: request-wide dynamic-agent tool-call budget exceeded]", on_event)
         return
 
     if max_tokens is not None and max_cost_usd is not None:
         used_tokens, used_cost = usage_tracker.current_usage(request_id)
         if used_tokens >= max_tokens or used_cost >= max_cost_usd:
-            agent.status, agent.error = "failed", "token/cost budget exceeded"
-            agent.result = "[skipped: request-wide dynamic-agent token/cost budget exceeded]"
+            _skip(agent, "token/cost budget exceeded", "[skipped: request-wide dynamic-agent token/cost budget exceeded]", on_event)
             return
 
     plan: dict = {}
-    if agent.depth < max_depth:
+    # The planning call is a model call too, reserved like any other. With
+    # none left, the agent isn't planned (and its own run then fails the same way).
+    if agent.depth < max_depth and (model_calls is None or model_calls.try_reserve()):
         try:
             plan = anthropic_client.plan_dynamic_delegation(
                 agent.task_description,
@@ -338,32 +388,48 @@ def _run_agent(
                 user_id=user_id,
                 conversation_id=conversation_id,
                 request_id=request_id,
+                available_tools=list(agent.allowed_tools),
             )
-        except Exception:
-            logger.exception(
-                "Dynamic delegation planning failed for agent %s; running it directly instead", agent.id
+        except Exception as exc:
+            logger.error(
+                "Dynamic delegation planning failed; running the agent directly: %s\n%s",
+                _trace_ids(agent, request_id, organization_id), _redacted_traceback(exc),
             )
+
+    # The plan is model output. One that isn't usable counts as no plan.
+    if not isinstance(plan, dict):
+        plan = {}
+    sub_agents_plan = (plan.get("sub_agents") or []) if plan.get("decompose") is True else []
+    if sub_agents_plan and not (
+        isinstance(sub_agents_plan, list) and any(isinstance(e, dict) for e in sub_agents_plan)
+    ):
+        logger.warning("Unusable delegation plan ignored: %s", _trace_ids(agent, request_id, organization_id))
+        plan, sub_agents_plan = {}, []
 
     if on_event and plan.get("reasoning"):
         on_event({"type": "understanding", "agent": agent.name, "agent_id": agent.id, "text": plan["reasoning"]})
 
-    sub_agents_plan = (plan.get("sub_agents") or []) if plan.get("decompose") else []
+    # Planning takes time: after it, neither run nor create anything if the
+    # request was cancelled or ran out of time meanwhile.
+    stop = _stop_reason(cancel_event, deadline)
+    if stop is not None:
+        _skip(agent, stop, f"[skipped: {stop}]", on_event)
+        return
 
     if not sub_agents_plan:
-        # Prefer tools this agent was already assigned by its PARENT's own
-        # decomposition decision (a deliberate scoping choice made with full
-        # knowledge of the sub-task) over this planning call's own
-        # direct_tools guess, which only applies when nothing was inherited
-        # (the top-level task, or a sub-agent created with no tools of its
-        # own) — [] (the full registry) is the final fallback either way.
-        agent.allowed_tools = agent.allowed_tools or plan.get("direct_tools") or []
-        if not budget.take():
-            agent.status, agent.error = "failed", "agent budget exhausted"
-            agent.result = "[skipped: request-wide dynamic-agent budget exhausted]"
+        # A sub-agent keeps exactly what its parent assigned (possibly
+        # nothing). The root starts with the selected agent's permitted set and
+        # may only be narrowed by its own plan; if there was no plan (planning
+        # failed or max depth is 0) it keeps that set.
+        if not agent.created_by_parent and "direct_tools" in plan:
+            agent.allowed_tools = tool_policy.narrow(plan.get("direct_tools"), agent.allowed_tools)
+        if not agent.created_by_parent and not budget.take():
+            _skip(agent, "agent budget exhausted", "[skipped: request-wide dynamic-agent budget exhausted]", on_event)
             return
         _execute_leaf_with_retry(
             agent, base_messages, user_id, organization_id, conversation_id, request_id, cancel_event, on_event, deadline,
             max_retries=max_retries, model_calls=model_calls, tool_calls=tool_calls,
+            system_prompt=system_prompt, model_tier=model_tier,
         )
         return
 
@@ -375,12 +441,24 @@ def _run_agent(
     # cheaper, more common version of the same waste (the planner proposing
     # the same sub-task twice in one breath). Both are skipped without
     # spending any budget — never silently dropped, never run anyway.
-    own_task = agent.task_description.strip().lower()
+    own_task = _normalize_task(agent.task_description)
     seen_this_level: set[str] = set()
     children: list[DynamicAgent] = []
     for entry in sub_agents_plan:
-        task_text = entry.get("task_description") or agent.task_description
-        normalized = task_text.strip().lower()
+        spec = entry if isinstance(entry, dict) else {}
+        name = spec.get("name") if isinstance(spec.get("name"), str) and spec.get("name") else "sub-agent"
+        task_text = spec.get("task_description") or agent.task_description
+        if not isinstance(entry, dict) or not isinstance(task_text, str) or not task_text.strip():
+            # Shown as a failed child rather than dropped; takes no budget.
+            reason = "invalid sub-agent specification"
+            children.append(
+                DynamicAgent(
+                    name=name, task_description="", allowed_tools=[], depth=agent.depth + 1, parent_id=agent.id,
+                    status="failed", error=reason, result=f"[skipped: {reason}]",
+                )
+            )
+            continue
+        normalized = _normalize_task(task_text)
         if normalized == own_task or normalized in ancestor_tasks:
             reason = "circular delegation (duplicates an ancestor's task)"
         elif normalized in seen_this_level:
@@ -390,8 +468,9 @@ def _run_agent(
 
         if reason is not None:
             skipped = DynamicAgent(
-                name=entry.get("name") or "sub-agent", task_description=task_text,
-                allowed_tools=entry.get("tools") or [], depth=agent.depth + 1, parent_id=agent.id,
+                name=name, task_description=task_text,
+                allowed_tools=tool_policy.narrow(spec.get("tools"), agent.allowed_tools),
+                depth=agent.depth + 1, parent_id=agent.id,
                 status="failed", error=reason,
             )
             skipped.result = f"[skipped: {reason}]"
@@ -403,13 +482,16 @@ def _run_agent(
             break
         children.append(
             DynamicAgent(
-                name=entry.get("name") or "sub-agent",
+                name=name,
                 task_description=task_text,
-                allowed_tools=entry.get("tools") or [],
+                allowed_tools=tool_policy.narrow(spec.get("tools"), agent.allowed_tools),
                 depth=agent.depth + 1,
                 parent_id=agent.id,
-                expected_output_schema=entry.get("output_schema"),
-                provider=entry.get("provider") or "anthropic",
+                expected_output_schema=spec.get("output_schema"),
+                created_by_parent=True,
+                # The only provider with tool support (DynamicAgent.provider),
+                # whatever the plan says.
+                provider="anthropic",
             )
         )
 
@@ -417,39 +499,50 @@ def _run_agent(
         # The plan wanted to decompose but the request-wide budget was
         # already spent by earlier sibling branches — one clearly-marked
         # result, never a silently empty one.
-        agent.status, agent.error = "failed", "agent budget exhausted"
-        agent.result = "[skipped: request-wide dynamic-agent budget exhausted]"
+        _skip(agent, "agent budget exhausted", "[skipped: request-wide dynamic-agent budget exhausted]", on_event)
         return
 
     if on_event:
         on_event({"type": "delegation_started", "depth": agent.depth, "agents": [c.name for c in children]})
         for c in children:
             on_event({"type": "agent_created", "agent": c.name, "agent_id": c.id, "depth": c.depth})
+        for c in children:
+            if c.status == "failed":  # skipped above as circular or duplicate
+                _report_failed(c, on_event)
 
     child_ancestor_tasks = ancestor_tasks | {own_task}
 
     def _run_child(child: DynamicAgent) -> DynamicAgent:
         if child.status == "failed":
-            return child  # already finalized above (circular/duplicate skip) — nothing to run
-        _run_agent(
-            child,
-            organization_id=organization_id,
-            user_id=user_id,
-            conversation_id=conversation_id,
-            request_id=request_id,
-            base_messages=base_messages,
-            cancel_event=cancel_event,
-            on_event=on_event,
-            budget=budget,
-            deadline=deadline,
-            max_depth=max_depth,
-            ancestor_tasks=child_ancestor_tasks,
-            max_retries=max_retries,
-            model_calls=model_calls,
-            tool_calls=tool_calls,
-            max_tokens=max_tokens,
-            max_cost_usd=max_cost_usd,
-        )
+            return child  # already finalized above (invalid/circular/duplicate skip) — nothing to run
+        try:
+            _run_agent(
+                child,
+                organization_id=organization_id,
+                user_id=user_id,
+                conversation_id=conversation_id,
+                request_id=request_id,
+                base_messages=base_messages,
+                cancel_event=cancel_event,
+                on_event=on_event,
+                budget=budget,
+                deadline=deadline,
+                max_depth=max_depth,
+                ancestor_tasks=child_ancestor_tasks,
+                max_retries=max_retries,
+                model_calls=model_calls,
+                tool_calls=tool_calls,
+                max_tokens=max_tokens,
+                max_cost_usd=max_cost_usd,
+                system_prompt=system_prompt,
+                model_tier=model_tier,
+            )
+        except Exception as exc:  # one branch's bug must not discard its siblings' results
+            logger.error(
+                "Dynamic branch crashed: %s\n%s", _trace_ids(child, request_id, organization_id), _redacted_traceback(exc)
+            )
+            child.error_category = "internal_error"
+            _skip(child, "internal error", f"[agent '{child.name}' failed: internal_error]", on_event)
         return child
 
     # Sibling sub-agents are independent (each got its own task_description
@@ -477,6 +570,18 @@ def _flatten(agent: DynamicAgent) -> list[DynamicAgent]:
     return flat
 
 
+def _log_outcomes(agent: DynamicAgent, request_id: str, organization_id: str | None) -> None:
+    """One line per agent in the finished tree, skipped ones included, so a
+    delegation can be traced from the logs by request id."""
+    logger.info(
+        "dynamic agent outcome: %s status=%s category=%s retries=%d reason=%s",
+        _trace_ids(agent, request_id, organization_id), agent.status, agent.error_category, agent.retry_count,
+        redact_secrets(agent.error or "")[:200] or None,
+    )
+    for child in agent.children:
+        _log_outcomes(child, request_id, organization_id)
+
+
 def run_task(
     task_description: str,
     *,
@@ -489,6 +594,9 @@ def run_task(
     parent_id: str | None = None,
     cancel_event=None,
     on_event=None,
+    parent_allowed_tools: list[str] | None = None,
+    system_prompt: str | None = None,
+    model_tier: str | None = None,
     _budget: "_Budget | None" = None,
     _deadline: float | None = None,
     _model_calls: "_RunningTotal | None" = None,
@@ -518,7 +626,13 @@ def run_task(
     # The top-level task itself is the request's own entry point, not a
     # dynamically-created sub-agent — framed as a DynamicAgent purely so
     # _run_agent can treat it uniformly with every recursively-created one.
-    root = DynamicAgent(name=f"agent-depth{depth}", task_description=task_description, allowed_tools=[], depth=depth, parent_id=parent_id)
+    root = DynamicAgent(
+        name=f"agent-depth{depth}",
+        task_description=task_description,
+        allowed_tools=tool_policy.permitted_tools(parent_allowed_tools),
+        depth=depth,
+        parent_id=parent_id,
+    )
 
     _run_agent(
         root,
@@ -537,6 +651,10 @@ def run_task(
         tool_calls=tool_calls,
         max_tokens=resolved.max_tokens,
         max_cost_usd=resolved.max_cost_usd,
+        system_prompt=system_prompt,
+        model_tier=model_tier,
     )
+
+    _log_outcomes(root, request_id, organization_id)
 
     return {"final_text": root.result or "", "agents": _flatten(root)}

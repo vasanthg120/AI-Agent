@@ -4,17 +4,11 @@ import { JwtService } from '@nestjs/jwt';
 import { Model } from 'mongoose';
 import { RedisCacheService } from '../common/redis/redis-cache.service';
 import { AgentRoleDocument } from '../agent-roles/schemas/agent-role.schema';
+import { StreamEvent } from './stream-events';
 import { ChatAttachmentsService } from './chat-attachments.service';
 import { ConversationDocument } from './schemas/conversation.schema';
 import { JwtPayload } from '../auth/jwt-payload.interface';
-export interface StreamEvent {
-    type: 'delta' | 'progress' | 'reasoning' | 'plan' | 'agent_done' | 'reflecting';
-    text?: string;
-    tool?: string;
-    agents?: string[];
-    agent?: string;
-    reason?: string;
-}
+export type { StreamEvent } from './stream-events';
 export declare class ChatService {
     private conversationModel;
     private agentRoleModel;

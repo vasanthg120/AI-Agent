@@ -102,6 +102,9 @@ let ChatGateway = ChatGateway_1 = class ChatGateway {
                 else if (event.type === 'reflecting') {
                     client.emit('reflecting', { conversationId, reason: event.reason });
                 }
+                else if (event.type === 'agent_created' || event.type === 'agent_progress' || event.type === 'validation') {
+                    client.emit('agentActivity', { conversationId, ...event });
+                }
             }, agentId, (resolvedId) => {
                 conversationId = resolvedId;
                 client.emit('conversationId', { conversationId: resolvedId });

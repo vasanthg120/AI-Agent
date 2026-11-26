@@ -57,3 +57,8 @@ class AgentState(TypedDict):
     agent_instance_id: str | None
     parent_agent_id: str | None
     delegation_depth: int | None
+    # Request-wide model/tool-call reservations, shared by a dynamic-agent
+    # tree (see app.agent.dynamic.usage_limiter). Missing/None for every other
+    # caller, which is then not limited here. Must be declared: LangGraph
+    # drops state keys it doesn't know.
+    usage_limiter: object | None

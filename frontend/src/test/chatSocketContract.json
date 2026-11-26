@@ -1,0 +1,142 @@
+[
+  [
+    "typing",
+    {
+      "typing": true
+    }
+  ],
+  [
+    "conversationId",
+    {
+      "conversationId": "conv-1"
+    }
+  ],
+  [
+    "reasoning",
+    {
+      "conversationId": "conv-1",
+      "text": "Planning…"
+    }
+  ],
+  [
+    "plan",
+    {
+      "conversationId": "conv-1",
+      "agents": [
+        "CRM lookup",
+        "Copy [redacted]"
+      ]
+    }
+  ],
+  [
+    "agentActivity",
+    {
+      "conversationId": "conv-1",
+      "type": "agent_created",
+      "agent": "CRM lookup",
+      "agent_id": "dyn-000000000001",
+      "depth": 1
+    }
+  ],
+  [
+    "agentActivity",
+    {
+      "conversationId": "conv-1",
+      "type": "agent_created",
+      "agent": "Copy [redacted]",
+      "agent_id": "dyn-000000000002",
+      "depth": 1
+    }
+  ],
+  [
+    "agentActivity",
+    {
+      "conversationId": "conv-1",
+      "type": "agent_progress",
+      "agent": "Copy [redacted]",
+      "agent_id": "dyn-000000000002",
+      "status": "failed"
+    }
+  ],
+  [
+    "reasoning",
+    {
+      "conversationId": "conv-1",
+      "text": "Planning…"
+    }
+  ],
+  [
+    "agentActivity",
+    {
+      "conversationId": "conv-1",
+      "type": "agent_progress",
+      "agent": "CRM lookup",
+      "agent_id": "dyn-000000000001",
+      "status": "running"
+    }
+  ],
+  [
+    "agentActivity",
+    {
+      "conversationId": "conv-1",
+      "type": "agent_progress",
+      "agent": "CRM lookup",
+      "agent_id": "dyn-000000000001",
+      "status": "retrying",
+      "attempt": 1
+    }
+  ],
+  [
+    "agentActivity",
+    {
+      "conversationId": "conv-1",
+      "type": "agent_progress",
+      "agent": "CRM lookup",
+      "agent_id": "dyn-000000000001",
+      "status": "running"
+    }
+  ],
+  [
+    "progress",
+    {
+      "conversationId": "conv-1",
+      "tool": "crm_deal"
+    }
+  ],
+  [
+    "agentActivity",
+    {
+      "conversationId": "conv-1",
+      "type": "validation",
+      "agent": "CRM lookup",
+      "agent_id": "dyn-000000000001",
+      "status": "passed"
+    }
+  ],
+  [
+    "agentDone",
+    {
+      "conversationId": "conv-1",
+      "agent": "CRM lookup"
+    }
+  ],
+  [
+    "typing",
+    {
+      "typing": false
+    }
+  ],
+  [
+    "message",
+    {
+      "conversationId": "conv-1",
+      "reply": "final answer",
+      "toolsUsed": [
+        "crm_deal"
+      ],
+      "suggestions": [
+        "next"
+      ]
+    }
+  ]
+]

@@ -83,7 +83,7 @@ class DecompositionTests(unittest.TestCase):
             "direct_tools": [],
             "sub_agents": [
                 {"name": "crm-lookup", "task_description": "find the deal", "tools": ["crm_deal"]},
-                {"name": "mail-lookup", "task_description": "find the email thread", "tools": ["outlook_search"]},
+                {"name": "mail-lookup", "task_description": "find the email thread", "tools": ["outlook_lookup"]},
             ],
         }
         leaf_plan = {"decompose": False, "direct_tools": [], "sub_agents": []}
@@ -184,7 +184,7 @@ class FailureIsolationTests(unittest.TestCase):
         def fake_invoke(state):
             task_text = state["messages"][-1]["content"][0]["text"]
             if task_text == "bad task":
-                raise RuntimeError("boom")
+                raise ConnectionError("boom")
             return _fake_graph_result(f"ok: {task_text}")
 
         with patch("app.agent.dynamic.master_agent.anthropic_client.plan_dynamic_delegation", side_effect=fake_plan), patch(
@@ -276,7 +276,7 @@ class OrganizationAndRequestIdThreadingTests(unittest.TestCase):
 
 
 class PlanningFailureFallbackTests(unittest.TestCase):
-    def test_a_planning_failure_falls_back_to_direct_execution_with_the_full_registry_rather_than_raising(self):
+    def test_a_planning_failure_falls_back_to_direct_execution_with_the_permitted_tools_rather_than_raising(self):
         with patch(
             "app.agent.dynamic.master_agent.anthropic_client.plan_dynamic_delegation", side_effect=RuntimeError("no api key")
         ), patch("app.agent.dynamic.master_agent.get_graph") as get_graph:
@@ -288,7 +288,8 @@ class PlanningFailureFallbackTests(unittest.TestCase):
         self.assertEqual(len(result["agents"]), 1)
         self.assertEqual(result["agents"][0].status, "done")
         state_passed = get_graph.return_value.invoke.call_args[0][0]
-        self.assertEqual(state_passed["allowed_tools"], None)  # None allowed_tools == the full registry, per graph.py
+        # No plan exists to narrow the scope, so the root keeps everything permitted.
+        self.assertEqual(state_passed["allowed_tools"], master_agent.tool_policy.permitted_tools(None))
 
 
 class ExecutionTimeLimitTests(unittest.TestCase):
@@ -519,7 +520,7 @@ class RetryTests(unittest.TestCase):
         def fake_invoke(state):
             calls.append(1)
             if len(calls) == 1:
-                raise RuntimeError("transient blip")
+                raise ConnectionError("transient blip")
             return _fake_graph_result("recovered")
 
         with patch("app.agent.dynamic.master_agent.anthropic_client.plan_dynamic_delegation", return_value=plan), patch(
@@ -545,7 +546,7 @@ class RetryTests(unittest.TestCase):
         ) as get_graph, patch("app.agent.dynamic.master_agent.time.sleep"), patch(
             "app.agent.dynamic.master_agent.limits.MAX_RETRIES", 2
         ):
-            get_graph.return_value.invoke.side_effect = RuntimeError("always fails")
+            get_graph.return_value.invoke.side_effect = ConnectionError("always fails")
             result = master_agent.run_task(
                 "task", organization_id="org-1", user_id="u1", conversation_id="c1", request_id="r1"
             )
@@ -580,7 +581,7 @@ class RetryTests(unittest.TestCase):
 
         def fake_invoke(state):
             cancel_event.set()  # simulate cancellation arriving during the first attempt
-            raise RuntimeError("fails, and now cancelled")
+            raise ConnectionError("fails, and now cancelled")
 
         with patch("app.agent.dynamic.master_agent.anthropic_client.plan_dynamic_delegation", return_value=plan), patch(
             "app.agent.dynamic.master_agent.get_graph"
@@ -602,21 +603,18 @@ class RetryTests(unittest.TestCase):
         # retry-decision check — confirms retry respects the SAME shared
         # deadline _run_agent itself checks, not a separate unbounded one.
         plan = {"decompose": False, "direct_tools": [], "sub_agents": []}
+        now = [0.0]
+
+        def fail_after_the_deadline(state):
+            now[0] = 100.0
+            raise ConnectionError("fails")
+
         with patch("app.agent.dynamic.master_agent.anthropic_client.plan_dynamic_delegation", return_value=plan), patch(
             "app.agent.dynamic.master_agent.get_graph"
         ) as get_graph, patch("app.agent.dynamic.master_agent.time.sleep") as sleep, patch(
-            "app.agent.dynamic.master_agent.time.monotonic", side_effect=[0.0, 0.0, 100.0]
+            "app.agent.dynamic.master_agent.time.monotonic", side_effect=lambda: now[0]
         ):
-            get_graph.return_value.invoke.side_effect = RuntimeError("fails")
-            # Patching the real time.monotonic affects every caller in the
-            # process for the duration of this test, including
-            # org_limits.resolve's own unconditional cache-timestamp write
-            # (org_limits._resolve_overrides, called once per resolve() —
-            # not just on a cache hit) — that's side_effect value #1; #2 is
-            # _run_agent's own top-of-function check (must stay <=
-            # deadline so the leaf is actually attempted); #3 is
-            # _execute_leaf_with_retry's own retry-decision check (must
-            # exceed the deadline so no retry is attempted).
+            get_graph.return_value.invoke.side_effect = fail_after_the_deadline
             result = master_agent.run_task(
                 "task", organization_id="org-deadline-retry-test", user_id="u1", conversation_id="c1", request_id="r1",
                 _deadline=50.0,
@@ -645,7 +643,15 @@ class ExecutionLimitDimensionsTests(unittest.TestCase):
         with patch("app.agent.dynamic.master_agent.anthropic_client.plan_dynamic_delegation", return_value=plan), patch(
             "app.agent.dynamic.master_agent.get_graph"
         ) as get_graph:
-            get_graph.return_value.invoke.return_value = invoke_return
+            def reserving_invoke(state):
+                # What the real planner_node/tools_node do for this many rounds and tools.
+                for _ in range(invoke_return.get("rounds", 0) + 1):
+                    state["usage_limiter"].reserve_model_call()
+                for _ in invoke_return.get("tools_used", []):
+                    state["usage_limiter"].try_reserve_tool_call()
+                return invoke_return
+
+            get_graph.return_value.invoke.side_effect = reserving_invoke
             first = DynamicAgent(name="first", task_description="first task", allowed_tools=[], depth=1)
             master_agent._run_agent(
                 first, organization_id="org-1", user_id="u1", conversation_id="c1", request_id="r1",
@@ -664,7 +670,7 @@ class ExecutionLimitDimensionsTests(unittest.TestCase):
 
     def test_model_call_budget_exhausted_by_the_first_agent_blocks_the_second(self):
         invoke_return = {"messages": [{"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "ok"}]}], "rounds": 0}
-        model_calls = master_agent._RunningTotal(1)  # the first agent's own 1 model call already meets this ceiling
+        model_calls = master_agent._RunningTotal(2)  # the first agent's planning call + its 1 round use it up
         first, second, get_graph = self._run_two_sequential_agents(model_calls=model_calls, invoke_return=invoke_return)
 
         self.assertEqual(first.status, "done")
@@ -694,7 +700,7 @@ class ExecutionLimitDimensionsTests(unittest.TestCase):
         tool_calls = master_agent._RunningTotal(100)
         self._run_two_sequential_agents(model_calls=model_calls, tool_calls=tool_calls, invoke_return=invoke_return)
 
-        self.assertEqual(model_calls.total, 6)  # (2 rounds + 1) per agent, twice
+        self.assertEqual(model_calls.total, 8)  # 1 planning call + (2 rounds + 1) per agent, twice
         self.assertEqual(tool_calls.total, 2)  # 1 tool call per agent, twice
 
     def test_token_and_cost_budget_exceeded_blocks_a_new_agent_from_starting(self):
@@ -768,17 +774,17 @@ class StructuredOutputTests(unittest.TestCase):
         self.assertEqual(agent.status, "done")
         self.assertIsNone(agent.error)
 
-    def test_invalid_json_output_is_a_retryable_failure(self):
+    def test_invalid_json_output_is_a_permanent_failure(self):
         agent, get_graph = self._run_leaf_with_schema(result_text="not valid json at all", max_retries=1)
         self.assertEqual(agent.status, "failed")
         self.assertIn("wasn't valid JSON", agent.error)
-        self.assertEqual(get_graph.return_value.invoke.call_count, 2)  # the original attempt + 1 retry, both failed
+        self.assertEqual(get_graph.return_value.invoke.call_count, 1)
 
-    def test_output_not_matching_the_schema_is_also_a_retryable_failure(self):
+    def test_output_not_matching_the_schema_is_also_a_permanent_failure(self):
         agent, get_graph = self._run_leaf_with_schema(result_text='{"wrong_field": "ok"}', max_retries=1)
         self.assertEqual(agent.status, "failed")
         self.assertIn("did not match the expected schema", agent.error)
-        self.assertEqual(get_graph.return_value.invoke.call_count, 2)
+        self.assertEqual(get_graph.return_value.invoke.call_count, 1)
 
     def test_the_task_text_sent_to_the_graph_includes_the_schema_instruction(self):
         from app.agent.dynamic.dynamic_agent import DynamicAgent

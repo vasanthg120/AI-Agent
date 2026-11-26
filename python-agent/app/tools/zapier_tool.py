@@ -1,6 +1,7 @@
 import json
 
 from app.integrations import zapier_mcp
+from app.memory import zapier_approvals
 
 SPEC = {
     "name": "zapier",
@@ -8,8 +9,9 @@ SPEC = {
         "Use the apps connected in the organization's Zapier account (for example Hoops or Gorilla Dash) through the "
         "actions an administrator enabled for HaiVE. 'actions' lists them per app with the inputs each needs — call it "
         "first; never guess an action name. 'run' runs one. Write actions (create/update/send) change real data: call "
-        "'run' WITHOUT confirmed to get a preview, show it to the user, and only call again with confirmed=true after "
-        "they explicitly agree. Each successful run uses 2 Zapier tasks. If an app has no read/search actions, say so "
+        "'run' WITHOUT confirmed to get a preview, show the user the exact inputs, and only call again with "
+        "confirmed=true and the same inputs after they explicitly agree in a later message — a write can't run in the "
+        "same turn as its preview. Each successful run uses 2 Zapier tasks. If an app has no read/search actions, say so "
         "plainly — never substitute data from another app or CRM."
     ),
     "input_schema": {
@@ -54,7 +56,9 @@ def run(tool_input: dict, context: dict) -> str:
     tools = catalog.get("tools") or []
     if tool_input["action"] == "actions":
         wanted = (tool_input.get("app") or "").strip().lower()
-        chosen = [t for t in tools if not wanted or t["app"].lower() == wanted]
+        chosen = [
+            {**t, "kind": zapier_mcp.action_kind(t)} for t in tools if not wanted or t["app"].lower() == wanted
+        ]
         if not chosen:
             apps = sorted({t["app"] for t in tools})
             return f"No enabled Zapier actions for '{tool_input.get('app')}'. Apps with actions: {', '.join(apps) or 'none'}."
@@ -74,14 +78,37 @@ def run(tool_input: dict, context: dict) -> str:
     if not tool:
         return f"'{name}' isn't an enabled Zapier action. Call 'actions' to see the available ones."
     arguments = tool_input.get("arguments") or {}
-    if tool["kind"] == "write" and not tool_input.get("confirmed"):
-        return (
-            f"PREVIEW — not run yet. '{tool['title']}' in {tool['app']} (via Zapier) with:\n"
-            + json.dumps(arguments, ensure_ascii=False, indent=2)
-            + "\nShow this to the user and ask them to confirm."
-        )
+    preview = (
+        f"PREVIEW — not run yet. '{tool['title']}' in {tool['app']} (via Zapier) with:\n"
+        + json.dumps(arguments, ensure_ascii=False, indent=2)
+        + "\nShow this to the user and ask them to confirm."
+    )
+    # A dynamic sub-agent only ever gets a preview: reads, writes, and even a
+    # confirmed=true that got past app.agent.dynamic.tool_policy. Its preview
+    # isn't recorded, so it can't be used to approve anything later.
+    if context.get("agent_instance_id"):
+        return preview
+    approved = False
+    if zapier_mcp.action_kind(tool) != "read":
+        if not tool_input.get("confirmed"):
+            zapier_approvals.record_preview(context, name, arguments)
+            return preview
+        if not zapier_approvals.consume(context, name, arguments):
+            earlier = zapier_approvals.earlier_previews(context, name)
+            zapier_approvals.record_preview(context, name, arguments)
+            hint = (
+                "\nInputs previewed in an earlier message (if the user approved one of these unchanged, call again "
+                "with exactly those inputs): " + json.dumps(earlier, ensure_ascii=False)
+                if earlier
+                else ""
+            )
+            return (
+                "Not approved: a write runs only after the user replies to a preview of these exact inputs, and each "
+                "approval works once.\n" + preview + hint
+            )
+        approved = True
     try:
-        result = zapier_mcp.call(organization_id, name, arguments)
+        result = zapier_mcp.call(organization_id, name, arguments, approved=approved)
     except zapier_mcp.ZapierError as exc:
         return str(exc)
     return f"Result from {tool['app']} (via Zapier), '{tool['title']}':\n{result}"

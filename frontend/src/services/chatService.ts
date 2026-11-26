@@ -1,6 +1,6 @@
 import { axiosClient } from '@/api/axiosClient';
 import { getSocket } from '@/api/socketClient';
-import { planStatus } from '@/features/chat/agentLabels';
+import { agentActivityStatus, planStatus } from '@/features/chat/agentLabels';
 import { useAuthStore } from '@/stores/authStore';
 import { generateId } from '@/utils/id';
 import { commandCenterService } from './commandCenterService';
@@ -235,6 +235,12 @@ export const chatService = {
       callbacks.onStatus?.(planStatus(payload.agents ?? []));
     };
 
+    const onAgentActivity = (payload: unknown) => {
+      if (settled) return;
+      const status = agentActivityStatus(payload);
+      if (status) callbacks.onStatus?.(status);
+    };
+
     const onReflecting = () => {
       if (settled) return;
       callbacks.onStatus?.('Finalizing…');
@@ -273,6 +279,7 @@ export const chatService = {
       socket.off('reasoning', onReasoning);
       socket.off('plan', onPlan);
       socket.off('reflecting', onReflecting);
+      socket.off('agentActivity', onAgentActivity);
       socket.off('conversationId', onConversationId);
       socket.off('message', onMessage);
       socket.off('error', onError);
@@ -283,6 +290,7 @@ export const chatService = {
     socket.on('reasoning', onReasoning);
     socket.on('plan', onPlan);
     socket.on('reflecting', onReflecting);
+    socket.on('agentActivity', onAgentActivity);
     socket.on('conversationId', onConversationId);
     socket.on('message', onMessage);
     socket.on('error', onError);

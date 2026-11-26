@@ -9,6 +9,7 @@ import { AxiosError } from 'axios';
 import { RedisCacheService } from '../common/redis/redis-cache.service';
 import { AgentRole, AgentRoleDocument } from '../agent-roles/schemas/agent-role.schema';
 import { CHAT_AGENTS } from './agents';
+import { StreamEvent, toStreamEvent } from './stream-events';
 import { ChatAttachmentsService } from './chat-attachments.service';
 import { Conversation, ConversationDocument } from './schemas/conversation.schema';
 import { JwtPayload } from '../auth/jwt-payload.interface';
@@ -52,14 +53,7 @@ function extractAgentErrorMessage(err: unknown): string | null {
   return null;
 }
 
-export interface StreamEvent {
-  type: 'delta' | 'progress' | 'reasoning' | 'plan' | 'agent_done' | 'reflecting';
-  text?: string;
-  tool?: string;
-  agents?: string[];
-  agent?: string;
-  reason?: string;
-}
+export type { StreamEvent } from './stream-events';
 
 const CACHE_TTL_SECONDS = 45;
 
@@ -446,15 +440,12 @@ export class ChatService {
               this.logger.warn(`Skipping malformed SSE frame: ${(parseErr as Error).message}`);
               continue;
             }
-            if (
-              event.type === 'delta' ||
-              event.type === 'progress' ||
-              event.type === 'reasoning' ||
-              event.type === 'plan' ||
-              event.type === 'agent_done' ||
-              event.type === 'reflecting'
-            ) {
-              onEvent(event);
+            // Valid JSON that isn't an object (null, a number) would throw
+            // below, inside this callback where nothing catches it.
+            if (!event || typeof event !== 'object') continue;
+            const relayed = toStreamEvent(event);
+            if (relayed) {
+              onEvent(relayed);
             } else if (event.type === 'done') {
               settled = true;
               resolve({ reply: event.reply, tools_used: event.tools_used, suggestions: event.suggestions });

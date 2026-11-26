@@ -41,7 +41,7 @@ def _connected_overview(organization_id: str) -> list[str]:
             lines.append(f"Zapier: connection problem — {catalog['error']}")
         else:
             lines.append("Apps via Zapier (use the 'zapier' tool):")
-            for app in catalog.get("apps") or []:
+            for app in zapier_mcp.apps_of(catalog.get("tools") or []):
                 reads = ", ".join(app["read"]) or "none — existing records can't be read through Zapier"
                 writes = ", ".join(app["write"]) or "none"
                 lines.append(f"  - {app['app']}: read/search actions: {reads}; write actions: {writes}")

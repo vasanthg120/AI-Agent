@@ -10,4 +10,5 @@ export declare class UpdateUserDto {
     permissions?: string[];
     voiceAccessEnabled?: boolean;
     aiAccessEnabled?: boolean;
+    reportingManagerId?: string | null;
 }

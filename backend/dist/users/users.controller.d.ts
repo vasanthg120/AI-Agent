@@ -26,6 +26,7 @@ export declare class UsersController {
         roles: string[];
         assignedAgentId: string | undefined;
         department: string | undefined;
+        reportingManagerId: string | undefined;
         active: boolean;
         voiceAccessEnabled: boolean;
         aiAccessEnabled: boolean;
@@ -46,6 +47,7 @@ export declare class UsersController {
         roles: string[];
         assignedAgentId: string | undefined;
         department: string | undefined;
+        reportingManagerId: string | undefined;
         active: boolean;
         voiceAccessEnabled: boolean;
         aiAccessEnabled: boolean;
@@ -281,6 +283,7 @@ export declare class UsersController {
         roles: string[];
         assignedAgentId: string | undefined;
         department: string | undefined;
+        reportingManagerId: string | undefined;
         active: boolean;
         voiceAccessEnabled: boolean;
         aiAccessEnabled: boolean;
@@ -301,6 +304,7 @@ export declare class UsersController {
             roles: string[];
             assignedAgentId: string | undefined;
             department: string | undefined;
+            reportingManagerId: string | undefined;
             active: boolean;
             voiceAccessEnabled: boolean;
             aiAccessEnabled: boolean;
@@ -323,6 +327,7 @@ export declare class UsersController {
             roles: string[];
             assignedAgentId: string | undefined;
             department: string | undefined;
+            reportingManagerId: string | undefined;
             active: boolean;
             voiceAccessEnabled: boolean;
             aiAccessEnabled: boolean;
@@ -357,6 +362,7 @@ export declare class UsersController {
         roles: string[];
         assignedAgentId: string | undefined;
         department: string | undefined;
+        reportingManagerId: string | undefined;
         active: boolean;
         voiceAccessEnabled: boolean;
         aiAccessEnabled: boolean;
